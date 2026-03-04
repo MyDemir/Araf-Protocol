@@ -5,10 +5,10 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
-    "dev":    "nodemon src/app.js",
-    "start":  "node src/app.js",
+    "dev":    "nodemon scripts/app.js",
+    "start":  "node scripts/app.js",
     "test":   "jest --forceExit",
-    "lint":   "eslint src/"
+    "lint":   "eslint scripts/"
   },
   "dependencies": {
     "express":           "^4.19.2",
