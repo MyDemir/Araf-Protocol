@@ -13,7 +13,7 @@
  */
 
 import React, { useState } from 'react';
-import { usePII } from './usePII';
+import { usePII } from '../hooks/usePII';
 
 export default function PIIDisplay({ tradeId, authToken }) {
   const { pii, loading, error, fetchPII, clearPII } = usePII(tradeId, authToken);
