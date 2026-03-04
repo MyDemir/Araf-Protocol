@@ -79,12 +79,23 @@ async function consumeNonce(walletAddress) {
 async function verifySiweSignature(message, signature) {
   const siweMsg = new SiweMessage(message);
 
-  // Verify against our expected domain (prevents cross-site replay)
+  // C-02 FIX: Null guard — consumeNonce returns null when TTL expired or not found
+  const nonce = await consumeNonce(siweMsg.address);
+  if (!nonce) {
+    throw new Error("Nonce bulunamadı veya süresi doldu. Lütfen tekrar deneyin.");
+  }
+
+  // H-02 FIX: SIWE_DOMAIN zorunlu — production'da localhost kalmasın
+  const domain = process.env.SIWE_DOMAIN;
+  if (!domain && process.env.NODE_ENV === "production") {
+    throw new Error("SIWE_DOMAIN ortam değişkeni production'da set edilmeli.");
+  }
+
   const result = await siweMsg.verify({
     signature,
-    scheme:  process.env.NODE_ENV === "production" ? "https" : "http",
-    domain:  process.env.SIWE_DOMAIN || "localhost",
-    nonce:   await consumeNonce(siweMsg.address),
+    scheme: process.env.NODE_ENV === "production" ? "https" : "http",
+    domain: domain || "localhost",
+    nonce,
   });
 
   if (!result.success) {
