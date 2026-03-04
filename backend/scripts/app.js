@@ -10,13 +10,6 @@ const { connectDB }    = require("./config/db");
 const { connectRedis } = require("./config/redis");
 const logger           = require("./utils/logger");
 
-// ── Routes (her biri ayrı dosyada) ───────────────────────────────────────────
-const authRoutes     = require("./routes/auth");
-const listingRoutes  = require("./routes/listings");
-const tradeRoutes    = require("./routes/trades");
-const piiRoutes      = require("./routes/pii");
-const feedbackRoutes = require("./routes/feedback");
-
 const { globalErrorHandler } = require("./middleware/errorHandler");
 
 const app = express();
@@ -47,38 +40,51 @@ app.use(mongoSanitize({
   onSanitize: ({ key }) => logger.warn(`[GÜVENLİK] Mongo injection denemesi: ${key}`),
 }));
 
-// ── Route Bağlantıları ────────────────────────────────────────────────────────
-app.use("/api/auth",     authRoutes);
-app.use("/api/listings", listingRoutes);
-app.use("/api/trades",   tradeRoutes);
-app.use("/api/pii",      piiRoutes);
-app.use("/api/feedback", feedbackRoutes);
-
-// ── Sağlık Kontrolü ───────────────────────────────────────────────────────────
-app.get("/health", (req, res) => res.json({ status: "ok", timestamp: Date.now() }));
-
-// ── 404 ───────────────────────────────────────────────────────────────────────
-app.use((req, res) => res.status(404).json({ error: "Route bulunamadı" }));
-
-// ── Global Hata Yakalayıcı ────────────────────────────────────────────────────
-app.use(globalErrorHandler);
-
-// ── Başlatma ──────────────────────────────────────────────────────────────────
+// ── Başlatma ve Route Entegrasyonu ─────────────────────────────────────────────
 async function bootstrap() {
-  await connectDB();
-  await connectRedis();
+  try {
+    // 1. ÖNCE Veritabanı ve Redis'i bağla (Yarış durumunu engeller)
+    await connectDB();
+    await connectRedis();
+    logger.info("Veritabanı ve Redis bağlantıları başarıyla kuruldu.");
 
-  const PORT = process.env.PORT || 4000;
-  app.listen(PORT, () => {
-    logger.info(`Araf Protocol Backend — :${PORT} portunda dinleniyor`);
-    logger.info(`Ortam: ${process.env.NODE_ENV}`);
-    logger.warn("Zero Private Key modu: Backend hiçbir cüzdan anahtarı tutmuyor.");
-  });
+    // 2. Rotaları BUNDAN SONRA içeri aktar! (Rate Limiter artık Redis'i bulabilecek)
+    const authRoutes     = require("./routes/auth");
+    const listingRoutes  = require("./routes/listings");
+    const tradeRoutes    = require("./routes/trades");
+    const piiRoutes      = require("./routes/pii");
+    const feedbackRoutes = require("./routes/feedback");
+
+    // 3. Route Bağlantılarını Yap
+    app.use("/api/auth",     authRoutes);
+    app.use("/api/listings", listingRoutes);
+    app.use("/api/trades",   tradeRoutes);
+    app.use("/api/pii",      piiRoutes);
+    app.use("/api/feedback", feedbackRoutes);
+
+    // ── Sağlık Kontrolü ────────────────────────────────────────────────────────
+    app.get("/health", (req, res) => res.json({ status: "ok", timestamp: Date.now() }));
+
+    // ── 404 ────────────────────────────────────────────────────────────────────
+    app.use((req, res) => res.status(404).json({ error: "Route bulunamadı" }));
+
+    // ── Global Hata Yakalayıcı ─────────────────────────────────────────────────
+    app.use(globalErrorHandler);
+
+    // 4. Sunucuyu Dinlemeye Başla
+    const PORT = process.env.PORT || 4000;
+    app.listen(PORT, () => {
+      logger.info(`Araf Protocol Backend — :${PORT} portunda dinleniyor`);
+      logger.info(`Ortam: ${process.env.NODE_ENV}`);
+      logger.warn("Zero Private Key modu: Backend hiçbir cüzdan anahtarı tutmuyor.");
+    });
+
+  } catch (err) {
+    logger.error("Başlatma hatası:", err);
+    process.exit(1);
+  }
 }
 
-bootstrap().catch((err) => {
-  logger.error("Başlatma hatası:", err);
-  process.exit(1);
-});
+bootstrap();
 
 module.exports = app;
