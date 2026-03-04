@@ -281,10 +281,29 @@ class EventWorker {
 
   async _incrementReputation(wallet, failed) {
     if (!wallet) return;
-    const update = failed
-      ? { $inc: { "reputation_cache.failed_disputes": 1 }, $set: { is_banned: true } }
-      : { $inc: { "reputation_cache.total_trades": 1 } };
-    await User.findOneAndUpdate({ wallet_address: wallet }, update, { upsert: true });
+
+    if (failed) {
+      // C-03 FIX: banned_until hesaplanarak set edilmeli
+      const user = await User.findOne({ wallet_address: wallet }).select("reputation_cache").lean();
+      const currentFailed = (user?.reputation_cache?.failed_disputes || 0) + 1;
+
+      const update = { $inc: { "reputation_cache.failed_disputes": 1 } };
+
+      // 2+ failed dispute → 30 günlük Taker ban + banned_until set et
+      if (currentFailed >= 2) {
+        update.$set = {
+          is_banned: true,
+          banned_until: new Date(Date.now() + 30 * 24 * 3600 * 1000),
+        };
+      }
+      await User.findOneAndUpdate({ wallet_address: wallet }, update, { upsert: true });
+    } else {
+      await User.findOneAndUpdate(
+        { wallet_address: wallet },
+        { $inc: { "reputation_cache.total_trades": 1 } },
+        { upsert: true }
+      );
+    }
   }
 }
 
