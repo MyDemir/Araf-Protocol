@@ -1,10 +1,14 @@
 import React, { useState, useEffect } from 'react';
 // --- WEB3 ENTEGRASYON KÜTÜPHANELERİ ---
-import { useAccount, useConnect, useDisconnect } from 'wagmi';
-import { injected, coinbaseWallet, walletConnect } from 'wagmi/connectors';
+// YENİ: useSignMessage eklendi (SIWE imzası için)
+import { useAccount, useConnect, useDisconnect, useSignMessage } from 'wagmi';
+import { injected } from 'wagmi/connectors';
 
 // --- BİLEŞEN VE HOOK İTHALATI ---
 import PIIDisplay from './components/PIIDisplay'; // H-03 Entegrasyonu
+
+// YENİ: Backend API Adresimiz (Codespace testleri için dinamik)
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 function App() {
   // ==========================================
@@ -14,7 +18,7 @@ function App() {
   const [showMakerModal, setShowMakerModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
-  const [showWalletModal, setShowWalletModal] = useState(false); // YENİ: Multi-wallet Seçim Modalı
+  const [showWalletModal, setShowWalletModal] = useState(false); // Multi-wallet Seçim Modalı
   
   // --- MİMARİ TEST STATE'LERİ ---
   const [tradeState, setTradeState] = useState('LOCKED');
@@ -28,7 +32,10 @@ function App() {
   const { address, isConnected } = useAccount();
   const { connect, connectors } = useConnect();
   const { disconnect } = useDisconnect();
-  const [jwtToken, setJwtToken] = useState(null); // SIWE sonrası buraya dolacak
+  const { signMessageAsync } = useSignMessage(); // YENİ: İmza kancası
+  
+  const [jwtToken, setJwtToken] = useState(null); // SIWE sonrası dolacak token
+  const [isLoggingIn, setIsLoggingIn] = useState(false); // YENİ: Yükleniyor state'i
 
   // --- KULLANICI VE VERİ STATE'LERİ ---
   const [lang, setLang] = useState('TR'); 
@@ -84,6 +91,53 @@ function App() {
     if (n.includes('coinbase')) return '🔵';
     return '👛';
   };
+
+  // YENİ: SIWE (Sign-In With Ethereum) Akışı
+  const loginWithSIWE = async () => {
+    if (!address) return;
+    try {
+      setIsLoggingIn(true);
+      
+      // 1. Backend'den Nonce (Tek kullanımlık şifre) al
+      const nonceRes = await fetch(`${API_URL}/api/auth/nonce?wallet=${address}`);
+      const { nonce } = await nonceRes.json();
+
+      // 2. İmza mesajını oluştur (EIP-4361 Formatı)
+      const domain = window.location.host;
+      const origin = window.location.origin;
+      const statement = 'Sign in to Araf Protocol to manage your trades and secure PII data.';
+      const message = `${domain} wants you to sign in with your Ethereum account:\n${address}\n\n${statement}\n\nURI: ${origin}\nVersion: 1\nChain ID: 8453\nNonce: ${nonce}\nIssued At: ${new Date().toISOString()}`;
+
+      // 3. Kullanıcıya imzalat
+      const signature = await signMessageAsync({ message });
+
+      // 4. İmzayı Backend'e doğrulat
+      const verifyRes = await fetch(`${API_URL}/api/auth/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message, signature }),
+      });
+
+      const data = await verifyRes.json();
+      
+      if (data.token) {
+        setJwtToken(data.token);
+        showToast(lang === 'TR' ? 'Sisteme başarıyla giriş yapıldı! 🚀' : 'Successfully signed in! 🚀', 'success');
+      } else {
+        throw new Error(data.error || 'Doğrulama başarısız');
+      }
+    } catch (error) {
+      console.error("SIWE Error:", error);
+      showToast(lang === 'TR' ? 'Giriş iptal edildi veya başarısız oldu.' : 'Login cancelled or failed.', 'error');
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  // Cüzdan değiştiğinde veya koptuğunda JWT'yi sıfırla
+  useEffect(() => {
+    if (!isConnected) setJwtToken(null);
+  }, [isConnected, address]);
 
   const handleStartTrade = (order) => {
     if (isBanned) {
@@ -141,10 +195,9 @@ function App() {
   };
 
   // ==========================================
-  // --- 4. MODALLAR (WALLET, FEEDBACK, MAKER, PROFILE) ---
+  // --- 4. RENDER MODALLARI ---
   // ==========================================
 
-  // --- YENİ: ÇOKLU CÜZDAN SEÇİM MODALI ---
   const renderWalletModal = () => {
     if (!showWalletModal) return null;
     return (
@@ -247,7 +300,6 @@ function App() {
 
   const renderProfileModal = () => {
     if (!showProfileModal) return null;
-    // Adres bağlıysa kendi ilanlarını filtrele
     const myOrders = address ? orders.filter(o => o.maker.toLowerCase() === address.toLowerCase()) : [];
 
     return (
@@ -278,10 +330,15 @@ function App() {
                     </div>
                   </div>
                 )}
-                {/* YENİ: Cüzdan Durumu Göstergesi */}
+                
                 <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
                    <p className="text-slate-400 text-xs mb-1 uppercase tracking-widest font-bold">Cüzdan Adresi</p>
                    <p className="font-mono text-white text-xs break-all">{address ? address : 'Bağlı Değil'}</p>
+                </div>
+                
+                <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
+                   <p className="text-slate-400 text-xs mb-1 uppercase tracking-widest font-bold">Oturum Durumu (JWT)</p>
+                   <p className="font-mono text-white text-xs break-all">{jwtToken ? '✅ Sisteme Giriş Yapıldı' : '❌ İmza Bekleniyor'}</p>
                 </div>
               </div>
             )}
@@ -470,10 +527,11 @@ function App() {
                   <div className="absolute top-0 right-0 bg-blue-600 text-white text-[10px] font-bold px-2 py-1 rounded-bl-lg">End-to-End Encrypted</div>
                   <p className="text-slate-400 mb-2 uppercase text-[10px] tracking-widest font-bold">🛡️ {lang === 'TR' ? 'Güvenli PII Verisi' : 'Secure PII Data'}</p>
                   
-                  {/* H-03 Entegrasyonu */}
+                  {/* H-03 Düzeltmesi: Statik IBAN yerine Güvenli Bileşen Entegrasyonu */}
                   <PIIDisplay 
                     tradeId={activeTrade?.id || 'TEST'} 
                     authToken={jwtToken} 
+                    lang={lang}
                   />
 
                   <div className="mt-4 p-2 bg-slate-800 rounded-lg flex items-start space-x-2 border border-slate-600">
@@ -612,7 +670,7 @@ function App() {
           <span className="text-lg font-bold tracking-widest hidden sm:block">ARAF</span>
         </div>
         
-        {/* MOBİL UYUMLU NAVBAR BUTONLARI */}
+        {/* MOBİL UYUMLU VE SIWE ENTEGRELİ NAVBAR BUTONLARI */}
         <div className="flex items-center space-x-2 sm:space-x-3">
           <button onClick={() => setLang(lang === 'TR' ? 'EN' : 'TR')} className="bg-slate-800 border border-slate-700 px-2 sm:px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold text-slate-300 hover:bg-slate-700 hover:text-white transition shadow-inner">
             🌐 <span className="hidden xs:inline">{lang}</span>
@@ -621,18 +679,29 @@ function App() {
           <button onClick={() => setShowMakerModal(true)} className="hidden md:block text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded-lg text-sm font-medium">{t.createAd}</button>
           
           <button 
-            onClick={() => isConnected ? disconnect() : setShowWalletModal(true)}
+            onClick={() => {
+              // YENİ MANTIK: Bağlı değilse cüzdan aç, bağlı ama JWT yoksa SIWE yap, JWT varsa cüzdanı kopar
+              if (!isConnected) setShowWalletModal(true);
+              else if (!jwtToken) loginWithSIWE();
+              else disconnect();
+            }}
+            disabled={isLoggingIn}
             className={`flex items-center justify-center px-3 sm:px-4 py-1.5 rounded-lg font-bold text-xs sm:text-sm transition-all ${
-              isConnected 
+              isConnected && jwtToken
               ? 'bg-slate-800 text-emerald-400 border border-emerald-500/20 hover:bg-red-950/20 hover:text-red-400' 
+              : isConnected && !jwtToken
+              ? 'bg-orange-600 hover:bg-orange-500 text-white shadow-lg shadow-orange-900/20 animate-pulse'
               : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/20'
             }`}
           >
-            {isConnected ? (
+            {isLoggingIn ? (lang === 'TR' ? 'Bekleniyor...' : 'Pending...') :
+              isConnected && jwtToken ? (
               <>
                 <span className="hidden sm:inline">{formatAddress(address)}</span>
                 <span className="sm:hidden">0x..{address?.slice(-3)}</span>
               </>
+            ) : isConnected && !jwtToken ? (
+              lang === 'TR' ? '✍️ İmzala' : '✍️ Sign In'
             ) : (
               lang === 'TR' ? 'Cüzdan' : 'Connect'
             )}
