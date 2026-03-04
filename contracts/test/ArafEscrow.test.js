@@ -18,6 +18,12 @@ describe("ArafEscrow", function () {
   const TOTAL_LOCK_T2  = TRADE_AMOUNT + MAKER_BOND_T2;
   const INITIAL_BAL    = ethers.parseUnits("10000", USDT_DECIMALS);
 
+  // Fee sabitleri — kontratla senkron tutulmalı (SUCCESS_FEE_BPS kaldırıldı)
+  // Simetrik model: taker %0.2 crypto'dan, maker %0.2 bond'dan öder
+  const TAKER_FEE_BPS = 20n;   // %0.2 — taker'ın crypto'sundan
+  const MAKER_FEE_BPS = 20n;   // %0.2 — maker'ın bond'undan
+  const BPS_DENOM     = 10000n;
+
   const SEVEN_DAYS     = 7 * 24 * 3600;
   const FORTY_EIGHT_H  = 48 * 3600;
   const ONE_HOUR       = 3600;
@@ -92,6 +98,19 @@ describe("ArafEscrow", function () {
     return signer.signTypedData(domain, types, value);
   }
 
+  // Fee hesap yardımcısı — kontrat mantığıyla birebir aynı
+  // Testlerde hardcoded sayı yerine bu kullanılmalı; kontrat sabitleri değişirse
+  // sadece TAKER_FEE_BPS / MAKER_FEE_BPS'i güncellemek yeterli olur
+  function calcFees(cryptoAmount, makerBond) {
+    const takerFee       = (cryptoAmount * TAKER_FEE_BPS) / BPS_DENOM;
+    const takerReceives  = cryptoAmount - takerFee;
+    const makerFee       = (cryptoAmount * MAKER_FEE_BPS) / BPS_DENOM;
+    const makerBondBack  = makerBond > makerFee ? makerBond - makerFee : 0n;
+    const actualMakerFee = makerBond > makerFee ? makerFee : makerBond;
+    const totalTreasury  = takerFee + actualMakerFee;
+    return { takerFee, takerReceives, makerFee: actualMakerFee, makerBondBack, totalTreasury };
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // 1. HAPPY PATH
   // ═══════════════════════════════════════════════════════════════════════════
@@ -109,14 +128,16 @@ describe("ArafEscrow", function () {
 
       // Release
       const takerBefore = await mockUSDT.balanceOf(taker.address);
+      const makerBefore = await mockUSDT.balanceOf(maker.address);
       await escrow.connect(maker).releaseFunds(tradeId);
 
-      // Taker receives 1000 USDT - 0.2% = 998 USDT
-      const expectedFee      = TRADE_AMOUNT * 20n / 10000n;
-      const expectedReceived = TRADE_AMOUNT - expectedFee;
-      const takerAfter = await mockUSDT.balanceOf(taker.address);
+      const { takerReceives, makerBondBack } = calcFees(TRADE_AMOUNT, MAKER_BOND_T2);
 
-      expect(takerAfter - takerBefore).to.equal(expectedReceived + TAKER_BOND_T2);
+      // Taker receives: crypto - takerFee + takerBond = 998 + 120 = 1118 USDT
+      expect(await mockUSDT.balanceOf(taker.address) - takerBefore).to.equal(takerReceives + TAKER_BOND_T2);
+      // Maker receives: makerBond - makerFee = 150 - 2 = 148 USDT
+      expect(await mockUSDT.balanceOf(maker.address) - makerBefore).to.equal(makerBondBack);
+
       expect((await escrow.getTrade(tradeId)).state).to.equal(4); // RESOLVED
     });
 
@@ -353,7 +374,7 @@ describe("ArafEscrow", function () {
       expect((await escrow.getTrade(tradeId)).state).to.equal(5); // CANCELED
     });
 
-    it("maker gets crypto refund, taker gets bond back", async () => {
+    it("maker gets crypto refund, taker gets bond back — no fee on cancel", async () => {
       const tradeId = await setupTrade(2);
       await escrow.connect(taker).lockEscrow(tradeId);
 
@@ -370,7 +391,7 @@ describe("ArafEscrow", function () {
       const makerAfter = await mockUSDT.balanceOf(maker.address);
       const takerAfter = await mockUSDT.balanceOf(taker.address);
 
-      // Maker gets back crypto + maker bond
+      // Cancel'da fee kesilmez — her iki taraf tam iade alır
       expect(makerAfter - makerBefore).to.equal(TRADE_AMOUNT + MAKER_BOND_T2);
       // Taker gets back taker bond
       expect(takerAfter - takerBefore).to.equal(TAKER_BOND_T2);
@@ -424,10 +445,12 @@ describe("ArafEscrow", function () {
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // 6. BOND CALCULATIONS
+  // 6. BOND & FEE CALCULATIONS
   // ═══════════════════════════════════════════════════════════════════════════
   describe("Bond & Fee Calculations", () => {
-    it("calculates correct 0.2% fee", async () => {
+    it("treasury receives %0.2 taker fee + %0.2 maker fee = %0.4 total", async () => {
+      // Eski: sadece %0.2 taker fee → 2 USDT
+      // Yeni: %0.2 taker + %0.2 maker → 4 USDT
       const tradeId = await setupTrade(2);
       await escrow.connect(taker).lockEscrow(tradeId);
       await escrow.connect(taker).reportPayment(tradeId, "QmHash");
@@ -436,8 +459,52 @@ describe("ArafEscrow", function () {
       await escrow.connect(maker).releaseFunds(tradeId);
       const treasuryAfter = await mockUSDT.balanceOf(treasury.address);
 
-      const expectedFee = TRADE_AMOUNT * 20n / 10000n; // 0.2% = 2 USDT
-      expect(treasuryAfter - treasuryBefore).to.equal(expectedFee);
+      const { totalTreasury } = calcFees(TRADE_AMOUNT, MAKER_BOND_T2);
+      expect(treasuryAfter - treasuryBefore).to.equal(totalTreasury);
+    });
+
+    it("taker receives crypto minus taker fee only (%0.2)", async () => {
+      const tradeId = await setupTrade(2);
+      await escrow.connect(taker).lockEscrow(tradeId);
+      await escrow.connect(taker).reportPayment(tradeId, "QmHash");
+
+      const takerBefore = await mockUSDT.balanceOf(taker.address);
+      await escrow.connect(maker).releaseFunds(tradeId);
+
+      const { takerReceives } = calcFees(TRADE_AMOUNT, MAKER_BOND_T2);
+      // 998 USDT kripto + 120 USDT bond iadesi
+      expect(await mockUSDT.balanceOf(taker.address) - takerBefore).to.equal(takerReceives + TAKER_BOND_T2);
+    });
+
+    it("maker bond refund is reduced by maker fee (%0.2)", async () => {
+      const tradeId = await setupTrade(2);
+      await escrow.connect(taker).lockEscrow(tradeId);
+      await escrow.connect(taker).reportPayment(tradeId, "QmHash");
+
+      const makerBefore = await mockUSDT.balanceOf(maker.address);
+      await escrow.connect(maker).releaseFunds(tradeId);
+
+      const { makerBondBack } = calcFees(TRADE_AMOUNT, MAKER_BOND_T2);
+      // 150 USDT bond - 2 USDT fee = 148 USDT
+      expect(await mockUSDT.balanceOf(maker.address) - makerBefore).to.equal(makerBondBack);
+    });
+
+    it("autoRelease applies same fee split as releaseFunds", async () => {
+      const tradeId = await setupTrade(2);
+      await escrow.connect(taker).lockEscrow(tradeId);
+      await escrow.connect(taker).reportPayment(tradeId, "QmHash");
+      await time.increase(FORTY_EIGHT_H + 1);
+
+      const takerBefore    = await mockUSDT.balanceOf(taker.address);
+      const makerBefore    = await mockUSDT.balanceOf(maker.address);
+      const treasuryBefore = await mockUSDT.balanceOf(treasury.address);
+
+      await escrow.connect(taker).autoRelease(tradeId);
+
+      const { takerReceives, makerBondBack, totalTreasury } = calcFees(TRADE_AMOUNT, MAKER_BOND_T2);
+      expect(await mockUSDT.balanceOf(taker.address)    - takerBefore).to.equal(takerReceives + TAKER_BOND_T2);
+      expect(await mockUSDT.balanceOf(maker.address)    - makerBefore).to.equal(makerBondBack);
+      expect(await mockUSDT.balanceOf(treasury.address) - treasuryBefore).to.equal(totalTreasury);
     });
 
     it("Tier 1 taker pays 0 bond", async () => {
@@ -447,6 +514,26 @@ describe("ArafEscrow", function () {
       const takerAfter = await mockUSDT.balanceOf(taker.address);
 
       expect(takerAfter).to.equal(takerBefore); // No bond locked
+    });
+
+    it("cancel has no fee — treasury unchanged, full refund to both parties", async () => {
+      // Cancel işleminde treasury'ye hiçbir şey gitmemeli
+      const tradeId = await setupTrade(2);
+      await escrow.connect(taker).lockEscrow(tradeId);
+
+      const makerBefore    = await mockUSDT.balanceOf(maker.address);
+      const takerBefore    = await mockUSDT.balanceOf(taker.address);
+      const treasuryBefore = await mockUSDT.balanceOf(treasury.address);
+
+      const deadline = (await time.latest()) + 3600;
+      const makerSig = await eip712CancelSig(maker, tradeId, await escrow.sigNonces(maker.address), deadline);
+      await escrow.connect(maker).proposeOrApproveCancel(tradeId, deadline, makerSig);
+      const takerSig = await eip712CancelSig(taker, tradeId, await escrow.sigNonces(taker.address), deadline);
+      await escrow.connect(taker).proposeOrApproveCancel(tradeId, deadline, takerSig);
+
+      expect(await mockUSDT.balanceOf(treasury.address)).to.equal(treasuryBefore); // treasury değişmez
+      expect(await mockUSDT.balanceOf(maker.address) - makerBefore).to.equal(TRADE_AMOUNT + MAKER_BOND_T2);
+      expect(await mockUSDT.balanceOf(taker.address) - takerBefore).to.equal(TAKER_BOND_T2);
     });
   });
 });
