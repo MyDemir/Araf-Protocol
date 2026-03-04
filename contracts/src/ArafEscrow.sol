@@ -592,16 +592,28 @@ contract ArafEscrow is ReentrancyGuard, EIP712, Ownable {
             "ArafEscrow: 48h grace period not elapsed"
         );
 
-        // Same logic as releaseFunds but initiated by taker
+        // L-03 FIX: autoRelease'de de decay hesabı yapılmalı.
+        // PAID state'i için decay yoktur (challenged değil), ama tutarlılık için
+        // _calculateCurrentAmounts kullanıyoruz — gelecekte state değişirse de güvenli.
+        (uint256 currentCrypto, uint256 currentMakerBond, uint256 currentTakerBond, uint256 decayed) =
+            _calculateCurrentAmounts(_tradeId);
+
+        // Effects
         t.state = TradeState.RESOLVED;
 
-        uint256 fee = (t.cryptoAmount * SUCCESS_FEE_BPS) / BPS_DENOMINATOR;
-        uint256 takerReceives = t.cryptoAmount - fee;
+        // Interactions
+        if (decayed > 0) {
+            IERC20(t.tokenAddress).safeTransfer(treasury, decayed);
+            emit BleedingDecayed(_tradeId, decayed, block.timestamp);
+        }
+
+        uint256 fee = (currentCrypto * SUCCESS_FEE_BPS) / BPS_DENOMINATOR;
+        uint256 takerReceives = currentCrypto - fee;
 
         IERC20(t.tokenAddress).safeTransfer(t.taker, takerReceives);
         if (fee > 0) IERC20(t.tokenAddress).safeTransfer(treasury, fee);
-        if (t.makerBond > 0) IERC20(t.tokenAddress).safeTransfer(t.maker, t.makerBond);
-        if (t.takerBond > 0) IERC20(t.tokenAddress).safeTransfer(t.taker, t.takerBond);
+        if (currentMakerBond > 0) IERC20(t.tokenAddress).safeTransfer(t.maker, currentMakerBond);
+        if (currentTakerBond > 0) IERC20(t.tokenAddress).safeTransfer(t.taker, currentTakerBond);
 
         _updateReputation(t.maker, false);
         _updateReputation(t.taker, false);
