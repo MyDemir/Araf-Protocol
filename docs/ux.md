@@ -1,4 +1,4 @@
-Araf Protocol'ün tam dosya yapısı:
+İşte Araf Protocol'ün **tam güncel dosya yapısı**
 
 ```
 araf-protocol/
@@ -27,7 +27,8 @@ araf-protocol/
 │       │   └── 📄 redis.js                 # Redis bağlantısı
 │       ├── 📁 models/
 │       │   ├── 📄 User.js                  # Kullanıcı + şifreli PII şeması
-│       │   └── 📄 Trade.js                 # Listing + Trade şemaları
+│       │   ├── 📄 Trade.js                 # Listing + Trade şemaları
+│       │   └── 📄 Feedback.js              # Kullanıcı geri bildirimi şeması
 │       ├── 📁 routes/
 │       │   ├── 📄 auth.js                  # SIWE nonce + verify + profil
 │       │   ├── 📄 listings.js              # Pazar yeri CRUD
@@ -52,6 +53,7 @@ araf-protocol/
 │   ├── 📄 tailwind.config.js
 │   ├── 📄 postcss.config.js
 │   ├── 📁 public/
+│   │   └── 📄 X.md                         # (Boş placeholder)
 │   └── 📁 src/
 │       ├── 📄 main.jsx
 │       ├── 📄 App.jsx                      # Tüm UI (Dashboard, Trade Room, Modaller)
