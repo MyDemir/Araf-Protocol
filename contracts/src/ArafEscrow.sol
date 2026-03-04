@@ -78,8 +78,12 @@ contract ArafEscrow is ReentrancyGuard, EIP712, Ownable {
     uint256 public constant GOOD_REP_DISCOUNT_BPS = 300; // -3%
     uint256 public constant BAD_REP_PENALTY_BPS   = 500; // +5%
 
-    // Protocol success fee
-    uint256 public constant SUCCESS_FEE_BPS = 20; // 0.2%
+    // Protocol success fee — symmetric split: %0.2 taker (crypto'dan) + %0.2 maker (bond'dan)
+    // Taker aldığı crypto'dan %0.2 öder → fiat/crypto paritesi korunur
+    // Maker bond iadesinden %0.2 öder → aldığı TL'ye dokunulmaz
+    // Toplam treasury geliri: %0.4/işlem
+    uint256 public constant TAKER_FEE_BPS = 20; // %0.2 — taker crypto'sundan
+    uint256 public constant MAKER_FEE_BPS = 20; // %0.2 — maker bond'undan
 
     // Timers
     uint256 public constant GRACE_PERIOD        = 48 hours;
@@ -142,7 +146,7 @@ contract ArafEscrow is ReentrancyGuard, EIP712, Ownable {
     event EscrowCreated(uint256 indexed tradeId, address indexed maker, address token, uint256 amount, uint8 tier);
     event EscrowLocked(uint256 indexed tradeId, address indexed taker, uint256 takerBond);
     event PaymentReported(uint256 indexed tradeId, string ipfsHash, uint256 timestamp);
-    event EscrowReleased(uint256 indexed tradeId, address indexed maker, address indexed taker, uint256 fee);
+    event EscrowReleased(uint256 indexed tradeId, address indexed maker, address indexed taker, uint256 takerFee, uint256 makerFee);
     event DisputeOpened(uint256 indexed tradeId, address indexed challenger, uint256 timestamp);
     event CancelProposed(uint256 indexed tradeId, address indexed proposer);
     event EscrowCanceled(uint256 indexed tradeId, uint256 makerRefund, uint256 takerRefund);
@@ -356,6 +360,12 @@ contract ArafEscrow is ReentrancyGuard, EIP712, Ownable {
     /**
      * @notice Maker confirms receipt and releases USDT to Taker.
      *         Can also be called during Bleeding phase.
+     *
+     * Fee dağılımı:
+     *   takerFee  = cryptoAmount × TAKER_FEE_BPS → taker'ın alacağından kesilir
+     *   makerFee  = cryptoAmount × MAKER_FEE_BPS → maker'ın bond iadesinden kesilir
+     *   Treasury  = takerFee + makerFee (toplam %0.4)
+     *
      * @param  _tradeId  Trade ID
      */
     function releaseFunds(uint256 _tradeId)
@@ -385,22 +395,29 @@ contract ArafEscrow is ReentrancyGuard, EIP712, Ownable {
             emit BleedingDecayed(_tradeId, decayed, block.timestamp);
         }
 
-        // Deduct 0.2% success fee from crypto amount
-        uint256 fee = (currentCrypto * SUCCESS_FEE_BPS) / BPS_DENOMINATOR;
-        uint256 takerReceives = currentCrypto - fee;
+        // Taker fee: crypto'dan kesilir
+        uint256 takerFee      = (currentCrypto * TAKER_FEE_BPS) / BPS_DENOMINATOR;
+        uint256 takerReceives = currentCrypto - takerFee;
 
-        // Taker gets crypto - fee
+        // Maker fee: bond'dan kesilir (bond yetmezse kalan kadar)
+        uint256 makerFee          = (currentCrypto * MAKER_FEE_BPS) / BPS_DENOMINATOR;
+        uint256 makerBondAfterFee = currentMakerBond > makerFee ? currentMakerBond - makerFee : 0;
+        uint256 actualMakerFee    = currentMakerBond > makerFee ? makerFee : currentMakerBond;
+
+        // Taker gets crypto - takerFee
         IERC20(t.tokenAddress).safeTransfer(t.taker, takerReceives);
 
-        // Treasury gets fee
-        if (fee > 0) {
-            IERC20(t.tokenAddress).safeTransfer(treasury, fee);
+        // Treasury gets takerFee + makerFee
+        if (takerFee + actualMakerFee > 0) {
+            IERC20(t.tokenAddress).safeTransfer(treasury, takerFee + actualMakerFee);
         }
 
-        // Bonds returned to both parties
-        if (currentMakerBond > 0) {
-            IERC20(t.tokenAddress).safeTransfer(t.maker, currentMakerBond);
+        // Maker gets bond back minus makerFee
+        if (makerBondAfterFee > 0) {
+            IERC20(t.tokenAddress).safeTransfer(t.maker, makerBondAfterFee);
         }
+
+        // Taker gets bond back (full)
         if (currentTakerBond > 0) {
             IERC20(t.tokenAddress).safeTransfer(t.taker, currentTakerBond);
         }
@@ -409,7 +426,7 @@ contract ArafEscrow is ReentrancyGuard, EIP712, Ownable {
         _updateReputation(t.maker, false);
         _updateReputation(t.taker, false);
 
-        emit EscrowReleased(_tradeId, t.maker, t.taker, fee);
+        emit EscrowReleased(_tradeId, t.maker, t.taker, takerFee, actualMakerFee);
     }
 
     // ═══════════════════════════════════════════════════
@@ -499,6 +516,7 @@ contract ArafEscrow is ReentrancyGuard, EIP712, Ownable {
 
     /**
      * @dev Internal cancel execution. Refunds both parties (minus decay if CHALLENGED).
+     *      Cancel'da fee kesilmez — tam iade.
      */
     function _executeCancel(uint256 _tradeId) internal {
         Trade storage t = trades[_tradeId];
@@ -578,6 +596,7 @@ contract ArafEscrow is ReentrancyGuard, EIP712, Ownable {
     /**
      * @notice If 48h passes with no challenge, Taker can self-release.
      *         Protects honest Takers from maker inaction.
+     *         Fee dağılımı releaseFunds ile aynıdır.
      * @param  _tradeId  Trade ID
      */
     function autoRelease(uint256 _tradeId)
@@ -607,18 +626,24 @@ contract ArafEscrow is ReentrancyGuard, EIP712, Ownable {
             emit BleedingDecayed(_tradeId, decayed, block.timestamp);
         }
 
-        uint256 fee = (currentCrypto * SUCCESS_FEE_BPS) / BPS_DENOMINATOR;
-        uint256 takerReceives = currentCrypto - fee;
+        // Taker fee: crypto'dan kesilir
+        uint256 takerFee      = (currentCrypto * TAKER_FEE_BPS) / BPS_DENOMINATOR;
+        uint256 takerReceives = currentCrypto - takerFee;
+
+        // Maker fee: bond'dan kesilir
+        uint256 makerFee          = (currentCrypto * MAKER_FEE_BPS) / BPS_DENOMINATOR;
+        uint256 makerBondAfterFee = currentMakerBond > makerFee ? currentMakerBond - makerFee : 0;
+        uint256 actualMakerFee    = currentMakerBond > makerFee ? makerFee : currentMakerBond;
 
         IERC20(t.tokenAddress).safeTransfer(t.taker, takerReceives);
-        if (fee > 0) IERC20(t.tokenAddress).safeTransfer(treasury, fee);
-        if (currentMakerBond > 0) IERC20(t.tokenAddress).safeTransfer(t.maker, currentMakerBond);
+        if (takerFee + actualMakerFee > 0) IERC20(t.tokenAddress).safeTransfer(treasury, takerFee + actualMakerFee);
+        if (makerBondAfterFee > 0) IERC20(t.tokenAddress).safeTransfer(t.maker, makerBondAfterFee);
         if (currentTakerBond > 0) IERC20(t.tokenAddress).safeTransfer(t.taker, currentTakerBond);
 
         _updateReputation(t.maker, false);
         _updateReputation(t.taker, false);
 
-        emit EscrowReleased(_tradeId, t.maker, t.taker, fee);
+        emit EscrowReleased(_tradeId, t.maker, t.taker, takerFee, actualMakerFee);
     }
 
     // ═══════════════════════════════════════════════════
