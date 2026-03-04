@@ -6,12 +6,12 @@
  */
 
 const rateLimit      = require("express-rate-limit");
-const RedisStore     = require("rate-limit-redis");
+const { RedisStore } = require("rate-limit-redis");
 const { getRedisClient } = require("../config/redis");
 const logger         = require("../utils/logger");
 
 function makeStore(prefix) {
-  return new RedisStore.default({
+  return new RedisStore({
     sendCommand: (...args) => getRedisClient().sendCommand(args),
     prefix:      `rl:${prefix}:`,
   });
