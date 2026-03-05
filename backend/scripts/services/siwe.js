@@ -92,19 +92,12 @@ async function verifySiweSignature(message, signature) {
       throw new Error("SIWE_DOMAIN ortam değişkeni production'da set edilmeli.");
     }
 
-    // 🛡️ DİNAMİK PROTOKOL: Codespaces, Ngrok veya Localhost uyumu
-    let expectedScheme = "https";
-    if (process.env.NODE_ENV !== "production") {
-      try {
-        expectedScheme = new URL(siweMsg.uri).protocol.replace(":", "");
-      } catch (e) {
-        expectedScheme = "http";
-      }
-    }
-
-    // 🔒 KUSURSUZ GÜVENLİK MANTIĞI: 
-    // Canlıda SADECE kendi .env domainini kabul eder. Geliştirmede esneklik sağlar.
+    // 🔒 KUSURSUZ GÜVENLİK VE PROTOKOL (SCHEME) MANTIĞI
+    // 1. Domain: Canlıda kendi domainin, testte esnek (frontend'in domainini al).
     const expectedDomain = process.env.NODE_ENV === "production" ? (domain || "localhost") : siweMsg.domain;
+    
+    // 2. Scheme: Canlıda KESİNLİKLE 'https' tavizi yok! Test ortamında ise frontend'in eksiğini (undefined) tolere et.
+    const expectedScheme = process.env.NODE_ENV === "production" ? "https" : siweMsg.scheme;
 
     const result = await siweMsg.verify({
       signature,
