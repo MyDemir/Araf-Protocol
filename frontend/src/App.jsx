@@ -51,19 +51,75 @@ function App() {
   const [feedbackRating, setFeedbackRating] = useState(0);
 
   // ==========================================
-  // --- 2. SAHTE VERİLER (MOCK DATA) ---
+  // --- 2. CANLI VERİLER (API MOCK REPLACEMENT) ---
   // ==========================================
-  const [orders, setOrders] = useState([
-    { id: 1, maker: "0x7F...3bA", crypto: "USDT", fiat: "TRY", rate: "33.50", min: 500,  max: 2500,  tier: 1, bond: "0%",  successRate: 100, txCount: 12 },
-    { id: 2, maker: "0x1A...9cK", crypto: "USDC", fiat: "TRY", rate: "33.45", min: 1000, max: 15000, tier: 2, bond: "8%",  successRate: 97,  txCount: 34 },
-    { id: 3, maker: "0x9D...4fE", crypto: "ETH",  fiat: "USD", rate: "3100.00", min: 500, max: 5000, tier: 3, bond: "6%",  successRate: 88,  txCount: 9  },
-  ]);
+  // Statik diziler silindi, yerini state aldı.
+  const [orders, setOrders] = useState([]);
+  const [activeEscrows, setActiveEscrows] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  const [activeEscrows] = useState([
-    { id: '#1042', role: 'maker', counterparty: '0x88...1b', state: 'PAID', amount: '1000 USDT', action: 'Ödeme Onayı Bekleniyor' },
-    { id: '#1039', role: 'maker', counterparty: '0x91...4a', state: 'CHALLENGED', amount: '500 USDC', action: 'ARAF Fazında' },
-    { id: '#1045', role: 'taker', counterparty: '0x7F...3bA', state: 'LOCKED', amount: '250 USDT', action: 'Ödeme Yapmanız Bekleniyor' },
-  ]);
+  // 1. Pazar Yeri İlanlarını Çek (Public)
+  useEffect(() => {
+    const fetchListings = async () => {
+      try {
+        setLoading(true);
+        const res = await fetch(`${API_URL}/api/listings`);
+        const data = await res.json();
+        
+        if (data.listings) {
+          setOrders(data.listings.map(l => ({
+            id: l._id,
+            maker: formatAddress(l.maker_address),
+            crypto: l.crypto_asset || "USDT",
+            fiat: l.fiat_currency || "TRY",
+            rate: l.exchange_rate,
+            min: l.limits?.min || 0,
+            max: l.limits?.max || 0,
+            tier: l.tier || 1,
+            bond: (l.maker_bond_pct || 0) + "%",
+            successRate: l.reputation?.success_rate || 100,
+            txCount: l.reputation?.total_trades || 0
+          })));
+        }
+      } catch (err) {
+        console.error("Listing fetch error:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchListings();
+  }, []);
+
+  // 2. Aktif İşlemlerimi Çek (Private - SIWE Gerektirir)
+  useEffect(() => {
+    if (!jwtToken || !isConnected) {
+      setActiveEscrows([]);
+      return;
+    }
+
+    const fetchMyTrades = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/trades/my`, {
+          headers: { 'Authorization': `Bearer ${jwtToken}` }
+        });
+        const data = await res.json();
+        
+        if (data.trades) {
+          setActiveEscrows(data.trades.map(t => ({
+            id: `#${t.onchain_escrow_id}`,
+            role: t.maker_address.toLowerCase() === address?.toLowerCase() ? 'maker' : 'taker',
+            counterparty: formatAddress(t.maker_address.toLowerCase() === address?.toLowerCase() ? t.taker_address : t.maker_address),
+            state: t.status,
+            amount: `${t.financials?.crypto_amount || 0} ${t.financials?.crypto_asset || 'USDT'}`,
+            action: t.status === 'PAID' ? (lang === 'TR' ? 'Onay Bekliyor' : 'Pending Approval') : (lang === 'TR' ? 'İşlemde' : 'In Progress')
+          })));
+        }
+      } catch (err) {
+        console.error("Trades fetch error:", err);
+      }
+    };
+    fetchMyTrades();
+  }, [jwtToken, isConnected, address, lang]);
 
   const filteredOrders = orders.filter(order => {
     const amountMatch = searchAmount === '' || (Number(searchAmount) >= order.min && Number(searchAmount) <= order.max);
@@ -378,7 +434,7 @@ function App() {
 
             {profileTab === 'aktif' && (
               <div className="space-y-3">
-                {activeEscrows.map(escrow => (
+                {activeEscrows.length > 0 ? activeEscrows.map(escrow => (
                   <div key={escrow.id} className="bg-slate-900 border border-slate-700 rounded-xl p-4">
                     <div className="flex justify-between items-start mb-2">
                       <div><span className="font-mono text-emerald-400 font-bold">{escrow.id}</span><span className="text-xs text-slate-500 ml-2 uppercase border border-slate-700 px-2 py-0.5 rounded">{escrow.role}</span></div>
@@ -390,7 +446,7 @@ function App() {
                       {lang === 'TR' ? 'Odaya Git →' : 'Go to Room →'}
                     </button>
                   </div>
-                ))}
+                )) : <p className="text-center text-slate-500 text-xs mt-4">Aktif işlem bulunamadı.</p>}
               </div>
             )}
             
@@ -454,7 +510,9 @@ function App() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-700/50">
-            {filteredOrders.length > 0 ? (
+            {loading ? (
+               <tr><td colSpan="5" className="p-8 text-center text-slate-400 animate-pulse">{lang === 'TR' ? 'Yükleniyor...' : 'Loading...'}</td></tr>
+            ) : filteredOrders.length > 0 ? (
               filteredOrders.map((order) => (
                 <tr key={order.id} className="hover:bg-slate-700/30 transition">
                   <td className="p-4">
