@@ -18,11 +18,11 @@ const logger                                 = require("../utils/logger");
  */
 router.get("/nonce", authLimiter, async (req, res, next) => {
   try {
-    const { address } = req.query;
-    if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
+    const { wallet } = req.query;
+    if (!wallet || !/^0x[a-fA-F0-9]{40}$/.test(wallet)) {
       return res.status(400).json({ error: "Geçerli bir Ethereum adresi gir" });
     }
-    const nonce = await generateNonce(address.toLowerCase());
+    const nonce = await generateNonce(wallet.toLowerCase());
     return res.json({ nonce });
   } catch (err) { next(err); }
 });
