@@ -77,43 +77,53 @@ async function consumeNonce(walletAddress) {
  * @throws {Error} If verification fails
  */
 async function verifySiweSignature(message, signature) {
-  const siweMsg = new SiweMessage(message);
+  try {
+    const siweMsg = new SiweMessage(message);
 
-  // C-02 FIX: Null guard — consumeNonce returns null when TTL expired or not found
-  const nonce = await consumeNonce(siweMsg.address);
-  if (!nonce) {
-    throw new Error("Nonce bulunamadı veya süresi doldu. Lütfen tekrar deneyin.");
-  }
-
-  // H-02 FIX: SIWE_DOMAIN zorunlu — production'da localhost kalmasın
-  const domain = process.env.SIWE_DOMAIN;
-  if (!domain && process.env.NODE_ENV === "production") {
-    throw new Error("SIWE_DOMAIN ortam değişkeni production'da set edilmeli.");
-  }
-
-  // 🛡️ DİNAMİK PROTOKOL: Codespaces, Ngrok veya Localhost uyumu
-  let expectedScheme = "https";
-  if (process.env.NODE_ENV !== "production") {
-    try {
-      expectedScheme = new URL(siweMsg.uri).protocol.replace(":", "");
-    } catch (e) {
-      expectedScheme = "http";
+    // C-02 FIX: Null guard — consumeNonce returns null when TTL expired or not found
+    const nonce = await consumeNonce(siweMsg.address);
+    if (!nonce) {
+      throw new Error("Nonce bulunamadı veya süresi doldu. Lütfen tekrar deneyin.");
     }
+
+    // H-02 FIX: SIWE_DOMAIN zorunlu — production'da localhost kalmasın
+    const domain = process.env.SIWE_DOMAIN;
+    if (!domain && process.env.NODE_ENV === "production") {
+      throw new Error("SIWE_DOMAIN ortam değişkeni production'da set edilmeli.");
+    }
+
+    // 🛡️ DİNAMİK PROTOKOL: Codespaces, Ngrok veya Localhost uyumu
+    let expectedScheme = "https";
+    if (process.env.NODE_ENV !== "production") {
+      try {
+        expectedScheme = new URL(siweMsg.uri).protocol.replace(":", "");
+      } catch (e) {
+        expectedScheme = "http";
+      }
+    }
+
+    // 🔒 KUSURSUZ GÜVENLİK MANTIĞI: 
+    // Canlıda SADECE kendi .env domainini kabul eder. Geliştirmede esneklik sağlar.
+    const expectedDomain = process.env.NODE_ENV === "production" ? (domain || "localhost") : siweMsg.domain;
+
+    const result = await siweMsg.verify({
+      signature,
+      domain: expectedDomain,
+      nonce,
+      scheme: expectedScheme,
+    });
+
+    if (!result.success) {
+      // Tanımsız (undefined) hata mesajını önlemek için düzeltildi
+      throw new Error(result.error?.message || result.error?.type || "İmza doğrulama başarısız.");
+    }
+
+    return siweMsg.address.toLowerCase();
+  } catch (error) {
+    // KÖR UÇUŞU BİTİRİYORUZ: İçerideki gerçek hatayı terminale tüm çıplaklığıyla bas!
+    console.error("\n🚨 [SIWE DETAYLI HATA]:", error, "\n");
+    throw new Error(error.message || error.type || "İmza doğrulanırken bilinmeyen bir hata oluştu");
   }
-
-  const result = await siweMsg.verify({
-    signature,
-    domain: domain || "localhost",
-    nonce,
-    scheme: expectedScheme,
-  });
-
-  if (!result.success) {
-    // Tanımsız (undefined) hata mesajını önlemek için düzeltildi
-    throw new Error(result.error?.message || result.error?.type || "İmza doğrulama başarısız.");
-  }
-
-  return siweMsg.address.toLowerCase();
 }
 
 // ─── JWT ──────────────────────────────────────────────────────────────────────
