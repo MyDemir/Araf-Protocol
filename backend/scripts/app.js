@@ -6,15 +6,25 @@ const helmet        = require("helmet");
 const cors          = require("cors");
 const mongoSanitize = require("express-mongo-sanitize");
 
+// Yapılandırma ve Yardımcı Araçlar
 const { connectDB }    = require("./config/db");
 const { connectRedis } = require("./config/redis");
 const logger           = require("./utils/logger");
 
+// Zincir Dinleyici (Worker)
+const worker = require("./services/eventListener");
+
+// Hata Yönetimi
 const { globalErrorHandler } = require("./middleware/errorHandler");
 
 const app = express();
 
-// ── Güvenlik Middleware ───────────────────────────────────────────────────────
+// ── GÜVENLİK MIDDLEWARE ───────────────────────────────────────────────────────
+
+/**
+ * Helmet: HTTP başlıklarını güvenli hale getirir.
+ * CSP ayarları frontend'in API ve görsel kaynaklarına erişimine izin verir.
+ */
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -26,65 +36,90 @@ app.use(helmet({
   },
 }));
 
+/**
+ * CORS: Sadece izin verilen kökenlerden (Origins) gelen isteklere izin verir.
+ * Codespaces veya local ortamlar için ALLOWED_ORIGINS .env içinde tanımlanmalıdır.
+ */
 app.use(cors({
   origin: (process.env.ALLOWED_ORIGINS || "http://localhost:5173").split(","),
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE"],
 }));
 
+// İstek gövdesi limitini 50kb ile sınırlayarak DoS saldırılarını önler.
 app.use(express.json({ limit: "50kb" }));
 
-// MongoDB injection koruması — $gt, $where gibi operatörleri temizler
+/**
+ * Mongo Sanitize: MongoDB Injection saldırılarını ($gt, $where vb.) engeller.
+ */
 app.use(mongoSanitize({
   replaceWith: "_",
-  onSanitize: ({ key }) => logger.warn(`[GÜVENLİK] Mongo injection denemesi: ${key}`),
+  onSanitize: ({ key }) => logger.warn(`[GÜVENLİK] Mongo injection denemesi engellendi: ${key}`),
 }));
 
-// ── Başlatma ve Route Entegrasyonu ─────────────────────────────────────────────
+// ── BAŞLATMA VE ROTA ENTEGRASYONU ─────────────────────────────────────────────
+
+/**
+ * bootstrap: Uygulamanın tüm bileşenlerini sırasıyla ayağa kaldırır.
+ */
 async function bootstrap() {
   try {
-    // 1. ÖNCE Veritabanı ve Redis'i bağla (Yarış durumunu engeller)
+    // 1. ÖNCE Veritabanı ve Redis bağlantılarını kur (Sıralama kritiktir)
     await connectDB();
     await connectRedis();
-    logger.info("Veritabanı ve Redis bağlantıları başarıyla kuruldu.");
+    logger.info("MongoDB ve Redis bağlantıları başarıyla sağlandı.");
 
-    // 2. Rotaları BUNDAN SONRA içeri aktar! (Rate Limiter artık Redis'i bulabilecek)
+    // 2. Event Listener'ı (Zincir Dinleyici) Başlat
+    // DB ve Redis hazır olduktan sonra, kaçırılan blokları taramaya ve canlı dinlemeye başlar.
+    await worker.start();
+    logger.info("Event Listener (Zincir Dinleyici) aktif: Base L2 ağı izleniyor.");
+
+    // 3. Rotaları İçeri Aktar (Redis ve DB hazır olduktan sonra)
     const authRoutes     = require("./routes/auth");
     const listingRoutes  = require("./routes/listings");
     const tradeRoutes    = require("./routes/trades");
     const piiRoutes      = require("./routes/pii");
     const feedbackRoutes = require("./routes/feedback");
 
-    // 3. Route Bağlantılarını Yap
+    // 4. API Endpoint'lerini Bağla
     app.use("/api/auth",     authRoutes);
     app.use("/api/listings", listingRoutes);
     app.use("/api/trades",   tradeRoutes);
     app.use("/api/pii",      piiRoutes);
     app.use("/api/feedback", feedbackRoutes);
 
-    // ── Sağlık Kontrolü ────────────────────────────────────────────────────────
-    app.get("/health", (req, res) => res.json({ status: "ok", timestamp: Date.now() }));
+    // ── SAĞLIK KONTROLÜ VE HATA YÖNETİMİ ───────────────────────────────────────
+    
+    // Uygulamanın ve ağın durumunu kontrol etmek için
+    app.get("/health", (req, res) => res.json({ 
+      status: "ok", 
+      worker: "active",
+      timestamp: new Date().toISOString() 
+    }));
 
-    // ── 404 ────────────────────────────────────────────────────────────────────
-    app.use((req, res) => res.status(404).json({ error: "Route bulunamadı" }));
+    // Tanımlanmayan rotalar için 404
+    app.use((req, res) => res.status(404).json({ error: "İstenen endpoint bulunamadı" }));
 
-    // ── Global Hata Yakalayıcı ─────────────────────────────────────────────────
+    // Tüm uygulamayı kapsayan global hata yakalayıcı
     app.use(globalErrorHandler);
 
-    // 4. Sunucuyu Dinlemeye Başla
+    // 5. SUNUCUYU BAŞLAT
     const PORT = process.env.PORT || 4000;
     app.listen(PORT, () => {
-      logger.info(`Araf Protocol Backend — :${PORT} portunda dinleniyor`);
-      logger.info(`Ortam: ${process.env.NODE_ENV}`);
-      logger.warn("Zero Private Key modu: Backend hiçbir cüzdan anahtarı tutmuyor.");
+      logger.info(`===========================================================`);
+      logger.info(`🚀 Araf Protocol Backend Dinleniyor: Port ${PORT}`);
+      logger.info(`🌍 Ortam: ${process.env.NODE_ENV || 'development'}`);
+      logger.warn(`🛡️  Güvenlik: Zero Private Key Modu Aktif.`);
+      logger.info(`===========================================================`);
     });
 
   } catch (err) {
-    logger.error("Başlatma hatası:", err);
-    process.exit(1);
+    logger.error("Uygulama başlatılırken kritik hata oluştu:", err);
+    process.exit(1); // Kritik hatada süreci durdur
   }
 }
 
+// Uygulamayı ateşle
 bootstrap();
 
 module.exports = app;
