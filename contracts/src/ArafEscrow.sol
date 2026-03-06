@@ -212,9 +212,11 @@ contract ArafEscrow is ReentrancyGuard, EIP712, Ownable, Pausable { // C-03 Fix:
 
     modifier notBanned() {
         Reputation storage rep = reputation[msg.sender];
+        // H-06 Fix: Hata mesajı "30-day" diyordu ama ban artık 30/60/120/365 gün olabilir.
+        // Genel mesaj kullanılarak yanıltıcılık giderildi.
         require(
             rep.bannedUntil == 0 || block.timestamp > rep.bannedUntil,
-            "ArafEscrow: 30-day Taker ban active"
+            "ArafEscrow: Taker ban active — check bannedUntil via getReputation()"
         );
         _;
     }
@@ -433,7 +435,7 @@ contract ArafEscrow is ReentrancyGuard, EIP712, Ownable, Pausable { // C-03 Fix:
      * Fee dağılımı:
      *   takerFee  = cryptoAmount × TAKER_FEE_BPS → taker'ın alacağından kesilir
      *   makerFee  = cryptoAmount × MAKER_FEE_BPS → maker'ın bond iadesinden kesilir
-     *   Treasury  = takerFee + makerFee (toplam %0.4)
+     *   Treasury  = takerFee + makerFee (toplam %0.2 — her iki taraftan %0.1'er)
      *
      * @param  _tradeId  Trade ID
      */
@@ -452,6 +454,12 @@ contract ArafEscrow is ReentrancyGuard, EIP712, Ownable, Pausable { // C-03 Fix:
         // If CHALLENGED, apply decay first to get current amounts
         (uint256 currentCrypto, uint256 currentMakerBond, uint256 currentTakerBond, uint256 decayed) =
             _calculateCurrentAmounts(_tradeId);
+
+        // C-02 Fix: Reputation kararı state değişiminden ÖNCE alınmalı.
+        // t.state = RESOLVED'a çevrildikten SONRA kontrol edilirse her zaman false döner.
+        // S2 senaryosu: CHALLENGED'tan release → maker haksız challenge açtı → +1 Failed
+        // Happy path: PAID'den release → normal kapatma → her ikisi +1 Successful
+        bool makerOpenedDispute = (t.state == TradeState.CHALLENGED);
 
         // ── Effects ──
         t.state = TradeState.RESOLVED;
@@ -491,10 +499,7 @@ contract ArafEscrow is ReentrancyGuard, EIP712, Ownable, Pausable { // C-03 Fix:
             IERC20(t.tokenAddress).safeTransfer(t.taker, currentTakerBond);
         }
 
-        // Update reputation
-        // S2: CHALLENGED state'ten release → maker haksız challenge açtı → +1 Failed
-        // PAID state'ten release → normal happy path → her ikisi +1 Successful
-        bool makerOpenedDispute = (t.state == TradeState.CHALLENGED);
+        // Update reputation — karar yukarıda (state değişiminden önce) alındı
         _updateReputation(t.maker, makerOpenedDispute);
         _updateReputation(t.taker, false);
 
