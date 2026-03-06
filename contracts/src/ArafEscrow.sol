@@ -79,12 +79,12 @@ contract ArafEscrow is ReentrancyGuard, EIP712, Ownable, Pausable { // C-03 Fix:
     uint256 public constant GOOD_REP_DISCOUNT_BPS = 300; // -3%
     uint256 public constant BAD_REP_PENALTY_BPS   = 500; // +5%
 
-    // Protocol success fee — symmetric split: %0.2 taker (crypto'dan) + %0.2 maker (bond'dan)
-    // Taker aldığı crypto'dan %0.2 öder → fiat/crypto paritesi korunur
-    // Maker bond iadesinden %0.2 öder → aldığı TL'ye dokunulmaz
-    // Toplam treasury geliri: %0.4/işlem
-    uint256 public constant TAKER_FEE_BPS = 20; // %0.2 — taker crypto'sundan
-    uint256 public constant MAKER_FEE_BPS = 20; // %0.2 — maker bond'undan
+    // Protocol success fee — symmetric split: %0.1 taker (crypto'dan) + %0.1 maker (bond'dan)
+    // Taker aldığı crypto'dan %0.1 öder → fiat/crypto paritesi korunur
+    // Maker bond iadesinden %0.1 öder → aldığı TL'ye dokunulmaz
+    // Toplam treasury geliri: %0.2/işlem
+    uint256 public constant TAKER_FEE_BPS = 10; // %0.1 — taker crypto'sundan
+    uint256 public constant MAKER_FEE_BPS = 10; // %0.1 — maker bond'undan
 
     // Timers
     uint256 public constant GRACE_PERIOD        = 48 hours;
