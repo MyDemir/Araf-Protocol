@@ -33,14 +33,20 @@ const userSchema = new mongoose.Schema(
     // Real reputation lives on-chain. This cache is for fast UI rendering only.
     // MUST NOT be used for tier/bond authorization decisions.
     reputation_cache: {
-      success_rate:  { type: Number, default: 100, min: 0, max: 100 },
-      total_trades:  { type: Number, default: 0,   min: 0 },
-      failed_disputes: { type: Number, default: 0, min: 0 },
+      success_rate:    { type: Number, default: 100, min: 0, max: 100 },
+      total_trades:    { type: Number, default: 0,   min: 0 },
+      failed_disputes: { type: Number, default: 0,   min: 0 },
     },
 
     // ── Ban Status (mirrors on-chain, refreshed by event listener) ───────────
-    is_banned:   { type: Boolean, default: false },
-    banned_until: { type: Date,   default: null  },
+    is_banned:    { type: Boolean, default: false },
+    banned_until: { type: Date,    default: null  },
+
+    // H-03 Fix: Consecutive ban takibi — contract ile senkronize edilmeli.
+    // Contract: her yeni ban consecutiveBans++ yapar, 2. ban'dan itibaren tier demosyon uygular.
+    // Bu alanlar display/cache amaçlıdır; autoritative değer on-chain'dedir.
+    consecutive_bans:  { type: Number, default: 0, min: 0 },
+    max_allowed_tier:  { type: Number, default: 4, min: 0, max: 4 },
 
     // ── Activity ──────────────────────────────────────────────────────────────
     last_login: { type: Date, default: null },
@@ -64,10 +70,13 @@ userSchema.index({ last_login: 1 }, { expireAfterSeconds: 2 * 365 * 24 * 3600 })
  */
 userSchema.methods.toPublicProfile = function () {
   return {
-    wallet_address:   this.wallet_address,
-    reputation_cache: this.reputation_cache,
-    is_banned:        this.is_banned,
-    created_at:       this.created_at,
+    wallet_address:    this.wallet_address,
+    reputation_cache:  this.reputation_cache,
+    is_banned:         this.is_banned,
+    // H-03 Fix: Consecutive ban durumu ve tier kısıtı frontend'e iletilir (display only).
+    consecutive_bans:  this.consecutive_bans,
+    max_allowed_tier:  this.max_allowed_tier,
+    created_at:        this.created_at,
   };
 };
 
