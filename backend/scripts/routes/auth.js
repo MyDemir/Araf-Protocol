@@ -75,7 +75,8 @@ router.put("/profile", requireAuth, async (req, res, next) => {
     const { error, value } = schema.validate(req.body);
     if (error) return res.status(400).json({ error: error.message });
 
-    const encPII = encryptPII(value, req.wallet);
+    // H-05 Fix: encryptPII artık async — await zorunlu
+    const encPII = await encryptPII(value, req.wallet);
     await User.findOneAndUpdate(
       { wallet_address: req.wallet },
       { $set: { pii_data: encPII } },
