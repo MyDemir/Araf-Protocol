@@ -14,10 +14,11 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol"; // C-03 Fix: Emergency pause mekanizması
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-contract ArafEscrow is ReentrancyGuard, EIP712, Ownable {
+contract ArafEscrow is ReentrancyGuard, EIP712, Ownable, Pausable { // C-03 Fix: Pausable eklendi
     using SafeERC20 for IERC20;
 
     // ═══════════════════════════════════════════════════
@@ -50,7 +51,7 @@ contract ArafEscrow is ReentrancyGuard, EIP712, Ownable {
         string  ipfsReceiptHash; // Taker's payment proof
         bool    cancelProposedByMaker;
         bool    cancelProposedByTaker;
-        uint256 cancelNonce;    // EIP-712 replay protection
+        // M-02 Fix: cancelNonce kaldırıldı — replay protection sigNonces mapping'i kullanır
     }
 
     struct Reputation {
@@ -112,9 +113,7 @@ contract ArafEscrow is ReentrancyGuard, EIP712, Ownable {
         "CancelProposal(uint256 tradeId,address proposer,uint256 nonce,uint256 deadline)"
     );
 
-    bytes32 private constant RELEASE_TYPEHASH = keccak256(
-        "ReleaseProposal(uint256 tradeId,address proposer,uint256 nonce,uint256 deadline)"
-    );
+    // H-08 Fix: RELEASE_TYPEHASH kaldırıldı — karşılık gelen bir fonksiyon yoktu, auditor yanıltıcıydı
 
     // ═══════════════════════════════════════════════════
     //  STATE VARIABLES
@@ -228,7 +227,7 @@ contract ArafEscrow is ReentrancyGuard, EIP712, Ownable {
         address _token,
         uint256 _cryptoAmount,
         uint8   _tier
-    ) external nonReentrant returns (uint256 tradeId) {
+    ) external nonReentrant whenNotPaused returns (uint256 tradeId) { // C-03 Fix: whenNotPaused eklendi
         // ── Checks ──
         require(supportedTokens[_token], "ArafEscrow: token not supported");
         require(_cryptoAmount > 0, "ArafEscrow: zero amount");
@@ -256,14 +255,42 @@ contract ArafEscrow is ReentrancyGuard, EIP712, Ownable {
             challengedAt:         0,
             ipfsReceiptHash:      "",
             cancelProposedByMaker: false,
-            cancelProposedByTaker: false,
-            cancelNonce:          0
+            cancelProposedByTaker: false
+            // M-02 Fix: cancelNonce kaldırıldı — sigNonces mapping replay'i önler
         });
 
         // ── Interactions ──
         IERC20(_token).safeTransferFrom(msg.sender, address(this), totalLock);
 
         emit EscrowCreated(tradeId, msg.sender, _token, _cryptoAmount, _tier);
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  MAKER FLOW — Cancel OPEN Escrow (C-02 Fix)
+    // ═══════════════════════════════════════════════════
+
+    /**
+     * @notice Maker, hiç eşleşmemiş (taker gelmemiş) OPEN escrow'u iptal eder.
+     *         Tüm fonlar (cryptoAmount + makerBond) maker'a iade edilir.
+     *         OPEN state'te taker yoktur — iade sırasında chargeback riski bulunmaz.
+     * @param  _tradeId  Trade ID
+     */
+    function cancelOpenEscrow(uint256 _tradeId)
+        external
+        nonReentrant
+        inState(_tradeId, TradeState.OPEN)
+    {
+        Trade storage t = trades[_tradeId];
+        require(msg.sender == t.maker, "ArafEscrow: only maker");
+
+        uint256 refund = t.cryptoAmount + t.makerBond;
+
+        // ── Effects ──
+        t.state = TradeState.CANCELED;
+
+        // ── Interactions ──
+        IERC20(t.tokenAddress).safeTransfer(t.maker, refund);
+        emit EscrowCanceled(_tradeId, refund, 0);
     }
 
     // ═══════════════════════════════════════════════════
@@ -278,6 +305,7 @@ contract ArafEscrow is ReentrancyGuard, EIP712, Ownable {
         external
         nonReentrant
         notBanned
+        whenNotPaused // C-03 Fix: whenNotPaused eklendi
         inState(_tradeId, TradeState.OPEN)
     {
         Trade storage t = trades[_tradeId];
@@ -858,4 +886,8 @@ contract ArafEscrow is ReentrancyGuard, EIP712, Ownable {
         supportedTokens[_token] = _supported;
         emit TokenSupportUpdated(_token, _supported);
     }
+
+    // C-03 Fix: Emergency pause — exploit tespit edildiğinde yeni işlem girişini durdurur
+    function pause()   external onlyOwner { _pause(); }
+    function unpause() external onlyOwner { _unpause(); }
 }
