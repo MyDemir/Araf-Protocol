@@ -164,6 +164,69 @@ describe("ArafEscrow", function () {
       expect(makerSuccess).to.equal(1);
       expect(takerSuccess).to.equal(1);
     });
+
+    // ── S1: autoRelease → maker pasif kaldı → +1 Failed ─────────────────────
+    it("S1: autoRelease gives maker +1 Failed, taker +1 Successful", async () => {
+      const tradeId = await setupTrade(2);
+      await escrow.connect(taker).lockEscrow(tradeId);
+      await escrow.connect(taker).reportPayment(tradeId, "QmHash");
+
+      // Maker 48h içinde release etmedi — taker autoRelease tetikler
+      await time.increase(FORTY_EIGHT_H + 1);
+      await escrow.connect(taker).autoRelease(tradeId);
+
+      const [makerSuccess, makerFailed,] = await escrow.getReputation(maker.address);
+      const [takerSuccess, takerFailed,] = await escrow.getReputation(taker.address);
+      expect(makerSuccess).to.equal(0);
+      expect(makerFailed).to.equal(1);  // Pasif maker ceza alır
+      expect(takerSuccess).to.equal(1);
+      expect(takerFailed).to.equal(0);
+    });
+
+    // ── S2: CHALLENGED → maker release → haksız challenge → maker +1 Failed ─
+    it("S2: releaseFunds from CHALLENGED state gives maker +1 Failed", async () => {
+      const tradeId = await setupTrade(2);
+      await escrow.connect(taker).lockEscrow(tradeId);
+      await escrow.connect(taker).reportPayment(tradeId, "QmHash");
+      await time.increase(ONE_HOUR + 1);
+      await escrow.connect(maker).challengeTrade(tradeId);
+
+      // Maker challenge açtı ama sonra geri adım atıp release etti → haksız challenge
+      await time.increase(FORTY_EIGHT_H + 1);
+      await escrow.connect(maker).releaseFunds(tradeId);
+
+      const [makerSuccess, makerFailed,] = await escrow.getReputation(maker.address);
+      const [takerSuccess, takerFailed,] = await escrow.getReputation(taker.address);
+      expect(makerSuccess).to.equal(0);
+      expect(makerFailed).to.equal(1);  // Haksız challenge cezası
+      expect(takerSuccess).to.equal(1);
+      expect(takerFailed).to.equal(0);
+    });
+
+    // ── S3: CHALLENGED → collaborative cancel → ikisi nötr ──────────────────
+    it("S3: collaborative cancel from CHALLENGED state gives no reputation penalty", async () => {
+      const tradeId = await setupTrade(2);
+      await escrow.connect(taker).lockEscrow(tradeId);
+      await escrow.connect(taker).reportPayment(tradeId, "QmHash");
+      await time.increase(ONE_HOUR + 1);
+      await escrow.connect(maker).challengeTrade(tradeId);
+
+      // İki taraf da imzalayıp cancel → hiçbiri ceza almaz
+      const deadline = (await time.latest()) + 3600;
+      const makerSig = await eip712CancelSig(maker, tradeId, await escrow.sigNonces(maker.address), deadline);
+      await escrow.connect(maker).proposeOrApproveCancel(tradeId, deadline, makerSig);
+      const takerSig = await eip712CancelSig(taker, tradeId, await escrow.sigNonces(taker.address), deadline);
+      await escrow.connect(taker).proposeOrApproveCancel(tradeId, deadline, takerSig);
+
+      expect((await escrow.getTrade(tradeId)).state).to.equal(5); // CANCELED
+
+      const [makerSuccess, makerFailed,] = await escrow.getReputation(maker.address);
+      const [takerSuccess, takerFailed,] = await escrow.getReputation(taker.address);
+      expect(makerSuccess).to.equal(0);
+      expect(makerFailed).to.equal(0);  // Nötr — ceza yok
+      expect(takerSuccess).to.equal(0);
+      expect(takerFailed).to.equal(0);  // Nötr — ceza yok
+    });
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -270,8 +333,8 @@ describe("ArafEscrow", function () {
       await time.increase(ONE_HOUR + 1);
       await escrow.connect(maker).challengeTrade(tradeId);
 
-      // Advance 2 days into bleeding
-      await time.increase(2 * 24 * 3600);
+      // Grace(48h) + 2 gün bleeding = 96h sonra release → bond kısmen eriyik
+      await time.increase(FORTY_EIGHT_H + 2 * 24 * 3600);
 
       const takerBefore = await mockUSDT.balanceOf(taker.address);
       await escrow.connect(maker).releaseFunds(tradeId);
@@ -289,33 +352,39 @@ describe("ArafEscrow", function () {
       await time.increase(ONE_HOUR + 1);
       await escrow.connect(maker).challengeTrade(tradeId);
 
-      // Check after 0 days (no decay yet)
-      const [,makerBond0,,] = await escrow.getCurrentAmounts(tradeId);
+      // t=0: Challenge açıldı. Grace period (48h) içinde sıfır erime.
+      const [,makerBond0,,decayed0] = await escrow.getCurrentAmounts(tradeId);
+      expect(decayed0).to.equal(0); // Grace içinde — sıfır erime
 
-      // After 3 days: opener bond -45%, other -30%
-      await time.increase(3 * 24 * 3600);
+      // t=48h: Grace biter, decay başlamaz (tam sınır)
+      await time.increase(FORTY_EIGHT_H);
+      const [,makerBondGrace,,decayedGrace] = await escrow.getCurrentAmounts(tradeId);
+      expect(decayedGrace).to.equal(0); // Henüz 0 gün bleeding
+
+      // t=48h+24h=72h: 1 gün bleeding → maker -%15, taker -%10
+      await time.increase(24 * 3600);
       const [,makerBond3,,decayed3] = await escrow.getCurrentAmounts(tradeId);
-
       expect(makerBond3).to.be.lt(makerBond0);
       expect(decayed3).to.be.gt(0);
     });
 
-    it("USDT decay starts only after Day 4", async () => {
+    it("USDT decay starts only after Day 4 of bleeding (t=144h from challenge)", async () => {
       const tradeId = await setupTrade(2);
       await escrow.connect(taker).lockEscrow(tradeId);
       await escrow.connect(taker).reportPayment(tradeId, "QmHash");
       await time.increase(ONE_HOUR + 1);
       await escrow.connect(maker).challengeTrade(tradeId);
 
-      // Day 3 — USDT should NOT have decayed yet
-      await time.increase(3 * 24 * 3600);
-      const [crypto3,,,] = await escrow.getCurrentAmounts(tradeId);
-      expect(crypto3).to.equal(TRADE_AMOUNT);
+      // t=48h+72h=120h: Grace(48h) + 3 gün bleeding → USDT henüz erimemeli
+      // USDT decay: bleedingElapsed(72h) < USDT_DECAY_START(96h) → sıfır
+      await time.increase(FORTY_EIGHT_H + 3 * 24 * 3600);
+      const [crypto120,,,] = await escrow.getCurrentAmounts(tradeId);
+      expect(crypto120).to.equal(TRADE_AMOUNT);
 
-      // Day 5 — USDT should be decaying
-      await time.increase(2 * 24 * 3600);
-      const [crypto5,,,] = await escrow.getCurrentAmounts(tradeId);
-      expect(crypto5).to.be.lt(TRADE_AMOUNT);
+      // t=48h+96h+24h=168h: Grace(48h) + 4 gün bleeding → USDT erimeye başlamalı
+      await time.increase(24 * 3600);
+      const [crypto168,,,] = await escrow.getCurrentAmounts(tradeId);
+      expect(crypto168).to.be.lt(TRADE_AMOUNT);
     });
 
     it("burns all funds after 10-day timeout", async () => {
