@@ -216,7 +216,7 @@ contract ArafEscrow is ReentrancyGuard, EIP712, Ownable, Pausable { // C-03 Fix:
         // Genel mesaj kullanılarak yanıltıcılık giderildi.
         require(
             rep.bannedUntil == 0 || block.timestamp > rep.bannedUntil,
-            "ArafEscrow: Taker ban active — check bannedUntil via getReputation()"
+            "ArafEscrow: Taker ban active - check bannedUntil via getReputation()"
         );
         _;
     }
