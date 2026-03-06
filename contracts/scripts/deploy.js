@@ -8,6 +8,8 @@
  * Kullanım: npx hardhat run scripts/deploy.js --network base-sepolia
  */
 const { ethers } = require("hardhat");
+const fs   = require("fs");
+const path = require("path");
 
 async function main() {
   const [deployer] = await ethers.getSigners();
@@ -31,6 +33,21 @@ async function main() {
 
   const address = await escrow.getAddress();
   console.log("✅ ArafEscrow deploy edildi:", address);
+
+  // H-07 Fix: ABI'ı frontend'e kopyala — useArafContract hook'u bu dosyayı kullanır
+  // Deploy sonrası ABI otomatik olarak frontend/src/abi/ArafEscrow.json'a yazılır
+  try {
+    const artifactPath = path.resolve(__dirname, "../artifacts/src/ArafEscrow.sol/ArafEscrow.json");
+    const artifact     = JSON.parse(fs.readFileSync(artifactPath, "utf8"));
+    const abiDestDir   = path.resolve(__dirname, "../../frontend/src/abi");
+    const abiDestPath  = path.join(abiDestDir, "ArafEscrow.json");
+
+    fs.mkdirSync(abiDestDir, { recursive: true });
+    fs.writeFileSync(abiDestPath, JSON.stringify(artifact.abi, null, 2));
+    console.log("✅ ABI frontend'e kopyalandı:", abiDestPath);
+  } catch (err) {
+    console.warn("⚠ ABI kopyalanamadı (frontend klasörü bulunamadı):", err.message);
+  }
 
   // ── Testnet: MockERC20 Deploy ve Desteklenen Token Ekleme ──────────────────
   if (process.env.NODE_ENV !== "production") {
