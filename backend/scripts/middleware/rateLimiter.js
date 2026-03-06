@@ -84,6 +84,22 @@ const listingsWriteLimiter = rateLimit({
   legacyHeaders:   false,
 });
 
+// ─── Trades — Active trade room & cancel operations ───────────────────────────
+// C-01 Fix: tradesLimiter eksikti — trades.js import ediyor ama export yoktu → backend crash.
+// 30 requests per minute per wallet (trade room polling, propose-cancel, chargeback-ack)
+const tradesLimiter = rateLimit({
+  windowMs:        60 * 1000,
+  max:             30,
+  keyGenerator:    (req) => req.wallet || req.ip,
+  store:           makeStore("trades"),
+  handler:         (req, res) => {
+    onLimitReached(req, res);
+    res.status(429).json({ error: "Too many trade requests. Max 30 per minute." });
+  },
+  standardHeaders: true,
+  legacyHeaders:   false,
+});
+
 // ─── Feedback — Prevent spam ──────────────────────────────────────────────────
 // 3 per hour per wallet
 const feedbackLimiter = rateLimit({
@@ -104,5 +120,6 @@ module.exports = {
   authLimiter,
   listingsReadLimiter,
   listingsWriteLimiter,
+  tradesLimiter,
   feedbackLimiter,
 };
