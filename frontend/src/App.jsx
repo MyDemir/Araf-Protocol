@@ -1,15 +1,24 @@
 import React, { useState, useEffect } from 'react';
 // --- WEB3 ENTEGRASYON KÜTÜPHANELERİ ---
-// YENİ: useSignMessage eklendi (SIWE imzası için)
 // H-01 Fix: useChainId eklendi — SIWE mesajındaki Chain ID artık hardcoded değil
 import { useAccount, useConnect, useDisconnect, useSignMessage, useChainId } from 'wagmi';
 import { injected } from 'wagmi/connectors';
 
+// H-05 Fix: SIWE mesajı resmi EIP-4361 formatında oluşturmak için siwe paketi kullanılıyor.
+// Manuel string concat ile oluşturulan mesaj OKX / Coinbase gibi cüzdanlarda doğrulama
+// hatasına yol açabilir. SiweMessage.prepareMessage() standartta tanımlı tam formatı verir.
+import { SiweMessage } from 'siwe';
+
+// H-02 Fix: useArafContract hook import edildi — kontrat çağrıları artık gerçek on-chain işlem.
+import { useArafContract } from './hooks/useArafContract';
+
 // --- BİLEŞEN VE HOOK İTHALATI ---
 import PIIDisplay from './components/PIIDisplay'; // H-03 Entegrasyonu
 
-// YENİ: Backend API Adresimiz (Codespace testleri için dinamik)
-const API_URL = import.meta.env.VITE_API_URL || 'https://probable-fortnight-9j5q9rvg7jq2x6p9-4000.app.github.dev';
+// M-04 Fix: Hardcoded Codespace URL kaldırıldı — production build'e sızıp veriyi
+// yanlış endpoint'e gönderebilirdi. Sadece VITE_API_URL env değişkeni kullanılıyor.
+// Geliştirme ortamında: frontend/.env.local içine VITE_API_URL=http://localhost:4000 ekle.
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
 
 function App() {
   // ==========================================
@@ -27,17 +36,34 @@ function App() {
   const [isBanned, setIsBanned] = useState(false);
   const [cancelStatus, setCancelStatus] = useState(null);
   const [cooldownPassed, setCooldownPassed] = useState(false);
-  const [chargebackAccepted, setChargebackAccepted] = useState(false); 
+  const [chargebackAccepted, setChargebackAccepted] = useState(false);
+
+  // M-02 Fix: Maker modal için reaktif state'ler — bond özeti tier/miktar değiştikçe güncellenir
+  const [makerTier, setMakerTier]     = useState(1);
+  const [makerAmount, setMakerAmount] = useState('');
 
   // --- WEB3 DURUM YÖNETİMİ ---
   const { address, isConnected } = useAccount();
   const { connect, connectors } = useConnect();
   const { disconnect } = useDisconnect();
-  const { signMessageAsync } = useSignMessage(); // YENİ: İmza kancası
+  const { signMessageAsync } = useSignMessage();
   const chainId = useChainId(); // H-01 Fix: dinamik chain ID — hardcoded 8453 yerine
+
+  // H-02 Fix: Kontrat hook'u burada başlatılıyor. Tüm on-chain işlemler
+  // (releaseFunds, challengeTrade, lockEscrow vb.) bu hook üzerinden çağrılır.
+  // Backend sadece relayer — fon transferini kontrat gerçekleştirir.
+  const {
+    releaseFunds,
+    challengeTrade,
+    autoRelease,
+    lockEscrow,
+    cancelOpenEscrow,
+    signCancelProposal,
+    proposeOrApproveCancel,
+  } = useArafContract();
   
   const [jwtToken, setJwtToken] = useState(null); // SIWE sonrası dolacak token
-  const [isLoggingIn, setIsLoggingIn] = useState(false); // YENİ: Yükleniyor state'i
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   // --- KULLANICI VE VERİ STATE'LERİ ---
   const [lang, setLang] = useState('TR'); 
@@ -70,17 +96,20 @@ function App() {
         
         if (data.listings) {
           setOrders(data.listings.map(l => ({
-            id: l._id,
-            maker: formatAddress(l.maker_address),
-            crypto: l.crypto_asset || "USDT",
-            fiat: l.fiat_currency || "TRY",
-            rate: l.exchange_rate,
-            min: l.limits?.min || 0,
-            max: l.limits?.max || 0,
-            tier: l.tier || 1,
-            bond: (l.maker_bond_pct || 0) + "%",
+            id:          l._id,
+            // H-02 Fix: onchainId — releaseFunds/challengeTrade gibi kontrat çağrıları için gerekli.
+            // eventListener EscrowCreated event'inden MongoDB'ye onchain_escrow_id olarak yazılır.
+            onchainId:   l.onchain_escrow_id || null,
+            maker:       formatAddress(l.maker_address),
+            crypto:      l.crypto_asset || "USDT",
+            fiat:        l.fiat_currency || "TRY",
+            rate:        l.exchange_rate,
+            min:         l.limits?.min || 0,
+            max:         l.limits?.max || 0,
+            tier:        l.tier || 1,
+            bond:        (l.maker_bond_pct || 0) + "%",
             successRate: l.reputation?.success_rate || 100,
-            txCount: l.reputation?.total_trades || 0
+            txCount:     l.reputation?.total_trades || 0,
           })));
         }
       } catch (err) {
@@ -123,9 +152,12 @@ function App() {
     fetchMyTrades();
   }, [jwtToken, isConnected, address, lang]);
 
+  // M-01 Fix: Önceki filtre order.tier===1 arıyordu.
+  // Tier 1'in bond'u var (%8/%10). %0 Bond = Tier 0 (yeni kullanıcı teşviki).
+  // Filtre şimdi Tier 0 ilanlarını listeliyor.
   const filteredOrders = orders.filter(order => {
     const amountMatch = searchAmount === '' || (Number(searchAmount) >= order.min && Number(searchAmount) <= order.max);
-    const tierMatch = filterTier1 ? order.tier === 1 : true;
+    const tierMatch = filterTier1 ? order.tier === 0 : true;
     return amountMatch && tierMatch;
   });
 
@@ -150,30 +182,39 @@ function App() {
     return '👛';
   };
 
-  // YENİ: SIWE (Sign-In With Ethereum) Akışı
+  // SIWE (Sign-In With Ethereum) Akışı
+  // H-05 Fix: Önceki implementasyon manuel string concat kullanıyordu.
+  // SiweMessage sınıfı EIP-4361 standardını tam olarak uygular — OKX, Coinbase, MetaMask
+  // gibi farklı cüzdanların imza doğrulaması bu formatla tutarlı çalışır.
   const loginWithSIWE = async () => {
     if (!address) return;
     try {
       setIsLoggingIn(true);
-      
-      // UX GÜNCELLEMESİ: Kullanıcıyı yönlendir
       showToast(lang === 'TR' ? 'Lütfen cüzdanınızdan imza isteğini onaylayın 🦊' : 'Please approve the signature request in your wallet 🦊', 'info');
 
-      // 1. Backend'den Nonce (Tek kullanımlık şifre) al
+      // 1. Backend'den Nonce al (Redis'te 5 dakika yaşar, tek kullanımlık)
       const nonceRes = await fetch(`${API_URL}/api/auth/nonce?wallet=${address}`);
       const { nonce } = await nonceRes.json();
 
-      // 2. İmza mesajını oluştur (EIP-4361 Formatı)
-      const domain = window.location.host;
-      const origin = window.location.origin;
-      const statement = 'Sign in to Araf Protocol to manage your trades and secure PII data.';
-      // H-01 Fix: Chain ID artık hardcoded değil — wagmi useChainId() ile dinamik alınıyor
-      const message = `${domain} wants you to sign in with your Ethereum account:\n${address}\n\n${statement}\n\nURI: ${origin}\nVersion: 1\nChain ID: ${chainId}\nNonce: ${nonce}\nIssued At: ${new Date().toISOString()}`;
+      // 2. EIP-4361 uyumlu SIWE mesajı oluştur
+      // H-01 Fix: chainId wagmi useChainId() ile dinamik — hardcoded 8453 değil
+      // SiweMessage.prepareMessage() cüzdanların beklediği kesin formatı üretir
+      const siweMessage = new SiweMessage({
+        domain:    window.location.host,
+        address,
+        statement: 'Sign in to Araf Protocol to manage your trades and secure PII data.',
+        uri:       window.location.origin,
+        version:   '1',
+        chainId,
+        nonce,
+        issuedAt:  new Date().toISOString(),
+      });
+      const message = siweMessage.prepareMessage();
 
-      // 3. Kullanıcıya imzalat
+      // 3. Kullanıcıya imzalat (MetaMask / OKX / Coinbase)
       const signature = await signMessageAsync({ message });
 
-      // 4. İmzayı Backend'e doğrulat
+      // 4. İmzayı backend'e doğrulat — JWT döner
       const verifyRes = await fetch(`${API_URL}/api/auth/verify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -181,7 +222,7 @@ function App() {
       });
 
       const data = await verifyRes.json();
-      
+
       if (data.token) {
         setJwtToken(data.token);
         showToast(lang === 'TR' ? 'Sisteme başarıyla giriş yapıldı! 🚀' : 'Successfully signed in! 🚀', 'success');
@@ -190,8 +231,7 @@ function App() {
       }
     } catch (error) {
       console.error("SIWE Error:", error);
-      // UX GÜNCELLEMESİ: Hata durumunda bilgi ver
-      if (error.message?.includes('rejected')) {
+      if (error.message?.includes('rejected') || error.message?.includes('User rejected')) {
         showToast(lang === 'TR' ? 'İmza işlemi sizin tarafınızdan iptal edildi.' : 'Signature request was cancelled by you.', 'error');
       } else {
         showToast(lang === 'TR' ? 'Giriş başarısız oldu.' : 'Login failed.', 'error');
@@ -256,7 +296,8 @@ function App() {
     return `https://t.me/${safeHandle}`;
   };
 
-  // M-06 Fix: Chargeback onayı backend'e kaydediliyor (sadece görsel checkbox değil)
+  // H-02 Fix: Chargeback onayı backend'e kaydediliyor (sadece görsel checkbox değil)
+  // Aynı zamanda kontrat çağrısından önce zorunlu ön adım — legal kanıt zinciri.
   const handleChargebackAck = async (checked) => {
     setChargebackAccepted(checked);
     if (!checked || !activeTrade?.id || !jwtToken) return;
@@ -270,17 +311,51 @@ function App() {
     }
   };
 
-  // M-06 Fix: Serbest Bırak butonu kontrat çağrısını tetikliyor (useArafContract'a bağlanacak)
-  // Şimdilik state geçişi yapıyor — useArafContract entegrasyonu ayrı adımda
+  // H-02 Fix: releaseFunds artık gerçek on-chain kontrat çağrısı yapıyor.
+  // Felsefe: Backend sadece chargeback ack'i kaydeder (hukuki iz).
+  // Asıl fon transferi kontrat üzerinden gerçekleşir — backend fonlara dokunamaz.
+  // activeTrade.onchainId: eventListener EscrowCreated'dan MongoDB'ye yazılan on-chain ID.
   const handleRelease = async () => {
     if (!chargebackAccepted) return;
+    if (!activeTrade?.onchainId) {
+      showToast(lang === 'TR' ? 'On-chain işlem ID bulunamadı.' : 'On-chain trade ID not found.', 'error');
+      return;
+    }
     try {
-      // TODO: await releaseFunds(activeTrade.onchainId) — useArafContract entegrasyonunda bağlanacak
+      showToast(lang === 'TR' ? 'İşlem cüzdanınıza gönderildi, onaylayın...' : 'Transaction sent to wallet, please confirm...', 'info');
+      // Kontrat çağrısı — MetaMask imza isteği açılır
+      await releaseFunds(BigInt(activeTrade.onchainId));
+      // Kontrat onaylandıktan sonra UI güncellenir
+      // EventListener on-chain event'i yakalayıp MongoDB'yi güncelleyecek
       setTradeState('RESOLVED');
       setCurrentView('dashboard');
-      showToast(lang === 'TR' ? 'USDT başarıyla serbest bırakıldı!' : 'USDT successfully released!', 'success');
+      showToast(lang === 'TR' ? 'USDT başarıyla serbest bırakıldı! ✅' : 'USDT successfully released! ✅', 'success');
     } catch (err) {
-      showToast(lang === 'TR' ? 'İşlem başarısız.' : 'Transaction failed.', 'error');
+      console.error("releaseFunds error:", err);
+      if (err.message?.includes('rejected') || err.message?.includes('User rejected')) {
+        showToast(lang === 'TR' ? 'İşlem sizin tarafınızdan iptal edildi.' : 'Transaction cancelled by you.', 'error');
+      } else {
+        showToast(lang === 'TR' ? 'Kontrat işlemi başarısız oldu.' : 'Contract transaction failed.', 'error');
+      }
+    }
+  };
+
+  // H-02 Fix: challengeTrade artık gerçek on-chain kontrat çağrısı yapıyor.
+  // Sadece maker çağırabilir (kontrat enforce eder). 1 saat cooldown kontrat tarafında.
+  const handleChallenge = async () => {
+    if (!activeTrade?.onchainId) return;
+    try {
+      showToast(lang === 'TR' ? 'İtiraz işlemi cüzdanınıza gönderildi...' : 'Challenge transaction sent to wallet...', 'info');
+      await challengeTrade(BigInt(activeTrade.onchainId));
+      setTradeState('CHALLENGED');
+      showToast(lang === 'TR' ? 'İtiraz başlatıldı. Bleeding Escrow aktif.' : 'Challenge opened. Bleeding Escrow active.', 'success');
+    } catch (err) {
+      console.error("challengeTrade error:", err);
+      if (err.message?.includes('rejected') || err.message?.includes('User rejected')) {
+        showToast(lang === 'TR' ? 'İşlem iptal edildi.' : 'Transaction cancelled.', 'error');
+      } else {
+        showToast(lang === 'TR' ? 'İtiraz işlemi başarısız.' : 'Challenge failed.', 'error');
+      }
     }
   };
 
@@ -373,6 +448,24 @@ function App() {
 
   const renderMakerModal = () => {
     if (!showMakerModal) return null;
+
+    // M-02 Fix: Bond oranları artık seçili tier'a göre dinamik hesaplanıyor.
+    // Önceden hardcoded "Tier 2 Kuralları / 150 bond" gösteriliyordu — tier seçiminden bağımsız.
+    // Contract sabitleriyle senkronize: T0:%0, T1:%8, T2:%6, T3:%5, T4:%2
+    const MAKER_BOND_PCT = { 0: 0, 1: 8, 2: 6, 3: 5, 4: 2 };
+    const TIER_LABELS = {
+      0: lang === 'TR' ? 'Tier 0 — Bond Yok (Yeni Kullanıcı)' : 'Tier 0 — No Bond (New User)',
+      1: lang === 'TR' ? 'Tier 1 — %8 Bond (Başlangıç)'       : 'Tier 1 — 8% Bond (Starter)',
+      2: lang === 'TR' ? 'Tier 2 — %6 Bond (Standart)'        : 'Tier 2 — 6% Bond (Standard)',
+      3: lang === 'TR' ? 'Tier 3 — %5 Bond (Deneyimli)'       : 'Tier 3 — 5% Bond (Experienced)',
+      4: lang === 'TR' ? 'Tier 4 — %2 Bond (Premium)'         : 'Tier 4 — 2% Bond (Premium)',
+    };
+
+    const bondPct    = MAKER_BOND_PCT[makerTier] ?? 0;
+    const cryptoAmt  = parseFloat(makerAmount) || 0;
+    const bondAmt    = Math.ceil(cryptoAmt * bondPct / 100);
+    const totalLock  = cryptoAmt + bondAmt;
+
     return (
       <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
         <div className="bg-slate-800 border border-slate-700 rounded-2xl p-6 w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto">
@@ -384,7 +477,7 @@ function App() {
             <div className="flex space-x-2">
               <div className="w-1/2">
                 <label className="block text-xs text-slate-400 mb-1">{lang === 'TR' ? 'Satılacak Kripto' : 'Crypto to Sell'}</label>
-                <select className="w-full bg-slate-900 text-white px-3 py-2 rounded-xl border border-slate-700 outline-none"><option>USDT</option><option>USDC</option><option>ETH</option></select>
+                <select className="w-full bg-slate-900 text-white px-3 py-2 rounded-xl border border-slate-700 outline-none"><option>USDT</option><option>USDC</option></select>
               </div>
               <div className="w-1/2">
                 <label className="block text-xs text-slate-400 mb-1">{lang === 'TR' ? 'İstenecek İtibari Para' : 'Fiat Currency'}</label>
@@ -393,7 +486,10 @@ function App() {
             </div>
             <div>
               <label className="block text-xs text-slate-400 mb-1">{lang === 'TR' ? 'Satılacak Miktar' : 'Amount'}</label>
-              <input type="number" placeholder="Örn: 1000" className="w-full bg-slate-900 text-white px-3 py-2 rounded-xl border border-slate-700 outline-none" />
+              <input
+                type="number" placeholder="Örn: 1000"
+                value={makerAmount} onChange={e => setMakerAmount(e.target.value)}
+                className="w-full bg-slate-900 text-white px-3 py-2 rounded-xl border border-slate-700 outline-none" />
             </div>
             <div>
               <label className="block text-xs text-slate-400 mb-1">{lang === 'TR' ? 'Kur Fiyatı' : 'Exchange Rate'}</label>
@@ -403,10 +499,39 @@ function App() {
               <div className="w-1/2"><label className="block text-xs text-slate-400 mb-1">{lang === 'TR' ? 'Min. Limit' : 'Min Limit'}</label><input type="number" placeholder="500" className="w-full bg-slate-900 text-white px-3 py-2 rounded-xl border border-slate-700 outline-none" /></div>
               <div className="w-1/2"><label className="block text-xs text-slate-400 mb-1">{lang === 'TR' ? 'Max. Limit' : 'Max Limit'}</label><input type="number" placeholder="2500" className="w-full bg-slate-900 text-white px-3 py-2 rounded-xl border border-slate-700 outline-none" /></div>
             </div>
+
+            {/* M-02 Fix: Tier seçimi — 0'dan 4'e tam liste, maxAllowedTier kısıtı gözetiliyor */}
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">{lang === 'TR' ? 'İlan Tier Seviyesi' : 'Listing Tier'}</label>
+              <select
+                value={makerTier}
+                onChange={e => setMakerTier(Number(e.target.value))}
+                className="w-full bg-slate-900 text-white px-3 py-2 rounded-xl border border-slate-700 outline-none">
+                {[0, 1, 2, 3, 4].map(t => (
+                  <option key={t} value={t}>{TIER_LABELS[t]}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* M-02 Fix: Bond özeti seçili tier ve miktar değiştiğinde reaktif güncelleniyor */}
             <div className="mt-4 p-3 bg-emerald-900/20 border border-emerald-500/30 rounded-xl">
-              <p className="text-xs text-emerald-400 mb-2 font-medium">🛡️ Tier 2 {lang === 'TR' ? 'Kuralları Geçerlidir' : 'Rules Apply'}</p>
-              <div className="flex justify-between text-xs text-slate-300 mb-1"><span>{lang === 'TR' ? 'Satıcı Teminatı' : 'Maker Bond'} (%15):</span> <span>150 Kripto</span></div>
-              <div className="flex justify-between text-sm font-bold text-white border-t border-emerald-500/30 pt-2"><span>{lang === 'TR' ? 'Toplam Kilitlenecek:' : 'Total Locked:'}</span> <span>1150 Kripto</span></div>
+              <p className="text-xs text-emerald-400 mb-2 font-medium">
+                🛡️ {TIER_LABELS[makerTier]} {lang === 'TR' ? 'Kuralları Geçerlidir' : 'Rules Apply'}
+              </p>
+              {bondPct > 0 ? (
+                <div className="flex justify-between text-xs text-slate-300 mb-1">
+                  <span>{lang === 'TR' ? 'Satıcı Teminatı' : 'Maker Bond'} (%{bondPct}):</span>
+                  <span>{bondAmt > 0 ? `${bondAmt} Kripto` : '—'}</span>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-400 mb-1">
+                  {lang === 'TR' ? 'Tier 0: Teminat yok — sadece kripto kilitlenir.' : 'Tier 0: No bond — only crypto is locked.'}
+                </p>
+              )}
+              <div className="flex justify-between text-sm font-bold text-white border-t border-emerald-500/30 pt-2">
+                <span>{lang === 'TR' ? 'Toplam Kilitlenecek:' : 'Total Locked:'}</span>
+                <span>{totalLock > 0 ? `${totalLock} Kripto` : '—'}</span>
+              </div>
             </div>
             <button className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-bold mt-2 shadow-lg shadow-emerald-900/20">{lang === 'TR' ? 'Varlığı ve Teminatı Kilitle' : 'Lock Asset & Bond'}</button>
           </div>
@@ -442,8 +567,11 @@ function App() {
                   <div className="bg-red-950/40 border border-red-900/50 p-4 rounded-xl flex items-start space-x-3">
                     <span className="text-2xl">🚫</span>
                     <div>
-                      <p className="font-bold text-red-400">{lang === 'TR' ? '30 Günlük İşlem Kısıtlaması' : '30-Day Restriction'}</p>
-                      <p className="text-red-300/80 text-xs mt-1">{lang === 'TR' ? 'Sadece Maker olarak ilan açabilirsiniz.' : 'You can only create ads as Maker.'}</p>
+                      {/* H-03 Fix: Ban mesajı artık sabit "30 gün" demiyor.
+                          Consecutive ban sistemi 30→60→120→365 gün artan sürelerle çalışır.
+                          Gerçek süre on-chain'den kontrol edilmeli (getReputation view fn). */}
+                      <p className="font-bold text-red-400">{lang === 'TR' ? 'Taker Kısıtlaması Aktif' : 'Taker Restriction Active'}</p>
+                      <p className="text-red-300/80 text-xs mt-1">{lang === 'TR' ? 'Sadece Maker olarak ilan açabilirsiniz. Bitiş tarihi için on-chain kaydı kontrol edin.' : 'You can only create listings as Maker. Check on-chain record for expiry date.'}</p>
                     </div>
                   </div>
                 )}
@@ -721,7 +849,12 @@ function App() {
                         className={`w-full sm:w-auto px-8 py-3 rounded-xl font-bold transition ${chargebackAccepted ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/20' : 'bg-slate-700 text-slate-500 cursor-not-allowed'}`}>
                         {lang === 'TR' ? 'Serbest Bırak' : 'Release USDT'}
                       </button>
-                      <button onClick={() => cooldownPassed && setTradeState('CHALLENGED')} disabled={!cooldownPassed} className={`w-full sm:w-auto px-6 py-3 rounded-xl font-bold transition ${cooldownPassed ? 'bg-red-500/10 text-red-500 border border-red-500/50 hover:bg-red-500 hover:text-white' : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'}`}>
+                      {/* H-02 Fix: Challenge butonu artık gerçek on-chain challengeTrade() çağırıyor.
+                          Cooldown kontrat tarafında enforce edilir (kontrat: 1h min). */}
+                      <button
+                        onClick={handleChallenge}
+                        disabled={!cooldownPassed}
+                        className={`w-full sm:w-auto px-6 py-3 rounded-xl font-bold transition ${cooldownPassed ? 'bg-red-500/10 text-red-500 border border-red-500/50 hover:bg-red-500 hover:text-white' : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'}`}>
                         {cooldownPassed ? (lang === 'TR' ? 'İtiraz Et' : 'Challenge') : '⏳ Cooldown 59:12'}
                       </button>
                     </div>
@@ -751,7 +884,14 @@ function App() {
                 <div className="bg-slate-900/50 border border-slate-700 rounded-xl p-4">
                   {cancelStatus === null && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      {isMaker && <button className="w-full bg-slate-800 border border-emerald-500/50 text-emerald-400 p-3 rounded-xl font-bold text-sm hover:bg-emerald-500 hover:text-white transition">🤝 {lang === 'TR' ? 'Serbest Bırak' : 'Release'}</button>}
+                      {/* H-02 Fix: Bleeding fazında maker serbest bırakabilir — aynı releaseFunds kontratı */}
+                      {isMaker && (
+                        <button
+                          onClick={handleRelease}
+                          className="w-full bg-slate-800 border border-emerald-500/50 text-emerald-400 p-3 rounded-xl font-bold text-sm hover:bg-emerald-500 hover:text-white transition">
+                          🤝 {lang === 'TR' ? 'Serbest Bırak' : 'Release'}
+                        </button>
+                      )}
                       <button onClick={handleProposeCancel} className="w-full bg-slate-800 border border-orange-500/50 text-orange-400 p-3 rounded-xl font-bold text-sm hover:bg-orange-500 hover:text-white transition">↩️ {lang === 'TR' ? 'İptal Teklif Et' : 'Propose Cancel'}</button>
                     </div>
                   )}
