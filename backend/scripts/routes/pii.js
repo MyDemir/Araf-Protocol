@@ -87,8 +87,8 @@ router.get(
   piiLimiter,
   async (req, res, next) => {
     try {
-      const { tradeId }   = req.params;
-      const callerWallet  = req.wallet;
+      const { tradeId }  = req.params;
+      const callerWallet = req.wallet;
 
       // Find trade — only need maker_address
       const trade = await Trade.findById(tradeId).select("maker_address status taker_address").lean();
@@ -110,8 +110,9 @@ router.get(
         return res.status(404).json({ error: "Seller has not configured payment details" });
       }
 
+      // H-05 Fix: decryptPII artık async — await zorunlu
       // Decrypt PII — keys derived from maker's wallet, never stored
-      const decrypted = decryptPII(makerUser.pii_data, trade.maker_address);
+      const decrypted = await decryptPII(makerUser.pii_data, trade.maker_address);
 
       // Log access (wallets only, never the actual IBAN)
       logger.info(`[PII] Accessed: taker=${callerWallet} maker=${trade.maker_address} trade=${tradeId}`);
