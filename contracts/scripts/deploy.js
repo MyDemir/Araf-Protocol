@@ -40,7 +40,7 @@ async function main() {
   // H-07 Fix: ABI'ı frontend'e kopyala — useArafContract hook'u bu dosyayı kullanır
   // Deploy sonrası ABI otomatik olarak frontend/src/abi/ArafEscrow.json'a yazılır
   try {
-    const artifactPath = path.resolve(__dirname, "../artifacts/contracts/src/ArafEscrow.sol/ArafEscrow.json");
+    const artifactPath = path.resolve(__dirname, "../artifacts/src/ArafEscrow.sol/ArafEscrow.json");
     const artifact     = JSON.parse(fs.readFileSync(artifactPath, "utf8"));
     const abiDestDir   = path.resolve(__dirname, "../../frontend/src/abi");
     const abiDestPath  = path.join(abiDestDir, "ArafEscrow.json");
