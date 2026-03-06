@@ -5,15 +5,17 @@ const Joi     = require("joi");
 const crypto  = require("crypto");
 const router  = express.Router();
 
-const { requireAuth } = require("../middleware/auth");
-const { Trade }       = require("../models/Trade");
-const logger          = require("../utils/logger");
+const { requireAuth }   = require("../middleware/auth");
+// M-04 Fix: Trade endpoint'lerine rate limiter eklendi — wallet/IP başına dakikada 30 istek
+const { tradesLimiter } = require("../middleware/rateLimiter");
+const { Trade }         = require("../models/Trade");
+const logger            = require("../utils/logger");
 
 /**
  * GET /api/trades/my
  * Kullanıcının aktif işlemlerini getirir.
  */
-router.get("/my", requireAuth, async (req, res, next) => {
+router.get("/my", requireAuth, tradesLimiter, async (req, res, next) => {
   try {
     const trades = await Trade.find({
       $or: [{ maker_address: req.wallet }, { taker_address: req.wallet }],
@@ -27,7 +29,7 @@ router.get("/my", requireAuth, async (req, res, next) => {
  * GET /api/trades/:id
  * İşlem odası verisi. Sadece taraflar görebilir.
  */
-router.get("/:id", requireAuth, async (req, res, next) => {
+router.get("/:id", requireAuth, tradesLimiter, async (req, res, next) => {
   try {
     const trade = await Trade.findById(req.params.id).lean();
     if (!trade) return res.status(404).json({ error: "İşlem bulunamadı" });
@@ -43,7 +45,7 @@ router.get("/:id", requireAuth, async (req, res, next) => {
  * EIP-712 imzasını kaydeder. Her iki taraf imzaladığında iptal hazır.
  * Body: { tradeId, signature, deadline }
  */
-router.post("/propose-cancel", requireAuth, async (req, res, next) => {
+router.post("/propose-cancel", requireAuth, tradesLimiter, async (req, res, next) => {
   try {
     const schema = Joi.object({
       tradeId:   Joi.string().length(24).hex().required(),
@@ -98,7 +100,7 @@ router.post("/propose-cancel", requireAuth, async (req, res, next) => {
  *   - Trade PAID veya CHALLENGED durumunda olmalı
  *   - Zaten onaylanmışsa 409 döner (idempotent)
  */
-router.post("/:id/chargeback-ack", requireAuth, async (req, res, next) => {
+router.post("/:id/chargeback-ack", requireAuth, tradesLimiter, async (req, res, next) => {
   try {
     if (!/^[a-fA-F0-9]{24}$/.test(req.params.id)) {
       return res.status(400).json({ error: "Geçersiz trade ID formatı" });
