@@ -719,8 +719,8 @@ describe("ArafEscrow", function () {
       expect(await mockUSDT.balanceOf(treasury.address) - treasuryBefore).to.equal(totalTreasury);
     });
 
-    it("Tier 1 taker pays 0 bond", async () => {
-      const tradeId = await setupTrade(1);
+    it("Tier 0 taker pays 0 bond", async () => {
+      const tradeId = await setupTrade(0);
       const takerBefore = await mockUSDT.balanceOf(taker.address);
       await escrow.connect(taker).lockEscrow(tradeId);
       const takerAfter = await mockUSDT.balanceOf(taker.address);
