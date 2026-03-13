@@ -836,6 +836,10 @@ describe("ArafEscrow", function () {
       await time.increase(24 * 3600 + 1);
       await escrow.connect(taker).pingMaker(tradeId);
       await time.increase(24 * 3600 + 1);
+      // HATA DÜZELTMESİ: autoRelease'den önce token desteği eklenmeli
+      // giveBanToMaker kendi escrow'unu oluşturduğu için bu gerekli.
+      await escrow.connect(owner).setSupportedToken(await mockUSDT.getAddress(), true);
+
       await escrow.connect(taker).autoRelease(tradeId);
 
       // Failed #2 -> Ban
@@ -845,6 +849,7 @@ describe("ArafEscrow", function () {
       await time.increase(24 * 3600 + 1);
       await escrow.connect(taker).pingMaker(tradeId);
       await time.increase(24 * 3600 + 1);
+
       await escrow.connect(taker).autoRelease(tradeId);
     }
 
