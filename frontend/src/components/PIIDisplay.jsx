@@ -7,11 +7,12 @@
  *   - Component unmount olduğunda IBAN otomatik olarak bellekten silinir
  *   - Ekran görüntüsü koruması için copy-only mod (göster/gizle toggle)
  *
+ * AUDIT FIX F-01: authToken prop kaldırıldı — auth artık httpOnly cookie ile sağlanır.
+ * AUDIT FIX E-03: lang prop küçük harfe normalize ediliyor.
+ *
  * Kullanım (App.jsx'te):
  *   import PIIDisplay from './PIIDisplay';
- *   <PIIDisplay tradeId={activeTrade.id} authToken={jwt} lang="tr" />
- *
- * H-03 Fix: lang prop eklendi — TR/EN arayüz metni desteği
+ *   <PIIDisplay tradeId={activeTrade.id} lang="tr" />
  */
 
 import React, { useState } from 'react';
@@ -49,13 +50,17 @@ const LABELS = {
   },
 };
 
-export default function PIIDisplay({ tradeId, authToken, lang = 'tr' }) {
-  const { pii, loading, error, fetchPII, clearPII } = usePII(tradeId, authToken);
+// AUDIT FIX F-01: authToken prop kaldırıldı — usePII artık cookie-based
+export default function PIIDisplay({ tradeId, lang = 'tr' }) {
+  // AUDIT FIX F-01: authToken parametresi artık gerekmiyor
+  const { pii, loading, error, fetchPII, clearPII } = usePII(tradeId);
   const [revealed, setRevealed] = useState(false);
   const [copied, setCopied]     = useState(false);
 
   // H-03 Fix: Desteklenmeyen lang değeri için TR'ye düş
-  const t = LABELS[lang] || LABELS['tr'];
+  // AUDIT FIX E-03: lang prop büyük/küçük harf normalize ediliyor
+  const normalizedLang = (lang || 'tr').toLowerCase();
+  const t = LABELS[normalizedLang] || LABELS['tr'];
 
   const handleReveal = async () => {
     if (!pii) {
