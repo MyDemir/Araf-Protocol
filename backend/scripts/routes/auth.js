@@ -10,7 +10,6 @@ const {
   generateNonce,
   verifySiweSignature,
   issueJWT,
-  // CON-04 Fix: Refresh token fonksiyonları import edildi
   issueRefreshToken,
   rotateRefreshToken,
   revokeRefreshToken,
@@ -20,9 +19,13 @@ const User                                   = require("../models/User");
 const logger                                 = require("../utils/logger");
 
 /**
- * GET /api/auth/nonce?address=0x...
+ * GET /api/auth/nonce?wallet=0x...
  * Frontend MetaMask imzalamadan önce bu nonce'u çeker.
  * Nonce Redis'te 5 dakika yaşar — tek kullanımlık.
+ *
+ * AFS-010 Fix: Response artık siweDomain alanını da içeriyor.
+ * Frontend loginWithSIWE fonksiyonu siweDomain'i kullanarak SIWE mesajı oluşturur.
+ * Önceki kod sadece { nonce } döndürüyordu — siweDomain undefined oluyordu.
  */
 router.get("/nonce", authLimiter, async (req, res, next) => {
   try {
@@ -31,7 +34,9 @@ router.get("/nonce", authLimiter, async (req, res, next) => {
       return res.status(400).json({ error: "Geçerli bir Ethereum adresi gir" });
     }
     const nonce = await generateNonce(wallet.toLowerCase());
-    return res.json({ nonce });
+    // AFS-010 Fix: siweDomain eklendi — frontend SIWE mesajında kullanır
+    const siweDomain = process.env.SIWE_DOMAIN || "localhost";
+    return res.json({ nonce, siweDomain });
   } catch (err) { next(err); }
 });
 
@@ -41,8 +46,6 @@ router.get("/nonce", authLimiter, async (req, res, next) => {
  * SIWE imzasını doğrular, JWT döner.
  *
  * CON-04 Fix: Artık JWT ile birlikte refreshToken da döner.
- * Frontend bu refreshToken'ı güvenli bir şekilde saklayarak
- * JWT expire olduğunda /api/auth/refresh endpoint'ine gönderir.
  */
 router.post("/verify", authLimiter, async (req, res, next) => {
   try {
@@ -64,7 +67,6 @@ router.post("/verify", authLimiter, async (req, res, next) => {
     if (user.checkBanExpiry()) await user.save();
 
     const token        = issueJWT(wallet);
-    // CON-04 Fix: Login sırasında refresh token da üret
     const refreshToken = await issueRefreshToken(wallet);
 
     logger.info(`[Auth] Giriş başarılı: ${wallet}`);
@@ -78,14 +80,6 @@ router.post("/verify", authLimiter, async (req, res, next) => {
 /**
  * CON-04 Fix: POST /api/auth/refresh
  * Body: { wallet, refreshToken }
- *
- * JWT expire olduğunda frontend bu endpoint'e refresh token gönderir.
- * Backend eski refresh token'ı siler (rotation) ve yeni JWT + refresh token döner.
- *
- * Güvenlik:
- *   - Refresh token Redis'te tek kullanımlık saklanır (getDel ile atomik silme)
- *   - Token mismatch → tüm oturumlar iptal edilir (çalınma koruması)
- *   - Rate limit: authLimiter ile korunur (dakikada 10 istek)
  */
 router.post("/refresh", authLimiter, async (req, res, next) => {
   try {
@@ -115,10 +109,7 @@ router.post("/refresh", authLimiter, async (req, res, next) => {
 
 /**
  * CON-04 Fix: POST /api/auth/logout
- * Body: (empty — wallet JWT'den alınır)
- *
- * Kullanıcının refresh token'ını iptal eder.
- * JWT kendiliğinden expire olacak (15 dakika) — ek invalidation gerekmez.
+ * AFS-009 Fix: revokeRefreshToken artık gerçekten Redis'ten siliyor.
  */
 router.post("/logout", requireAuth, async (req, res, next) => {
   try {
@@ -132,6 +123,8 @@ router.post("/logout", requireAuth, async (req, res, next) => {
  * PUT /api/auth/profile
  * Kullanıcının IBAN ve Telegram bilgisini günceller.
  * Veriler veritabanına YAZILMADAN önce AES-256 ile şifrelenir.
+ *
+ * AFS-016 Fix: Frontend artık PUT /api/auth/profile çağırıyor (önceki: PUT /api/pii).
  */
 router.put("/profile", requireAuth, async (req, res, next) => {
   try {
@@ -143,7 +136,6 @@ router.put("/profile", requireAuth, async (req, res, next) => {
     const { error, value } = schema.validate(req.body);
     if (error) return res.status(400).json({ error: error.message });
 
-    // H-05 Fix: encryptPII artık async — await zorunlu
     const encrypted = await encryptPII(value, req.wallet);
 
     await User.findOneAndUpdate(
