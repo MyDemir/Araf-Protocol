@@ -19,6 +19,39 @@ const User                                   = require("../models/User");
 const logger                                 = require("../utils/logger");
 
 /**
+ * AUDIT FIX F-01: httpOnly Cookie Yardımcısı
+ *
+ * JWT ve Refresh Token artık response body'de döndürülmüyor.
+ * httpOnly + Secure + SameSite=Strict cookie olarak set ediliyor.
+ * Bu sayede JavaScript'ten (XSS) erişilemez.
+ *
+ * Development'ta Secure=false (http://localhost kullanıldığı için).
+ * Production'da Secure=true zorunlu.
+ */
+const COOKIE_OPTIONS_BASE = {
+  httpOnly: true,
+  sameSite: "strict",
+  path:     "/",
+};
+
+function _getJwtCookieOptions() {
+  return {
+    ...COOKIE_OPTIONS_BASE,
+    secure: process.env.NODE_ENV === "production",
+    maxAge: 15 * 60 * 1000, // 15 dakika (JWT_EXPIRES_IN ile senkron)
+  };
+}
+
+function _getRefreshCookieOptions() {
+  return {
+    ...COOKIE_OPTIONS_BASE,
+    secure: process.env.NODE_ENV === "production",
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 gün (REFRESH_TOKEN_TTL ile senkron)
+    path:   "/api/auth", // Refresh token sadece auth endpoint'lerine gönderilsin
+  };
+}
+
+/**
  * GET /api/auth/nonce?wallet=0x...
  * Frontend MetaMask imzalamadan önce bu nonce'u çeker.
  * Nonce Redis'te 5 dakika yaşar — tek kullanımlık.
@@ -46,6 +79,9 @@ router.get("/nonce", authLimiter, async (req, res, next) => {
  * SIWE imzasını doğrular, JWT döner.
  *
  * CON-04 Fix: Artık JWT ile birlikte refreshToken da döner.
+ *
+ * AUDIT FIX F-01: Token'lar artık response body'de DEĞİL, httpOnly cookie'de.
+ * Frontend sadece { wallet, profile } alır — token'lara erişemez (XSS koruması).
  */
 router.post("/verify", authLimiter, async (req, res, next) => {
   try {
@@ -69,8 +105,14 @@ router.post("/verify", authLimiter, async (req, res, next) => {
     const token        = issueJWT(wallet);
     const refreshToken = await issueRefreshToken(wallet);
 
+    // AUDIT FIX F-01: httpOnly cookie olarak set et
+    res.cookie("araf_jwt",     token,        _getJwtCookieOptions());
+    res.cookie("araf_refresh", refreshToken, _getRefreshCookieOptions());
+
     logger.info(`[Auth] Giriş başarılı: ${wallet}`);
-    return res.json({ token, refreshToken, wallet, profile: user.toPublicProfile() });
+
+    // AUDIT FIX F-01: Token'lar body'de döndürülmüyor — sadece wallet ve profil
+    return res.json({ wallet, profile: user.toPublicProfile() });
   } catch (err) {
     logger.warn(`[Auth] SIWE başarısız: ${err.message}`);
     return res.status(401).json({ error: `Kimlik doğrulama başarısız: ${err.message}` });
@@ -79,30 +121,55 @@ router.post("/verify", authLimiter, async (req, res, next) => {
 
 /**
  * CON-04 Fix: POST /api/auth/refresh
- * Body: { wallet, refreshToken }
+ *
+ * AUDIT FIX F-01: Refresh token artık cookie'den okunuyor (body'den değil).
+ * Wallet adresi de cookie'deki JWT'den çözümleniyor (expired olsa bile sub claim okunabilir).
  */
 router.post("/refresh", authLimiter, async (req, res, next) => {
   try {
-    const schema = Joi.object({
-      wallet:       Joi.string().pattern(/^0x[a-fA-F0-9]{40}$/).required(),
-      refreshToken: Joi.string().length(64).hex().required(),
-    });
-    const { error, value } = schema.validate(req.body);
-    if (error) return res.status(400).json({ error: error.message });
+    // AUDIT FIX F-01: Refresh token cookie'den okunur
+    const refreshToken = req.cookies?.araf_refresh;
+    if (!refreshToken) {
+      return res.status(401).json({ error: "Refresh token bulunamadı." });
+    }
+
+    // Wallet adresini expired JWT'den çözümle (verify skip — sadece decode)
+    // VEYA body'den al (geriye uyumluluk)
+    let wallet = req.body?.wallet;
+    if (!wallet) {
+      const jwt = req.cookies?.araf_jwt;
+      if (jwt) {
+        try {
+          // JWT expired olsa bile payload okunabilir (verify etmeden decode)
+          const parts = jwt.split(".");
+          if (parts.length === 3) {
+            const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString());
+            wallet = payload.sub;
+          }
+        } catch { /* ignore decode errors */ }
+      }
+    }
+
+    if (!wallet || !/^0x[a-fA-F0-9]{40}$/.test(wallet)) {
+      return res.status(400).json({ error: "Wallet adresi belirlenemedi." });
+    }
 
     const result = await rotateRefreshToken(
-      value.wallet.toLowerCase(),
-      value.refreshToken
+      wallet.toLowerCase(),
+      refreshToken
     );
 
-    logger.info(`[Auth] Token yenilendi: ${value.wallet}`);
-    return res.json({
-      token:        result.token,
-      refreshToken: result.refreshToken,
-      wallet:       value.wallet.toLowerCase(),
-    });
+    // AUDIT FIX F-01: Yeni token'ları cookie olarak set et
+    res.cookie("araf_jwt",     result.token,        _getJwtCookieOptions());
+    res.cookie("araf_refresh", result.refreshToken, _getRefreshCookieOptions());
+
+    logger.info(`[Auth] Token yenilendi: ${wallet}`);
+    return res.json({ wallet: wallet.toLowerCase() });
   } catch (err) {
     logger.warn(`[Auth] Refresh başarısız: ${err.message}`);
+    // AUDIT FIX F-01: Başarısız refresh'te cookie'leri temizle
+    res.clearCookie("araf_jwt",     { ...COOKIE_OPTIONS_BASE, path: "/" });
+    res.clearCookie("araf_refresh", { ...COOKIE_OPTIONS_BASE, path: "/api/auth" });
     return res.status(401).json({ error: err.message });
   }
 });
@@ -110,13 +177,30 @@ router.post("/refresh", authLimiter, async (req, res, next) => {
 /**
  * CON-04 Fix: POST /api/auth/logout
  * AFS-009 Fix: revokeRefreshToken artık gerçekten Redis'ten siliyor.
+ *
+ * AUDIT FIX F-01: Cookie'leri de temizle.
  */
 router.post("/logout", requireAuth, async (req, res, next) => {
   try {
     await revokeRefreshToken(req.wallet);
+
+    // AUDIT FIX F-01: httpOnly cookie'leri temizle
+    res.clearCookie("araf_jwt",     { ...COOKIE_OPTIONS_BASE, path: "/" });
+    res.clearCookie("araf_refresh", { ...COOKIE_OPTIONS_BASE, path: "/api/auth" });
+
     logger.info(`[Auth] Çıkış: ${req.wallet}`);
     return res.json({ success: true, message: "Oturum kapatıldı." });
   } catch (err) { next(err); }
+});
+
+/**
+ * AUDIT FIX F-01: GET /api/auth/me
+ * Frontend sayfa yüklendiğinde cookie'deki JWT'nin geçerli olup olmadığını kontrol eder.
+ * Geçerliyse wallet adresini döndürür → frontend isAuthenticated = true yapabilir.
+ * httpOnly cookie JavaScript'ten okunamadığı için bu endpoint gereklidir.
+ */
+router.get("/me", requireAuth, (req, res) => {
+  return res.json({ wallet: req.wallet, authenticated: true });
 });
 
 /**
