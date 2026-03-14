@@ -11,14 +11,24 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 // L-05 Fix: Global hata sınırı — render hatalarında uygulamanın tamamen çökmesini önler
 import ErrorBoundary from './components/ErrorBoundary.jsx'
 
+// MED-07 Fix: WalletConnect projectId artık hardcoded değil — VITE_WALLETCONNECT_PROJECT_ID
+// ortam değişkeninden okunuyor. Bu sayede proje ID'si kaynak kodda görünmez.
+// .env dosyasına ekleyin: VITE_WALLETCONNECT_PROJECT_ID=<your-project-id>
+const walletConnectProjectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID;
+
+const connectorsList = [
+  injected(), // MetaMask, Rabby vb. yerel cüzdanlar
+  coinbaseWallet({ appName: 'Araf Protocol' }),
+];
+
+// WalletConnect yalnızca geçerli bir project ID tanımlıysa etkinleştirilir.
+if (walletConnectProjectId) {
+  connectorsList.push(walletConnect({ projectId: walletConnectProjectId }));
+}
+
 const config = createConfig({
   chains: [base, baseSepolia],
-  connectors: [
-    injected(), // MetaMask, Rabby vb. yerel cüzdanlar
-    coinbaseWallet({ appName: 'Araf Protocol' }),
-    // GEÇİCİ OLARAK UYUTULDU (403 Reown hatasını engellemek için)
-    // walletConnect({ projectId: '3fcc6b444f67d32e656910629a888c34' }),
-  ],
+  connectors: connectorsList,
   transports: {
     [base.id]: http(),
     [baseSepolia.id]: http(),

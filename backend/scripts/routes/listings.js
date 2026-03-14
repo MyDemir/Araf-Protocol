@@ -31,25 +31,48 @@ const REPUTATION_ABI = [
 ];
 
 /**
+ * HIGH-05 Fix: Provider ve kontrat singleton olarak modül seviyesinde tutulur.
+ * ÖNCEKİ: Her _getOnChainEffectiveTier() çağrısında yeni JsonRpcProvider oluşuyordu.
+ *   Sorun: Yüksek yük altında bağlantı sızıntısı (connection leak) riski.
+ * ŞİMDİ: İlk çağrıda oluşturulur, sonraki çağrılarda yeniden kullanılır.
+ */
+let _reputationProvider = null;
+let _reputationContract = null;
+
+function _getReputationContract() {
+  if (_reputationContract) return _reputationContract;
+
+  const rpcUrl          = process.env.BASE_RPC_URL;
+  const contractAddress = process.env.ARAF_ESCROW_ADDRESS;
+
+  if (!rpcUrl || !contractAddress || contractAddress === "0x0000000000000000000000000000000000000000") {
+    return null;
+  }
+
+  _reputationProvider = new ethers.JsonRpcProvider(rpcUrl);
+  _reputationContract = new ethers.Contract(contractAddress, REPUTATION_ABI, _reputationProvider);
+  return _reputationContract;
+}
+
+/**
  * AUDIT FIX B-07: Kullanıcının on-chain efektif tier'ını sorgular.
  * Kontrat view fonksiyonu çağrısı — gas ücreti yok.
+ *
+ * HIGH-05 Fix: Singleton provider kullanılıyor — bağlantı sızıntısı önlendi.
  *
  * @param {string} walletAddress
  * @returns {Promise<number>} effectiveTier (0-4)
  */
 async function _getOnChainEffectiveTier(walletAddress) {
-  const rpcUrl          = process.env.BASE_RPC_URL;
-  const contractAddress = process.env.ARAF_ESCROW_ADDRESS;
+  const contract = _getReputationContract();
 
-  if (!rpcUrl || !contractAddress || contractAddress === "0x0000000000000000000000000000000000000000") {
+  if (!contract) {
     // Development'ta kontrat yoksa → tier kontrolü atla, 4 (en yüksek) döndür
     logger.warn("[Listings] On-chain tier kontrolü atlanıyor — kontrat adresi tanımsız (development).");
     return 4;
   }
 
   try {
-    const provider = new ethers.JsonRpcProvider(rpcUrl);
-    const contract = new ethers.Contract(contractAddress, REPUTATION_ABI, provider);
     const rep = await contract.getReputation(walletAddress);
     return Number(rep.effectiveTier);
   } catch (err) {
@@ -151,7 +174,8 @@ router.post("/", requireAuth, listingsWriteLimiter, async (req, res, next) => {
 });
 
 // ─── DELETE /api/listings/:id ─────────────────────────────────────────────────
-router.delete("/:id", requireAuth, async (req, res, next) => {
+// MED-06 Fix: listingsWriteLimiter eklendi — önceki: rate limiter yoktu.
+router.delete("/:id", requireAuth, listingsWriteLimiter, async (req, res, next) => {
   try {
     if (!/^[a-fA-F0-9]{24}$/.test(req.params.id)) {
       return res.status(400).json({ error: "Geçersiz ilan ID formatı" });

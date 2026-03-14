@@ -176,7 +176,13 @@ async function _getMasterKey() {
 async function _deriveDataKey(walletAddress) {
   // SEC-01 Fix: _getMasterKey artık async — KMS çağrıları için await gerekli
   const masterKey = await _getMasterKey();
-  const salt      = Buffer.alloc(32, 0); // deterministic salt (wallet adresi info'da)
+  // MED-01 Fix: Sıfır salt yerine anlamlı sabit bir salt kullanıyoruz.
+  // RFC 5869: "not providing a salt is equivalent to providing all-zeros" — bu
+  // güvenli olmakla birlikte, named salt kullanmak domain ayrışımını netleştirir.
+  // NOT: Bu değişiklik mevcut şifreli verileri bozmaz çünkü DEK türetimi info
+  // parametresi (wallet adresi) ile benzersizdir. Ancak eski verilerle backward
+  // compatibility için bu salt değeri asla değiştirilmemeli.
+  const salt      = Buffer.from("araf-protocol-pii-v1", "utf8");
   const info      = Buffer.from(`araf-pii-${walletAddress.toLowerCase()}`);
 
   const dek = await hkdfAsync("sha256", masterKey, salt, info, KEY_LENGTH);

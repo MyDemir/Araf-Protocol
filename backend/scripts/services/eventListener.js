@@ -312,14 +312,19 @@ class EventWorker {
       logger.warn(`[Worker] EscrowCreated: Trade #${tradeId} için kaynak ilan bulunamadı. Varsayılan değerler kullanılıyor.`);
     }
 
+    // LOW-01 Fix: uint256 amount değeri Number() yerine string olarak saklanır.
+    // Number() JS'de 2^53-1 ile sınırlıdır; 9B+ USDT (6 decimals) değerleri sessizce
+    // yuvarlanır. Mongo'da string saklayıp UI'da BigInt ile formatlıyoruz.
+    const amountStr = amount.toString();
+
     const financials = listing
       ? {
-          crypto_amount: Number(amount),
+          crypto_amount: amountStr,
           exchange_rate: listing.exchange_rate,
           crypto_asset:  listing.crypto_asset,
           fiat_currency: listing.fiat_currency,
         }
-      : { crypto_amount: Number(amount), exchange_rate: 0, crypto_asset: "USDT", fiat_currency: "TRY" };
+      : { crypto_amount: amountStr, exchange_rate: 0, crypto_asset: "USDT", fiat_currency: "TRY" };
 
     await Trade.findOneAndUpdate(
       { onchain_escrow_id: Number(tradeId) },
@@ -463,11 +468,12 @@ class EventWorker {
 
   async _onBleedingDecayed(event) {
     const { tradeId, decayedAmount } = event.args;
+    // LOW-01 Fix: decayedAmount uint256 — string olarak sakla
     await Trade.findOneAndUpdate(
       { onchain_escrow_id: Number(tradeId) },
       {
         $set:  { "timers.last_decay_at": new Date() },
-        $inc:  { "financials.total_decayed": Number(decayedAmount) },
+        $inc:  { "financials.total_decayed": decayedAmount.toString() },
       }
     );
   }
@@ -480,16 +486,48 @@ class EventWorker {
     );
   }
 
+  /**
+   * HIGH-01 Fix: MakerPinged event'inin yönü pinger adresine göre belirleniyor.
+   *
+   * ÖNCEKİ: Her zaman pinged_by_taker: true yazıyordu.
+   *   Sorun: Maker, pingTakerForChallenge() çağırdığında da aynı event fırlar
+   *   (event ismi "MakerPinged" olmasına rağmen). Backend, pinger adresini
+   *   kontrol etmeden her iki durumda da taker ping'i olarak kaydediyordu.
+   * ŞİMDİ: event.args.pinger, trade'in maker_address'i ile karşılaştırılır.
+   *   - pinger == maker → maker, taker'ı uyardı → challenge_pinged_at güncellenir
+   *   - pinger == taker → taker, maker'ı uyardı → pinged_at + pinged_by_taker güncellenir
+   */
   async _onMakerPinged(event) {
-    const { tradeId } = event.args;
-    await Trade.findOneAndUpdate(
-      { onchain_escrow_id: Number(tradeId) },
-      { $set: {
-          "timers.pinged_at": new Date(),
-          "pinged_by_taker": true,
-        }
-      },
-    );
+    const { tradeId, pinger } = event.args;
+    const trade = await Trade.findOne({ onchain_escrow_id: Number(tradeId) }).lean();
+
+    if (!trade) {
+      logger.warn(`[Worker] MakerPinged: Trade #${tradeId} bulunamadı.`);
+      return;
+    }
+
+    const pingerLower = pinger.toLowerCase();
+    const isMakerPinging = pingerLower === trade.maker_address?.toLowerCase();
+
+    if (isMakerPinging) {
+      // Maker, taker'ı itiraz öncesi uyarıyor (pingTakerForChallenge)
+      await Trade.findOneAndUpdate(
+        { onchain_escrow_id: Number(tradeId) },
+        { $set: { "timers.challenge_pinged_at": new Date() } },
+      );
+      logger.info(`[Worker] MakerPinged (maker→taker): trade #${tradeId}, pinger=${pingerLower}`);
+    } else {
+      // Taker, maker'ı ödeme sonrası uyarıyor (pingMaker)
+      await Trade.findOneAndUpdate(
+        { onchain_escrow_id: Number(tradeId) },
+        { $set: {
+            "timers.pinged_at": new Date(),
+            "pinged_by_taker": true,
+          }
+        },
+      );
+      logger.info(`[Worker] MakerPinged (taker→maker): trade #${tradeId}, pinger=${pingerLower}`);
+    }
   }
 
   /**

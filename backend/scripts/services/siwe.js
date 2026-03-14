@@ -133,6 +133,26 @@ async function verifySiweSignature(messageStr, signature) {
     throw new Error(`SIWE domain mismatch: expected ${expectedDomain}, got ${message.domain}`);
   }
 
+  // LOW-02 Fix: issuedAt doğrulaması — replay saldırısı penceresini daraltır.
+  // Nonce 5 dakika TTL'e sahip, ancak issuedAt kontrolü olmadan eski (nonce
+  // henüz tüketilmemiş) mesajlar nonce TTL'i dolana kadar tekrar kullanılabilir.
+  // ŞİMDİ: issuedAt, mevcut zamandan 5 dakikadan fazla geride olamaz.
+  if (message.issuedAt) {
+    const issuedAtMs  = new Date(message.issuedAt).getTime();
+    const nowMs       = Date.now();
+    const maxAgeMs    = NONCE_TTL_SECS * 1000; // 5 dakika
+    if (isNaN(issuedAtMs)) {
+      throw new Error("SIWE issuedAt geçersiz format");
+    }
+    if (nowMs - issuedAtMs > maxAgeMs) {
+      throw new Error(`SIWE mesajı çok eski (issuedAt: ${message.issuedAt}). Lütfen yeniden imzalayın.`);
+    }
+    if (issuedAtMs > nowMs + 60_000) {
+      // Saat uyumsuzluğu (clock skew) için 60 saniyelik hoşgörü
+      throw new Error("SIWE issuedAt gelecekte bir zaman gösteriyor — saat uyumsuzluğu veya saldırı.");
+    }
+  }
+
   const storedNonce = await consumeNonce(message.address.toLowerCase());
   if (!storedNonce) {
     throw new Error("Nonce expired or not found");

@@ -130,13 +130,18 @@ contract ArafEscrow is ReentrancyGuard, EIP712, Ownable, Pausable { // C-03 Fix:
     uint256 public constant TAKER_BOND_TIER3_BPS =  500; //  5%
     uint256 public constant TAKER_BOND_TIER4_BPS =  200; //  2%
 
-    // Tier gecis kriterleri (off-chain zorunlu, on-chain referans):
-    // T0->T1: 15 basarili islem, 0 failed dispute
-    // T1->T2: 50 basarili + 100.000 TRY hacim, <=1 failed dispute
-    // T2->T3: 100 basarili + 500.000 TRY hacim, <=1 failed dispute
-    // T3->T4: 200 basarili + 2.000.000 TRY hacim, 0 failed dispute
-    // Ceza: Her yeni failed dispute bir ust tier sayacini sifirlar.
-    //       2+ failed dispute mevcut tier'i bir asagi dusurur.
+    // MED-03 Fix: Tier gecis kriterleri _getEffectiveTier() implementasyonuyla eslestirildi.
+    // Onceki yorumlar (0 failed, <=1 failed) kodla uyumsuzdu — okuyucuyu yaniltabilirdi.
+    //
+    // Tier gecis kriterleri (on-chain _getEffectiveTier() ile birebir):
+    // T0->T1: >= 15 basarili islem, <= 2 failed dispute
+    // T1->T2: >= 50 basarili islem, <= 5 failed dispute
+    // T2->T3: >= 100 basarili islem, <= 10 failed dispute
+    // T3->T4: >= 200 basarili islem, <= 15 failed dispute
+    //
+    // Ek kriter: MIN_ACTIVE_PERIOD (30 gun) ilk basarili islemden itibaren
+    //   gecmeden Tier 1+ verilemez (Sybil / wash-trading caydirici, AUDIT FIX C-04).
+    // Ceza: hasTierPenalty bayragi set edilmisse maxAllowedTier tavani uygulanir.
 
     // ── Reputation Modifiers ─────────────────────────────────────────────────
     uint256 public constant GOOD_REP_DISCOUNT_BPS = 100; // -1% (temiz gecmise hafif tesvik)
