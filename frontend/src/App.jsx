@@ -371,6 +371,7 @@ function App() {
           ),
           state: t.status,
           paidAt: t.timers?.paid_at,
+          lockedAt: t.timers?.locked_at,   // burnExpired 10-gün kontrolü için — backend timers.locked_at alanı
           pingedAt: t.timers?.pinged_at,
           challengedAt: t.timers?.challenged_at,
           onchainId: t.onchain_escrow_id,
@@ -389,6 +390,7 @@ function App() {
             ...prev,
             state:        updated.status,
             paidAt:       updated.timers?.paid_at       ?? prev.paidAt,
+            lockedAt:     updated.timers?.locked_at     ?? prev.lockedAt,  // burnExpired için
             pingedAt:     updated.timers?.pinged_at     ?? prev.pingedAt,
             challengedAt: updated.timers?.challenged_at ?? prev.challengedAt,
           };

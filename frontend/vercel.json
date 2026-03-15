@@ -5,6 +5,10 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
+      "source": "/api/:path*",
+      "destination": "https://araf-protocol-backend.fly.dev/api/:path*"
+    },
+    {
       "source": "/((?!assets/).*)",
       "destination": "/index.html"
     }
