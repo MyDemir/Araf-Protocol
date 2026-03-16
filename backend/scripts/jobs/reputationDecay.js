@@ -14,20 +14,20 @@
  * Alternatif: Gelato/Chainlink Automation gibi üçüncü parti servisle tetiklenebilir.
  *
  * Felsefe: "Kod Kanundur"
- *   - Bu görev, "Temiz Sayfa" kuralını uygulamak için on-chain `decayReputation`
- *     fonksiyonunu tetikler.
- *   - Sorumluluklar nettir:
- *     - Off-chain (bu dosya): Kimin itibarının temizlenmesi gerektiğini bulur.
- *     - On-chain (kontrat): İtibarı temizler.
+ * - Bu görev, "Temiz Sayfa" kuralını uygulamak için on-chain `decayReputation`
+ * fonksiyonunu tetikler.
+ * - Sorumluluklar nettir:
+ * - Off-chain (bu dosya): Kimin itibarının temizlenmesi gerektiğini bulur.
+ * - On-chain (kontrat): İtibarı temizler.
  *
  * Çalışma Prensibi:
- *   1. Her 24 saatte bir çalışır (`app.js` tarafından tetiklenir).
- *   2. MongoDB'de, son yasağının üzerinden 180 günden fazla geçmiş ve hala
- *      `consecutive_bans` değeri olan kullanıcıları bulur.
- *   3. Her uygun kullanıcı için, bir relayer (yönetici cüzdanı) aracılığıyla
- *      on-chain `decayReputation(wallet)` fonksiyonunu çağırır.
- *   4. `ReputationUpdated` eventi, `eventListener` tarafından yakalanır ve
- *      MongoDB'deki `reputation_cache` otomatik olarak güncellenir.
+ * 1. Her 24 saatte bir çalışır (`app.js` tarafından tetiklenir).
+ * 2. MongoDB'de, son yasağının üzerinden 180 günden fazla geçmiş ve hala
+ * `consecutive_bans` değeri olan kullanıcıları bulur.
+ * 3. Her uygun kullanıcı için, bir relayer (yönetici cüzdanı) aracılığıyla
+ * on-chain `decayReputation(wallet)` fonksiyonunu çağırır.
+ * 4. `ReputationUpdated` eventi, `eventListener` tarafından yakalanır ve
+ * MongoDB'deki `reputation_cache` otomatik olarak güncellenir.
  */
 
 const { ethers } = require("ethers");
@@ -80,10 +80,10 @@ async function runReputationDecay() {
   // Son yasağının üzerinden 180 gün geçmiş ve hala sıfırlanmamış
   // `consecutive_bans` değeri olan kullanıcıları bul.
   const oneHundredEightyDaysAgo = new Date(Date.now() - 180 * 24 * 3600 * 1000);
-
+  
   const usersToClean = await User.find({
-    "reputation_cache.banned_until": { $lt: oneHundredEightyDaysAgo },
-    "reputation_cache.consecutive_bans": { $gt: 0 },
+    "banned_until": { $lt: oneHundredEightyDaysAgo },
+    "consecutive_bans": { $gt: 0 },
   }).limit(50); // Gas maliyetlerini kontrol altında tutmak için bir seferde en fazla 50 kullanıcı
 
   if (usersToClean.length === 0) {
