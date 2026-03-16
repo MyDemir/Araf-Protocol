@@ -125,6 +125,7 @@ function App() {
     getTrade,
     getPaused,
     decayReputation,
+    antiSybilCheck,
   } = useArafContract();
   
   const [jwtToken, setJwtToken] = useState(null);
