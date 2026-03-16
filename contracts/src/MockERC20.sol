@@ -1,0 +1,26 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+
+/**
+ * @dev Mock ERC20 (USDT / USDC) for local Hardhat testing.
+ */
+contract MockERC20 is ERC20 {
+    uint8 private _dec;
+
+    constructor(string memory name, string memory symbol, uint8 decimals_)
+        ERC20(name, symbol)
+    {
+        _dec = decimals_;
+    }
+
+    function decimals() public view override returns (uint8) {
+        return _dec;
+    }
+
+    function mint(address to, uint256 amount) external {
+        require(amount <= 1000000 * 10**decimals(), "MockERC20: Max 1M tokens per mint to prevent abuse");
+        _mint(to, amount);
+    }
+}
