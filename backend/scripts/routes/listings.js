@@ -2,16 +2,7 @@
 
 /**
  * Listings Route — Pazar Yeri CRUD
- *
- * AFS-013 Fix: `Trade` import'u eklendi.
- * DELETE endpoint'inde `Trade.findOne(...)` çağrılıyordu ancak sadece `Listing`
- * import edilmişti — Trade tanımsızdı. Bu, aktif bir escrow ile ilişkili
- * bir ilanı silmeye çalışan herhangi bir istek için ReferenceError fırlatıyordu.
- *
- * AUDIT FIX B-07: Listing oluşturmadan önce kullanıcının efektif tier'ı doğrulanıyor.
- * Kontrat createEscrow'da da kontrol yapıyor ama backend'de erken doğrulama sayesinde
- * geçersiz listing'ler veritabanına bile yazılmaz.
- */
+ **/
 
 const express = require("express");
 const Joi     = require("joi");
@@ -23,13 +14,13 @@ const { Listing, Trade }                             = require("../models/Trade"
 const logger                                         = require("../utils/logger");
 const { getConfig }                                  = require("../services/protocolConfig");
 
-// AUDIT FIX B-07: On-chain tier doğrulama için ethers ve kontrat ABI
+// On-chain tier doğrulama için ethers ve kontrat ABI
 const { ethers } = require("ethers");
 const REPUTATION_ABI = [
   "function getReputation(address _wallet) view returns (uint256 successful, uint256 failed, uint256 bannedUntil, uint256 consecutiveBans, uint8 effectiveTier)",
 ];
 
-// GÖREV 13: RPC Provider Cache Mekanizması
+// RPC Provider Cache Mekanizması
 let _cachedListingsProvider = null;
 function _getListingsProvider() {
   if (!_cachedListingsProvider) {
@@ -119,7 +110,7 @@ router.post("/", requireAuth, listingsWriteLimiter, async (req, res, next) => {
       return res.status(400).json({ error: "limits.max, limits.min'den büyük olmalı" });
     }
 
-    // AUDIT FIX B-07: Kontratın view fonksiyonuyla kullanıcının efektif tier'ını doğrula.
+    //  Kontratın view fonksiyonuyla kullanıcının efektif tier'ını doğrula.
     const effectiveTier = await _getOnChainEffectiveTier(req.wallet);
     if (value.tier > effectiveTier) {
       logger.warn(`[Listings] Tier reddedildi: wallet=${req.wallet} istenen=${value.tier} efektif=${effectiveTier}`);
