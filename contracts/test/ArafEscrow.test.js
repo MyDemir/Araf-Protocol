@@ -58,8 +58,6 @@ describe("ArafEscrow", function () {
     await owner.sendTransaction({ to: attacker.address, value: ethers.parseEther("0.1") });
 
     // ─── TIER 4 BOOST DÖNGÜSÜ ───
-    // Maker ve Taker'ı Tier 4 seviyesine çıkartmak için 200 işlem
-    // Hem successfulTrades sayacını doldurur hem de 30 günlük MIN_ACTIVE_PERIOD'u atlar.
     const tokenAddr = await mockUSDT.getAddress();
     const dummyAmount = ethers.parseUnits("1", USDT_DECIMALS); 
     
@@ -76,7 +74,6 @@ describe("ArafEscrow", function () {
       await escrow.connect(taker).reportPayment(tradeId, "setup");
       await escrow.connect(maker).releaseFunds(tradeId);
 
-      // TIER0_TRADE_COOLDOWN'ı atlamak için zamanı ileri sarıyoruz
       await time.increase(24 * 3600 + 1);
     }
 
@@ -84,7 +81,6 @@ describe("ArafEscrow", function () {
   }
 
   beforeEach(async () => {
-    // Tüm kurulum ve boost işlemleri bir kez yapılır, state snapshot alınır.
     const fixture = await loadFixture(deployAndSetupFixture);
     escrow = fixture.escrow;
     mockUSDT = fixture.mockUSDT;
@@ -276,7 +272,7 @@ describe("ArafEscrow", function () {
       expect(failed).to.equal(2);
       expect(bannedUntil).to.be.gt(0n);
       expect(consecutive).to.equal(1n);
-      expect(tierCap).to.equal(4); // Tier 4'te başladığı için etkilenmez
+      expect(tierCap).to.equal(4); 
       const now = BigInt(await time.latest());
       expect(bannedUntil).to.be.closeTo(now + BigInt(30 * 24 * 3600), 60n);
     });
@@ -302,7 +298,7 @@ describe("ArafEscrow", function () {
 
       const [, , bannedUntil, consecutive, tierCap] = await escrow.getReputation(maker.address);
       expect(consecutive).to.equal(2n);
-      expect(tierCap).to.equal(3); // Tier 4'ten 1 düşer -> max Tier 3
+      expect(tierCap).to.equal(3); 
       const now = BigInt(await time.latest());
       expect(bannedUntil).to.be.closeTo(now + BigInt(60 * 24 * 3600), 60n);
     });
@@ -608,7 +604,7 @@ describe("ArafEscrow", function () {
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // 4. COLLABORATIVE CANCEL — EIP-712
+  // 4. COLLABORATIVE CANCEL — EIP-712 (GÖREV 4 GÜNCELLEMESİ)
   // ═══════════════════════════════════════════════════════════════════════════
   describe("Collaborative Cancel (EIP-712)", () => {
     it("requires both parties to sign", async () => {
@@ -629,25 +625,59 @@ describe("ArafEscrow", function () {
       expect((await escrow.getTrade(tradeId)).state).to.equal(5); 
     });
 
-    it("maker gets crypto refund, taker gets bond back — no fee on cancel", async () => {
+    it("cancel in LOCKED state has NO fee — full refund to both parties", async () => {
       const tradeId = await setupTrade(2);
-      await escrow.connect(taker).lockEscrow(tradeId);
+      await escrow.connect(taker).lockEscrow(tradeId); // State: LOCKED
 
-      const makerBefore  = await mockUSDT.balanceOf(maker.address);
-      const takerBefore  = await mockUSDT.balanceOf(taker.address);
+      const makerBefore    = await mockUSDT.balanceOf(maker.address);
+      const takerBefore    = await mockUSDT.balanceOf(taker.address);
+      const treasuryBefore = await mockUSDT.balanceOf(treasury.address);
 
       const deadline = (await time.latest()) + 3600;
       const makerSig = await eip712CancelSig(maker, tradeId, await escrow.sigNonces(maker.address), deadline);
       await escrow.connect(maker).proposeOrApproveCancel(tradeId, deadline, makerSig);
-
+      
       const takerSig = await eip712CancelSig(taker, tradeId, await escrow.sigNonces(taker.address), deadline);
       await escrow.connect(taker).proposeOrApproveCancel(tradeId, deadline, takerSig);
 
-      const makerAfter = await mockUSDT.balanceOf(maker.address);
-      const takerAfter = await mockUSDT.balanceOf(taker.address);
+      // LOCKED durumunda fee = 0
+      const makerAfter    = await mockUSDT.balanceOf(maker.address);
+      const takerAfter    = await mockUSDT.balanceOf(taker.address);
+      const treasuryAfter = await mockUSDT.balanceOf(treasury.address);
 
       expect(makerAfter - makerBefore).to.equal(TRADE_AMOUNT + MAKER_BOND_T2);
       expect(takerAfter - takerBefore).to.equal(TAKER_BOND_T2);
+      expect(treasuryAfter - treasuryBefore).to.equal(0n); // Hazineye giden yok
+      expect((await escrow.getTrade(tradeId)).state).to.equal(5); // CANCELED
+    });
+
+    it("cancel in PAID state deducts standard protocol fee (%0.2)", async () => {
+      const tradeId = await setupTrade(2);
+      await escrow.connect(taker).lockEscrow(tradeId);
+      await escrow.connect(taker).reportPayment(tradeId, "QmTestHash"); // State: PAID
+
+      const makerBefore    = await mockUSDT.balanceOf(maker.address);
+      const takerBefore    = await mockUSDT.balanceOf(taker.address);
+      const treasuryBefore = await mockUSDT.balanceOf(treasury.address);
+
+      const deadline = (await time.latest()) + 3600;
+      const makerSig = await eip712CancelSig(maker, tradeId, await escrow.sigNonces(maker.address), deadline);
+      await escrow.connect(maker).proposeOrApproveCancel(tradeId, deadline, makerSig);
+      
+      const takerSig = await eip712CancelSig(taker, tradeId, await escrow.sigNonces(taker.address), deadline);
+      await escrow.connect(taker).proposeOrApproveCancel(tradeId, deadline, takerSig);
+
+      // PAID durumunda fee var
+      const takerFee = (TRADE_AMOUNT * TAKER_FEE_BPS) / BPS_DENOM;
+      const makerFee = (TRADE_AMOUNT * MAKER_FEE_BPS) / BPS_DENOM;
+
+      const makerAfter    = await mockUSDT.balanceOf(maker.address);
+      const takerAfter    = await mockUSDT.balanceOf(taker.address);
+      const treasuryAfter = await mockUSDT.balanceOf(treasury.address);
+
+      expect(makerAfter - makerBefore).to.equal(TRADE_AMOUNT + MAKER_BOND_T2 - makerFee);
+      expect(takerAfter - takerBefore).to.equal(TAKER_BOND_T2 - takerFee);
+      expect(treasuryAfter - treasuryBefore).to.equal(takerFee + makerFee);
     });
 
     it("rejects expired signatures", async () => {
@@ -735,7 +765,8 @@ describe("ArafEscrow", function () {
       expect(await mockUSDT.balanceOf(maker.address) - makerBefore).to.equal(makerBondBack);
     });
 
-    it("autoRelease applies 5% negligence penalty instead of standard fee", async () => {
+    // GÖREV 3b: AutoRelease cezası 500n (5%) yerine 200n (2%) olarak düzeltildi
+    it("autoRelease applies 2% negligence penalty instead of standard fee", async () => {
       const tradeId = await setupTrade(2);
       await escrow.connect(taker).lockEscrow(tradeId);
       await escrow.connect(taker).reportPayment(tradeId, "QmHash");
@@ -749,8 +780,8 @@ describe("ArafEscrow", function () {
 
       await escrow.connect(taker).autoRelease(tradeId);
       
-      const makerPenalty = (MAKER_BOND_T2 * 500n) / 10000n;
-      const takerPenalty = (TAKER_BOND_T2 * 500n) / 10000n;
+      const makerPenalty = (MAKER_BOND_T2 * 200n) / 10000n;
+      const takerPenalty = (TAKER_BOND_T2 * 200n) / 10000n;
       const totalPenalty = makerPenalty + takerPenalty;
 
       expect(await mockUSDT.balanceOf(taker.address) - takerBefore).to.equal(TRADE_AMOUNT + (TAKER_BOND_T2 - takerPenalty));
@@ -765,25 +796,6 @@ describe("ArafEscrow", function () {
       const takerAfter = await mockUSDT.balanceOf(taker.address);
 
       expect(takerAfter).to.equal(takerBefore); 
-    });
-
-    it("cancel has no fee — treasury unchanged, full refund to both parties", async () => {
-      const tradeId = await setupTrade(2);
-      await escrow.connect(taker).lockEscrow(tradeId);
-
-      const makerBefore    = await mockUSDT.balanceOf(maker.address);
-      const takerBefore    = await mockUSDT.balanceOf(taker.address);
-      const treasuryBefore = await mockUSDT.balanceOf(treasury.address);
-
-      const deadline = (await time.latest()) + 3600;
-      const makerSig = await eip712CancelSig(maker, tradeId, await escrow.sigNonces(maker.address), deadline);
-      await escrow.connect(maker).proposeOrApproveCancel(tradeId, deadline, makerSig);
-      const takerSig = await eip712CancelSig(taker, tradeId, await escrow.sigNonces(taker.address), deadline);
-      await escrow.connect(taker).proposeOrApproveCancel(tradeId, deadline, takerSig);
-
-      expect(await mockUSDT.balanceOf(treasury.address)).to.equal(treasuryBefore); 
-      expect(await mockUSDT.balanceOf(maker.address) - makerBefore).to.equal(TRADE_AMOUNT + MAKER_BOND_T2);
-      expect(await mockUSDT.balanceOf(taker.address) - takerBefore).to.equal(TAKER_BOND_T2);
     });
   });
 
