@@ -215,6 +215,21 @@ export function useArafContract() {
   }, [walletClient, publicClient, _validateChain]);
 
   /**
+   * Testnet Faucet Entegrasyonu: Token kontratından test bakiyesi basar.
+   */
+  const mintToken = useCallback(async (tokenAddress) => {
+    if (!walletClient) throw new Error("Cüzdan bağlı değil.");
+    _validateChain();
+    
+    const hash = await walletClient.writeContract({
+      address: getAddress(tokenAddress),
+      abi: parseAbi(['function mint()']), // Sabit parametresiz mint işlemi
+      functionName: 'mint',
+    });
+    return await publicClient.waitForTransactionReceipt({ hash });
+  }, [walletClient, publicClient, _validateChain]);
+
+  /**
    * Mevcut allowance'ı okur — approve gerekip gerekmediğini anlamak için.
    * @param {string} tokenAddress
    * @param {string} ownerAddress
@@ -409,6 +424,7 @@ export function useArafContract() {
       [publicClient]
     ),
     // [KRIT-01/02 Fix]: Token onayı — createEscrow ve lockEscrow öncesi zorunlu
+    mintToken,
     approveToken,
     getAllowance,
     // [M-03]: getTrade on-chain okuma — backend bağımlılığını azaltır
