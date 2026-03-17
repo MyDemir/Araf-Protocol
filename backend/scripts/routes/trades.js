@@ -6,7 +6,7 @@ const crypto  = require("crypto");
 const router  = express.Router();
 
 const { requireAuth }   = require("../middleware/auth");
-// M-04 Fix: Trade endpoint'lerine rate limiter eklendi — wallet/IP başına dakikada 30 istek
+// Trade endpoint'lerine rate limiter eklendi — wallet/IP başına dakikada 30 istek
 const { tradesLimiter } = require("../middleware/rateLimiter");
 const { Trade }         = require("../models/Trade");
 const logger            = require("../utils/logger");
@@ -60,6 +60,32 @@ router.get("/history", requireAuth, tradesLimiter, async (req, res, next) => {
 });
 
 /**
+ * GET /api/trades/by-escrow/:onchainId
+ * On-chain escrow ID'ye göre Trade belgesini döndürür.
+ * PIIDisplay için gerçek Trade MongoDB _id'sini almak amacıyla kullanılır.
+ *
+ * Bu endpoint GET /:id rotasından ÖNCE tanımlanmalıdır;
+ * aksi hâlde Express /by-escrow/123 isteğini /:id rotasıyla eşleştirir.
+ */
+router.get("/by-escrow/:onchainId", requireAuth, tradesLimiter, async (req, res, next) => {
+  try {
+    const onchainId = Number(req.params.onchainId);
+    if (!Number.isInteger(onchainId) || onchainId <= 0) {
+      return res.status(400).json({ error: "Geçersiz on-chain ID formatı" });
+    }
+    const trade = await Trade.findOne({ onchain_escrow_id: onchainId })
+      .select("_id onchain_escrow_id maker_address taker_address status")
+      .lean();
+    if (!trade) return res.status(404).json({ error: "Trade bulunamadı" });
+    if (trade.maker_address !== req.wallet && trade.taker_address !== req.wallet) {
+      logger.warn(`[Trades] Yetkisiz by-escrow erişimi: caller=${req.wallet} onchainId=${onchainId}`);
+      return res.status(403).json({ error: "Erişim reddedildi" });
+    }
+    return res.json({ trade });
+  } catch (err) { next(err); }
+});
+
+/**
  * GET /api/trades/:id
  * İşlem odası verisi. Sadece taraflar görebilir.
  */
@@ -89,7 +115,7 @@ router.post("/propose-cancel", requireAuth, tradesLimiter, async (req, res, next
     const { error, value } = schema.validate(req.body);
     if (error) return res.status(400).json({ error: error.message });
 
-    // SEC-08 Backend Fix: Deadline'ı backend'de de doğrula (frontend'deki kuralın aynısı)
+    // Deadline'ı backend'de de doğrula (frontend'deki kuralın aynısı)
     const now = Math.floor(Date.now() / 1000);
     const MAX_DEADLINE_SECONDS = 7 * 24 * 60 * 60; // 7 gün
     if (value.deadline <= now) {
@@ -131,7 +157,7 @@ router.post("/propose-cancel", requireAuth, tradesLimiter, async (req, res, next
 /**
  * POST /api/trades/:id/chargeback-ack
  *
- * M-01: Maker, "Serbest Bırak" butonuna basmadan önce bu endpoint'i çağırır.
+ * Maker, "Serbest Bırak" butonuna basmadan önce bu endpoint'i çağırır.
  * Frontend'deki "Ters İbraz Riskini Anladım" kutucuğu işaretlendiğinde tetiklenir.
  *
  * Kaydedilenler:
@@ -143,11 +169,6 @@ router.post("/propose-cancel", requireAuth, tradesLimiter, async (req, res, next
  *   - Sadece maker çağırabilir
  *   - Trade PAID veya CHALLENGED durumunda olmalı
  *   - Zaten onaylanmışsa 409 döner (idempotent)
- *
- * AUDIT FIX E-04: CHALLENGED state'te de chargeback ack'e izin verildi.
- * ÖNCEKİ: Sadece PAID durumunda izin veriliyordu.
- *   Sorun: releaseFunds() hem PAID hem CHALLENGED'dan çağrılabiliyor (kontrat tasarımı).
- *   Maker CHALLENGED state'te release yapmak isterse chargeback ack veremiyordu.
  * ŞİMDİ: PAID ve CHALLENGED her ikisinde de izin var.
  */
 router.post("/:id/chargeback-ack", requireAuth, tradesLimiter, async (req, res, next) => {
@@ -164,7 +185,7 @@ router.post("/:id/chargeback-ack", requireAuth, tradesLimiter, async (req, res, 
       return res.status(403).json({ error: "Bu işlem için yetkiniz yok" });
     }
 
-    // AUDIT FIX E-04: PAID + CHALLENGED her ikisinde de izin var
+    // PAID + CHALLENGED her ikisinde de izin var
     const allowedStates = ["PAID", "CHALLENGED"];
     if (!allowedStates.includes(trade.status)) {
       return res.status(400).json({
