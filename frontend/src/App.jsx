@@ -1281,19 +1281,20 @@ useEffect(() => {
     try {
       // SORUN-08 Fix: İlanı blockchain'e basmadan önce off-chain olarak DB'de başlat ki event listener eşleyebilsin.
       try {
-        await authenticatedFetch(`${API_URL}/api/listings`, {
-          method: 'POST',
-          body: JSON.stringify({
-            crypto_asset:  makerToken,
-            fiat_currency: makerFiat,
-            exchange_rate: parseFloat(makerRate),
-            limits:{ min: parseFloat(makerMinLimit), max: parseFloat(makerMaxLimit) },
-            tier:makerTier,
-            token_address: SUPPORTED_TOKEN_ADDRESSES[makerToken],
-          });
-      } catch (e) {
-        console.warn("Off-chain ilan pre-creation uyarısı:", e);
-      }
+  await authenticatedFetch(`${API_URL}/api/listings`, {
+    method: 'POST',
+    body: JSON.stringify({
+      crypto_asset:  makerToken,
+      fiat_currency: makerFiat,
+      exchange_rate: parseFloat(makerRate),
+      limits: { min: parseFloat(makerMinLimit), max: parseFloat(makerMaxLimit) },
+      tier: makerTier,
+      token_address: SUPPORTED_TOKEN_ADDRESSES[makerToken],
+    }),
+  });
+} catch (e) {
+  console.warn("Off-chain ilan pre-creation uyarısı:", e);
+}
 
       setIsContractLoading(true);
 
