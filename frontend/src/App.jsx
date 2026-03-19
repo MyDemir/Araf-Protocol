@@ -402,7 +402,7 @@ useEffect(() => {
       }
     };
     fetchUserReputation();
-  }, [isConnected, address, getReputation]); // Bağımlılıklar doğru
+  }, [isConnected, address, getReputation, getFirstSuccessfulTradeAt]);// Bağımlılıklar doğru
 
   // YENİ: Anti-Sybil Cooldown kontrolü
   useEffect(() => {
@@ -629,7 +629,6 @@ useEffect(() => {
   const gracePeriodEndDate = activeTrade?.paidAt ? new Date(new Date(activeTrade.paidAt).getTime() + 48 * 3600 * 1000) : null;
   const gracePeriodTimer = useCountdown(gracePeriodEndDate);
 
-  const challengeUnlockDate = activeTrade?.paidAt ? new Date(new Date(activeTrade.paidAt).getTime() + 1 * 3600 * 1000) : null;
   const challengeCountdown = useCountdown(activeTrade?.challengePingedAt ? new Date(new Date(activeTrade.challengePingedAt).getTime() + 24 * 3600 * 1000) : null);
   // DEV modunda test için cooldownPassed state'i ile challenge kilidi açılabilir
   const canChallenge = import.meta.env.DEV ? (cooldownPassed || challengeCountdown.isFinished) : challengeCountdown.isFinished;
