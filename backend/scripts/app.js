@@ -6,46 +6,51 @@ const helmet        = require("helmet");
 const cors          = require("cors");
 const mongoSanitize = require("express-mongo-sanitize");
 const mongoose      = require("mongoose");
-// AUDIT FIX F-01: httpOnly cookie desteği için cookie-parser
-// Kurulum: npm install cookie-parser
 const cookieParser  = require("cookie-parser");
 
-// Yapılandırma ve Yardımcı Araçlar
+// [TR] Yapılandırma ve yardımcı araçlar
+// [EN] Configuration and utility helpers
 const { connectDB }    = require("./config/db");
 const { connectRedis } = require("./config/redis");
 const logger           = require("./utils/logger");
 
-// Zincir Dinleyici (Worker)
+// [TR] On-chain event'leri MongoDB'ye yansıtan servis
+// [EN] Service that mirrors on-chain events to MongoDB
 const worker = require("./services/eventListener");
 
-// YENİ MİMARİ: On-Chain protokol parametrelerini yükler
+// [TR] Kontrat public constant'larını startup'ta on-chain'den yükler
+// [EN] Loads contract public constants from on-chain at startup
 const { loadProtocolConfig } = require("./services/protocolConfig");
 
-// H-06 Fix: DLQ Processor — başarısız event'leri izler ve alert gönderir
+// [TR] Başarısız event'leri izleyen ve uyaran Dead Letter Queue monitörü
+// [EN] Dead Letter Queue monitor that tracks and alerts on failed events
 const { processDLQ } = require("./services/dlqProcessor");
 
-// AFS-008 Fix: Dosya artık doğru dizinde — backend/scripts/jobs/reputationDecay.js
-// Önceki: backend/scripts/jops/reputationDecay.js (typo: jops → jobs)
-// AUDIT FIX C-03B: Bu görev RELAYER_PRIVATE_KEY kullanıyor.
-// Testnet: Dokümantasyon "Quasi-Zero Key" olarak güncellendi.
-// Mainnet: Gelato/Chainlink Automation'a taşınacak (gerçek zero-key).
+// [TR] 180 günlük temiz sayfa kuralını on-chain'de tetikleyen periyodik görev
+// [EN] Periodic job that triggers the 180-day clean slate rule on-chain
 const { runReputationDecay } = require("./jobs/reputationDecay");
 
-// AFS-007 Fix: Dosya artık doğru dizinde — backend/scripts/jobs/statsSnapshot.js
-// Önceki: backend/scripts/routes/statsSnapshot.js (route değil, job)
+// [TR] Günlük protokol istatistiklerini MongoDB'ye kaydeden periyodik görev
+// [EN] Periodic job that saves daily protocol stats to MongoDB
 const { runStatsSnapshot } = require("./jobs/statsSnapshot");
 
-// Hata Yönetimi
+// [TR] Global Express hata yakalayıcı
+// [EN] Global Express error handler
 const { globalErrorHandler } = require("./middleware/errorHandler");
+
+// [TR] Shutdown sırasında AES master key'i RAM'den sıfırlar
+// [EN] Zeroes out AES master key from RAM on shutdown
+const { clearMasterKeyCache } = require("./services/encryption");
 
 const app = express();
 
-// ── SEC-04 Fix: Trust Proxy ─────────────────────────────────────────────────
+// [TR] Fly.io / Vercel proxy arkasında gerçek IP için trust proxy
+// [EN] Trust proxy for real client IP behind Fly.io / Vercel
 if (process.env.NODE_ENV === "production") {
   app.set("trust proxy", 1);
 }
 
-// ── GÜVENLİK MIDDLEWARE ───────────────────────────────────────────────────────
+// ─── Güvenlik Middleware / Security Middleware ────────────────────────────────
 
 app.use(helmet({
   contentSecurityPolicy: {
@@ -66,6 +71,8 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || "http://localhost:5173")
   .map(o => o.trim())
   .filter(o => o.length > 0);
 
+// [TR] Production'da CORS wildcard ve boş origin engellenir
+// [EN] CORS wildcard and empty origins blocked in production
 if (process.env.NODE_ENV === "production") {
   if (allowedOrigins.includes("*")) {
     logger.error("[GÜVENLİK] CORS wildcard (*) production'da kullanılamaz! Sunucu durduruluyor.");
@@ -92,7 +99,8 @@ app.use(cors({
 
 app.use(express.json({ limit: "50kb" }));
 
-// AUDIT FIX F-01: Cookie parser — httpOnly JWT cookie'leri okumak için
+// [TR] JWT, JWT refresh token'ı httpOnly cookie'den okumak için
+// [EN] Required to read JWT and refresh token from httpOnly cookie
 app.use(cookieParser());
 
 app.use(mongoSanitize({
@@ -100,11 +108,12 @@ app.use(mongoSanitize({
   onSanitize: ({ key }) => logger.warn(`[GÜVENLİK] Mongo injection denemesi engellendi: ${key}`),
 }));
 
-// ── BAŞLATMA VE ROTA ENTEGRASYONU ─────────────────────────────────────────────
+// ─── Bootstrap ───────────────────────────────────────────────────────────────
 
 async function bootstrap() {
   try {
-    // SEC-14 Fix: Production'da SIWE_DOMAIN kontrolü
+    // [TR] Production'da SIWE_DOMAIN localhost olamaz
+    // [EN] SIWE_DOMAIN cannot be localhost in production
     if (process.env.NODE_ENV === "production") {
       const siweDomain = process.env.SIWE_DOMAIN;
       if (!siweDomain || siweDomain === "localhost") {
@@ -113,42 +122,35 @@ async function bootstrap() {
       }
     }
 
-    // 1. Veritabanı ve Redis bağlantılarını kur
     await connectDB();
     await connectRedis();
     logger.info("MongoDB ve Redis bağlantıları başarıyla sağlandı.");
 
-    // YENİ MİMARİ: Protokol parametrelerini on-chain'den yükle
     await loadProtocolConfig();
 
-    // 2. Event Listener'ı Başlat
     await worker.start();
     logger.info("Event Listener (Zincir Dinleyici) aktif: Base L2 ağı izleniyor.");
 
-    // H-06 Fix: DLQ processor — her 60 saniyede bir çalışır
+    // [TR] DLQ monitörü — her 60 saniyede başarısız event'leri kontrol eder
+    // [EN] DLQ monitor — checks failed events every 60 seconds
     const dlqInterval = setInterval(processDLQ, 60_000);
 
-    // AUDIT FIX B-05: Periyodik job'lar geciktirilmiş başlatma.
-    // ÖNCEKİ: runReputationDecay() ve runStatsSnapshot() hemen çalışıyordu.
-    //   Sorun: Sunucu başlarken event replay + config load + 3 paralel aggregation
-    //   aynı anda MongoDB'ye ağır yük bindiriyordu → cold start timeout (Fly.io 15s).
-    // ŞİMDİ: İlk çalıştırma 30 saniye geciktirildi.
-
-    // Reputation Decay Job — her 24 saatte bir çalışır
+    // [TR] İlk çalıştırma 30 sn geciktirilir — cold start'ta DB'ye eş zamanlı yük binmesini önler
+    // [EN] First run delayed by 30s — prevents simultaneous DB load on cold start
     const reputationDecayDelay = setTimeout(() => {
-      runReputationDecay(); // İlk çalıştırma (30s gecikme sonrası)
+      runReputationDecay();
       logger.info("Periyodik İtibar İyileştirme görevi zamanlandı (her 24 saatte bir).");
-    }, 30_000); // AUDIT FIX B-05: 30 saniye gecikme
+    }, 30_000);
     const reputationDecayInterval = setInterval(runReputationDecay, 24 * 60 * 60 * 1000);
 
-    // Stats Snapshot Job — her 24 saatte bir çalışır
     const statsSnapshotDelay = setTimeout(() => {
-      runStatsSnapshot(); // İlk çalıştırma (60s gecikme sonrası)
+      runStatsSnapshot();
       logger.info("Periyodik İstatistik Kaydetme görevi zamanlandı (her 24 saatte bir).");
-    }, 60_000); // AUDIT FIX B-05: 60 saniye gecikme (reputation decay'den 30s sonra)
+    }, 60_000);
     const statsSnapshotInterval = setInterval(runStatsSnapshot, 24 * 60 * 60 * 1000);
 
-    // 3. Rotaları İçeri Aktar (Redis ve DB hazır olduktan sonra)
+    // [TR] Rotalar DB ve Redis hazır olduktan sonra yüklenir
+    // [EN] Routes loaded after DB and Redis are ready
     const authRoutes     = require("./routes/auth");
     const listingRoutes  = require("./routes/listings");
     const tradeRoutes    = require("./routes/trades");
@@ -156,15 +158,12 @@ async function bootstrap() {
     const feedbackRoutes = require("./routes/feedback");
     const statsRoutes    = require("./routes/stats");
 
-    // 4. API Endpoint'lerini Bağla
     app.use("/api/auth",     authRoutes);
     app.use("/api/listings", listingRoutes);
     app.use("/api/trades",   tradeRoutes);
     app.use("/api/pii",      piiRoutes);
     app.use("/api/feedback", feedbackRoutes);
     app.use("/api/stats",    statsRoutes);
-
-    // ── SAĞLIK KONTROLÜ VE HATA YÖNETİMİ ───────────────────────────────────
 
     app.get("/health", (req, res) => res.json({
       status:    "ok",
@@ -176,7 +175,6 @@ async function bootstrap() {
 
     app.use(globalErrorHandler);
 
-    // 5. SUNUCUYU BAŞLAT
     const PORT   = process.env.PORT || 4000;
     const server = app.listen(PORT, () => {
       logger.info(`===========================================================`);
@@ -186,13 +184,17 @@ async function bootstrap() {
       logger.info(`===========================================================`);
     });
 
-    // L-03 Fix: Graceful shutdown
+    // [TR] Graceful shutdown — clearMasterKeyCache ile plaintext key bellekten sıfırlanır.
+    //      Tüm interval'lar ve timeout'lar temizlenir, bağlantılar kapatılır.
+    // [EN] Graceful shutdown — clearMasterKeyCache zeroes plaintext key from RAM.
+    //      All intervals and timeouts cleared, connections closed.
     const shutdown = async (signal) => {
       logger.info(`${signal} alındı. Graceful shutdown başlıyor...`);
+      clearMasterKeyCache();
       clearInterval(dlqInterval);
-      clearTimeout(reputationDecayDelay);  // AUDIT FIX B-05
+      clearTimeout(reputationDecayDelay);
       clearInterval(reputationDecayInterval);
-      clearTimeout(statsSnapshotDelay);    // AUDIT FIX B-05
+      clearTimeout(statsSnapshotDelay);
       clearInterval(statsSnapshotInterval);
       server.close(async () => {
         await worker.stop();
