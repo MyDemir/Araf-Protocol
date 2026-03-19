@@ -1,18 +1,15 @@
 /**
  * PIIDisplay — Şifreli IBAN + Telegram Görüntüleme Bileşeni
  *
- * Güvenlik Özellikleri:
+  * Güvenlik Özellikleri:
+ * 
  *   - IBAN varsayılan olarak GİZLİ gelir; kullanıcı onay verince fetch edilir
  *   - usePII hook'u aracılığıyla 2 adımlı şifreli kanaldan alınır
  *   - Bileşen unmount olduğunda IBAN + Telegram otomatik bellekten silinir
  *   - Telegram aynı şifreli kanaldan gelir — statik state kullanılmaz
+  *
  *
- * GÖREV 12 Fix: authToken prop kaldırıldı.
- *   ÖNCEKİ: usePII(tradeId, authToken) — Authorization: Bearer cookie-active header'ı gönderiyordu.
- *   ŞİMDİ: usePII(tradeId) — tüm auth httpOnly cookie üzerinden yürütülür (credentials: include).
  *
- * Kullanım (App.jsx'te):
- *   <PIIDisplay tradeId={activeTrade.id} lang={lang} getSafeTelegramUrl={getSafeTelegramUrl} />
  */
 
 import React, { useState } from 'react';
@@ -55,15 +52,11 @@ const LABELS = {
  * @param {string}   tradeId          Backend trade ID (Trade koleksiyonunun MongoDB _id'si)
  * @param {string}   lang             'TR' veya 'EN' (büyük/küçük harf fark etmez)
  * @param {Function} getSafeTelegramUrl  App.jsx'ten gelen memoize edilmiş güvenli URL yardımcısı
- *
- * NOT: authToken prop'u GÖREV 12 kapsamında kaldırıldı.
- * Auth işlemleri httpOnly cookie üzerinden otomatik yürütülür.
  */
 export default function PIIDisplay({ tradeId, lang = 'tr', getSafeTelegramUrl }) {
   const normalizedLang = (lang || 'tr').toLowerCase();
   const t = LABELS[normalizedLang] || LABELS['tr'];
 
-  // GÖREV 12 Fix: authToken parametresi kaldırıldı — usePII artık cookie-only
   const { pii, loading, error, fetchPII, clearPII } = usePII(tradeId);
   const [revealed, setRevealed] = useState(false);
   const [copied, setCopied]     = useState(false);
@@ -85,7 +78,6 @@ export default function PIIDisplay({ tradeId, lang = 'tr', getSafeTelegramUrl })
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // App.jsx'ten gelen memoize edilmiş güvenli URL fonksiyonunu kullan, yoksa fallback yap.
   const buildTelegramUrl = (handle) => {
     if (!handle) return '#';
     return getSafeTelegramUrl ? getSafeTelegramUrl(handle) : `https://t.me/${handle.replace(/[^a-zA-Z0-9_]/g, '')}`;
@@ -136,7 +128,7 @@ export default function PIIDisplay({ tradeId, lang = 'tr', getSafeTelegramUrl })
     );
   }
 
-  // ── Açılmış (revealed) görünüm — IBAN + Telegram birlikte ────────────────
+  // ── Açılmış (revealed) görünüm ────────────────────────────────────────────
   return (
     <div className="bg-slate-900 p-4 rounded-xl border border-blue-500/40 relative overflow-hidden">
       {/* Şifreli kanal rozeti */}
@@ -176,9 +168,9 @@ export default function PIIDisplay({ tradeId, lang = 'tr', getSafeTelegramUrl })
             </button>
           </div>
 
-          {/* Telegram — şifreli kanaldan gelen, statik state değil */}
+          {/* Telegram — şifreli kanaldan gele */}
           {pii.telegram ? (
-            
+            <a
               href={buildTelegramUrl(pii.telegram)}
               target="_blank"
               rel="noopener noreferrer"
@@ -208,4 +200,4 @@ export default function PIIDisplay({ tradeId, lang = 'tr', getSafeTelegramUrl })
       )}
     </div>
   );
-}
+    }
