@@ -1459,7 +1459,6 @@ useEffect(() => {
   const renderMakerModal = () => {
     if (!showMakerModal) return null;
 
-    const MAKER_BOND_PCT = { 0: 0, 1: 8, 2: 6, 3: 5, 4: 2 };
     const TIER_LABELS = {
       0: lang === 'TR' ? 'Tier 0 — Bond Yok (Yeni)' : 'Tier 0 — No Bond (New)',
       1: lang === 'TR' ? 'Tier 1 — %8 Bond (Başlangıç)' : 'Tier 1 — 8% Bond (Starter)',
@@ -1468,7 +1467,7 @@ useEffect(() => {
       4: lang === 'TR' ? 'Tier 4 — %2 Bond (Premium)'   : 'Tier 4 — 2% Bond (Premium)',
     };
 
-    const bondPct    = MAKER_BOND_PCT[makerTier] ?? 0;
+    const bondPct = onchainBondMap ? (onchainBondMap[makerTier]?.maker ?? 0) : 0;
     const cryptoAmt  = parseFloat(makerAmount) || 0;
     const bondAmt    = Math.ceil(cryptoAmt * bondPct / 100);
     const totalLock  = cryptoAmt + bondAmt;
