@@ -1,6 +1,6 @@
 # 🌀 Araf Protocol — Canonical Architecture & Technical Reference
 
-> **Version:** 2.0 | **Network:** Base (Layer 2) | **Status:** Mainnet Ready | **Last Updated:** March 2026
+> **Version:** 2.0 | **Network:** Base (Layer 2) | **Status:** Tesnet Ready | **Last Updated:** March 2026
 
 ---
 
@@ -190,7 +190,7 @@ Maker calls createEscrow()
 | `LOCKED` | Taker `lockEscrow()` | Anti-Sybil passed. Taker collateral locked on-chain. |
 | `PAID` | Taker `reportPayment()` | IPFS receipt hash saved on-chain. 48-hour timer started. |
 | `RESOLVED` | Maker `releaseFunds()` | 0.2% fee taken. USDT → Taker. Collaterals returned. |
-| `CANCELED` | 2/2 EIP-712 signature | Full refund. No fees. Collaterals fully returned. |
+| `CANCELED` | 2/2 EIP-712 signature | **LOCKED state:** Zero fees, full refund to both parties. **PAID or CHALLENGED state:** Standard protocol fee (0.2%) deducted from remaining amounts; net refund returned to both parties. No reputation penalty in either case. |
 | `BURNED` | `burnExpired()` after 240 hours | All remaining funds → Treasury. |
 
 ### Fee Model
