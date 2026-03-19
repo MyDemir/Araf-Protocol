@@ -266,7 +266,7 @@ Signature type: `CancelProposal(uint256 tradeId, address proposer, uint256 nonce
 
 ### `autoRelease` and Negligence Penalty
 
-If the Taker receives no response 24 hours after calling the `pingMaker` function, they can call `autoRelease` to unilaterally release the funds. In this case, instead of the standard transaction fee, a **5% negligence penalty** (`AUTO_RELEASE_PENALTY_BPS`) is deducted from both the Maker's and the Taker's collateral and transferred to the Treasury. This mechanism ensures that the Taker also has a small cost for forcibly ending the process, balancing the system and deterring abuse against the Maker.
+If the Taker receives no response 24 hours after calling the `pingMaker` function, they can call `autoRelease` to unilaterally release the funds. In this case, instead of the standard transaction fee, a **2% negligence penalty** (`AUTO_RELEASE_PENALTY_BPS`) is deducted from both the Maker's and the Taker's collateral and transferred to the Treasury. This mechanism ensures that the Taker also has a small cost for forcibly ending the process, balancing the system and deterring abuse against the Maker.
 
 ### Related Contract Functions
 
