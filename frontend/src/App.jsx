@@ -2422,7 +2422,7 @@ function App() {
             {/* PII Verileri (Mevcut Mantık, Koyu Tema) */}
             {isTaker && tradeState !== 'RESOLVED' && (
               <div className="border border-[#222] rounded-xl overflow-hidden mt-6 bg-[#0a0a0c] p-1">
-                <PIIDisplay tradeId={activeTrade?.id} authToken={jwtToken} lang={lang} getSafeTelegramUrl={getSafeTelegramUrl} />
+                <PIIDisplay tradeId={activeTrade?.id} lang={lang} getSafeTelegramUrl={getSafeTelegramUrl} />
               </div>
             )}
             {isMaker && tradeState !== 'RESOLVED' && (
