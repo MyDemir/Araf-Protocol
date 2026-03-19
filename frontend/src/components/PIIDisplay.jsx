@@ -1,15 +1,12 @@
 /**
  * PIIDisplay — Şifreli IBAN + Telegram Görüntüleme Bileşeni
  *
-  * Güvenlik Özellikleri:
- * 
- *   - IBAN varsayılan olarak GİZLİ gelir; kullanıcı onay verince fetch edilir
- *   - usePII hook'u aracılığıyla 2 adımlı şifreli kanaldan alınır
- *   - Bileşen unmount olduğunda IBAN + Telegram otomatik bellekten silinir
- *   - Telegram aynı şifreli kanaldan gelir — statik state kullanılmaz
-  *
  *
+ *. IBAN varsayılan olarak GİZLİ gelir; kullanıcı onay verince fetch edilir
+ *  usePII(tradeId) — tüm auth httpOnly cookie üzerinden yürütülür (credentials: include).
  *
+ * Kullanım (App.jsx'te):
+ *   <PIIDisplay tradeId={activeTrade.id} lang={lang} getSafeTelegramUrl={getSafeTelegramUrl} />
  */
 
 import React, { useState } from 'react';
@@ -168,7 +165,6 @@ export default function PIIDisplay({ tradeId, lang = 'tr', getSafeTelegramUrl })
             </button>
           </div>
 
-          {/* Telegram — şifreli kanaldan gele */}
           {pii.telegram ? (
             <a
               href={buildTelegramUrl(pii.telegram)}
@@ -200,4 +196,4 @@ export default function PIIDisplay({ tradeId, lang = 'tr', getSafeTelegramUrl })
       )}
     </div>
   );
-    }
+}
