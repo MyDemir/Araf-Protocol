@@ -1,74 +1,72 @@
 # 🌀 Araf Protocol: Game Theory Visualized
 
-This document visually explains the core game theory of the Araf Protocol using a sequence diagram for the "Bleeding Escrow" dispute resolution process.
+This document visually explains the core game theory and resolution paths of the Araf Protocol using a state-flow diagram.
 
 ---
 
-## Bleeding Escrow Sequence Diagram
+## Bleeding Escrow Flowchart
 
-This diagram illustrates all possible resolution paths from the `PAID` state — mutual release, Taker auto-release, or Maker challenge.
+This diagram illustrates all possible paths an escrow can take once a Taker reports a payment (`PAID` state) — including the happy path, auto-release mechanism, and the multi-phased dispute resolution (Purgatory).
 
-> **Security note:** A `ConflictingPingPath` guard prevents both ping paths from being open simultaneously. If the Maker has called `pingTakerForChallenge`, the Taker cannot call `pingMaker` (autoRelease path), and vice versa. This prevents MEV/transaction ordering manipulation.
+> **Security note:** A `ConflictingPingPath` guard prevents both ping paths from being open simultaneously. If the Maker calls `pingTakerForChallenge`, the Taker cannot call `pingMaker` (autoRelease path), and vice versa. This prevents MEV and transaction ordering manipulation.
 
 ```mermaid
-sequenceDiagram
-    actor Taker
-    actor Maker
-    participant Contract as ArafEscrow.sol
-    participant Treasury
+flowchart TD
+    %% Styling Classes
+    classDef state fill:#e1f5fe,stroke:#0288d1,stroke-width:2px,color:#01579b
+    classDef success fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#1b5e20
+    classDef warning fill:#fff3e0,stroke:#f57c00,stroke-width:2px,color:#e65100
+    classDef danger fill:#ffebee,stroke:#c62828,stroke-width:2px,color:#b71c1c
+    classDef action fill:#ffffff,stroke:#9e9e9e,stroke-width:1px
+    classDef phase fill:#f3e5f5,stroke:#8e24aa,stroke-width:2px,stroke-dasharray: 4
 
-    Taker->>Contract: reportPayment()
-    Contract-->>Taker: Event: PaymentReported
-    note over Contract: State: PAID. Taker can call pingMaker() after 48h.
+    %% Define Nodes
+    PAID(["🔵 STATE: PAID\n(Taker reports payment)"])
+    ActionRelease["Maker: releaseFunds()"]
+    ResOk((("✅ RESOLVED\n(Normal)")))
 
-    par Maker Actions
-        Maker->>Contract: releaseFunds()
-        Contract-->>Taker: Receives Crypto + Bond
-        Contract-->>Maker: Receives Bond (minus fee)
-        note over Contract: Outcome: RESOLVED ✅
+    ActionPingMaker["Taker: pingMaker()"]
+    ActionAuto["Taker: autoRelease()"]
+    ResPen((("⚠️ RESOLVED\n(2% Penalty)")))
 
-    and Taker path (Maker inactive after 48h)
-        note over Taker: Waits for paidAt + 48h (GRACE_PERIOD)
-        Taker->>Contract: pingMaker() (after 48h — ConflictingPingPath guard active)
-        note over Contract: Maker has 24h to respond.
-        Taker->>Contract: autoRelease() (after 24h)
-        note over Contract: Outcome: RESOLVED ✅ (2% negligence penalty from both bonds)
+    ActionPingTaker["Maker: pingTakerForChallenge()"]
+    ActionChallenge["Maker: challengeTrade()"]
+    CHALLENGED(["🔴 STATE: CHALLENGED\n(Dispute Opened)"])
 
-    and Maker dispute path (payment not received)
-        note over Maker: Waits for paidAt + 24h
-        Maker->>Contract: pingTakerForChallenge() (ConflictingPingPath guard active)
-        note over Contract: Taker has 24h response window.
-        note over Taker: Taker can resolve or cancel within 24h.
-        note over Maker: After 24h with no resolution:
-        Maker->>Contract: challengeTrade()
-        Contract-->>Maker: Event: DisputeOpened
-        note over Contract: State: CHALLENGED.
+    %% Define Connections
+    PAID -->|"Happy Path"| ActionRelease
+    ActionRelease --> ResOk
 
-        rect rgb(255, 230, 230)
-            note over Taker, Maker: Grace Period (48 Hours) — No Decay
-            Taker->>Maker: Off-chain communication (e.g., Telegram)
-            alt Mutual Agreement
-                Maker->>Contract: proposeOrApproveCancel() (EIP-712)
-                Taker->>Contract: proposeOrApproveCancel() (EIP-712)
-                Contract-->>Maker: Refund (Crypto + Bond minus fee)
-                Contract-->>Taker: Refund (Bond minus fee)
-                note over Contract: Outcome: CANCELED 🔄
-            else No Agreement
-                note over Taker, Maker: 48 hours pass...
-            end
-        end
+    PAID -->|"Maker Inactive\n(Waits 48h)"| ActionPingMaker
+    ActionPingMaker -->|"No response\n(Waits 24h)"| ActionAuto
+    ActionAuto --> ResPen
 
-        rect rgb(255, 200, 200)
-            note over Taker, Maker: Bleeding Phase (10 Days) — Hourly Decay Starts
-            loop Every Hour
-                note over Contract: Taker bond: 42 BPS/h · Maker bond: 26 BPS/h<br/>USDT (both): 34 BPS/h starting at 96h of Bleeding
-            end
-            note over Taker, Maker: Either party can still release or cancel at any time.
-        end
+    PAID -->|"Payment Missing\n(Waits 24h)"| ActionPingTaker
+    ActionPingTaker -->|"No resolution\n(Waits 24h)"| ActionChallenge
+    ActionChallenge --> CHALLENGED
 
-        note over Contract: After 10 days (240h) of no resolution...
-        Taker->>Contract: burnExpired()
-        Contract->>Treasury: All remaining funds transferred
-        note over Contract: Outcome: BURNED 💀 (Both parties lose — +1 failedDisputes each)
+    %% Purgatory Subgraph
+    subgraph Purgatory [Dispute Resolution Phases]
+        direction TB
+        GRACE["🛡️ 48h Grace Period\n(No Fund Decay)"]
+        CANCELED((("🔄 CANCELED\n(Refunds Issued)")))
+        BLEEDING["🩸 10-Day Bleeding Phase\n(Hourly Decay Starts)"]
+        ActionBurn["Any: burnExpired()"]
+        BURNED((("💀 BURNED\n(Funds to Treasury)")))
 
+        CHALLENGED --> GRACE
+        GRACE -->|"Mutual Agreement\n(EIP-712)"| CANCELED
+        GRACE -->|"No Agreement\n(After 48h)"| BLEEDING
+        BLEEDING -->|"Mutual Agreement"| CANCELED
+        BLEEDING -->|"No Agreement\n(After 10 Days)"| ActionBurn
+        ActionBurn --> BURNED
     end
+
+    %% Apply Classes Safely
+    class PAID,CHALLENGED state;
+    class ResOk success;
+    class ResPen warning;
+    class CANCELED action;
+    class ActionRelease,ActionPingMaker,ActionAuto,ActionPingTaker,ActionChallenge,ActionBurn action;
+    class GRACE phase;
+    class BLEEDING,BURNED danger;
