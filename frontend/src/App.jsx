@@ -1295,7 +1295,7 @@ useEffect(() => {
     if (isContractLoading) return;
 
     try {
-      // SORUN-08 Fix: İlanı blockchain'e basmadan önce off-chain olarak DB'de başlat ki event listener eşleyebilsin.
+      // İlanı blockchain'e basmadan önce off-chain olarak DB'de başlat ki event listener eşleyebilsin.
       try {
   await authenticatedFetch(`${API_URL}/api/listings`, {
     method: 'POST',
@@ -1318,11 +1318,16 @@ useEffect(() => {
       const decimals = BigInt(6);
       const cryptoAmountRaw = BigInt(Math.round(cryptoAmt * 10 ** Number(decimals)));
 
-      // Bond hesabı (kontratla aynı mantık)
-      const MAKER_BOND_BPS = { 0: 0n, 1: 800n, 2: 600n, 3: 500n, 4: 200n };
-      const bondBps = MAKER_BOND_BPS[makerTier] ?? 0n;
+            if (!onchainBondMap) {
+        showToast(lang === 'TR' ? 'Protokol ayarları yükleniyor...' : 'Loading protocol config...', 'info');
+        setIsContractLoading(false);
+        return;
+      }
+      // Bond hesabı (Kontrattan dinamik)
+      const bondBps = BigInt(onchainBondMap[makerTier]?.makerBps ?? 0);
       const makerBondRaw = (cryptoAmountRaw * bondBps) / 10000n;
       const totalLock = cryptoAmountRaw + makerBondRaw;
+
 
       // Adım 1: Mevcut allowance kontrol et
       const currentAllowance = await getAllowance(tokenAddress, address);
