@@ -1281,13 +1281,13 @@ function App() {
         await authenticatedFetch(`${API_URL}/api/listings`, {
           method: 'POST',
           body: JSON.stringify({
-            crypto_asset: makerToken,
+            crypto_asset:  makerToken,
             fiat_currency: makerFiat,
             exchange_rate: parseFloat(makerRate),
-            limits: { min: parseFloat(makerMinLimit), max: parseFloat(makerMaxLimit) },
-            tier_rules: { required_tier: makerTier }
-          })
-        });
+            limits:{ min: parseFloat(makerMinLimit), max: parseFloat(makerMaxLimit) },
+            tier:makerTier,
+            token_address: SUPPORTED_TOKEN_ADDRESSES[makerToken],
+          });
       } catch (e) {
         console.warn("Off-chain ilan pre-creation uyarısı:", e);
       }
