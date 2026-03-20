@@ -9,52 +9,66 @@ araf-protocol/
 ├── 📁 contracts/                          # Solidity Smart Contract Katmanı
 │   ├── 📄 hardhat.config.js               # Hardhat yapılandırması (Base L2, Solidity 0.8.24)
 │   ├── 📄 package.json
+│   ├── 📄 .env.example                    # Kontrat ortam değişkenleri şablonu
 │   │
 │   ├── 📁 src/
-│   │   ├── 📄 ArafEscrow.sol              # Ana kontrat (Bleeding Escrow + Anti-Sybil + EIP-712)
-│   │   └── 📄 MockERC20.sol               # Test token'ı (USDT/USDC mock)
+│   │   ├── 📄 ArafEscrow.sol              # Ana kontrat v2.1 (Bleeding Escrow + Anti-Sybil + EIP-712 + Tier Limits)
+│   │   └── 📄 MockERC20.sol               # Test token'ı — faucet mint() + admin mint(address,uint256)
 │   │
 │   ├── 📁 scripts/
-│   │   └── 📄 deploy.js                   # Deploy scripti (ABI otomatik frontend'e kopyalar)
+│   │   └── 📄 deploy.js                   # Deploy scripti (ABI otomatik frontend'e kopyalar, ownership devri)
 │   │
 │   └── 📁 test/
-│       └── 📄 ArafEscrow.test.js          # Tam test suite (Happy path, Anti-Sybil, Bleeding, Cancel)
+│       └── 📄 ArafEscrow.test.js          # Tam test suite v2.1 (Happy path, Tier Limits K-05, Anti-Sybil, Bleeding, Cancel)
 │
 ├── 📁 backend/                            # Node.js + Express Web2.5 API
 │   ├── 📄 package.json
 │   ├── 📄 .env.example                    # Ortam değişkenleri şablonu
+│   ├── 📄 env.example                     # Alternatif env şablonu (duplicate)
+│   ├── 📄 Dockerfile                      # Alpine Node.js üretim imajı
+│   ├── 📄 fly.toml                        # Fly.io deploy yapılandırması
+│   ├── 📄 .dockerignore
 │   │
 │   └── 📁 scripts/
-│       ├── 📄 app.js                      # Ana uygulama (Bootstrap + Routes + Graceful Shutdown)
+│       ├── 📄 app.js                      # Ana uygulama (Bootstrap + Routes + DLQ + Graceful Shutdown)
 │       │
 │       ├── 📁 config/
-│       │   ├── 📄 db.js                   # MongoDB bağlantı yöneticisi
-│       │   └── 📄 redis.js                # Redis bağlantı yöneticisi (Rate limiting + Nonces)
+│       │   ├── 📄 db.js                   # MongoDB bağlantı yöneticisi (connection pool)
+│       │   └── 📄 redis.js                # Redis bağlantı yöneticisi (rate limiting + nonces + DLQ)
 │       │
 │       ├── 📁 models/
-│       │   ├── 📄 User.js                 # Kullanıcı modeli (Şifreli PII + Reputation cache)
-│       │   ├── 📄 Trade.js                # Listing + Trade şemaları (Chargeback ack dahil)
-│       │   └── 📄 Feedback.js             # Geri bildirim şeması
+│       │   ├── 📄 User.js                 # Kullanıcı modeli (şifreli PII + reputation cache + ban state)
+│       │   ├── 📄 Trade.js                # Listing + Trade şemaları (evidence + receipt TTL + chargeback ack)
+│       │   ├── 📄 Feedback.js             # Geri bildirim şeması (kategori + GDPR TTL)
+│       │   └── 📄 HistoricalStat.js       # Günlük protokol istatistik anlık görüntüsü (stats endpoint için)
 │       │
 │       ├── 📁 routes/
-│       │   ├── 📄 auth.js                            # Pazar yeri CRUD (GET/POST/DELETE)
-│       │   ├── 📄 trades.js               # İşlem odası + EIP-712 cancel + Chargeback ack
-│       │   ├── 📄 pii.js                  # 🔐 KRİTİK: 2-adımlı IBAN fetch endpoint
-│       │   └── 📄 feedback.js             # Kullanıcı geri bildirimi
+│       │   ├── 📄 auth.js                 # SIWE + JWT + httpOnly cookie + profil güncelleme
+│       │   ├── 📄 listings.js             # Pazar yeri CRUD (on-chain tier doğrulama + bond config)
+│       │   ├── 📄 trades.js               # İşlem odası + EIP-712 cancel + chargeback ack + by-escrow
+│       │   ├── 📄 pii.js                  # 🔐 2-adımlı IBAN fetch + /my + /taker-name triangulation
+│       │   ├── 📄 receipts.js             # 🔐 Şifreli dekont yükleme (AES-256-GCM + SHA-256 hash)
+│       │   ├── 📄 feedback.js             # Kullanıcı geri bildirimi (kategori zorunlu)
+│       │   └── 📄 stats.js                # Protokol istatistikleri (Redis 1s cache + 30 günlük karşılaştırma)
 │       │
 │       ├── 📁 middleware/
-│       │   ├── 📄 auth.js                 # JWT + PII token doğrulama (requireAuth + requirePIIToken)
-│       │   ├── 📄 rateLimiter.js          # Redis sliding window (PII: 3/10min, Auth: 10/min)
-│       │   └── 📄 errorHandler.js         # Global hata yakalayıcı
+│       │   ├── 📄 auth.js                 # requireAuth (httpOnly cookie) + requirePIIToken (Bearer)
+│       │   ├── 📄 rateLimiter.js          # Redis sliding window (6 seviye: PII/Auth/Listings/Trades/Feedback)
+│       │   └── 📄 errorHandler.js         # Global hata yakalayıcı (Mongoose + JWT + generic)
 │       │
 │       ├── 📁 services/
-│       │   ├── 📄 siwe.js                 # SIWE akışı + JWT üretimi + Nonce yönetimi (Redis)
-│       │   ├── 📄 encryption.js           # AES-256-GCM envelope encryption (HKDF ile async)
-│       │   ├── 📄 eventListener.js        # Zincir dinleyici (On-chain → MongoDB sync + DLQ)
-│       │   └── 📄 dlqProcessor.js         # Dead Letter Queue monitor (başarısız event'leri izler)
+│       │   ├── 📄 siwe.js                 # SIWE akışı + JWT + refresh token rotation (Redis SCAN)
+│       │   ├── 📄 encryption.js           # AES-256-GCM envelope encryption (HKDF + KMS-ready: env/aws/vault)
+│       │   ├── 📄 eventListener.js        # Zincir dinleyici (on-chain → MongoDB + FIFO DLQ + checkpoint)
+│       │   ├── 📄 dlqProcessor.js         # Dead Letter Queue monitörü (arşiv + alert cooldown)
+│       │   └── 📄 protocolConfig.js       # On-chain bond parametrelerini başlangıçta yükler (Redis cache)
+│       │
+│       ├── 📁 jobs/
+│       │   ├── 📄 reputationDecay.js      # 180 günlük temiz sayfa kuralını on-chain'de tetikler (Relayer)
+│       │   └── 📄 statsSnapshot.js        # Günlük istatistik anlık görüntüsü (aggregation pipeline)
 │       │
 │       └── 📁 utils/
-│           └── 📄 logger.js               # Winston logger (production/dev log seviyeleri)
+│           └── 📄 logger.js               # Winston logger (JSON format, ortama göre log seviyesi)
 │
 ├── 📁 frontend/                           # React + Vite + Tailwind
 │   ├── 📄 index.html
@@ -62,27 +76,67 @@ araf-protocol/
 │   ├── 📄 vite.config.js
 │   ├── 📄 tailwind.config.js
 │   ├── 📄 postcss.config.js
+│   ├── 📄 vercel.json                     # Vercel deploy (API proxy + security headers)
+│   ├── 📄 .env.example                    # Frontend ortam değişkenleri şablonu
 │   │
 │   ├── 📁 public/
-│   │   └── 📄 X.md                        # Boş placeholder
+│   │   └── 📄 X.md                        # Placeholder
 │   │
 │   └── 📁 src/
 │       ├── 📄 main.jsx                    # Wagmi + React Query Provider (ErrorBoundary sarmalı)
-│       ├── 📄 App.jsx                     # 🎨 ANA UI (Dashboard + Trade Room + Modaller + SIWE)
-│       ├── 📄 index.css                   # Tailwind + Custom animasyonlar
+│       ├── 📄 App.jsx                     # 🎨 Ana UI (Marketplace + Trade Room + Profil + SIWE + Cookie auth)
+│       ├── 📄 index.css                   # Tailwind + custom animasyonlar (bounce-in, pulse-slow)
 │       │
 │       ├── 📁 components/
-│       │   ├── 📄 ErrorBoundary.jsx       # Global render hata sınırı (L-05 Fix)
-│       │   └── 📄 PIIDisplay.jsx          # 🔐 Güvenli IBAN görüntüleme (H-03 Fix)
+│       │   ├── 📄 ErrorBoundary.jsx       # Global render hata sınırı
+│       │   └── 📄 PIIDisplay.jsx          # 🔐 Şifreli IBAN görüntüleme (2-adım + kopyala + Telegram)
 │       │
-│       └── 📁 hooks/
-│           ├── 📄 usePII.js               # 2-adımlı PII fetch hook (auto-cleanup)
-│           └── 📄 useArafContract.js      # Kontrat etkileşim hook (H-07 Fix)
+│       ├── 📁 hooks/
+│       │   ├── 📄 usePII.js               # 2-adımlı PII fetch (auto-cleanup, cookie-only auth)
+│       │   ├── 📄 useArafContract.js      # Tüm kontrat etkileşimleri (write/read/EIP-712, chain guard)
+│       │   └── 📄 useCountdown.js         # Hedef tarihe geri sayım hook'u (saniye bazlı)
+│       │
+│       └── 📁 abi/
+│           └── 📄 ArafEscrow.json         # Deploy scripti tarafından otomatik oluşturulur
 │
-└── 📁 docs/                               # Mimari Dokümantasyon
-    ├── 📄 ARCHITECTURE.md                 # 📚 Protokol parametreleri + Tier + Oyun teorisi
-    ├── 📄 DATABASE_AND_SECURITY.md        # 🔐 DB şemaları + Güvenlik audit özeti
-    ├── 📄 GAME_THEORY.md                  # (Boş - içerik bekliyor)
-    ├── 📄 WORKFLOWS.md                    # (Boş - içerik bekliyor)
-    └── 📄 ux.md                           # UX tasarım notları
+└── 📁 docs/                               # Mimari & Operasyonel Dokümantasyon
+    ├── 📄 ARCHITECTURE_TR.md              # Protokol mimarisi (TR) — teknik referans
+    ├── 📄 ARCHITECTURE_EN.md              # Protokol mimarisi (EN) — teknik referans
+    ├── 📄 API_DOCUMENTATION.md            # Backend API endpoint referansı
+    ├── 📄 DEPLOYMENT.md                   # 🚀 Deploy rehberi (Local / Testnet / Mainnet)
+    ├── 📄 LOCAL_DEVELOPMENT.md            # Yerel geliştirme kurulum rehberi (kısa)
+    ├── 📄 GAME_THEORY.md                  # Bleeding Escrow Mermaid akış diyagramı
+    ├── 📄 ARAF_AUDIT_ACTION_REPORT.md     # Testnet hazırlık audit raporu (K/Y/O/D bulguları)
+    ├── 📄 ARAF_BASE_GRANT_APPLICATION.md  # Base grant başvuru paketi (Builder / Batches / OP)
+    ├── 📄 FUNDRAISING_STRATEGY.md         # Yatırım hedefleri ve strateji
+    ├── 📄 OUTREACH_TEMPLATE.md            # Yatırımcı ulaşım şablonları (TR/EN)
+    ├── 📄 PITCH_TR.md                     # Yatırımcı sunumu (TR)
+    ├── 📄 PITCH_EN.md                     # Yatırımcı sunumu (EN)
+    ├── 📄 Promo.md                        # Kapsamlı düzeltme görevleri (tamamlandı)
+    ├── 📄 maliyet.md                      # Operasyonel maliyet muhasebesi
+    └── 📄 ux.md                           # Bu dosya — güncel dizin yapısı
 ```
+
+---
+
+## Dosya Sayıları
+
+| Katman | Dosya Sayısı |
+|--------|-------------|
+| Kontrat (`contracts/`) | 5 |
+| Backend (`backend/scripts/`) | 18 |
+| Frontend (`frontend/src/`) | 9 |
+| Dokümantasyon (`docs/`) | 14 |
+| **Toplam** | **~46** |
+
+---
+
+## Kritik Dosyalar (Dokunmadan Önce Düşün)
+
+| Dosya | Neden Kritik |
+|-------|-------------|
+| `contracts/src/ArafEscrow.sol` | Ana kontrat — deploy sonrası değiştirilemez |
+| `backend/scripts/services/encryption.js` | Master key yönetimi — yanlış değişiklik PII veri kaybına yol açar |
+| `backend/scripts/services/eventListener.js` | On-chain senkronizasyon — FIFO sırası bozulursa state tutarsızlığı |
+| `frontend/src/hooks/useArafContract.js` | Tüm kontrat etkileşimleri — ABI uyumsuzluğu tüm tx'leri kırar |
+| `backend/scripts/services/siwe.js` | JWT gizliliği — entropy kontrolü başlangıçta çalışır |
