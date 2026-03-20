@@ -124,14 +124,22 @@ router.post("/", requireAuth, listingsWriteLimiter, async (req, res, next) => {
       return res.status(400).json({ error: "limits.max, limits.min'den büyük olmalı" });
     }
 
+    // M-1 Fix: Tier başına kripto limiti backend'de de kontrol ediliyor.
+    // Off-chain ilan DB'ye kaydedilip on-chain createEscrow AmountExceedsTierLimit
+    // ile revert ettiğinde kullanıcı kafa karışıklığı yaşar — erken yakalamak daha iyi UX.
     // Kaynak: ArafEscrow.sol sabitleri (TIER_MAX_AMOUNT_TIER0..3)
+    // NOT: limits.max fiat cinsinden gelir (örn: 49500 TRY) — kripto eşdeğerine çevrilmeli.
+    // exchange_rate = 1 USDT karşılığı fiat tutarı. limits.max / exchange_rate = max USDT.
     const TIER_MAX_CRYPTO = { 0: 150, 1: 1500, 2: 7500, 3: 30000 };
     const tierMax = TIER_MAX_CRYPTO[value.tier];
-    if (tierMax !== undefined && value.limits.max > tierMax) {
-      return res.status(400).json({
-        error: `Tier ${value.tier} için maksimum kripto limiti ${tierMax} USDT/USDC. ` +
-               `İstenen: ${value.limits.max}`,
-      });
+    if (tierMax !== undefined) {
+      const cryptoEquivalent = value.limits.max / value.exchange_rate;
+      if (cryptoEquivalent > tierMax) {
+        return res.status(400).json({
+          error: `Tier ${value.tier} için maksimum kripto limiti ${tierMax} USDT/USDC. ` +
+                 `Max limit kripto karşılığı: ${cryptoEquivalent.toFixed(2)}`,
+        });
+      }
     }
 
     //  Kontratın view fonksiyonuyla kullanıcının efektif tier'ını doğrula.
