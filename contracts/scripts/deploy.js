@@ -1,5 +1,5 @@
 /**
- * ArafEscrow Deploy Script (Dinamik .env Güncellemeli Sürüm)
+ * ArafEscrow Deploy Script (Güncellenmiş Testnet Sürümü)
  *
  * Deploy ve test token ayarları tamamlandıktan hemen sonra ownership, TREASURY_ADDRESS'e devredilir.
  * Bu sayede DEPLOYER_PRIVATE_KEY sızsa bile kontrat üzerinde hiçbir yetkisi kalmaz.
@@ -77,29 +77,43 @@ async function main() {
     console.log("✅ USDC desteklenen token listesine eklendi");
   }
 
-  // ── 3. Ownership Devri ────────────────────────────────────────────────────
+  // ── 3. Ownership Devri (EN SONA ALINDI) ───────────────────────────────────
   console.log("\n🔒 Ownership devrediliyor →", treasuryAddress);
   const tx = await escrow.transferOwnership(treasuryAddress);
   await tx.wait();
   console.log("✅ Ownership başarıyla devredildi!");
 
-  // ── 4. Sonuçlar ve Otomatik .env Güncelleme ────────────────────────────────
-  console.log("\n🎉 BÜTÜN İŞLEMLER TAMAMLANDI! 🎉");
+  // ── 4. AKILLI .ENV YÖNETİMİ ───────────────────────────────────────────────
+  const frontendEnvPath = path.resolve(__dirname, "../../frontend/.env");
+  const exampleEnvPath = path.resolve(__dirname, "../../frontend/.env.example");
 
-  // Frontend .env dosyasını otomatik güncelleme
-  const envPath = path.resolve(__dirname, "../../frontend/.env");
-  if (fs.existsSync(envPath)) {
-    let envContent = fs.readFileSync(envPath, "utf8");
+  // Eğer .env yoksa .env.example'dan oluştur
+  if (!fs.existsSync(frontendEnvPath) && fs.existsSync(exampleEnvPath)) {
+    fs.copyFileSync(exampleEnvPath, frontendEnvPath);
+    console.log("📝 .env.example'dan yeni .env oluşturuldu.");
+  }
+
+  if (fs.existsSync(frontendEnvPath)) {
+    let envContent = fs.readFileSync(frontendEnvPath, "utf8");
     
+    // VITE_API_URL'yi Codespaces URL'sine göre otomatik güncelle
+    const codespaceName = process.env.CODESPACE_NAME;
+    if (codespaceName) {
+      const apiUrl = `https://${codespaceName}-4000.app.github.dev`;
+      envContent = envContent.replace(/VITE_API_URL=.*/, `VITE_API_URL=${apiUrl}`);
+    }
+
     // Regex ile adresleri günceller
     envContent = envContent.replace(/VITE_ESCROW_ADDRESS=.*/, `VITE_ESCROW_ADDRESS="${address}"`);
     if (usdtAddress) envContent = envContent.replace(/VITE_USDT_ADDRESS=.*/, `VITE_USDT_ADDRESS="${usdtAddress}"`);
     if (usdcAddress) envContent = envContent.replace(/VITE_USDC_ADDRESS=.*/, `VITE_USDC_ADDRESS="${usdcAddress}"`);
     
-    fs.writeFileSync(envPath, envContent);
-    console.log("✅ Frontend .env dosyası otomatik olarak güncellendi.");
+    fs.writeFileSync(frontendEnvPath, envContent);
+    console.log("✅ .env dosyası otomatik olarak güncellendi.");
   }
 
+  // ── 5. Sonuçlar ve .env Çıktıları ─────────────────────────────────────────
+  console.log("\n🎉 BÜTÜN İŞLEMLER TAMAMLANDI! 🎉");
   console.log("--------------------------------------------------");
   console.log(`VITE_ESCROW_ADDRESS="${address}"`);
   if (process.env.NODE_ENV !== "production") {
