@@ -13,7 +13,7 @@ const logger = createLogger({
   
   format: format.combine(
     format.timestamp({ format: "YYYY-MM-DD HH:mm:ss" }),
-    [span_4](start_span)format.errors({ stack: true }), // Hata yığınlarını (stack trace) yakalar[span_4](end_span)
+    format.errors({ stack: true }), // Hata yığınlarını (stack trace) yakalar
     format.json(), // Dosyada yapılandırılmış veri tutar
     format.printf(({ timestamp, level, message, stack, ...meta }) => {
       // .txt dosyasında okunabilir format
