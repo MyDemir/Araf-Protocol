@@ -12,13 +12,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
 
 /**
- * Codespaces URL'sini otomatik olarak Hardhat RPC URL'sine dönüştüren yardımcı fonksiyon.
- * Mobil cihazda (Kiwi) 127.0.0.1 yerine dış HTTPS tünelini kullanmayı sağlar.
+ * Codespaces URL'sini dinamik olarak Hardhat RPC URL'sine dönüştürür.
+ * Mobil cihazda (Kiwi) 'localhost' yerine dış HTTPS tünelini kullanmayı sağlar.
  */
 const getCodespacesRPC = (port) => {
   try {
     const host = window.location.hostname;
-    // Yerel makinedeyse localhost, Codespaces tünelindeyse dinamik URL döndürür
+    // Yerel makinedeyse localhost, Codespaces tünelindeyse dinamik HTTPS URL döndürür
     if (host === 'localhost' || host === '127.0.0.1') return `http://127.0.0.1:${port}`;
     return `https://${host.replace('-5173', `-${port}`)}`;
   } catch (e) {
@@ -28,8 +28,8 @@ const getCodespacesRPC = (port) => {
 
 const config = createConfig({
   /**
-   * KRİTİK: Hardhat (31337) ağını listenin en başına aldık. 
-   * Bu sayede uygulama açıldığında cüzdanın otomatik olarak yerel ağa bağlanır.
+   * KRİTİK: Hardhat ağını listenin en başına aldık. 
+   * Bu sayede uygulama açıldığında cüzdanın otomatik olarak yerel ağa (31337) bağlanır.
    */
   chains: import.meta.env.PROD
     ? [base, baseSepolia]
@@ -37,8 +37,6 @@ const config = createConfig({
   connectors: [
     injected(), // MetaMask, Rabby vb. yerel cüzdanlar
     coinbaseWallet({ appName: 'Araf Protocol' }),
-    // GEÇİCİ OLARAK UYUTULDU (403 Reown hatasını engellemek için)
-    // walletConnect({ projectId: '3fcc6b444f67d32e656910629a888c34' }),
   ],
   transports: {
     [base.id]:       http(),
