@@ -157,6 +157,9 @@ async function bootstrap() {
     const piiRoutes      = require("./routes/pii");
     const feedbackRoutes = require("./routes/feedback");
     const statsRoutes    = require("./routes/stats");
+    // [TR] Şifreli dekont yükleme — AES-256-GCM ile şifreler, SHA-256 hash döner
+    // [EN] Encrypted receipt upload — AES-256-GCM encrypt, returns SHA-256 hash
+    const receiptRoutes  = require("./routes/receipts");
 
     app.use("/api/auth",     authRoutes);
     app.use("/api/listings", listingRoutes);
@@ -164,6 +167,7 @@ async function bootstrap() {
     app.use("/api/pii",      piiRoutes);
     app.use("/api/feedback", feedbackRoutes);
     app.use("/api/stats",    statsRoutes);
+    app.use("/api/receipts", receiptRoutes);
 
     app.get("/health", (req, res) => res.json({
       status:    "ok",
