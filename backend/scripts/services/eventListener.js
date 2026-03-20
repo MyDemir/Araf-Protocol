@@ -13,6 +13,9 @@ const { ethers }         = require("ethers");
 const { getRedisClient } = require("../config/redis");
 const { Trade, Listing } = require("../models/Trade");
 const User               = require("../models/User");
+// [TR] Receipt modeli — TTL güncellemesi için (GDPR/KVKK Unutulma Hakkı)
+// [EN] Receipt model — for TTL updates (GDPR/KVKK Right to be Forgotten)
+const Receipt            = require("../models/Receipt");
 const logger             = require("../utils/logger");
 
 const CHECKPOINT_KEY             = "worker:last_block";
@@ -368,6 +371,13 @@ class EventWorker {
       return;
     }
 
+    // [TR] RESOLVED: dekont 24 saat içinde silinir (Unutulma Hakkı)
+    // [EN] RESOLVED: receipt deleted within 24 hours (Right to be Forgotten)
+    await Receipt.findOneAndUpdate(
+      { onchain_escrow_id: Number(tradeId) },
+      { $set: { expires_at: new Date(Date.now() + 24 * 3600 * 1000) } }
+    );
+
     // [TR] CHALLENGED → RESOLVED: maker haksız itiraz açtı, failure_score yazılır
     // [EN] CHALLENGED → RESOLVED: maker opened unjust challenge, write failure_score
     if (wasDisputed && trade.maker_address) {
@@ -401,6 +411,13 @@ class EventWorker {
     await Trade.findOneAndUpdate(
       { onchain_escrow_id: Number(tradeId) },
       { $set: { status: "CANCELED", "timers.resolved_at": new Date() } }
+    );
+
+    // [TR] CANCELED: dekont 24 saat içinde silinir (Unutulma Hakkı)
+    // [EN] CANCELED: receipt deleted within 24 hours (Right to be Forgotten)
+    await Receipt.findOneAndUpdate(
+      { onchain_escrow_id: Number(tradeId) },
+      { $set: { expires_at: new Date(Date.now() + 24 * 3600 * 1000) } }
     );
   }
 
@@ -445,6 +462,13 @@ class EventWorker {
         );
       }
       logger.info(`[Worker] Burn failure scores: +${score} to ${addresses.length} parties, trade #${tradeId}`);
+
+      // [TR] BURNED: dekont 30 gün sonra silinir (CHALLENGED/BURNED için uzun retention)
+      // [EN] BURNED: receipt deleted after 30 days (longer retention for CHALLENGED/BURNED)
+      await Receipt.findOneAndUpdate(
+        { onchain_escrow_id: Number(tradeId) },
+        { $set: { expires_at: new Date(Date.now() + 30 * 24 * 3600 * 1000) } }
+      );
     }
   }
 
