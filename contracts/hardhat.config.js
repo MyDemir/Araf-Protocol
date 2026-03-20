@@ -8,13 +8,20 @@ module.exports = {
     settings: {
       optimizer: { enabled: true, runs: 200 },
       viaIR: true, // Karmaşık kontratların derlenmesini kolaylaştırır
-      evmVersion: "cancun" //mcopy hatasi için
+      evmVersion: "cancun" // mcopy hatasi için
     },
   },
   networks: {
+    // Yerel geliştirme ağı (Codespaces/Local)
     hardhat: {
       chainId: 31337,
     },
+    // YENİ EKLENDİ: MetaMask ve Deploy betiği için localhost ağ tanımı
+    localhost: {
+      url: "http://127.0.0.1:8545", 
+      chainId: 31337,
+    },
+    // public tesnet
     "base-sepolia": {
       url: process.env.BASE_SEPOLIA_RPC_URL || "https://sepolia.base.org",
       accounts: process.env.DEPLOYER_PRIVATE_KEY
@@ -22,6 +29,7 @@ module.exports = {
         : [],
       chainId: 84532,
     },
+    // Base Mainnet Ayarları
     base: {
       url: process.env.BASE_RPC_URL || "https://mainnet.base.org",
       accounts: process.env.DEPLOYER_PRIVATE_KEY
