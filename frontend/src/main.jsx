@@ -11,11 +11,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 // L-05 Fix: Global hata sınırı — render hatalarında uygulamanın tamamen çökmesini önler
 import ErrorBoundary from './components/ErrorBoundary.jsx'
 
-// Codespaces URL'sini otomatik olarak Hardhat RPC URL'sine dönüştüren yardımcı fonksiyon
+/**
+ * Codespaces URL'sini otomatik olarak Hardhat RPC URL'sine dönüştüren yardımcı fonksiyon.
+ * Mobil cihazda (Kiwi) 127.0.0.1 yerine dış HTTPS tünelini kullanmayı sağlar.
+ */
 const getCodespacesRPC = (port) => {
   try {
     const host = window.location.hostname;
-    // Eğer localhost'taysan doğrudan döndür, Codespaces'teysen portu dinamik değiştir
+    // Yerel makinedeyse localhost, Codespaces tünelindeyse dinamik URL döndürür
     if (host === 'localhost' || host === '127.0.0.1') return `http://127.0.0.1:${port}`;
     return `https://${host.replace('-5173', `-${port}`)}`;
   } catch (e) {
@@ -24,7 +27,10 @@ const getCodespacesRPC = (port) => {
 };
 
 const config = createConfig({
-  // KRİTİK: Hardhat en başa alındı, böylece uygulama varsayılan olarak yerel ağa bağlanır
+  /**
+   * KRİTİK: Hardhat (31337) ağını listenin en başına aldık. 
+   * Bu sayede uygulama açıldığında cüzdanın otomatik olarak yerel ağa bağlanır.
+   */
   chains: import.meta.env.PROD
     ? [base, baseSepolia]
     : [hardhat, baseSepolia, base],
@@ -37,7 +43,10 @@ const config = createConfig({
   transports: {
     [base.id]:       http(),
     [baseSepolia.id]: http(),
-    // Hibrit Transport: Geliştirmede dinamik Codespaces URL, üretimde varsayılan
+    /**
+     * HİBRİT TRANSPORT: 
+     * Geliştirme modunda Codespaces dış URL'sini kullanır, canlıda (production) varsayılan RPC'ye döner.
+     */
     [hardhat.id]:    http(import.meta.env.PROD ? undefined : getCodespacesRPC(8545)),
   },
 })
