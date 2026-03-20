@@ -25,18 +25,26 @@ const getCodespacesRPC = (port) => {
 };
 
 const config = createConfig({
-  // KRİTİK: Vite'da process.env yerine import.meta.env.PROD kullanılır
+  /**
+   * [DÜZELTME]: Wagmi listenin ilk sırasındaki ağı varsayılan seçer.
+   * Geliştirme modunda Hardhat'i başa alarak cüzdanın Base'e bağlanmasını engelliyoruz.
+   */
   chains: import.meta.env.PROD
     ? [base, baseSepolia]
-    : [hardhat, baseSepolia, base], 
+    : [hardhat, baseSepolia, base],
   connectors: [
-    injected(), // OKX Wallet ve diğer eklentiler için
+    injected(), // OKX Wallet ve diğer yerel cüzdanlar
     coinbaseWallet({ appName: 'Araf Protocol' }),
+    // GEÇİCİ OLARAK UYUTULDU (403 Reown hatasını engellemek için)
+    // walletConnect({ projectId: '3fcc6b444f67d32e656910629a888c34' }),
   ],
   transports: {
     [base.id]:       http(),
     [baseSepolia.id]: http(),
-    // KRİTİK: Geliştirme modunda dinamik Codespaces linkini kullanır
+    /**
+     * [DÜZELTME]: 127.0.0.1 mobilden erişilemez. 
+     * Codespaces HTTPS tünelini (getCodespacesRPC) kullanarak bağlantı kuruyoruz.
+     */
     [hardhat.id]:    http(import.meta.env.PROD ? undefined : getCodespacesRPC(8545)),
   },
 })
