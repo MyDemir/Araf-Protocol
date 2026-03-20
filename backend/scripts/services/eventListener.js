@@ -13,9 +13,6 @@ const { ethers }         = require("ethers");
 const { getRedisClient } = require("../config/redis");
 const { Trade, Listing } = require("../models/Trade");
 const User               = require("../models/User");
-// [TR] Receipt modeli — TTL güncellemesi için (GDPR/KVKK Unutulma Hakkı)
-// [EN] Receipt model — for TTL updates (GDPR/KVKK Right to be Forgotten)
-const Receipt            = require("../models/Receipt");
 const logger             = require("../utils/logger");
 
 const CHECKPOINT_KEY             = "worker:last_block";
@@ -372,10 +369,12 @@ class EventWorker {
     }
 
     // [TR] RESOLVED: dekont 24 saat içinde silinir (Unutulma Hakkı)
+    //      Trade.evidence.receipt_delete_at güncellenir — ayrı Receipt koleksiyonu yok.
     // [EN] RESOLVED: receipt deleted within 24 hours (Right to be Forgotten)
-    await Receipt.findOneAndUpdate(
+    //      Updates Trade.evidence.receipt_delete_at — no separate Receipt collection.
+    await Trade.findOneAndUpdate(
       { onchain_escrow_id: Number(tradeId) },
-      { $set: { expires_at: new Date(Date.now() + 24 * 3600 * 1000) } }
+      { $set: { "evidence.receipt_delete_at": new Date(Date.now() + 24 * 3600 * 1000) } }
     );
 
     // [TR] CHALLENGED → RESOLVED: maker haksız itiraz açtı, failure_score yazılır
@@ -414,10 +413,12 @@ class EventWorker {
     );
 
     // [TR] CANCELED: dekont 24 saat içinde silinir (Unutulma Hakkı)
+    //      Trade.evidence.receipt_delete_at güncellenir — ayrı Receipt koleksiyonu yok.
     // [EN] CANCELED: receipt deleted within 24 hours (Right to be Forgotten)
-    await Receipt.findOneAndUpdate(
+    //      Updates Trade.evidence.receipt_delete_at — no separate Receipt collection.
+    await Trade.findOneAndUpdate(
       { onchain_escrow_id: Number(tradeId) },
-      { $set: { expires_at: new Date(Date.now() + 24 * 3600 * 1000) } }
+      { $set: { "evidence.receipt_delete_at": new Date(Date.now() + 24 * 3600 * 1000) } }
     );
   }
 
@@ -463,11 +464,13 @@ class EventWorker {
       }
       logger.info(`[Worker] Burn failure scores: +${score} to ${addresses.length} parties, trade #${tradeId}`);
 
-      // [TR] BURNED: dekont 30 gün sonra silinir (CHALLENGED/BURNED için uzun retention)
+      // [TR] BURNED: dekont 30 gün sonra silinir (CHALLENGED/BURNED uzun retention)
+      //      Trade.evidence.receipt_delete_at güncellenir — ayrı Receipt koleksiyonu yok.
       // [EN] BURNED: receipt deleted after 30 days (longer retention for CHALLENGED/BURNED)
-      await Receipt.findOneAndUpdate(
+      //      Updates Trade.evidence.receipt_delete_at — no separate Receipt collection.
+      await Trade.findOneAndUpdate(
         { onchain_escrow_id: Number(tradeId) },
-        { $set: { expires_at: new Date(Date.now() + 30 * 24 * 3600 * 1000) } }
+        { $set: { "evidence.receipt_delete_at": new Date(Date.now() + 30 * 24 * 3600 * 1000) } }
       );
     }
   }
