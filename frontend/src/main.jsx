@@ -25,22 +25,19 @@ const getCodespacesRPC = (port) => {
 };
 
 const config = createConfig({
-  // Orijinal sıralaman: Geliştirmede hardhat'i en sona koymuştun, cüzdanın Base'e bağlanma sebebi buydu.
-  // Yerelde sorunsuz çalışması için hardhat'i listenin başına çekiyoruz.
-  chains: process.env.NODE_ENV === 'production'
+  // KRİTİK: Vite'da process.env yerine import.meta.env.PROD kullanılır
+  chains: import.meta.env.PROD
     ? [base, baseSepolia]
     : [hardhat, baseSepolia, base], 
   connectors: [
-    injected(), // MetaMask, Rabby vb. yerel cüzdanlar
+    injected(), // OKX Wallet ve diğer eklentiler için
     coinbaseWallet({ appName: 'Araf Protocol' }),
-    // GEÇİCİ OLARAK UYUTULDU (403 Reown hatasını engellemek için)
-    // walletConnect({ projectId: '3fcc6b444f67d32e656910629a888c34' }),
   ],
   transports: {
     [base.id]:       http(),
     [baseSepolia.id]: http(),
-    // Hibrit Transport: Geliştirmede dinamik URL, üretimde varsayılan.
-    [hardhat.id]:    http(process.env.NODE_ENV === 'production' ? 'http://127.0.0.1:8545' : getCodespacesRPC(8545)),
+    // KRİTİK: Geliştirme modunda dinamik Codespaces linkini kullanır
+    [hardhat.id]:    http(import.meta.env.PROD ? undefined : getCodespacesRPC(8545)),
   },
 })
 
