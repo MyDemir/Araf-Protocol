@@ -1,10 +1,10 @@
 /**
- * ArafEscrow Deploy Script (Güncellenmiş Testnet Sürümü)
+ * ArafEscrow Deploy Script (Dinamik .env Güncellemeli Sürüm)
  *
  * Deploy ve test token ayarları tamamlandıktan hemen sonra ownership, TREASURY_ADDRESS'e devredilir.
  * Bu sayede DEPLOYER_PRIVATE_KEY sızsa bile kontrat üzerinde hiçbir yetkisi kalmaz.
  *
- * Kullanım: npx hardhat run scripts/deploy.js --network base-sepolia
+ * Kullanım: npx hardhat run scripts/deploy.js --network localhost
  */
 const { ethers } = require("hardhat");
 const fs   = require("fs");
@@ -77,15 +77,29 @@ async function main() {
     console.log("✅ USDC desteklenen token listesine eklendi");
   }
 
-  // ── 3. Ownership Devri (EN SONA ALINDI) ───────────────────────────────────
+  // ── 3. Ownership Devri ────────────────────────────────────────────────────
   console.log("\n🔒 Ownership devrediliyor →", treasuryAddress);
   const tx = await escrow.transferOwnership(treasuryAddress);
   await tx.wait();
   console.log("✅ Ownership başarıyla devredildi!");
 
-  // ── 4. Sonuçlar ve .env Çıktıları ─────────────────────────────────────────
+  // ── 4. Sonuçlar ve Otomatik .env Güncelleme ────────────────────────────────
   console.log("\n🎉 BÜTÜN İŞLEMLER TAMAMLANDI! 🎉");
-  console.log("Lütfen aşağıdaki verileri Frontend (.env) veya Vercel'e yapıştırın:");
+
+  // Frontend .env dosyasını otomatik güncelleme
+  const envPath = path.resolve(__dirname, "../../frontend/.env");
+  if (fs.existsSync(envPath)) {
+    let envContent = fs.readFileSync(envPath, "utf8");
+    
+    // Regex ile adresleri günceller
+    envContent = envContent.replace(/VITE_ESCROW_ADDRESS=.*/, `VITE_ESCROW_ADDRESS="${address}"`);
+    if (usdtAddress) envContent = envContent.replace(/VITE_USDT_ADDRESS=.*/, `VITE_USDT_ADDRESS="${usdtAddress}"`);
+    if (usdcAddress) envContent = envContent.replace(/VITE_USDC_ADDRESS=.*/, `VITE_USDC_ADDRESS="${usdcAddress}"`);
+    
+    fs.writeFileSync(envPath, envContent);
+    console.log("✅ Frontend .env dosyası otomatik olarak güncellendi.");
+  }
+
   console.log("--------------------------------------------------");
   console.log(`VITE_ESCROW_ADDRESS="${address}"`);
   if (process.env.NODE_ENV !== "production") {
