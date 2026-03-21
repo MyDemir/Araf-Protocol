@@ -14,6 +14,9 @@ function globalErrorHandler(err, req, res, next) {
     message: err.message,
     path: req.path,
     method: req.method,
+    // [TR] İzlenebilirlik için IP ve Cüzdan bilgisi eklendi (Hata avını kolaylaştırır)
+    ip: req.ip,
+    wallet: req.wallet || "anon",
     // Sadece test ortamında body ve stack trace'i logla (Güvenlik için)
     body: process.env.NODE_ENV !== "production" ? req.body : {},
     stack: process.env.NODE_ENV !== "production" ? err.stack : "Stack trace hidden",
@@ -24,9 +27,9 @@ function globalErrorHandler(err, req, res, next) {
   // Bu satır sayesinde 'araf_full_stack.log.txt' dosyasına tüm detaylar düşer.
   logger.error(`[SERVER ERROR]`, errorDetails);
 
-  [span_0](start_span)// 3. Özel Hata Tiplerini Yönet[span_0](end_span)
+  // 3. Özel Hata Tiplerini Yönet
   
-  [span_1](start_span)// Mongoose Validation Hataları[span_1](end_span)
+  // Mongoose Validation Hataları
   if (err.name === "ValidationError") {
     const messages = Object.values(err.errors).map(e => e.message);
     return res.status(400).json({ 
@@ -35,7 +38,7 @@ function globalErrorHandler(err, req, res, next) {
     });
   }
 
-  [span_2](start_span)// Mongoose Duplicate Key (Aynı veriden iki tane ekleme)[span_2](end_span)
+  // Mongoose Duplicate Key (Aynı veriden iki tane ekleme)
   if (err.code === 11000) {
     return res.status(409).json({ 
       error: "Duplicate entry",
@@ -43,7 +46,7 @@ function globalErrorHandler(err, req, res, next) {
     });
   }
 
-  [span_3](start_span)// JWT (Kimlik Doğrulama) Hataları[span_3](end_span)
+  // JWT (Kimlik Doğrulama) Hataları
   if (err.name === "JsonWebTokenError" || err.name === "TokenExpiredError") {
     return res.status(401).json({ 
       error: "Invalid or expired token",
@@ -51,7 +54,7 @@ function globalErrorHandler(err, req, res, next) {
     });
   }
 
-  [span_4](start_span)// 4. Genel Sunucu Hatası (İç yapıyı dışarı sızdırmaz)[span_4](end_span)
+  // 4. Genel Sunucu Hatası (İç yapıyı dışarı sızdırmaz)
   return res.status(500).json({ 
     error: "Internal server error",
     message: "Sunucu tarafında beklenmedik bir sorun oluştu. Lütfen log dosyasını kontrol edin." 
