@@ -4,9 +4,9 @@
  * Event Listener Worker — On-Chain ↔ MongoDB Sync Engine
  *
  * [TR] On-chain ArafEscrow event'lerini dinler ve MongoDB'ye yansıtır.
- *      Checkpoint (Redis), replay, DLQ retry ve otomatik reconnect destekler.
+ * Checkpoint (Redis), replay, DLQ retry ve otomatik reconnect destekler.
  * [EN] Listens to on-chain ArafEscrow events and mirrors them to MongoDB.
- *      Supports checkpoint (Redis), replay, DLQ retry and auto-reconnect.
+ * Supports checkpoint (Redis), replay, DLQ retry and auto-reconnect.
  */
 
 const { ethers }         = require("ethers");
@@ -141,7 +141,12 @@ class EventWorker {
       for (const eventName of EVENT_NAMES) {
         try {
           const filtered = await this.contract.queryFilter(eventName, from, to);
-          allEvents.push(...filtered);
+          // [TR] Dönen verinin gerçekten bir liste (iterable) olduğundan emin ol (Ethers.js crash koruması)
+          if (Array.isArray(filtered)) {
+            allEvents.push(...filtered);
+          } else {
+            logger.warn(`[Worker] Replay: ${eventName} sorgusu boş/geçersiz döndü (iterable değil).`);
+          }
         } catch (err) {
           logger.warn(`[Worker] Replay: ${eventName} sorgusu başarısız (blok ${from}-${to}): ${err.message}`);
         }
