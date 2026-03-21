@@ -25,12 +25,14 @@ export default class ErrorBoundary extends React.Component {
 
     // 2. Backend ile Senkronizasyon (Sisteme yük bindirmeden arka planda)
     // VITE_API_URL ortam değişkeninin tanımlı olduğundan emin olun.
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+    // DÜZELTME: Fallback port 3001 yerine projenin kullandığı 4000 yapıldı.
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
 
     fetch(`${apiUrl}/logs/client-error`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        level: 'ERROR', // Backend'in ayırt edebilmesi için eklendi
         message: error.message || 'Bilinmeyen Render Hatası',
         stack: error.stack,
         componentStack: errorInfo.componentStack,
