@@ -53,11 +53,9 @@ const { clearMasterKeyCache } = require("./services/encryption");
 
 const app = express();
 
-// [TR] Fly.io / Vercel proxy arkasında gerçek IP için trust proxy
-// [EN] Trust proxy for real client IP behind Fly.io / Vercel
-if (process.env.NODE_ENV === "production") {
-  app.set("trust proxy", 1);
-}
+// [TR] Proxy arkasında doğru istemci IP'si için tüm ortamlarda trust proxy aktif
+// [EN] Enable trust proxy in all environments for accurate client IP handling
+app.set("trust proxy", true);
 
 // ─Güvenlik Middleware / Security Middleware ─
 

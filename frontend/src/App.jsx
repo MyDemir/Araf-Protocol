@@ -132,6 +132,8 @@ function App() {
     antiSybilCheck,
     mintToken,
     getFirstSuccessfulTradeAt,
+    getCooldownRemaining,
+    getTokenDecimals,
   } = useArafContract();
 
   // ═══════════════════════════════════════════
@@ -427,17 +429,20 @@ function App() {
     const fetchSybil = async () => {
       const res = await antiSybilCheck(address);
       if (res) {
+        const cooldownRemaining = getCooldownRemaining
+          ? Number(await getCooldownRemaining(address))
+          : 0;
         setSybilStatus({
           funded:            typeof res.balanceOk   !== 'undefined' ? res.balanceOk   : (typeof res.funded       !== 'undefined' ? res.funded       : res[1]),
           cooldownOk:        typeof res.cooldownOk  !== 'undefined' ? res.cooldownOk  : res[2],
-          cooldownRemaining: 0,
+          cooldownRemaining,
         });
       }
     };
     fetchSybil();
     const interval = setInterval(fetchSybil, 30000);
     return () => clearInterval(interval);
-  }, [isConnected, address, antiSybilCheck]);
+  }, [isConnected, address, antiSybilCheck, getCooldownRemaining]);
 
   // [TR] Kontratın bakım/paused durumunu her 60 sn'de kontrol eder
   // [EN] Checks contract paused/maintenance status every 60s
@@ -459,7 +464,7 @@ function App() {
   // [TR] Üçgen dolandırıcılık önlemi: trade odasında maker için taker'ın banka sahibi adını çeker
   // [EN] Triangulation fraud prevention: fetches taker's bank owner name for maker in trade room
   useEffect(() => {
-    if (currentView === 'tradeRoom' && tradeState === 'LOCKED' && userRole === 'maker' && activeTrade?.id && isAuthenticated) {
+    if (currentView === 'tradeRoom' && ['LOCKED', 'PAID', 'CHALLENGED'].includes(tradeState) && userRole === 'maker' && activeTrade?.id && isAuthenticated) {
       authenticatedFetch(`${API_URL}/api/pii/taker-name/${activeTrade.onchainId}`)
         .then(res => res.json())
         .then(data => { if (data.bankOwner) setTakerName(data.bankOwner); })
@@ -498,6 +503,7 @@ function App() {
             pingedAt: t.timers?.pinged_at,
             challengePingedAt: t.timers?.challenge_pinged_at,
             challengedAt: t.timers?.challenged_at,
+            chargebackAck: Boolean(t.chargeback_ack?.acknowledged),
             onchainId: t.onchain_escrow_id,
             amount: `${cryptoAmt} ${t.financials?.crypto_asset || 'USDT'}`,
             action: t.status === 'PAID'
@@ -519,6 +525,7 @@ function App() {
               challengePingedAt: t.timers?.challenge_pinged_at,
               challengedAt: t.timers?.challenged_at,
               cancelProposedBy: t.cancel_proposal?.proposed_by,
+              chargebackAck: Boolean(t.chargeback_ack?.acknowledged),
             }
           };
         }));
@@ -530,6 +537,9 @@ function App() {
           if (!prev) return prev;
           const updated = data.trades.find(t => t.onchain_escrow_id === prev.onchainId);
           if (!updated) return prev;
+          if (updated.status !== prev.state) {
+            setTradeState(updated.status);
+          }
           return {
             ...prev,
             state:             updated.status,
@@ -539,6 +549,9 @@ function App() {
             challengePingedAt: updated.timers?.challenge_pinged_at ?? prev.challengePingedAt,
             challengedAt:      updated.timers?.challenged_at      ?? prev.challengedAt,
             cancelProposedBy:  updated.cancel_proposal?.proposed_by ?? prev.cancelProposedBy,
+            chargebackAck:     typeof updated.chargeback_ack?.acknowledged === 'boolean'
+              ? updated.chargeback_ack.acknowledged
+              : prev.chargebackAck,
           };
         });
       }
@@ -559,6 +572,12 @@ function App() {
       setCancelStatus(prev => prev ? null : prev);
     }
   }, [activeTrade?.onchainId, activeEscrows, address]);
+
+  // [TR] Chargeback onayı backend'de kayıtlıysa checkbox state'i geri yüklenir
+  // [EN] Restores chargeback checkbox state from backend-backed trade data
+  useEffect(() => {
+    setChargebackAccepted(Boolean(activeTrade?.chargebackAck));
+  }, [activeTrade?.onchainId, activeTrade?.chargebackAck]);
 
   useEffect(() => { fetchMyTrades(); }, [fetchMyTrades]);
 
@@ -648,12 +667,13 @@ function App() {
   //      cannot be called inside render helper functions like renderTradeRoom.
   const gracePeriodEndDate          = activeTrade?.paidAt ? new Date(new Date(activeTrade.paidAt).getTime() + 48 * 3600 * 1000) : null;
   const gracePeriodTimer            = useCountdown(gracePeriodEndDate);
-  const challengeCountdown          = useCountdown(activeTrade?.challengePingedAt ? new Date(new Date(activeTrade.challengePingedAt).getTime() + 24 * 3600 * 1000) : null);
-  const canChallenge                = import.meta.env.DEV ? (cooldownPassed || challengeCountdown.isFinished) : challengeCountdown.isFinished;
   const bleedingEndDate             = activeTrade?.challengedAt ? new Date(new Date(activeTrade.challengedAt).getTime() + 240 * 3600 * 1000) : null;
   const bleedingTimer               = useCountdown(bleedingEndDate);
   const principalProtectionEndDate  = activeTrade?.challengedAt ? new Date(new Date(activeTrade.challengedAt).getTime() + (48 + 96) * 3600 * 1000) : null;
   const principalProtectionTimer    = useCountdown(principalProtectionEndDate);
+  const makerPingTakerEndDate       = activeTrade?.paidAt ? new Date(new Date(activeTrade.paidAt).getTime() + 24 * 3600 * 1000) : null;
+  const makerPingTakerTimer         = useCountdown(makerPingTakerEndDate);
+  const canPingTaker                = import.meta.env.DEV ? (cooldownPassed || makerPingTakerTimer.isFinished) : makerPingTakerTimer.isFinished;
   const makerPingEndDate            = activeTrade?.paidAt ? new Date(new Date(activeTrade.paidAt).getTime() + 48 * 3600 * 1000) : null;
   const makerPingTimer              = useCountdown(makerPingEndDate);
   const canMakerPing                = makerPingTimer.isFinished;
@@ -814,7 +834,14 @@ function App() {
       }
 
       const tier = order.tier ?? 1;
-      const cryptoAmtRaw = BigInt(Math.round((parseFloat(order.max) || 0) * 1e6));
+      const rate = parseFloat(order.rate) || 0;
+      if (rate <= 0) {
+        showToast(lang === 'TR' ? 'Kur bilgisi geçersiz.' : 'Invalid exchange rate.', 'error');
+        return;
+      }
+      const cryptoAmtFloat = (parseFloat(order.max) || 0) / rate;
+      const decimals = await getTokenDecimals(tokenAddress);
+      const cryptoAmtRaw = BigInt(Math.round(cryptoAmtFloat * 10 ** Number(decimals)));
       const takerBondBps = BigInt(onchainBondMap[tier]?.takerBps ?? 0);
       const takerBond = (cryptoAmtRaw * takerBondBps) / 10000n;
 
@@ -876,9 +903,14 @@ function App() {
     }
     if (isContractLoading) return;
     try {
+      if (order.status && order.status !== 'OPEN') {
+        showToast(lang === 'TR' ? 'Sadece OPEN durumundaki ilanlar iptal edilebilir.' : 'Only OPEN listings can be cancelled.', 'error');
+        return;
+      }
       setIsContractLoading(true);
       showToast(lang === 'TR' ? 'İlan iptal ediliyor, lütfen cüzdanınızdan onaylayın...' : 'Cancelling listing, please confirm in wallet...', 'info');
       await cancelOpenEscrow(BigInt(order.onchainId));
+      await authenticatedFetch(`${API_URL}/api/listings/${order.id}`, { method: 'DELETE' });
       setOrders(prev => prev.filter(o => o.id !== order.id));
       setConfirmDeleteId(null);
       showToast(lang === 'TR' ? 'İlan iptal edildi ve fonlar iade edildi.' : 'Listing cancelled and funds returned.', 'success');
@@ -1080,6 +1112,7 @@ function App() {
       showToast(lang === 'TR' ? 'İşlem cüzdanınıza gönderildi, onaylayın...' : 'Transaction sent to wallet, please confirm...', 'info');
       await releaseFunds(BigInt(activeTrade.onchainId));
       setTradeState('RESOLVED');
+      setActiveTrade(null);
       setCurrentView('home');
       showToast(lang === 'TR' ? 'USDT başarıyla serbest bırakıldı! ✅' : 'USDT successfully released! ✅', 'success');
     } catch (err) {
@@ -1109,6 +1142,15 @@ function App() {
     const challengePingedAt = tradeDetails?.challengePingedAt;
 
     if (!challengePingedAt) {
+      if (!canPingTaker) {
+        showToast(
+          lang === 'TR'
+            ? 'Alıcıya uyarı göndermek için ödeme bildiriminden sonra 24 saat geçmelidir.'
+            : 'You must wait 24h after payment report before pinging taker.',
+          'error'
+        );
+        return;
+      }
       try {
         setIsContractLoading(true);
         showToast(lang === 'TR' ? 'Alıcıya uyarı gönderiliyor...' : 'Pinging taker...', 'info');
@@ -1118,7 +1160,12 @@ function App() {
         showToast(lang === 'TR' ? 'Alıcı uyarıldı. İtiraz için 24 saat beklemeniz gerekiyor.' : 'Taker pinged. You must wait 24h to challenge.', 'success');
       } catch (err) {
         console.error('pingTakerForChallenge error:', err);
-        const errorMessage = err.shortMessage || err.reason || err.message || (lang === 'TR' ? 'Uyarı gönderilemedi.' : 'Failed to send ping.');
+        let errorMessage = err.shortMessage || err.reason || err.message || (lang === 'TR' ? 'Uyarı gönderilemedi.' : 'Failed to send ping.');
+        if (errorMessage.includes('ConflictingPingPath')) {
+          errorMessage = lang === 'TR'
+            ? 'Karşı taraf farklı bir ping yolu başlattığı için bu adım kullanılamıyor.'
+            : 'Counterparty already started a conflicting ping path for this trade.';
+        }
         showToast(errorMessage, 'error');
       } finally {
         setIsContractLoading(false);
@@ -1136,7 +1183,12 @@ function App() {
       showToast(lang === 'TR' ? 'İtiraz başlatıldı. Bleeding Escrow aktif.' : 'Challenge opened. Bleeding Escrow active.', 'success');
     } catch (err) {
       console.error('challengeTrade error:', err);
-      const errorMessage = err.shortMessage || err.reason || err.message || (lang === 'TR' ? 'İtiraz işlemi başarısız.' : 'Challenge failed.');
+      let errorMessage = err.shortMessage || err.reason || err.message || (lang === 'TR' ? 'İtiraz işlemi başarısız.' : 'Challenge failed.');
+      if (errorMessage.includes('ConflictingPingPath')) {
+        errorMessage = lang === 'TR'
+          ? 'Karşı taraf farklı bir ping yolu başlattığı için bu akış kullanılamıyor.'
+          : 'Counterparty already started a conflicting ping path for this trade.';
+      }
       showToast(errorMessage, 'error');
     } finally {
       setIsContractLoading(false);
@@ -1309,7 +1361,7 @@ function App() {
 
       setIsContractLoading(true);
 
-      const decimals = BigInt(6);
+      const decimals = BigInt(await getTokenDecimals(tokenAddress));
       const cryptoAmountRaw = BigInt(Math.round(cryptoAmt * 10 ** Number(decimals)));
 
       if (!onchainBondMap) {
@@ -2170,9 +2222,7 @@ function App() {
                      !isTokenConfigured  ? <><span>⚙️</span> {lang === 'TR' ? 'Token Ayarlanmadı' : 'Token Not Set'}</> :
                      !canTakeOrder       ? <><span>🔒</span> {lang === 'TR' ? 'Kilitli' : 'Locked'}</> :
                      !isFunded           ? <><span>⚠️</span> {lang === 'TR' ? 'Bakiye Yetersiz' : 'Low Balance'}</> :
-                     // [TR] Cooldown süresini göstermek yerine sade etiket kullanılıyor
-                     // [EN] Using simple label instead of showing cooldown duration
-                     !isCooldownOk       ? <><span>⏳</span> {lang === 'TR' ? 'Cooldown Aktif' : 'Cooldown Active'}</> :
+                     !isCooldownOk       ? <><span>⏳</span> {lang === 'TR' ? `Cooldown: ${Math.ceil((sybilStatus?.cooldownRemaining || 0) / 60)} dk` : `Cooldown: ${Math.ceil((sybilStatus?.cooldownRemaining || 0) / 60)} min`}</> :
                      (isContractLoading  ? (loadingText || (lang === 'TR' ? '⏳ İşleniyor...' : '⏳ Processing...')) : (lang === 'TR' ? 'Satın Al' : 'Buy'))}
                   </button>
                   {!isFunded && isConnected && canTakeOrder && !isPaused && (
@@ -2364,6 +2414,39 @@ function App() {
                   </div>
                 ) : (
                   <div className="w-full max-w-md flex flex-col space-y-4">
+                    {!activeTrade?.challengePingedAt ? (
+                      <button
+                        onClick={handleChallenge}
+                        disabled={!canPingTaker || isContractLoading}
+                        className={`w-full py-3 rounded-xl font-bold transition ${
+                          !canPingTaker || isContractLoading
+                            ? 'bg-[#1a1a1f] text-slate-500 cursor-not-allowed border border-[#2a2a2e]'
+                            : 'bg-orange-600/20 text-orange-400 border border-orange-500/40 hover:bg-orange-500 hover:text-white'
+                        }`}
+                      >
+                        {isContractLoading
+                          ? '...'
+                          : canPingTaker
+                            ? (lang === 'TR' ? '🔔 Alıcıyı Uyar (Ödeme Gelmedi)' : '🔔 Ping Taker (No Payment)')
+                            : (lang === 'TR' ? '⏱️ Alıcıyı Uyarma Süresi Bekleniyor (24h)' : '⏱️ Ping Taker Cooldown (24h)')}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={handleChallenge}
+                        disabled={!canMakerChallenge || isContractLoading}
+                        className={`w-full py-3 rounded-xl font-bold transition ${
+                          !canMakerChallenge || isContractLoading
+                            ? 'bg-[#1a1a1f] text-slate-500 cursor-not-allowed border border-[#2a2a2e]'
+                            : 'bg-red-600/20 text-red-400 border border-red-500/40 hover:bg-red-500 hover:text-white'
+                        }`}
+                      >
+                        {isContractLoading
+                          ? '...'
+                          : canMakerChallenge
+                            ? (lang === 'TR' ? '⚔️ Resmi İtiraz Başlat' : '⚔️ Start Official Challenge')
+                            : (lang === 'TR' ? '⏱️ İtiraz için 24h bekleyin' : '⏱️ Wait 24h to Challenge')}
+                      </button>
+                    )}
                     <label className="flex items-start space-x-3 p-3 md:p-4 bg-[#1a0f0f] border border-red-900/30 rounded-xl cursor-pointer text-left">
                       <input type="checkbox" checked={chargebackAccepted} onChange={(e) => handleChargebackAck(e.target.checked)} className="mt-1 w-4 h-4 accent-emerald-500 rounded bg-[#0a0a0c] border-[#333]" />
                       <span className="text-xs text-slate-400"><strong className="text-red-500">{lang === 'TR' ? 'UYARI:' : 'WARNING:'}</strong> {lang === 'TR' ? 'Paranın farklı isimli bir hesaptan gelmediğini ve Chargeback riskini anladığımı kabul ediyorum.' : 'I confirm the funds came from the correct name and understand the Chargeback risk.'}</span>
