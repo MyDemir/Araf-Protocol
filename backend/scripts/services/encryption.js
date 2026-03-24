@@ -26,6 +26,8 @@ const ALGORITHM  = "aes-256-gcm";
 const IV_LENGTH  = 12;    // GCM recommended
 const TAG_LENGTH = 16;
 const KEY_LENGTH = 32;    // 256-bit
+const DEK_SCHEME_V1 = "v1";
+const DEK_SCHEME_V0 = "v0";
 
 // Node.js native hkdf — callback tabanlı, promisify ile async kullanılır
 const hkdfAsync = promisify(crypto.hkdf);
@@ -182,16 +184,28 @@ async function _getMasterKey() {
  * @param {string} walletAddress - lowercase Ethereum address
  * @returns {Promise<Buffer>} 32-byte DEK
  */
-async function _deriveDataKey(walletAddress) {
+async function _deriveDataKey(walletAddress, scheme = DEK_SCHEME_V1) {
   // SEC-01 Fix: _getMasterKey artık async — KMS çağrıları için await gerekli
   const masterKey = await _getMasterKey();
   const normalizedWallet = _normalizeWalletAddress(walletAddress);
-  // ORTA-10 Fix: Statik zero-salt yerine cüzdan-bağımlı deterministik salt.
-  const salt = crypto
-    .createHash("sha256")
-    .update(`araf-pii-salt-v1:${normalizedWallet}`)
-    .digest();
-  const info = Buffer.from("araf-pii-dek-v1");
+
+  let salt;
+  let info;
+
+  if (scheme === DEK_SCHEME_V0) {
+    // Legacy derivation: keep compatibility for already-stored ciphertexts.
+    salt = Buffer.alloc(32, 0);
+    info = Buffer.from(`araf-pii-${normalizedWallet}`);
+  } else if (scheme === DEK_SCHEME_V1) {
+    // ORTA-10 Fix: Statik zero-salt yerine cüzdan-bağımlı deterministik salt.
+    salt = crypto
+      .createHash("sha256")
+      .update(`araf-pii-salt-v1:${normalizedWallet}`)
+      .digest();
+    info = Buffer.from("araf-pii-dek-v1");
+  } else {
+    throw new Error(`Unsupported DEK derivation scheme: ${scheme}`);
+  }
 
   const dek = await hkdfAsync("sha256", masterKey, salt, info, KEY_LENGTH);
   return Buffer.from(dek);
@@ -205,12 +219,44 @@ async function _deriveDataKey(walletAddress) {
  * @returns {Promise<T>}
  */
 async function _withDataKey(walletAddress, operation) {
-  const dek = await _deriveDataKey(walletAddress);
+  const dek = await _deriveDataKey(walletAddress, DEK_SCHEME_V1);
   try {
     return await operation(dek);
   } finally {
     dek.fill(0);
   }
+}
+
+async function _tryDecryptWithDataKey(cipherHex, dek) {
+  const data = Buffer.from(cipherHex, "hex");
+  if (data.length < IV_LENGTH + TAG_LENGTH + 1) {
+    throw new Error("Invalid ciphertext format");
+  }
+
+  const iv         = data.slice(0, IV_LENGTH);
+  const tag        = data.slice(IV_LENGTH, IV_LENGTH + TAG_LENGTH);
+  const ciphertext = data.slice(IV_LENGTH + TAG_LENGTH);
+
+  const decipher = crypto.createDecipheriv(ALGORITHM, dek, iv);
+  decipher.setAuthTag(tag);
+
+  return decipher.update(ciphertext) + decipher.final("utf8");
+}
+
+
+function _isAuthenticationFailure(err) {
+  if (!err) return false;
+
+  if (err.code === "ERR_OSSL_EVP_BAD_DECRYPT") {
+    return true;
+  }
+
+  if (typeof err.message !== "string") {
+    return false;
+  }
+
+  const message = err.message.toLowerCase();
+  return message.includes("auth") || message.includes("authenticate") || message.includes("bad decrypt");
 }
 
 /**
@@ -242,22 +288,31 @@ async function encryptField(plaintext, walletAddress) {
  * @returns {Promise<string>}    - Original plaintext
  */
 async function decryptField(cipherHex, walletAddress) {
+  if (typeof cipherHex !== "string" || !/^[0-9a-f]+$/i.test(cipherHex) || cipherHex.length % 2 !== 0) {
+    throw new Error("Invalid ciphertext format");
+  }
+
   const normalizedWallet = _normalizeWalletAddress(walletAddress);
-  return _withDataKey(normalizedWallet, async (dek) => {
-    const data = Buffer.from(cipherHex, "hex");
-    if (data.length < IV_LENGTH + TAG_LENGTH + 1) {
-      throw new Error("Invalid ciphertext format");
+  const primaryDek = await _deriveDataKey(normalizedWallet, DEK_SCHEME_V1);
+  try {
+    return await _tryDecryptWithDataKey(cipherHex, primaryDek);
+  } catch (err) {
+    // Backward compatibility: support ciphertexts encrypted before HKDF inputs changed.
+    if (!_isAuthenticationFailure(err)) {
+      throw err;
     }
 
-    const iv         = data.slice(0, IV_LENGTH);
-    const tag        = data.slice(IV_LENGTH, IV_LENGTH + TAG_LENGTH);
-    const ciphertext = data.slice(IV_LENGTH + TAG_LENGTH);
+    logger.warn("[Encryption] Falling back to legacy DEK derivation for ciphertext decrypt.");
 
-    const decipher = crypto.createDecipheriv(ALGORITHM, dek, iv);
-    decipher.setAuthTag(tag);
-
-    return decipher.update(ciphertext) + decipher.final("utf8");
-  });
+    const legacyDek = await _deriveDataKey(normalizedWallet, DEK_SCHEME_V0);
+    try {
+      return await _tryDecryptWithDataKey(cipherHex, legacyDek);
+    } finally {
+      legacyDek.fill(0);
+    }
+  } finally {
+    primaryDek.fill(0);
+  }
 }
 
 /**
