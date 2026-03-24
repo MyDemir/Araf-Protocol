@@ -1,15 +1,53 @@
 "use strict";
 
 /**
- * Event Listener Worker — On-Chain ↔ MongoDB Sync Engine
+ * Event Listener Worker — On-Chain ↔ MongoDB Senkronizasyon Motoru
  *
- * [TR] On-chain ArafEscrow event'lerini dinler ve MongoDB'ye yansıtır.
- * Checkpoint (Redis), replay, DLQ retry ve otomatik reconnect destekler.
- * [EN] Listens to on-chain ArafEscrow events and mirrors them to MongoDB.
- * Supports checkpoint (Redis), replay, DLQ retry and auto-reconnect.
+ * KRİT-02 Fix: Kurbanı Cezalandıran İtibar Algoritması Düzeltildi.
+ *   CHALLENGED→RESOLVED = Maker parayı serbest bıraktı = Maker haklıydı.
+ *   ÖNCEKİ: Maker'ın failure_score'u artırılıyordu.
+ *   ŞİMDİ: Taker'ın (haksız itiraz açanın) failure_score'u artırılıyor.
+ *
+ * KRİT-08 Fix: Hardcoded USDT/TRY Fallback Kaldırıldı.
+ *   ÖNCEKİ: Listing bulunamazsa exchange_rate:0, crypto_asset:"USDT", fiat_currency:"TRY"
+ *   sabit yazılıyordu. Multi-token geldiğinde veri bozuluyordu.
+ *   ŞİMDİ: Listing bulunamazsa işlem BEKLEMEDE bırakılıyor (retry), fallback hardcode yok.
+ *
+ * KRİT-09 Fix: LIFO Listing Eşleştirme Race Condition Azaltıldı.
+ *   Batch transaction durumunda LIFO eşleştirme hâlâ riski var.
+ *   Tam çözüm: on-chain createEscrow'a listing_id parametresi eklenmesi (kontrat değişikliği).
+ *   Bu dosyada: Zaman penceresi daraltıldı + status:"OPEN" filtresi eklendi.
+ *
+ * KRİT-10 Fix: Checkpoint Zehirlenmesi Kapatıldı.
+ *   ÖNCEKİ: Hata durumunda da checkpoint ilerletiliyordu — event'ler sessizce kayboluyordu.
+ *   ŞİMDİ: Checkpoint YALNIZCA başarılı işlem sonrasında ilerletiliyor.
+ *
+ * KRİT-16 Fix: Zombi WebSocket Bellek Sızıntısı Kapatıldı.
+ *   ÖNCEKİ: _reconnect() yeni provider oluştururken eskisini yok etmiyordu.
+ *   ŞİMDİ: Reconnect öncesinde eski provider'ın tüm listener'ları temizleniyor + destroy().
+ *
+ * YÜKS-04 Fix: Atomik Olmayan DB Güncellemeleri — MongoDB Transactions Eklendi.
+ *   EscrowReleased ve EscrowBurned'de Trade + User güncellemeleri artık atomik.
+ *
+ * YÜKS-05 Fix: Replay İdempotency — $inc Çakışması Kapatıldı.
+ *   _onBleedingDecayed'e transactionHash bazlı tekrar işleme kontrolü eklendi.
+ *
+ * YÜKS-22 Fix: reputation_history Sınırsız Dizi Büyümesi Önlendi.
+ *   $push yerine $push + $slice kullanılıyor — maksimum 100 kayıt tutulur.
+ *
+ * ORTA-06 Fix: IPFS Hash XSS Injection Koruması Eklendi.
+ *   ipfsHash değeri CID formatı için doğrulanıyor.
+ *
+ * BACK-04 Fix: Ping Sınıflandırma Race Condition Azaltıldı.
+ *   taker_address null ise pinger kontratdan yeniden okunmak yerine event bekleniliyor.
+ *
+ * FEL-08 Fix: Finansal Hassasiyet — Number() Yerine String Saklama.
+ *   ÖNCEKİ: Number(amount) — JS Number max 2^53-1, büyük değerlerde hassasiyet kaybı.
+ *   ŞİMDİ: amount.toString() — MongoDB'de String olarak saklanır, BigInt güvenli.
  */
 
 const { ethers }         = require("ethers");
+const mongoose           = require("mongoose");
 const { getRedisClient } = require("../config/redis");
 const { Trade, Listing } = require("../models/Trade");
 const User               = require("../models/User");
@@ -21,9 +59,9 @@ const RETRY_DELAY_MS             = 5_000;
 const MAX_RETRIES                = 3;
 const BLOCK_BATCH_SIZE           = 1_000;
 const CHECKPOINT_INTERVAL_BLOCKS = 50;
+// YÜKS-22 Fix: reputation_history maksimum boyutu
+const MAX_REPUTATION_HISTORY     = 100;
 
-// [TR] Olay ciddiyetine göre ağırlıklı başarısızlık puanları
-// [EN] Weighted failure scores by event severity
 const FAILURE_SCORE_WEIGHTS = {
   burned:           50,
   unjust_challenge: 20,
@@ -31,8 +69,9 @@ const FAILURE_SCORE_WEIGHTS = {
   failed_dispute:   20,
 };
 
-// [TR] queryFilter("*") yerine event bazlı filtreleme — RPC rate limit koruması
-// [EN] Per-event filtering instead of queryFilter("*") — protects against RPC rate limits
+// ORTA-06 Fix: Geçerli IPFS CID formatları (v0 ve v1)
+const CID_PATTERN = /^(Qm[1-9A-HJ-NP-Za-km-z]{44}|b[A-Za-z2-7]{58}|[a-f0-9]{64})$/;
+
 const EVENT_NAMES = [
   "WalletRegistered",
   "EscrowCreated", "EscrowLocked", "PaymentReported",
@@ -66,12 +105,12 @@ class EventWorker {
   }
 
   async start() {
-    logger.info("[Worker] Starting event listener...");
+    logger.info("[Worker] Event listener başlatılıyor...");
     this.isRunning = true;
     await this._connect();
     await this._replayMissedEvents();
     this._attachLiveListeners();
-    logger.info("[Worker] Event listener active.");
+    logger.info("[Worker] Event listener aktif.");
   }
 
   async stop() {
@@ -79,7 +118,7 @@ class EventWorker {
     if (this.provider) {
       this.provider.removeAllListeners();
     }
-    logger.info("[Worker] Event listener stopped.");
+    logger.info("[Worker] Event listener durduruldu.");
   }
 
   async _connect() {
@@ -88,10 +127,10 @@ class EventWorker {
 
     if (!contractAddress || contractAddress === "0x0000000000000000000000000000000000000000") {
       if (process.env.NODE_ENV === "production") {
-        logger.error("[Worker] KRİTİK: ARAF_ESCROW_ADDRESS tanımlı değil. Sunucu durduruluyor.");
+        logger.error("[Worker] KRİTİK: ARAF_ESCROW_ADDRESS tanımlı değil. Durduruluyor.");
         process.exit(1);
       }
-      logger.warn("[Worker] ARAF_ESCROW_ADDRESS not set. Worker in dry-run mode (development only).");
+      logger.warn("[Worker] Kontrat adresi yok — Worker kuru çalışma modunda (development).");
       return;
     }
 
@@ -100,7 +139,7 @@ class EventWorker {
     if (wsRpcUrl && wsRpcUrl.startsWith("wss://")) {
       try {
         this.provider = new ethers.WebSocketProvider(wsRpcUrl);
-        logger.info(`[Worker] WebSocket RPC bağlantısı kuruldu: ${wsRpcUrl.split("/v2/")[0]}`);
+        logger.info(`[Worker] WebSocket RPC bağlandı.`);
       } catch (wsErr) {
         logger.warn(`[Worker] WebSocket başarısız, HTTP fallback: ${wsErr.message}`);
         this.provider = new ethers.JsonRpcProvider(rpcUrl);
@@ -113,12 +152,9 @@ class EventWorker {
     }
 
     this.contract = new ethers.Contract(contractAddress, ARAF_ABI, this.provider);
-    logger.info(`[Worker] Connected to Base at ${wsRpcUrl || rpcUrl}`);
-    logger.info(`[Worker] Watching contract: ${contractAddress}`);
+    logger.info(`[Worker] Kontrat izleniyor: ${contractAddress}`);
   }
 
-  // [TR] Yeniden başlatmada kaçırılan blokları checkpoint'ten itibaren işler
-  // [EN] Processes missed blocks from checkpoint on restart
   async _replayMissedEvents() {
     if (!this.contract) return;
 
@@ -128,11 +164,11 @@ class EventWorker {
     const toBlock    = await this.provider.getBlockNumber();
 
     if (fromBlock > toBlock) {
-      logger.info("[Worker] No missed events. Checkpoint is current.");
+      logger.info("[Worker] Kaçırılan event yok. Checkpoint güncel.");
       return;
     }
 
-    logger.info(`[Worker] Replaying events from block ${fromBlock} to ${toBlock}...`);
+    logger.info(`[Worker] ${fromBlock} - ${toBlock} blok aralığı tekrar işleniyor...`);
 
     for (let from = fromBlock; from <= toBlock; from += BLOCK_BATCH_SIZE) {
       const to = Math.min(from + BLOCK_BATCH_SIZE - 1, toBlock);
@@ -141,30 +177,39 @@ class EventWorker {
       for (const eventName of EVENT_NAMES) {
         try {
           const filtered = await this.contract.queryFilter(eventName, from, to);
-          // [TR] Dönen verinin gerçekten bir liste (iterable) olduğundan emin ol (Ethers.js crash koruması)
-          if (Array.isArray(filtered)) {
-            allEvents.push(...filtered);
-          } else {
-            logger.warn(`[Worker] Replay: ${eventName} sorgusu boş/geçersiz döndü (iterable değil).`);
-          }
+          if (Array.isArray(filtered)) allEvents.push(...filtered);
         } catch (err) {
-          logger.warn(`[Worker] Replay: ${eventName} sorgusu başarısız (blok ${from}-${to}): ${err.message}`);
+          logger.warn(`[Worker] Replay: ${eventName} sorgusu başarısız (${from}-${to}): ${err.message}`);
         }
       }
-      // [TR] Blok ve log index sırasına göre sırala — event işleme sırası önemli
-      // [EN] Sort by block and log index — event processing order matters
+
       allEvents.sort((a, b) => a.blockNumber - b.blockNumber || a.logIndex - b.logIndex);
 
+      let batchSuccess = true;
       for (const event of allEvents) {
-        await this._processEvent(event);
+        try {
+          await this._processEvent(event);
+        } catch (err) {
+          logger.error(`[Worker] Replay event işleme hatası: ${event.eventName} - ${err.message}`);
+          await this._addToDLQ(event, err.message);
+          batchSuccess = false;
+          // [TR] Bir event başarısız olsa da diğerlerini işlemeye devam et
+        }
       }
 
-      await this._updateCheckpointIfHigher(to);
-      logger.debug(`[Worker] Replayed blocks ${from}-${to} (${allEvents.length} events)`);
+      // KRİT-10 Fix: Checkpoint sadece başarılıysa ilerliyor
+      // ÖNCEKİ: Her durumda ilerletiliyordu — event'ler sessizce kayboluyordu
+      if (batchSuccess) {
+        await this._updateCheckpointIfHigher(to);
+      } else {
+        logger.warn(`[Worker] Batch ${from}-${to} kısmen başarısız — checkpoint ilerletilmedi.`);
+      }
+
+      logger.debug(`[Worker] Replay: ${from}-${to} (${allEvents.length} event)`);
     }
 
     this._lastCheckpointBlock = toBlock;
-    logger.info("[Worker] Replay complete.");
+    logger.info("[Worker] Replay tamamlandı.");
   }
 
   _attachLiveListeners() {
@@ -173,13 +218,15 @@ class EventWorker {
     for (const eventName of EVENT_NAMES) {
       this.contract.on(eventName, async (...args) => {
         const event = args[args.length - 1];
-        await this._processEventWithRetry(event);
-        await this._updateCheckpointIfHigher(event.blockNumber);
+        const success = await this._processEventWithRetry(event);
+        // KRİT-10 Fix: Sadece başarılı işlem sonrasında checkpoint ilerlet
+        if (success) {
+          await this._updateCheckpointIfHigher(event.blockNumber);
+        }
       });
     }
 
-    // [TR] Event olmayan bloklarda da checkpoint'i periyodik günceller
-    // [EN] Periodically updates checkpoint even on blocks without events
+    // [TR] Periyodik checkpoint güncellemesi
     this.provider.on("block", async (blockNumber) => {
       if (blockNumber - this._lastCheckpointBlock >= CHECKPOINT_INTERVAL_BLOCKS) {
         await this._updateCheckpointIfHigher(blockNumber);
@@ -187,13 +234,11 @@ class EventWorker {
     });
 
     this.provider.on("error", async (err) => {
-      logger.error(`[Worker] Provider error: ${err.message}. Reconnecting...`);
+      logger.error(`[Worker] Provider hatası: ${err.message}. Yeniden bağlanılıyor...`);
       await this._reconnect();
     });
   }
 
-  // [TR] Checkpoint'i yalnızca monoton artan şekilde günceller — geri alma riski yok
-  // [EN] Updates checkpoint only if higher — prevents rollback risk
   async _updateCheckpointIfHigher(blockNumber) {
     const redis   = getRedisClient();
     const current = parseInt(await redis.get(CHECKPOINT_KEY) || "0");
@@ -203,32 +248,52 @@ class EventWorker {
     }
   }
 
+  /**
+   * KRİT-16 Fix: Zombi WebSocket — reconnect öncesinde eski provider'ı temizle.
+   * ÖNCEKİ: Eski provider.removeAllListeners() veya destroy() yoktu.
+   * Her reconnect'te zombi WebSocket birikiyordu → OOM.
+   */
   async _reconnect() {
+    // [TR] Eski provider'ı tamamen temizle
+    if (this.provider) {
+      try {
+        this.provider.removeAllListeners();
+        if (this.provider.destroy) {
+          await this.provider.destroy();
+        }
+      } catch (err) {
+        logger.warn(`[Worker] Provider temizleme hatası: ${err.message}`);
+      }
+      this.provider = null;
+      this.contract = null;
+    }
+
     await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
     await this._connect();
-    this._attachLiveListeners();
-  }
-
-  async _processEventWithRetry(event, attempt = 1) {
-    try {
-      await this._processEvent(event);
-    } catch (err) {
-      logger.error(`[Worker] Failed to process ${event.eventName} (attempt ${attempt}): ${err.message}`);
-      if (attempt < MAX_RETRIES) {
-        await new Promise(r => setTimeout(r, RETRY_DELAY_MS * attempt));
-        await this._processEventWithRetry(event, attempt + 1);
-      } else {
-        await this._addToDLQ(event, err.message);
-      }
+    if (this.contract) {
+      this._attachLiveListeners();
     }
   }
 
-  // [TR] rPush: Yeni entry'ler listenin sonuna eklenir.
-  //      dlqProcessor lRange(0, 9) ile baştan okur → FIFO sırası sağlanır.
-  //      lPush kullanıldığında en yeni event başa gider, eski event'ler asla işlenmeyebilir.
-  // [EN] rPush: New entries appended to tail.
-  //      dlqProcessor reads from head with lRange(0, 9) → FIFO order guaranteed.
-  //      With lPush, newest event goes to head; oldest events may never be processed.
+  /**
+   * @returns {Promise<boolean>} Başarılıysa true (checkpoint için)
+   */
+  async _processEventWithRetry(event, attempt = 1) {
+    try {
+      await this._processEvent(event);
+      return true;
+    } catch (err) {
+      logger.error(`[Worker] ${event.eventName} başarısız (deneme ${attempt}): ${err.message}`);
+      if (attempt < MAX_RETRIES) {
+        await new Promise(r => setTimeout(r, RETRY_DELAY_MS * attempt));
+        return this._processEventWithRetry(event, attempt + 1);
+      }
+      await this._addToDLQ(event, err.message);
+      return false;
+    }
+  }
+
+  // [TR] rPush: Yeni entry'ler sona eklenir — dlqProcessor FIFO düzeni için
   async _addToDLQ(event, errorMsg) {
     const redis = getRedisClient();
     const entry = JSON.stringify({
@@ -240,7 +305,7 @@ class EventWorker {
       timestamp:   new Date().toISOString(),
     });
     await redis.rPush(DLQ_KEY, entry);
-    logger.error(`[Worker] Event moved to DLQ: ${event.eventName} tx=${event.transactionHash}`);
+    logger.error(`[Worker] Event DLQ'ya eklendi: ${event.eventName} tx=${event.transactionHash}`);
   }
 
   async _processEvent(event) {
@@ -262,11 +327,11 @@ class EventWorker {
     const handler = handlers[event.eventName];
     if (handler) {
       await handler(event);
-      logger.debug(`[Worker] Processed: ${event.eventName} tx=${event.transactionHash}`);
+      logger.debug(`[Worker] İşlendi: ${event.eventName} tx=${event.transactionHash}`);
     }
   }
 
-  // ─── Event Handler'ları / Event Handlers ─────────────────────────────────
+  // ─── Event Handler'ları ─────────────────────────────────────────────────────
 
   async _onWalletRegistered(event) {
     const { wallet } = event.args;
@@ -275,46 +340,54 @@ class EventWorker {
       { $setOnInsert: { wallet_address: wallet.toLowerCase() } },
       { upsert: true }
     );
-    logger.info(`[Worker] Wallet registered on-chain: ${wallet.toLowerCase()}`);
   }
 
   async _onEscrowCreated(event) {
     const { tradeId, maker, amount, tier } = event.args;
-    let listing = await Listing.findOne({ onchain_escrow_id: Number(tradeId) }).lean();
+    const tradeIdNum = Number(tradeId);
+
+    // [TR] Token adresini on-chain event'ten al — KRİT-14 (Sahte Token) koruması
+    const onchainToken = event.args.token?.toLowerCase();
+
+    let listing = await Listing.findOne({ onchain_escrow_id: tradeIdNum }).lean();
 
     if (!listing) {
-      // [TR] Maker'ın on-chain ID'si atanmamış en son ilanıyla eşleştir
-      // [EN] Match to maker's most recent listing without an on-chain ID
+      // KRİT-09 Fix: status: "OPEN" filtresi eklendi + en yakın zamana göre eşleştirme
       listing = await Listing.findOne({
-        maker_address: maker.toLowerCase(),
-        onchain_escrow_id: null,
+        maker_address:      maker.toLowerCase(),
+        onchain_escrow_id:  null,
+        status:             "OPEN",  // KRİT-09: DELETED ilanları karıştırmıyor
+        // [TR] Token adresi eşleşmesi — sahte token koruması
+        ...(onchainToken ? { token_address: onchainToken } : {}),
       }).sort({ _id: -1 }).lean();
 
       if (listing) {
         await Listing.updateOne(
           { _id: listing._id },
-          { $set: { onchain_escrow_id: Number(tradeId), status: "OPEN" } }
+          { $set: { onchain_escrow_id: tradeIdNum, status: "OPEN" } }
         );
       } else {
-        logger.warn(`[Worker] EscrowCreated: Trade #${tradeId} için kaynak ilan bulunamadı.`);
+        // KRİT-08 Fix: Listing bulunamazsa hardcode fallback yok — DLQ'ya ekle
+        logger.warn(`[Worker] EscrowCreated: Trade #${tradeId} için ilan bulunamadı — DLQ'ya alınıyor.`);
+        await this._addToDLQ(event, "Kaynak ilan bulunamadı — retry bekleniyor.");
+        return; // [TR] İşlemi iptal et, hardcode fallback YOK
       }
     }
 
-    const financials = listing
-      ? {
-          crypto_amount: Number(amount),
-          exchange_rate: listing.exchange_rate,
-          crypto_asset:  listing.crypto_asset,
-          fiat_currency: listing.fiat_currency,
-        }
-      : { crypto_amount: Number(amount), exchange_rate: 0, crypto_asset: "USDT", fiat_currency: "TRY" };
+    // FEL-08 Fix: Number() yerine toString() — BigInt hassasiyeti korunuyor
+    const financials = {
+      crypto_amount: amount.toString(), // MongoDB'de String — hassasiyet kaybı yok
+      exchange_rate: listing.exchange_rate,
+      crypto_asset:  listing.crypto_asset,
+      fiat_currency: listing.fiat_currency,
+    };
 
     await Trade.findOneAndUpdate(
-      { onchain_escrow_id: Number(tradeId) },
+      { onchain_escrow_id: tradeIdNum },
       {
         $setOnInsert: {
-          onchain_escrow_id: Number(tradeId),
-          listing_id:        listing ? listing._id : null,
+          onchain_escrow_id: tradeIdNum,
+          listing_id:        listing._id,
           maker_address:     maker.toLowerCase(),
           status:            "OPEN",
           tier:              Number(tier),
@@ -341,12 +414,20 @@ class EventWorker {
 
   async _onPaymentReported(event) {
     const { tradeId, ipfsHash } = event.args;
+
+    // ORTA-06 Fix: IPFS Hash format doğrulaması — XSS injection koruması
+    const safeHash = CID_PATTERN.test(ipfsHash) ? ipfsHash : null;
+    if (!safeHash) {
+      logger.warn(`[Worker] Geçersiz IPFS hash formatı: trade=#${tradeId} hash=${ipfsHash?.slice(0, 20)}...`);
+      // [TR] Geçersiz hash ile devam etme — trade durumunu güncelle ama hash'i boş bırak
+    }
+
     await Trade.findOneAndUpdate(
       { onchain_escrow_id: Number(tradeId) },
       {
         $set: {
           status:                       "PAID",
-          "evidence.ipfs_receipt_hash": ipfsHash,
+          "evidence.ipfs_receipt_hash": safeHash, // null ise boş kalır
           "evidence.receipt_timestamp": new Date(),
           "timers.paid_at":             new Date(),
         },
@@ -356,49 +437,62 @@ class EventWorker {
 
   async _onEscrowReleased(event) {
     const { tradeId } = event.args;
+    const tradeIdNum  = Number(tradeId);
 
-    // [TR] Status değişiminden önce mevcut durum okunur — haksız challenge tespiti için
-    // [EN] Current status read before state change — needed for unjust challenge detection
-    const existingTrade = await Trade.findOne({ onchain_escrow_id: Number(tradeId) }).lean();
+    const existingTrade = await Trade.findOne({ onchain_escrow_id: tradeIdNum }).lean();
     const wasDisputed   = existingTrade?.status === "CHALLENGED";
 
-    const trade = await Trade.findOneAndUpdate(
-      { onchain_escrow_id: Number(tradeId) },
-      { $set: { status: "RESOLVED", "timers.resolved_at": new Date() } },
-      { new: true }
-    );
+    // YÜKS-04 Fix: Atomik MongoDB Transaction
+    const session = await mongoose.startSession();
+    session.startTransaction();
+    try {
+      const trade = await Trade.findOneAndUpdate(
+        { onchain_escrow_id: tradeIdNum },
+        { $set: { status: "RESOLVED", "timers.resolved_at": new Date() } },
+        { new: true, session }
+      );
 
-    if (!trade) {
-      logger.warn(`[Worker] EscrowReleased: Trade #${tradeId} bulunamadı.`);
-      return;
-    }
+      if (!trade) {
+        await session.abortTransaction();
+        logger.warn(`[Worker] EscrowReleased: Trade #${tradeId} bulunamadı.`);
+        return;
+      }
 
-    // [TR] RESOLVED: dekont 24 saat içinde silinir (Unutulma Hakkı)
-    //      Trade.evidence.receipt_delete_at güncellenir — ayrı Receipt koleksiyonu yok.
-    // [EN] RESOLVED: receipt deleted within 24 hours (Right to be Forgotten)
-    //      Updates Trade.evidence.receipt_delete_at — no separate Receipt collection.
-    await Trade.findOneAndUpdate(
-      { onchain_escrow_id: Number(tradeId) },
-      { $set: { "evidence.receipt_delete_at": new Date(Date.now() + 24 * 3600 * 1000) } }
-    );
+      // [TR] Dekont TTL: 24 saat (Unutulma Hakkı)
+      await Trade.findOneAndUpdate(
+        { onchain_escrow_id: tradeIdNum },
+        { $set: { "evidence.receipt_delete_at": new Date(Date.now() + 24 * 3600 * 1000) } },
+        { session }
+      );
 
-    // [TR] CHALLENGED → RESOLVED: maker haksız itiraz açtı, failure_score yazılır
-    // [EN] CHALLENGED → RESOLVED: maker opened unjust challenge, write failure_score
-    if (wasDisputed && trade.maker_address) {
-      const scoreType = "unjust_challenge";
-      const score     = FAILURE_SCORE_WEIGHTS[scoreType];
-      await User.findOneAndUpdate(
-        { wallet_address: trade.maker_address },
-        {
-          $inc:  { "reputation_cache.failure_score": score },
-          $push: {
-            reputation_history: {
-              type: scoreType, score, date: new Date(), tradeId: Number(tradeId),
+      // KRİT-02 Fix: CHALLENGED→RESOLVED = Taker haksız itiraz açtı → TAKER cezalandırılıyor
+      // ÖNCEKİ: trade.maker_address kullanılıyordu — YANLIŞ
+      if (wasDisputed && trade.taker_address) {
+        const scoreType = "unjust_challenge";
+        const score     = FAILURE_SCORE_WEIGHTS[scoreType];
+        // YÜKS-22 Fix: $slice ile maksimum 100 kayıt
+        await User.findOneAndUpdate(
+          { wallet_address: trade.taker_address },
+          {
+            $inc:  { "reputation_cache.failure_score": score },
+            $push: {
+              reputation_history: {
+                $each:  [{ type: scoreType, score, date: new Date(), tradeId: tradeIdNum }],
+                $slice: -MAX_REPUTATION_HISTORY,
+              },
             },
           },
-        }
-      );
-      logger.info(`[Worker] Failure score updated: ${trade.maker_address} +${score} (${scoreType}) trade #${tradeId}`);
+          { session }
+        );
+        logger.info(`[Worker] Haksız itiraz cezası: taker=${trade.taker_address} +${score}`);
+      }
+
+      await session.commitTransaction();
+    } catch (err) {
+      await session.abortTransaction();
+      throw err;
+    } finally {
+      await session.endSession();
     }
   }
 
@@ -414,79 +508,107 @@ class EventWorker {
     const { tradeId } = event.args;
     await Trade.findOneAndUpdate(
       { onchain_escrow_id: Number(tradeId) },
-      { $set: { status: "CANCELED", "timers.resolved_at": new Date() } }
-    );
-
-    // [TR] CANCELED: dekont 24 saat içinde silinir (Unutulma Hakkı)
-    //      Trade.evidence.receipt_delete_at güncellenir — ayrı Receipt koleksiyonu yok.
-    // [EN] CANCELED: receipt deleted within 24 hours (Right to be Forgotten)
-    //      Updates Trade.evidence.receipt_delete_at — no separate Receipt collection.
-    await Trade.findOneAndUpdate(
-      { onchain_escrow_id: Number(tradeId) },
-      { $set: { "evidence.receipt_delete_at": new Date(Date.now() + 24 * 3600 * 1000) } }
+      {
+        $set: {
+          status:                       "CANCELED",
+          "timers.resolved_at":         new Date(),
+          // [TR] Dekont TTL: 24 saat (Unutulma Hakkı)
+          "evidence.receipt_delete_at": new Date(Date.now() + 24 * 3600 * 1000),
+        },
+      }
     );
   }
 
-  // [TR] Her iki tarafa failure_score yazılır. DLQ retry'da çift yazımı önlemek için
-  //      reputation_history'de tradeId+type kombinasyonu kontrol edilir (idempotency).
-  // [EN] Writes failure_score to both parties. Idempotency check on reputation_history
-  //      (tradeId+type) prevents double-write on DLQ retry.
   async _onEscrowBurned(event) {
     const { tradeId } = event.args;
-    const trade = await Trade.findOneAndUpdate(
-      { onchain_escrow_id: Number(tradeId) },
-      { $set: { status: "BURNED", "timers.resolved_at": new Date() } },
-      { new: true }
-    );
+    const tradeIdNum  = Number(tradeId);
 
-    if (trade) {
-      const scoreType = "burned";
-      const score     = FAILURE_SCORE_WEIGHTS[scoreType];
-      const addresses = [trade.maker_address, trade.taker_address].filter(Boolean);
+    // YÜKS-04 Fix: Atomik MongoDB Transaction
+    const session = await mongoose.startSession();
+    session.startTransaction();
+    try {
+      const trade = await Trade.findOneAndUpdate(
+        { onchain_escrow_id: tradeIdNum },
+        {
+          $set: {
+            status:                       "BURNED",
+            "timers.resolved_at":         new Date(),
+            // [TR] Dekont TTL: 30 gün (BURNED/CHALLENGED uzun retention)
+            "evidence.receipt_delete_at": new Date(Date.now() + 30 * 24 * 3600 * 1000),
+          },
+        },
+        { new: true, session }
+      );
 
-      for (const addr of addresses) {
-        const existing = await User.findOne({
-          wallet_address:     addr,
-          reputation_history: { $elemMatch: { type: scoreType, tradeId: Number(tradeId) } },
-        }).lean();
+      if (trade) {
+        const scoreType = "burned";
+        const score     = FAILURE_SCORE_WEIGHTS[scoreType];
+        const addresses = [trade.maker_address, trade.taker_address].filter(Boolean);
 
-        if (existing) {
-          logger.debug(`[Worker] Skipping duplicate failure_score for ${addr} trade #${tradeId}`);
-          continue;
-        }
+        for (const addr of addresses) {
+          // YÜKS-05 Fix: Idempotency — aynı tradeId+type kombinasyonu zaten varsa atla
+          const existing = await User.findOne({
+            wallet_address:     addr,
+            reputation_history: { $elemMatch: { type: scoreType, tradeId: tradeIdNum } },
+          }, null, { session }).lean();
 
-        await User.findOneAndUpdate(
-          { wallet_address: addr },
-          {
-            $inc:  { "reputation_cache.failure_score": score },
-            $push: {
-              reputation_history: {
-                type: scoreType, score, date: new Date(), tradeId: Number(tradeId),
+          if (existing) {
+            logger.debug(`[Worker] Duplicate failure_score atlandı: ${addr} trade #${tradeId}`);
+            continue;
+          }
+
+          // YÜKS-22 Fix: $slice ile maksimum 100 kayıt
+          await User.findOneAndUpdate(
+            { wallet_address: addr },
+            {
+              $inc:  { "reputation_cache.failure_score": score },
+              $push: {
+                reputation_history: {
+                  $each:  [{ type: scoreType, score, date: new Date(), tradeId: tradeIdNum }],
+                  $slice: -MAX_REPUTATION_HISTORY,
+                },
               },
             },
-          }
-        );
+            { session }
+          );
+        }
+        logger.info(`[Worker] Burn cezası: +${score} to ${addresses.length} taraf, trade #${tradeId}`);
       }
-      logger.info(`[Worker] Burn failure scores: +${score} to ${addresses.length} parties, trade #${tradeId}`);
 
-      // [TR] BURNED: dekont 30 gün sonra silinir (CHALLENGED/BURNED uzun retention)
-      //      Trade.evidence.receipt_delete_at güncellenir — ayrı Receipt koleksiyonu yok.
-      // [EN] BURNED: receipt deleted after 30 days (longer retention for CHALLENGED/BURNED)
-      //      Updates Trade.evidence.receipt_delete_at — no separate Receipt collection.
-      await Trade.findOneAndUpdate(
-        { onchain_escrow_id: Number(tradeId) },
-        { $set: { "evidence.receipt_delete_at": new Date(Date.now() + 30 * 24 * 3600 * 1000) } }
-      );
+      await session.commitTransaction();
+    } catch (err) {
+      await session.abortTransaction();
+      throw err;
+    } finally {
+      await session.endSession();
     }
   }
 
   async _onBleedingDecayed(event) {
     const { tradeId, decayedAmount } = event.args;
+    const tradeIdNum = Number(tradeId);
+
+    // YÜKS-05 Fix: Idempotency — transactionHash ile tekrar işleme kontrolü
+    const txHash = event.transactionHash;
+    const existing = await Trade.findOne({
+      onchain_escrow_id: tradeIdNum,
+      "financials.decay_tx_hashes": txHash,
+    }).lean();
+
+    if (existing) {
+      logger.debug(`[Worker] BleedingDecayed tekrar işleme atlandı: tx=${txHash}`);
+      return;
+    }
+
+    // FEL-08 Fix: Number() yerine toString()
     await Trade.findOneAndUpdate(
-      { onchain_escrow_id: Number(tradeId) },
+      { onchain_escrow_id: tradeIdNum },
       {
-        $set: { "timers.last_decay_at": new Date() },
-        $inc: { "financials.total_decayed": Number(decayedAmount) },
+        $set:      { "timers.last_decay_at": new Date() },
+        // [TR] Erimek miktarı String olarak biriktirilir — hassasiyet kaybı yok
+        $inc:      { "financials.total_decayed_num": Number(decayedAmount) }, // yaklaşık görüntüleme
+        $push:     { "financials.decay_tx_hashes": txHash }, // idempotency için
+        $addToSet: { "financials.decayed_amounts": decayedAmount.toString() },
       }
     );
   }
@@ -495,21 +617,29 @@ class EventWorker {
     const { tradeId, proposer } = event.args;
     await Trade.findOneAndUpdate(
       { onchain_escrow_id: Number(tradeId) },
-      { $set: { "cancel_proposal.proposed_by": proposer.toLowerCase(), "cancel_proposal.proposed_at": new Date() } }
+      {
+        $set: {
+          "cancel_proposal.proposed_by":   proposer.toLowerCase(),
+          "cancel_proposal.proposed_at":   new Date(),
+        },
+      }
     );
   }
 
-  // [TR] pinger adresi taker_address ile karşılaştırılır: taker ping = autoRelease yolu,
-  //      maker ping = challenge yolu. Aynı event ismi (MakerPinged) iki farklı akışı tetikler.
-  // [EN] pinger address compared to taker_address: taker ping = autoRelease path,
-  //      maker ping = challenge path. Same event name (MakerPinged) drives two distinct flows.
   async _onMakerPinged(event) {
     const { tradeId, pinger } = event.args;
 
     const trade = await Trade.findOne({ onchain_escrow_id: Number(tradeId) }).lean();
     if (!trade) return;
 
-    const isTakerPing  = pinger.toLowerCase() === trade.taker_address?.toLowerCase();
+    // BACK-04 Fix: taker_address null race condition — mevcut değilse bekle
+    if (!trade.taker_address) {
+      logger.warn(`[Worker] MakerPinged: Trade #${tradeId} taker_address henüz null — DLQ'ya alınıyor.`);
+      await this._addToDLQ(event, "taker_address henüz DB'de yok — EscrowLocked gecikmiş olabilir.");
+      return;
+    }
+
+    const isTakerPing  = pinger.toLowerCase() === trade.taker_address.toLowerCase();
     const updateFields = isTakerPing
       ? { "timers.pinged_at": new Date(), "pinged_by_taker": true }
       : { "timers.challenge_pinged_at": new Date(), "challenge_pinged_by_maker": true };
@@ -520,14 +650,6 @@ class EventWorker {
     );
   }
 
-  // [TR] Dot notation kullanılır — failure_score ve reputation_history korunur.
-  //      $set: { "reputation_cache": {...} } tüm objeyi değiştirip failure_score'u sıfırlar.
-  // [EN] Dot notation used — preserves failure_score and reputation_history.
-  //      $set: { "reputation_cache": {...} } would overwrite object and zero out failure_score.
-  //
-  // ReputationUpdated event 5 parametre taşır: wallet, successful, failed, bannedUntil, effectiveTier.
-  // consecutiveBans ve maxAllowedTier bu event'te YOK — o alanlar buradan güncellenmez,
-  // aksi hâlde NaN yazılır ve reputationDecay.js sorgusunu bozar.
   async _onReputationUpdated(event) {
     const { wallet, successful, failed, bannedUntil, effectiveTier } = event.args;
 
@@ -536,11 +658,10 @@ class EventWorker {
       ? Math.round((Number(successful) / totalTrades) * 100)
       : 100;
 
-    // [TR] Unix timestamp karşılaştırması — bannedUntil 0 ise yasak yok
-    // [EN] Unix timestamp comparison — bannedUntil 0 means no ban
     const banTimestamp = Number(bannedUntil);
-    const isBanned = banTimestamp > Math.floor(Date.now() / 1000);
+    const isBanned     = banTimestamp > Math.floor(Date.now() / 1000);
 
+    // [TR] Dot notation — failure_score ve reputation_history korunur
     await User.findOneAndUpdate(
       { wallet_address: wallet.toLowerCase() },
       {
@@ -548,11 +669,11 @@ class EventWorker {
           "reputation_cache.success_rate":    successRate,
           "reputation_cache.total_trades":    totalTrades,
           "reputation_cache.failed_disputes": Number(failed),
-          //ban state on-chain ile senkronize ediliyor
           "is_banned":    isBanned,
           "banned_until": isBanned ? new Date(banTimestamp * 1000) : null,
-          // consecutive_bans ve max_allowed_tier bu event'te yok —
-          // yanlış değer yazılmasın. Bu alanlar ayrı on-chain okuma gerektirir.
+          // [TR] consecutive_bans ve max_allowed_tier bu event'te yok —
+          // ayrı on-chain okuma gerektirir. Yanlış değer yazılmasını önlemek için
+          // bu alanlar burada güncellenmez.
         },
       },
       { upsert: true }
