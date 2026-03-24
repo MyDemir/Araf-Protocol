@@ -1,66 +1,74 @@
 "use strict";
 
-const { verifyJWT } = require("../services/siwe");
-const logger        = require("../utils/logger");
+const { verifyJWT, isJWTBlacklisted } = require("../services/siwe");
+const logger                           = require("../utils/logger");
 
 /**
- * JWT artık httpOnly cookie'den okunuyor.
+ * requireAuth Middleware
  *
- * ŞİMDİ: Önce httpOnly cookie kontrol edilir, bulunamazsa header'a fallback yapılır.
- *   Bu sayede JWT JavaScript'ten erişilemez (XSS koruması).
+ * ORTA-09 Fix: JWT Blacklist Kontrolü Eklendi.
+ *   ÖNCEKİ: JWT geçerliyse her zaman kabul ediliyordu.
+ *   Logout sonrası 15 dk'lık süre boyunca çalınan JWT kullanılabiliyordu.
+ *   ŞİMDİ: Her doğrulamada JWT'nin jti değeri Redis blacklist'te kontrol ediliyor.
+ *   Blacklist'teki (logout edilmiş) JWT'ler reddediliyor.
  *
- * NOT: requirePIIToken DEĞİŞMEDİ — PII token trade-scoped ve kısa ömürlü,
+ * Dual-Auth Smuggling Fix:
+ *   ÖNCEKİ: Cookie yoksa Authorization: Bearer header'a fallback yapılıyordu.
+ *   XSS ile localStorage'dan çalınan token header üzerinden kabul edilebiliyordu.
+ *   ŞİMDİ: requireAuth yalnızca httpOnly cookie'yi kabul ediyor.
+ *   Header fallback sadece PII token için ayrı middleware'de korunuyor.
+ *
+ * Not: requirePIIToken DEĞİŞMEDİ — PII token trade-scoped ve kısa ömürlü,
  * cookie'de saklanması uygun değil. Bearer header ile gönderilmeye devam eder.
  */
 
 /**
- * @private
- * Helper to extract and verify JWT.
+ * @private JWT'yi sadece httpOnly cookie'den okur (header fallback KALDIRILDI).
  */
-function _getTokenPayload(req) {
-  // Önce httpOnly cookie'den oku
-  let token = req.cookies?.araf_jwt;
+async function _getTokenPayload(req) {
+  const token = req.cookies?.araf_jwt;
 
-  // Fallback: Authorization header (geriye uyumlu + PII dışındaki manuel çağrılar için)
   if (!token) {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      const err = new Error("Authorization header missing");
-      err.statusCode = 401;
-      throw err;
-    }
-    token = authHeader.slice(7);
-  }
-
-  // verifyJWT will throw its own error if token is invalid/expired
-  return verifyJWT(token);
-}
-
-/**
- * @private
- * Helper specifically for PII tokens — ALWAYS reads from Authorization header.
- * PII tokens are trade-scoped and short-lived, they should NOT be in cookies.
- */
-function _getPIITokenPayload(req) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    const err = new Error("PII Authorization header missing");
+    const err = new Error("Oturum bulunamadı. Lütfen giriş yapın.");
     err.statusCode = 401;
     throw err;
   }
 
-  const token = authHeader.slice(7);
-  return verifyJWT(token);
+  const payload = verifyJWT(token);
+
+  // ORTA-09 Fix: Blacklist kontrolü
+  if (payload.jti) {
+    const blacklisted = await isJWTBlacklisted(payload.jti);
+    if (blacklisted) {
+      const err = new Error("Oturum geçersiz kılınmış. Lütfen yeniden giriş yapın.");
+      err.statusCode = 401;
+      throw err;
+    }
+  }
+
+  return payload;
 }
 
 /**
- * requireAuth — Validates JWT on protected routes.
- * Reads from httpOnly cookie first, then Authorization header.
- * Sets req.wallet = lowercase Ethereum address.
+ * @private PII token'ı her zaman Authorization header'dan okur.
  */
-function requireAuth(req, res, next) {
+function _getPIITokenPayload(req) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    const err = new Error("PII Authorization header eksik.");
+    err.statusCode = 401;
+    throw err;
+  }
+  return verifyJWT(authHeader.slice(7));
+}
+
+/**
+ * requireAuth — Korunan route'lar için JWT doğrulaması.
+ * Sadece httpOnly cookie'yi okur — XSS koruması.
+ */
+async function requireAuth(req, res, next) {
   try {
-    const payload = _getTokenPayload(req);
+    const payload = await _getTokenPayload(req);
 
     if (payload.type !== "auth") {
       return res.status(403).json({ error: "Geçersiz token tipi. 'auth' bekleniyordu." });
@@ -69,35 +77,37 @@ function requireAuth(req, res, next) {
     req.wallet = payload.sub.toLowerCase();
     next();
   } catch (err) {
-    logger.warn(`[Auth] Token verification failed: ${err.message}`);
-    return res.status(err.statusCode || 401).json({ error: err.message || "Invalid or expired token" });
+    logger.warn(`[Auth] Token doğrulaması başarısız: ${err.message}`);
+    return res.status(err.statusCode || 401).json({ error: err.message || "Geçersiz veya süresi dolmuş token." });
   }
 }
 
 /**
- * NOT DEĞİŞTİ: PII token her zaman Authorization: Bearer header'ından okunur.
- * PII token cookie'de SAKLANMAMALI — trade-scoped ve kısa ömürlü.
+ * requirePIIToken — IBAN endpoint'i için daha sıkı kontrol.
+ * Token tipi "pii" olmalı ve URL'deki tradeId ile eşleşmeli.
  */
 function requirePIIToken(req, res, next) {
   try {
     const payload = _getPIITokenPayload(req);
 
-    // Must be PII-type token
     if (payload.type !== "pii") {
       return res.status(403).json({ error: "Geçersiz token tipi. 'pii' bekleniyordu." });
     }
 
-    // Token must match the requested tradeId
+    // [TR] Token sadece belirtilen tradeId için geçerli
     if (payload.tradeId !== req.params.tradeId) {
-      logger.warn(`[GÜVENLİK] PII token manipülasyonu denemesi: caller=${payload.sub}, token_trade=${payload.tradeId}, requested_trade=${req.params.tradeId}`);
+      logger.warn(
+        `[GÜVENLİK] PII token manipülasyonu: caller=${payload.sub} ` +
+        `token_trade=${payload.tradeId} requested_trade=${req.params.tradeId}`
+      );
       return res.status(403).json({ error: "Token bu işlem için geçerli değil." });
     }
 
-    req.wallet  = payload.sub.toLowerCase();
+    req.wallet = payload.sub.toLowerCase();
     next();
   } catch (err) {
-    logger.warn(`[PIIAuth] Token verification failed: ${err.message}`);
-    return res.status(err.statusCode || 401).json({ error: err.message || "Invalid or expired PII token" });
+    logger.warn(`[PIIAuth] Token doğrulaması başarısız: ${err.message}`);
+    return res.status(err.statusCode || 401).json({ error: err.message || "Geçersiz PII token." });
   }
 }
 
