@@ -172,9 +172,9 @@ class EventWorker {
     if (!this.contract) return;
 
     const redis      = getRedisClient();
-    const savedSafeBlock = await redis.get(LAST_SAFE_BLOCK_KEY) || await redis.get(CHECKPOINT_KEY);
-    const fromBlock      = savedSafeBlock ? parseInt(savedSafeBlock) + 1 : 0;
+    const savedBlock = await redis.get(CHECKPOINT_KEY);
     const toBlock    = await this.provider.getBlockNumber();
+    const fromBlock  = this._resolveReplayStartBlock(savedBlock, toBlock);
 
     if (fromBlock > toBlock) {
       logger.info("[Worker] Kaçırılan event yok. Checkpoint güncel.");
@@ -265,6 +265,38 @@ class EventWorker {
       await redis.set(CHECKPOINT_KEY, safeBlock);
       this._lastCheckpointBlock = blockNumber;
     }
+  }
+
+
+  _resolveReplayStartBlock(savedBlock, currentBlock) {
+    if (savedBlock !== null && savedBlock !== undefined) {
+      const checkpoint = Number(savedBlock);
+      if (!Number.isInteger(checkpoint) || checkpoint < 0) {
+        throw new Error(`[Worker] Geçersiz checkpoint değeri: ${savedBlock}`);
+      }
+      if (checkpoint > currentBlock) {
+        throw new Error(`[Worker] Checkpoint current block'u aşıyor: checkpoint=${checkpoint} current=${currentBlock}`);
+      }
+      return checkpoint + 1;
+    }
+
+    const configuredStartRaw = process.env.ARAF_DEPLOYMENT_BLOCK ?? process.env.WORKER_START_BLOCK;
+
+    if (configuredStartRaw === undefined || configuredStartRaw === null || configuredStartRaw === "") {
+      logger.warn("[Worker] Checkpoint bulunamadı ve ARAF_DEPLOYMENT_BLOCK/WORKER_START_BLOCK tanımlı değil. Varsayılan başlangıç bloğu: 0.");
+      return 0;
+    }
+
+    const configuredStart = Number(configuredStartRaw);
+    if (!Number.isInteger(configuredStart) || configuredStart < 0) {
+      throw new Error(`[Worker] Geçersiz başlangıç bloğu: ${configuredStartRaw}. Beklenen: >= 0 tam sayı.`);
+    }
+    if (configuredStart > currentBlock) {
+      throw new Error(`[Worker] Başlangıç bloğu current block'tan büyük olamaz: start=${configuredStart} current=${currentBlock}`);
+    }
+
+    logger.info(`[Worker] Checkpoint bulunamadı. Başlangıç bloğu env'den alındı: ${configuredStart}`);
+    return configuredStart;
   }
 
   /**
