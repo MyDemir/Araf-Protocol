@@ -431,9 +431,12 @@ DEPLOYER_PRIVATE_KEY=0x<mainnet_deployer_private_key>
 TREASURY_ADDRESS=0x<gnosis_safe_address>
 BASE_RPC_URL=[https://base-mainnet.g.alchemy.com/v2/](https://base-mainnet.g.alchemy.com/v2/)<API_KEY>
 BASESCAN_API_KEY=<basescan_api_key>
+MAINNET_USDT_ADDRESS=0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2
+MAINNET_USDC_ADDRESS=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
 EOF
 
 # NODE_ENV production set et ki MockERC20 deploy edilmesin
+# Not: MAINNET_USDT_ADDRESS / MAINNET_USDC_ADDRESS eksikse script deploy tamamlanmadan hard fail eder.
 NODE_ENV=production npx hardhat run scripts/deploy.js --network base
 
 # Verify et
@@ -484,6 +487,8 @@ vercel --prod
 - [ ] Gnosis Safe multisig yapılandırılmış (min 3/5)
 - [ ] AWS KMS aktif ve şifreli data key test edilmiş
 - [ ] `NODE_ENV=production` — MockERC20 deploy edilmedi ✅
+- [ ] `MAINNET_USDT_ADDRESS` ve `MAINNET_USDC_ADDRESS` set edildi (zorunlu)
+- [ ] `setSupportedToken` sonrası on-chain doğrulama çıktılarını logda gördün (`supportedTokens(token)==true`)
 - [ ] Kontrat verified on BaseScan
 - [ ] Ownership Gnosis Safe'e devredildi ✅
 - [ ] `pause()` / `unpause()` Gnosis Safe'ten çalışıyor
@@ -491,6 +496,7 @@ vercel --prod
 - [ ] DLQ monitörü alert webhook aktif (Slack/PagerDuty)
 - [ ] `GET /health` → worker: active
 - [ ] Gerçek USDT/USDC adresleri frontend'de doğru
+- [ ] Production deploy'da frontend `.env` auto-write yapılmadı (beklenen davranış)
 - [ ] SIWE domain production domain'e eşleşiyor
 - [ ] Rate limit testleri geçti
 
