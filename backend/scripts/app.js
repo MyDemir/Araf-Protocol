@@ -16,12 +16,15 @@ const logger           = require("./utils/logger");
 
 // [TR] Ethers.js vb. kütüphane içi gizli çökmeleri sisteme yük bindirmeden dosyaya yazar
 // [EN] Catches library-internal hidden crashes without adding load to the system
-process.on("uncaughtException", (err) => {
-  logger.error("[CRITICAL-EXCEPTION] Beklenmedik Çökme (Sistem Durdu):", { message: err.message, stack: err.stack });
-});
-process.on("unhandledRejection", (reason) => {
-  logger.error("[CRITICAL-REJECTION] Yakalanmamış Promise (Sahipsiz Hata):", { reason });
-});
+let _fatalShutdownStarted = false;
+function _handleFatal(reason, payload) {
+  if (_fatalShutdownStarted) return;
+  _fatalShutdownStarted = true;
+  logger.error(`[FATAL] ${reason}`, payload);
+  setTimeout(() => process.exit(1), 500).unref();
+}
+process.on("uncaughtException", (err) => _handleFatal("uncaughtException", { message: err.message, stack: err.stack }));
+process.on("unhandledRejection", (reason) => _handleFatal("unhandledRejection", { reason }));
 
 // [TR] On-chain event'lerini MongoDB'ye yansıtan servis
 // [EN] Service that mirrors on-chain events to MongoDB
@@ -43,6 +46,11 @@ const { runReputationDecay } = require("./jobs/reputationDecay");
 // [EN] Periodic job that saves daily protocol stats to MongoDB
 const { runStatsSnapshot } = require("./jobs/statsSnapshot");
 const { runPendingListingCleanup } = require("./jobs/cleanupPendingListings");
+const { getReadiness, getLiveness } = require("./services/health");
+const {
+  runReceiptCleanup,
+  runPIISnapshotCleanup,
+} = require("./jobs/cleanupSensitiveData");
 
 // [TR] Global Express hata yakalayıcı
 // [EN] Global Express error handler
@@ -141,7 +149,10 @@ async function bootstrap() {
 
     // [TR] DLQ monitörü — her 60 saniyede başarısız event'leri kontrol eder
     // [EN] DLQ monitor — checks failed events every 60 seconds
-    const dlqInterval = setInterval(processDLQ, 60_000);
+    const dlqInterval = setInterval(
+      () => processDLQ({ retryHandler: worker.reprocessDLQEntry }),
+      60_000
+    );
 
     // [TR] İlk çalıştırma 30 sn geciktirilir — cold start'ta DB'ye eş zamanlı yük binmesini önler
     // [EN] First run delayed by 30s — prevents simultaneous DB load on cold start
@@ -164,6 +175,17 @@ async function bootstrap() {
       logger.info("Periyodik PENDING listing temizlik görevi zamanlandı (her 1 saatte bir).");
     }, 90_000);
     const pendingCleanupInterval = setInterval(runPendingListingCleanup, 60 * 60 * 1000);
+
+    // [TR] Hassas veri retention cleanup — her 30 dakikada bir
+    const sensitiveCleanupDelay = setTimeout(async () => {
+      await runReceiptCleanup();
+      await runPIISnapshotCleanup();
+      logger.info("Receipt/PII retention cleanup görevi zamanlandı (her 30 dakikada bir).");
+    }, 120_000);
+    const sensitiveCleanupInterval = setInterval(async () => {
+      await runReceiptCleanup();
+      await runPIISnapshotCleanup();
+    }, 30 * 60 * 1000);
 
     // [TR] Rotalar DB ve Redis hazır olduktan sonra yüklenir
     // [EN] Routes loaded after DB and Redis are ready
@@ -190,11 +212,11 @@ async function bootstrap() {
     app.use("/api/stats",    statsRoutes);
     app.use("/api/receipts", receiptRoutes);
 
-    app.get("/health", (req, res) => res.json({
-      status:    "ok",
-      worker:    "active",
-      timestamp: new Date().toISOString(),
-    }));
+    app.get("/health", (req, res) => res.json(getLiveness()));
+    app.get("/ready", async (req, res) => {
+      const readiness = await getReadiness({ worker, provider: worker.provider });
+      return res.status(readiness.ok ? 200 : 503).json(readiness);
+    });
 
     app.use((req, res) => res.status(404).json({ error: "İstenen endpoint bulunamadı" }));
 
@@ -205,7 +227,7 @@ async function bootstrap() {
       logger.info(`===========================================================`);
       logger.info(`🚀 Araf Protocol Backend Dinleniyor: Port ${PORT}`);
       logger.info(`🌍 Ortam: ${process.env.NODE_ENV || 'development'}`);
-      logger.warn(`🛡️  Güvenlik: Zero Private Key Modu Aktif.`);
+      logger.info(`🛡️  Güvenlik: Non-custodial backend (opsiyonel automation signer olabilir).`);
       logger.info(`===========================================================`);
     });
 
@@ -220,6 +242,8 @@ async function bootstrap() {
       clearInterval(statsSnapshotInterval);
       clearTimeout(pendingCleanupDelay);
       clearInterval(pendingCleanupInterval);
+      clearTimeout(sensitiveCleanupDelay);
+      clearInterval(sensitiveCleanupInterval);
       server.close(async () => {
         await worker.stop();
         await mongoose.connection.close();

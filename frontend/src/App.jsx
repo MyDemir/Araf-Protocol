@@ -518,9 +518,10 @@ function App() {
       const data = await res.json();
       if (data.trades) {
         setActiveEscrows(data.trades.map(t => {
-          const cryptoAmt = t.financials?.crypto_amount || 0;
+          const cryptoAmt = t.financials?.crypto_amount || "0";
+          const cryptoAmtNum = Number(cryptoAmt);
           const rate = t.financials?.exchange_rate || 1;
-          const fiatAmt = cryptoAmt * rate;
+          const fiatAmt = cryptoAmtNum * rate;
           return {
             id: `#${t.onchain_escrow_id}`,
             role: t.maker_address.toLowerCase() === address?.toLowerCase() ? 'maker' : 'taker',
@@ -550,7 +551,7 @@ function App() {
               fiat: t.financials?.fiat_currency || 'TRY',
               rate,
               max: fiatAmt,
-              cryptoAmount: Number(cryptoAmt),
+              cryptoAmount: cryptoAmtNum,
               paidAt: t.timers?.paid_at,
               lockedAt: t.timers?.locked_at,
               pingedAt: t.timers?.pinged_at,

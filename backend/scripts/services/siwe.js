@@ -136,10 +136,18 @@ async function verifySiweSignature(messageStr, signature) {
     throw new Error(`SIWE domain uyuşmazlığı: beklenen ${expectedDomain}, gelen ${message.domain}`);
   }
 
-  // YÜKS-15 Fix: URI kontrolü — phishing koruması
-  if (!message.uri.startsWith(expectedUri)) {
-    logger.warn(`[Auth] SIWE URI uyuşmazlığı: beklenen ${expectedUri}, gelen ${message.uri}`);
-    throw new Error(`SIWE URI uyuşmazlığı: beklenen ${expectedUri}`);
+  // YÜKS-15 Fix: URI kontrolü — exact-origin phishing koruması
+  let parsedIncoming = null;
+  let parsedExpected = null;
+  try {
+    parsedIncoming = new URL(message.uri);
+    parsedExpected = new URL(expectedUri);
+  } catch {
+    throw new Error("SIWE URI formatı geçersiz.");
+  }
+  if (parsedIncoming.origin !== parsedExpected.origin) {
+    logger.warn(`[Auth] SIWE URI origin uyuşmazlığı: beklenen ${parsedExpected.origin}, gelen ${parsedIncoming.origin}`);
+    throw new Error(`SIWE URI uyuşmazlığı: beklenen origin ${parsedExpected.origin}`);
   }
 
   const storedNonce = await consumeNonce(message.address.toLowerCase());
@@ -190,9 +198,12 @@ async function isJWTBlacklisted(jti) {
     const redis = getRedisClient();
     const val   = await redis.get(`${JWT_BLACKLIST_PREFIX}${jti}`);
     return val !== null;
-  } catch {
-    // [TR] Redis erişilemezse fail-open (erişimi engelleme)
-    return false;
+  } catch (err) {
+    const failMode = process.env.JWT_BLACKLIST_FAIL_MODE
+      || (process.env.NODE_ENV === "production" ? "closed" : "open");
+    logger.warn(`[Auth] JWT blacklist kontrolü yapılamadı (mode=${failMode}): ${err.message}`);
+    // [TR] closed: güvenli tarafta kal, open: erişimi kesme
+    return failMode === "closed";
   }
 }
 

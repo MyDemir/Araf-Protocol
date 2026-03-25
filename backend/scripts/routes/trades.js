@@ -10,6 +10,28 @@ const { tradesLimiter } = require("../middleware/rateLimiter");
 const { Trade }         = require("../models/Trade");
 const logger            = require("../utils/logger");
 
+const SAFE_TRADE_PROJECTION = [
+  "_id",
+  "onchain_escrow_id",
+  "listing_id",
+  "maker_address",
+  "taker_address",
+  "status",
+  "tier",
+  "financials",
+  "timers",
+  "cancel_proposal.proposed_by",
+  "cancel_proposal.proposed_at",
+  "cancel_proposal.approved_by",
+  "cancel_proposal.deadline",
+  "cancel_proposal.maker_signed",
+  "cancel_proposal.taker_signed",
+  "evidence.ipfs_receipt_hash",
+  "evidence.receipt_timestamp",
+  "chargeback_ack.acknowledged",
+  "chargeback_ack.acknowledged_at",
+].join(" ");
+
 /**
  * KRİT-12 Fix: EIP-712 Deadline Ezilmesi (Deadlock) Kapatıldı.
  *   ÖNCEKİ: propose-cancel endpoint'i gelen deadline değerini doğrudan
@@ -39,7 +61,7 @@ router.get("/my", requireAuth, tradesLimiter, async (req, res, next) => {
     const trades = await Trade.find({
       $or: [{ maker_address: req.wallet }, { taker_address: req.wallet }],
       status: { $nin: ["RESOLVED", "CANCELED", "BURNED"] },
-    }).sort({ created_at: -1 }).lean();
+    }).select(SAFE_TRADE_PROJECTION).sort({ created_at: -1 }).lean();
     return res.json({ trades });
   } catch (err) { next(err); }
 });
@@ -60,6 +82,7 @@ router.get("/history", requireAuth, tradesLimiter, async (req, res, next) => {
     };
     const skip   = (value.page - 1) * value.limit;
     const trades = await Trade.find(filter)
+      .select(SAFE_TRADE_PROJECTION)
       .sort({ "timers.resolved_at": -1 })
       .skip(skip).limit(value.limit).lean();
     const total  = await Trade.countDocuments(filter);
@@ -90,7 +113,9 @@ router.get("/by-escrow/:onchainId", requireAuth, tradesLimiter, async (req, res,
 // ─── GET /api/trades/:id ──────────────────────────────────────────────────────
 router.get("/:id", requireAuth, tradesLimiter, async (req, res, next) => {
   try {
-    const trade = await Trade.findById(req.params.id).lean();
+    const trade = await Trade.findById(req.params.id)
+      .select(SAFE_TRADE_PROJECTION)
+      .lean();
     if (!trade) return res.status(404).json({ error: "İşlem bulunamadı." });
     if (trade.maker_address !== req.wallet && trade.taker_address !== req.wallet) {
       return res.status(403).json({ error: "Erişim reddedildi." });

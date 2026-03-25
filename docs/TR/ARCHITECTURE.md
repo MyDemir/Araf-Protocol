@@ -38,7 +38,7 @@ Araf Protokolü; fiat para birimi (TRY / USD / EUR) ile kripto varlıklar (USDT 
 | **Oracle-Bağımsız Uyuşmazlık Çözümü** | Hiçbir dış veri kaynağı anlaşmazlıklarda kazananı belirlemez. Çözüm tamamen zaman bazlıdır (Bleeding Escrow). |
 | **İnsansız** | Moderatör yok. Jüri yok. Kodu ve zamanlayıcılar her şeye karar verir. |
 | **MAD Tabanlı Güvenlik** | Karşılıklı Garantili Yıkım (MAD) oyun teorisi: dürüstsüz davranış her zaman dürüst davranıştan daha pahalıya mal olur. |
-| **Sıfır Özel Anahtar Backend** | Backend sunucusu hiçbir cüzdan anahtarı tutmaz ve fonları hareket ettiremez. |
+| **Non-custodial Backend Anahtar Modeli** | Backend kullanıcı fonlarını kontrol eden custody anahtarı tutmaz; operasyonel automation/relayer signer olabilir ancak kullanıcı fonlarını doğrudan hareket ettiremez. |
 
 ### Oracle-Bağımsızlık Açıklaması
 
@@ -79,7 +79,7 @@ Araf **Web2.5 Hibrit Sistem** olarak çalışır. Güvenlik açısından kritik 
 | Katman | Teknoloji | Detaylar |
 |---|---|---|
 | Akıllı Sözleşme | Solidity + Hardhat | 0.8.24 — Base L2 (Chain ID 8453) |
-| Backend | Node.js + Express | CommonJS, Sıfır Özel Anahtar Relayer |
+| Backend | Node.js + Express | CommonJS, non-custodial relayer |
 | Veritabanı | MongoDB + Mongoose | v8.x — İlanlar, İşlemler, Kullanıcılar |
 | Önbellek / Auth | Redis | v4.x — Hız limitleri, Nonce'lar, DLQ |
 | Şifreleme | AES-256-GCM + HKDF | Zarf şifreleme, cüzdan başına DEK |
@@ -92,7 +92,7 @@ Araf **Web2.5 Hibrit Sistem** olarak çalışır. Güvenlik açısından kritik 
 Off-chain altyapı kullanılmasına rağmen **backend fonları çalamaz veya sonuçları manipüle edemez:**
 
 ```
-✅ Backend'in SIFIR özel anahtarı vardır (Relayer deseni)
+✅ Backend'de kullanıcı fonları için custody anahtarı yoktur (operasyonel signer olabilir)
 ✅ Backend escrow serbest bırakamaz (yalnızca kullanıcılar imzalayabilir)
 ✅ Backend Bleeding Escrow zamanlayıcısını atlayamaz (on-chain zorunlu)
 ✅ Backend itibar puanlarını sahte gösteremez (on-chain doğrulanır)
@@ -108,7 +108,7 @@ Off-chain altyapı kullanılmasına rağmen **backend fonları çalamaz veya son
 | **Maker** | Satıcı | İlan açar. USDT + Teminat kilitler. Serbest bırakabilir, itiraz edebilir, iptal önerebilir. | Kendi ilanında Taker olamaz. Teminat işlem çözülene kadar kilitli kalır. |
 | **Taker** | Alıcı | Fiat'ı off-chain gönderir. Taker Teminatı kilitler. Ödeme bildirebilir, iptal onaylayabilir. | Anti-Sybil filtrelerine tabidir. Yasaklanabilir (yalnızca Taker kısıtlaması). |
 | **Hazine** | Protokol | %0.2 başarı ücreti + eriyip/yanan fonları alır. | Adres deploy sırasında belirlenir — backend tarafından değiştirilemez. |
-| **Backend** | Relayer | Şifreli PII'yı depolar, emir defterini indeksler, JWT yayınlar, API sunar. | Sıfır özel anahtar. Fonları hareket ettiremez. On-chain durumu değiştiremez. |
+| **Backend** | Relayer | Şifreli PII'yı depolar, emir defterini indeksler, JWT yayınlar, API sunar. | Kullanıcı fonları için custody anahtarı yoktur; operasyonel signer olabilir. Kullanıcı fonlarını hareket ettiremez. On-chain durumu değiştiremez. |
 
 ---
 
@@ -452,11 +452,11 @@ Taker dekont yüklediğinde public IPFS'e atmak yerine, backend üzerinde AES-25
 | Alan Grubu | Temel Alanlar | Notlar |
 |---|---|---|
 | Kimlik | `onchain_escrow_id`, `listing_id`, `maker_address`, `taker_address` | `onchain_escrow_id` = gerçeğin kaynağı |
-| Finansal | `crypto_amount`, `exchange_rate`, `total_decayed` | `total_decayed` = `BleedingDecayed` olaylarının kümülatif toplamı |
+| Finansal | `crypto_amount` (String, authoritative), `crypto_amount_num` (Number, cache), `exchange_rate`, `total_decayed` (String), `total_decayed_num` (Number, cache), `decay_tx_hashes`, `decayed_amounts` | `*_num` alanları yalnızca analytics/UI için yaklaşık değerdir; enforcement için kullanılmaz |
 | Durum | `status` | On-chain durum makinesini yansıtır |
 | Zamanlayıcılar | `locked_at`, `paid_at`, `challenged_at`, `resolved_at`, `last_decay_at` | `last_decay_at` = son `BleedingDecayed` olayı |
 | Kanıt | `ipfs_receipt_hash`, `receipt_timestamp` | Ödeme makbuzunun IPFS hash'i |
-| İptal Önerisi | `proposed_by`, `maker_signed`, `taker_signed`, imzalar | On-chain gönderimden önce toplanan EIP-712 imzaları |
+| İptal Önerisi | `proposed_by`, `proposed_at`, `approved_by`, `maker_signed`, `taker_signed`, imzalar | On-chain gönderimden önce toplanan EIP-712 imzaları |
 | Chargeback Onayı | `acknowledged`, `acknowledged_by`, `acknowledged_at`, `ip_hash` | `releaseFunds` öncesi Maker'ın yasal onayı. `ip_hash = SHA-256(IP)` |
 | Tier | `tier` (0–4) | İşlem oluşturma anındaki on-chain tier |
 

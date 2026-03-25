@@ -38,7 +38,7 @@ Araf Protocol is a **non-custodial, humanless, and oracle-free** peer-to-peer es
 | **Oracle-Free Dispute Resolution** | No external data source determines the winner in disputes. The resolution is purely time-based (Bleeding Escrow). |
 | **Humanless** | No moderators. No juries. The code and timers decide everything. |
 | **MAD-Based Security** | Mutually Assured Destruction (MAD) game theory: dishonest behavior always costs more than honest behavior. |
-| **Zero Private Key Backend** | The backend server holds no wallet keys and cannot move funds. |
+| **Non-Custodial Backend Key Model** | The backend does not hold user-fund custody keys; an automation/relayer signer may exist for operational jobs but cannot move user funds directly. |
 
 ### Oracle-Independence Explained
 
@@ -79,7 +79,7 @@ Araf operates as a **Web2.5 Hybrid System**. Security-critical operations live o
 | Layer | Technology | Details |
 |---|---|---|
 | Smart Contract | Solidity + Hardhat | 0.8.24 — Base L2 (Chain ID 8453) |
-| Backend | Node.js + Express | CommonJS, Zero Private Key Relayer |
+| Backend | Node.js + Express | CommonJS, non-custodial relayer |
 | Database | MongoDB + Mongoose | v8.x — Listings, Trades, Users |
 | Cache / Auth | Redis | v4.x — Rate limits, Nonces, DLQ |
 | Encryption | AES-256-GCM + HKDF | Envelope encryption, per-wallet DEK |
@@ -92,7 +92,7 @@ Araf operates as a **Web2.5 Hybrid System**. Security-critical operations live o
 Despite using an off-chain infrastructure, **the backend cannot steal funds or manipulate outcomes:**
 
 ```
-✅ Backend has ZERO private keys (Relayer pattern)
+✅ Backend has no custody key for user funds (operational signer may exist)
 ✅ Backend cannot release escrow (only users can sign)
 ✅ Backend cannot bypass the Bleeding Escrow timer (enforced on-chain)
 ✅ Backend cannot fake reputation scores (verified on-chain)
@@ -108,7 +108,7 @@ Despite using an off-chain infrastructure, **the backend cannot steal funds or m
 | **Maker** | Seller | Creates listings. Locks USDT + Collateral. Can release, challenge, propose cancel. | Cannot be a Taker in their own listing. Collateral is locked until the trade is resolved. |
 | **Taker** | Buyer | Sends fiat off-chain. Locks Taker Collateral. Can report payment, approve cancel. | Subject to Anti-Sybil filters. Can be banned (Taker-only restriction). |
 | **Treasury** | Protocol | Receives a 0.2% success fee + decayed/burned funds. | Address is set at deploy time — cannot be changed by the backend. |
-| **Backend** | Relayer | Stores encrypted PII, indexes the order book, issues JWTs, serves the API. | Zero private keys. Cannot move funds. Cannot change on-chain state. |
+| **Backend** | Relayer | Stores encrypted PII, indexes the order book, issues JWTs, serves the API. | No custody key for user funds; optional automation signer may exist. Cannot move user funds. Cannot change on-chain state. |
 
 ---
 
@@ -439,11 +439,11 @@ To prevent triangulation fraud; when the trade enters the `LOCKED` state, the Ma
 | Field Group | Key Fields | Notes |
 |---|---|---|
 | Identity | `onchain_escrow_id`, `listing_id`, `maker_address`, `taker_address` | `onchain_escrow_id` = source of truth |
-| Financials | `crypto_amount`, `exchange_rate`, `total_decayed` | `total_decayed` = cumulative sum of `BleedingDecayed` events |
+| Financials | `crypto_amount` (String, authoritative), `crypto_amount_num` (Number, cache), `exchange_rate`, `total_decayed` (String), `total_decayed_num` (Number, cache), `decay_tx_hashes`, `decayed_amounts` | `*_num` fields are approximate analytics/UI caches and are not enforcement-grade |
 | Status | `status` | Mirrors the on-chain state machine |
 | Timers | `locked_at`, `paid_at`, `challenged_at`, `resolved_at`, `last_decay_at` | `last_decay_at` = last `BleedingDecayed` event |
 | Proof | `ipfs_receipt_hash`, `receipt_timestamp` | IPFS hash of the payment receipt |
-| Cancel Proposal | `proposed_by`, `maker_signed`, `taker_signed`, signatures | EIP-712 signatures collected before on-chain submission |
+| Cancel Proposal | `proposed_by`, `proposed_at`, `approved_by`, `maker_signed`, `taker_signed`, signatures | EIP-712 signatures collected before on-chain submission |
 | Chargeback Ack | `acknowledged`, `acknowledged_by`, `acknowledged_at`, `ip_hash` | Maker's legal acknowledgment before `releaseFunds`. `ip_hash = SHA-256(IP)` |
 | Tier | `tier` (0–4) | On-chain tier at the time of trade creation |
 

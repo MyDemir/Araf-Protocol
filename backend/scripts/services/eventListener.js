@@ -96,12 +96,29 @@ const ARAF_ABI = [
   "event EscrowBurned(uint256 indexed tradeId, uint256 burnedAmount)",
 ];
 
+const EVENT_ARG_KEYS = {
+  WalletRegistered:  ["wallet", "timestamp"],
+  EscrowCreated:     ["tradeId", "maker", "token", "amount", "tier"],
+  EscrowLocked:      ["tradeId", "taker", "takerBond"],
+  PaymentReported:   ["tradeId", "ipfsHash", "timestamp"],
+  EscrowReleased:    ["tradeId", "maker", "taker", "takerFee", "makerFee"],
+  DisputeOpened:     ["tradeId", "challenger", "timestamp"],
+  CancelProposed:    ["tradeId", "proposer"],
+  EscrowCanceled:    ["tradeId", "makerRefund", "takerRefund"],
+  MakerPinged:       ["tradeId", "pinger", "timestamp"],
+  ReputationUpdated: ["wallet", "successful", "failed", "bannedUntil", "effectiveTier"],
+  BleedingDecayed:   ["tradeId", "decayedAmount", "timestamp"],
+  EscrowBurned:      ["tradeId", "burnedAmount"],
+};
+
 class EventWorker {
   constructor() {
     this.provider  = null;
     this.contract  = null;
     this.isRunning = false;
     this._lastCheckpointBlock = 0;
+    this._lastSeenBlock = 0;
+    this._isReconnecting = false;
   }
 
   async start() {
@@ -160,8 +177,17 @@ class EventWorker {
 
     const redis      = getRedisClient();
     const savedBlock = await redis.get(CHECKPOINT_KEY);
-    const fromBlock  = savedBlock ? parseInt(savedBlock) + 1 : 0;
+    const startBlockEnv = process.env.WORKER_START_BLOCK || process.env.ARAF_DEPLOYMENT_BLOCK;
+    const fallbackStartBlock = startBlockEnv ? parseInt(startBlockEnv, 10) : 0;
+    if (!savedBlock && process.env.NODE_ENV === "production" && !Number.isFinite(fallbackStartBlock)) {
+      throw new Error("[Worker] Production'da checkpoint yoksa WORKER_START_BLOCK veya ARAF_DEPLOYMENT_BLOCK zorunludur.");
+    }
+    const fromBlock = savedBlock ? parseInt(savedBlock, 10) + 1 : Math.max(0, fallbackStartBlock || 0);
     const toBlock    = await this.provider.getBlockNumber();
+    if (fromBlock > toBlock) {
+      logger.warn(`[Worker] Replay başlangıç bloğu zincir başından ileride: from=${fromBlock} to=${toBlock}`);
+      return;
+    }
 
     if (fromBlock > toBlock) {
       logger.info("[Worker] Kaçırılan event yok. Checkpoint güncel.");
@@ -208,7 +234,9 @@ class EventWorker {
       logger.debug(`[Worker] Replay: ${from}-${to} (${allEvents.length} event)`);
     }
 
-    this._lastCheckpointBlock = toBlock;
+    const latestCheckpoint = parseInt(await redis.get(CHECKPOINT_KEY) || "0", 10);
+    this._lastCheckpointBlock = latestCheckpoint;
+    this._lastSeenBlock = toBlock;
     logger.info("[Worker] Replay tamamlandı.");
   }
 
@@ -226,10 +254,11 @@ class EventWorker {
       });
     }
 
-    // [TR] Periyodik checkpoint güncellemesi
+    // [TR] Live block gözlemi (checkpoint advance ETMEZ)
     this.provider.on("block", async (blockNumber) => {
+      this._lastSeenBlock = blockNumber;
       if (blockNumber - this._lastCheckpointBlock >= CHECKPOINT_INTERVAL_BLOCKS) {
-        await this._updateCheckpointIfHigher(blockNumber);
+        logger.warn(`[Worker] Checkpoint geride: safe=${this._lastCheckpointBlock} seen=${blockNumber}`);
       }
     });
 
@@ -254,24 +283,34 @@ class EventWorker {
    * Her reconnect'te zombi WebSocket birikiyordu → OOM.
    */
   async _reconnect() {
-    // [TR] Eski provider'ı tamamen temizle
-    if (this.provider) {
-      try {
-        this.provider.removeAllListeners();
-        if (this.provider.destroy) {
-          await this.provider.destroy();
-        }
-      } catch (err) {
-        logger.warn(`[Worker] Provider temizleme hatası: ${err.message}`);
-      }
-      this.provider = null;
-      this.contract = null;
+    if (this._isReconnecting) {
+      logger.warn("[Worker] Reconnect zaten çalışıyor, ikinci çağrı atlandı.");
+      return;
     }
+    this._isReconnecting = true;
+    // [TR] Eski provider'ı tamamen temizle
+    try {
+      if (this.provider) {
+        try {
+          this.provider.removeAllListeners();
+          if (this.provider.destroy) {
+            await this.provider.destroy();
+          }
+        } catch (err) {
+          logger.warn(`[Worker] Provider temizleme hatası: ${err.message}`);
+        }
+        this.provider = null;
+        this.contract = null;
+      }
 
-    await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
-    await this._connect();
-    if (this.contract) {
-      this._attachLiveListeners();
+      await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+      await this._connect();
+      if (this.contract) {
+        await this._replayMissedEvents();
+        this._attachLiveListeners();
+      }
+    } finally {
+      this._isReconnecting = false;
     }
   }
 
@@ -296,11 +335,20 @@ class EventWorker {
   // [TR] rPush: Yeni entry'ler sona eklenir — dlqProcessor FIFO düzeni için
   async _addToDLQ(event, errorMsg) {
     const redis = getRedisClient();
+    const namedArgs = {};
+    if (event?.args && typeof event.args === "object") {
+      for (const [key, value] of Object.entries(event.args)) {
+        if (!Number.isNaN(Number(key))) continue;
+        namedArgs[key] = value?.toString ? value.toString() : value;
+      }
+    }
+
     const entry = JSON.stringify({
       eventName:   event.eventName,
       txHash:      event.transactionHash,
       blockNumber: event.blockNumber,
       args:        event.args?.map(a => a.toString()),
+      namedArgs,
       error:       errorMsg,
       timestamp:   new Date().toISOString(),
     });
@@ -378,9 +426,14 @@ class EventWorker {
     // FEL-08 Fix: Number() yerine toString() — BigInt hassasiyeti korunuyor
     const financials = {
       crypto_amount: amount.toString(), // MongoDB'de String — hassasiyet kaybı yok
+      crypto_amount_num: Number(amount),
       exchange_rate: listing.exchange_rate,
       crypto_asset:  listing.crypto_asset,
       fiat_currency: listing.fiat_currency,
+      total_decayed: "0",
+      total_decayed_num: 0,
+      decay_tx_hashes: [],
+      decayed_amounts: [],
     };
 
     await Trade.findOneAndUpdate(
@@ -636,13 +689,24 @@ class EventWorker {
     }
 
     // FEL-08 Fix: Number() yerine toString()
+    const trade = await Trade.findOne({ onchain_escrow_id: tradeIdNum })
+      .select("financials.total_decayed")
+      .lean();
+    if (!trade) return;
+
+    const currentTotal = BigInt(trade.financials?.total_decayed || "0");
+    const nextTotal    = (currentTotal + BigInt(decayedAmount.toString())).toString();
+
     await Trade.findOneAndUpdate(
       { onchain_escrow_id: tradeIdNum },
       {
-        $set:      { "timers.last_decay_at": new Date() },
-        // [TR] Erimek miktarı String olarak biriktirilir — hassasiyet kaybı yok
-        $inc:      { "financials.total_decayed_num": Number(decayedAmount) }, // yaklaşık görüntüleme
-        $push:     { "financials.decay_tx_hashes": txHash }, // idempotency için
+        $set: {
+          "timers.last_decay_at": new Date(),
+          "financials.total_decayed": nextTotal,
+        },
+        // [TR] Yaklaşık Number alanı yalnızca analytics için korunur
+        $inc:      { "financials.total_decayed_num": Number(decayedAmount) },
+        $push:     { "financials.decay_tx_hashes": txHash },
         $addToSet: { "financials.decayed_amounts": decayedAmount.toString() },
       }
     );
@@ -717,4 +781,31 @@ class EventWorker {
 }
 
 const worker = new EventWorker();
+worker.buildSyntheticEventFromDLQEntry = function buildSyntheticEventFromDLQEntry(entry) {
+  const mappedArgs = { ...(entry.namedArgs || {}) };
+  if (!Object.keys(mappedArgs).length && Array.isArray(entry.args)) {
+    const keys = EVENT_ARG_KEYS[entry.eventName] || [];
+    keys.forEach((key, i) => {
+      if (entry.args[i] !== undefined) mappedArgs[key] = entry.args[i];
+    });
+  }
+  return {
+    eventName:       entry.eventName,
+    transactionHash: entry.txHash,
+    blockNumber:     entry.blockNumber,
+    args:            mappedArgs,
+  };
+};
+
+worker.reprocessDLQEntry = async function reprocessDLQEntry(entry) {
+  if (!entry?.eventName) return false;
+  try {
+    const syntheticEvent = worker.buildSyntheticEventFromDLQEntry(entry);
+    await worker._processEvent(syntheticEvent);
+    return true;
+  } catch (err) {
+    logger.error(`[Worker] DLQ re-drive başarısız: ${entry.eventName} tx=${entry.txHash} err=${err.message}`);
+    return false;
+  }
+};
 module.exports = worker;
