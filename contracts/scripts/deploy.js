@@ -1,49 +1,51 @@
 /**
- * ArafEscrow Deploy Script (Güncellenmiş Testnet Sürümü)
+ * ArafEscrow Deploy Script (Güncellenmiş Testnet + Mainnet Güvenli Sürüm)
  *
- * Deploy ve test token ayarları tamamlandıktan hemen sonra ownership, TREASURY_ADDRESS'e devredilir.
- * Bu sayede DEPLOYER_PRIVATE_KEY sızsa bile kontrat üzerinde hiçbir yetkisi kalmaz.
+ * Deploy sonrası token support doğrulaması zincir üstünde teyit edilir.
+ * Ownership, yalnızca tüm desteklenen tokenlar başarıyla aktif ve doğrulanmışsa devredilir.
+ * Production ortamında gerçek token adresleri ENV'den zorunlu alınır; eksikse script hard fail olur.
  *
  * Kullanım: npx hardhat run scripts/deploy.js --network localhost
  */
 const { ethers } = require("hardhat");
-const fs   = require("fs");
+const fs = require("fs");
 const path = require("path");
 
-function resolveProductionTokenConfig() {
-  const isProduction = process.env.NODE_ENV === "production";
-  if (!isProduction) {
-    return { isProduction, usdtAddress: "", usdcAddress: "" };
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+function requireEnvAddress(name) {
+  const value = process.env[name];
+  if (!value || value === ZERO_ADDRESS) {
+    throw new Error(`❌ ${name} .env'de zorunlu ve geçerli bir adres olmalı.`);
+  }
+  return ethers.getAddress(value);
+}
+
+async function enableAndVerifySupportedToken(escrow, tokenAddress, symbol) {
+  const setTx = await escrow.setSupportedToken(tokenAddress, true);
+  await setTx.wait();
+
+  const isSupported = await escrow.supportedTokens(tokenAddress);
+  if (!isSupported) {
+    throw new Error(`❌ ${symbol} desteklenen token olarak zincir üstünde doğrulanamadı: ${tokenAddress}`);
   }
 
-  const usdtAddress = process.env.MAINNET_USDT_ADDRESS;
-  const usdcAddress = process.env.MAINNET_USDC_ADDRESS;
-
-  if (!usdtAddress || !usdcAddress) {
-    throw new Error("❌ Production deploy için MAINNET_USDT_ADDRESS ve MAINNET_USDC_ADDRESS zorunludur.");
-  }
-
-  return {
-    isProduction,
-    usdtAddress: ethers.getAddress(usdtAddress),
-    usdcAddress: ethers.getAddress(usdcAddress),
-  };
+  console.log(`✅ ${symbol} desteklenen token listesine eklendi ve zincir üstünde doğrulandı:`, tokenAddress);
+  return { symbol, address: tokenAddress, isSupported };
 }
 
 async function main() {
+  const isProduction = process.env.NODE_ENV === "production";
+
   const [deployer] = await ethers.getSigners();
   console.log("🚀 Deploy eden cüzdan:", deployer.address);
+  console.log("🌍 Ortam:", isProduction ? "production" : "non-production");
 
   const balance = await ethers.provider.getBalance(deployer.address);
   console.log("💰 Bakiye:", ethers.formatEther(balance), "ETH\n");
 
   // ── Treasury & Owner ──────────────────────────────────────────────────────
-  const treasury = process.env.TREASURY_ADDRESS;
-  if (!treasury || treasury === "0x0000000000000000000000000000000000000000") {
-    throw new Error("❌ TREASURY_ADDRESS .env'de set edilmeli! (deploy eden cüzdan değil, hazine cüzdanı)");
-  }
-
-  const treasuryAddress = ethers.getAddress(treasury);
+  const treasuryAddress = requireEnvAddress("TREASURY_ADDRESS");
   console.log("🏦 Treasury & Son Owner adresi:", treasuryAddress);
 
   // ── 1. Escrow Kontratı Deploy ─────────────────────────────────────────────
@@ -58,9 +60,9 @@ async function main() {
   // ── ABI Kopyalama ─────────────────────────────────────────────────────────
   try {
     const artifactPath = path.resolve(__dirname, "../artifacts/src/ArafEscrow.sol/ArafEscrow.json");
-    const artifact     = JSON.parse(fs.readFileSync(artifactPath, "utf8"));
-    const abiDestDir   = path.resolve(__dirname, "../../frontend/src/abi");
-    const abiDestPath  = path.join(abiDestDir, "ArafEscrow.json");
+    const artifact = JSON.parse(fs.readFileSync(artifactPath, "utf8"));
+    const abiDestDir = path.resolve(__dirname, "../../frontend/src/abi");
+    const abiDestPath = path.join(abiDestDir, "ArafEscrow.json");
 
     fs.mkdirSync(abiDestDir, { recursive: true });
     fs.writeFileSync(abiDestPath, JSON.stringify(artifact.abi, null, 2));
@@ -69,11 +71,18 @@ async function main() {
     console.warn("⚠ ABI kopyalanamadı (Önemli Değil, Hardcoded ABI kullanıyoruz):", err.message);
   }
 
-  // ── 2. Token Setup ────────────────────────────────────────────────────────
-  const tokenConfig = resolveProductionTokenConfig();
-  let { usdtAddress, usdcAddress } = tokenConfig;
+  // ── 2. Supported Token Kurulumu (Ownership devrinden ÖNCE) ───────────────
+  let usdtAddress = "";
+  let usdcAddress = "";
+  const tokenSupportChecks = [];
 
-  if (!tokenConfig.isProduction) {
+  if (isProduction) {
+    console.log("\n⏳ Production token adresleri env'den alınıyor...");
+    usdtAddress = requireEnvAddress("MAINNET_USDT_ADDRESS");
+    usdcAddress = requireEnvAddress("MAINNET_USDC_ADDRESS");
+    console.log("✅ MAINNET_USDT_ADDRESS:", usdtAddress);
+    console.log("✅ MAINNET_USDC_ADDRESS:", usdcAddress);
+  } else {
     console.log("\n⏳ MockERC20 (USDT ve USDC) deploy ediliyor...");
     const MockERC20 = await ethers.getContractFactory("MockERC20");
 
@@ -88,32 +97,22 @@ async function main() {
     console.log("✅ MockUSDC deploy edildi:", usdcAddress);
   }
 
-  await escrow.setSupportedToken(usdtAddress, true);
-  await escrow.setSupportedToken(usdcAddress, true);
+  tokenSupportChecks.push(await enableAndVerifySupportedToken(escrow, usdtAddress, "USDT"));
+  tokenSupportChecks.push(await enableAndVerifySupportedToken(escrow, usdcAddress, "USDC"));
 
-  const [usdtEnabled, usdcEnabled] = await Promise.all([
-    escrow.supportedTokens(usdtAddress),
-    escrow.supportedTokens(usdcAddress),
-  ]);
-
-  if (!usdtEnabled || !usdcEnabled) {
-    throw new Error("❌ Supported token doğrulaması başarısız.");
+  const allTokenSupportVerified = tokenSupportChecks.every((check) => check.isSupported);
+  if (!allTokenSupportVerified) {
+    throw new Error("❌ Token support doğrulaması tamamlanmadı; ownership devri iptal edildi.");
   }
 
-  if (tokenConfig.isProduction) {
-    console.log("✅ Production USDT/USDC desteklenen token olarak doğrulandı.");
-  } else {
-    console.log("✅ Mock USDT/USDC desteklenen token olarak doğrulandı.");
-  }
-
-  // ── 3. Ownership Devri
+  // ── 3. Ownership Devri ────────────────────────────────────────────────────
   console.log("\n🔒 Ownership devrediliyor →", treasuryAddress);
   const tx = await escrow.transferOwnership(treasuryAddress);
   await tx.wait();
   console.log("✅ Ownership başarıyla devredildi!");
 
-  // ── 4. AKILLI .ENV YÖNETİMİ (sadece non-production) ─────────────────────
-  if (!tokenConfig.isProduction) {
+  // ── 4. FE .env Auto-write (Production'da KAPALI) ──────────────────────────
+  if (!isProduction) {
     const frontendEnvPath = path.resolve(__dirname, "../../frontend/.env");
     const exampleEnvPath = path.resolve(__dirname, "../../frontend/.env.example");
 
@@ -131,23 +130,27 @@ async function main() {
         envContent = envContent.replace(/VITE_API_URL=.*/, `VITE_API_URL=${apiUrl}`);
       }
 
-      envContent = envContent.replace(/VITE_ESCROW_ADDRESS=.*/, `VITE_ESCROW_ADDRESS="${address}"`);
-      envContent = envContent.replace(/VITE_USDT_ADDRESS=.*/, `VITE_USDT_ADDRESS="${usdtAddress}"`);
-      envContent = envContent.replace(/VITE_USDC_ADDRESS=.*/, `VITE_USDC_ADDRESS="${usdcAddress}"`);
+      envContent = envContent.replace(/VITE_ESCROW_ADDRESS=.*/, `VITE_ESCROW_ADDRESS=\"${address}\"`);
+      envContent = envContent.replace(/VITE_USDT_ADDRESS=.*/, `VITE_USDT_ADDRESS=\"${usdtAddress}\"`);
+      envContent = envContent.replace(/VITE_USDC_ADDRESS=.*/, `VITE_USDC_ADDRESS=\"${usdcAddress}\"`);
 
       fs.writeFileSync(frontendEnvPath, envContent);
-      console.log("✅ .env dosyası otomatik olarak güncellendi.");
+      console.log("✅ .env dosyası otomatik olarak güncellendi (non-production). ");
     }
+  } else {
+    console.log("ℹ️ Production modunda frontend/.env auto-write atlandı.");
   }
 
-  // ── 5. Sonuçlar ve .env Çıktıları ─────────────────────────────────────────
-  console.log("\n🎉 BÜTÜN İŞLEMLER TAMAMLANDI! 🎉");
-  console.log("--------------------------------------------------");
-  console.log(`VITE_ESCROW_ADDRESS="${address}"`);
-  if (!tokenConfig.isProduction) {
-    console.log(`VITE_USDT_ADDRESS="${usdtAddress}"`);
-    console.log(`VITE_USDC_ADDRESS="${usdcAddress}"`);
+  // ── 5. Sonuçlar ve completion koşulu ──────────────────────────────────────
+  if (!allTokenSupportVerified) {
+    throw new Error("❌ deployment complete koşulu sağlanmadı: token support doğrulaması başarısız.");
   }
+
+  console.log("\n🎉 DEPLOYMENT COMPLETE (token support zincir üstünde doğrulandı) 🎉");
+  console.log("--------------------------------------------------");
+  console.log(`VITE_ESCROW_ADDRESS=\"${address}\"`);
+  console.log(`VITE_USDT_ADDRESS=\"${usdtAddress}\"`);
+  console.log(`VITE_USDC_ADDRESS=\"${usdcAddress}\"`);
   console.log("--------------------------------------------------");
 }
 

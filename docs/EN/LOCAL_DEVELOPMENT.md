@@ -302,7 +302,12 @@ fly secrets set \
   TREASURY_ADDRESS="<TREASURY_WALLET>" \
   RELAYER_PRIVATE_KEY="0x<relayer_private_key>" \
   SIWE_DOMAIN="araf-protocol-backend.fly.dev" \
-  ALLOWED_ORIGINS="[https://araf-protocol.vercel.app](https://araf-protocol.vercel.app)"
+  ALLOWED_ORIGINS="[https://araf-protocol.vercel.app](https://araf-protocol.vercel.app)" \
+  ARAF_DEPLOYMENT_BLOCK="<DEPLOY_BLOCK_NUMBER>"
+
+# First install: seed checkpoint (prevents genesis replay)
+# Note: skip this if Redis already has a checkpoint.
+redis-cli -u "$REDIS_URL" SET worker:last_block "$ARAF_DEPLOYMENT_BLOCK"
 
 # Deploy
 fly deploy
@@ -431,9 +436,12 @@ DEPLOYER_PRIVATE_KEY=0x<mainnet_deployer_private_key>
 TREASURY_ADDRESS=0x<gnosis_safe_address>
 BASE_RPC_URL=[https://base-mainnet.g.alchemy.com/v2/](https://base-mainnet.g.alchemy.com/v2/)<API_KEY>
 BASESCAN_API_KEY=<basescan_api_key>
+MAINNET_USDT_ADDRESS=0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2
+MAINNET_USDC_ADDRESS=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
 EOF
 
 # Set NODE_ENV to production so MockERC20 is NOT deployed
+# Note: Script hard-fails before completion if MAINNET_USDT_ADDRESS / MAINNET_USDC_ADDRESS are missing.
 NODE_ENV=production npx hardhat run scripts/deploy.js --network base
 
 # Verify
@@ -484,6 +492,8 @@ vercel --prod
 - [ ] Gnosis Safe multisig is configured (min 3/5)
 - [ ] AWS KMS is active and encrypted data key is tested
 - [ ] `NODE_ENV=production` — MockERC20 was not deployed ✅
+- [ ] `MAINNET_USDT_ADDRESS` and `MAINNET_USDC_ADDRESS` are set (mandatory)
+- [ ] You saw post-`setSupportedToken` on-chain checks in logs (`supportedTokens(token)==true`)
 - [ ] Contract verified on BaseScan
 - [ ] Ownership transferred to Gnosis Safe ✅
 - [ ] `pause()` / `unpause()` is operational from Gnosis Safe
@@ -491,6 +501,7 @@ vercel --prod
 - [ ] DLQ monitor alert webhook is active (Slack/PagerDuty)
 - [ ] `GET /health` → worker: active
 - [ ] Real USDT/USDC addresses are correct on the frontend
+- [ ] Frontend `.env` auto-write was skipped in production (expected behavior)
 - [ ] SIWE domain matches the production domain
 - [ ] Rate limit tests passed
 
