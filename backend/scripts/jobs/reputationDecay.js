@@ -3,14 +3,11 @@
 /**
  * Reputation Decay Job — Periyodik İtibar Temizleme Görevi
  *
- * KRİT-13 Fix: Null Timestamp Körlüğü Düzeltildi — Temiz Sayfa Artık Çalışıyor.
- *   ÖNCEKİ: Sorguda `"banned_until": { $lt: oneHundredEightyDaysAgo }` kullanılıyordu.
- *   Sorun: User.js'teki checkBanExpiry() çağrıldığında banned_until = null yapılıyordu.
- *   MongoDB'nin $lt operatörü null değerlerle eşleşmez — hiçbir kullanıcı bulunamıyordu.
- *   180 günlük "temiz sayfa" kuralı teknik olarak HİÇBİR ZAMAN tetiklenmiyordu.
- *   ŞİMDİ: İki farklı durum ayrı olarak sorgulanıyor:
- *     1. banned_until geçerli bir tarih ve 180+ gün önce dolmuş (normal durum)
- *     2. banned_until null AMA consecutive_bans > 0 (checkBanExpiry çağrılmış durum)
+ * KRİT-13 Fix (v2): Stale DB mirror bağımlılığı kaldırıldı.
+ *   ÖNCEKİ: Aday seçimi DB'deki banned_until / consecutive_bans alanlarına dayanıyordu.
+ *   Sorun: Bu alanlar stale kalabildiğinde decay adayı yanlış seçiliyor veya kaçıyordu.
+ *   ŞİMDİ: DB yalnızca aday havuzu için kullanılıyor; nihai karar on-chain
+ *   reputation() verisine göre veriliyor (bannedUntil + consecutiveBans).
  *
  * Bu görev:
  * 1. Her 24 saatte bir çalışır (app.js tarafından tetiklenir)
@@ -26,6 +23,7 @@ const logger     = require("../utils/logger");
 // [TR] Sadece decayReputation fonksiyonunu çağırmak için minimal ABI
 const DECAY_ABI = [
   "function decayReputation(address _wallet)",
+  "function reputation(address) view returns (uint256 successfulTrades, uint256 failedDisputes, uint256 bannedUntil, uint256 consecutiveBans)",
 ];
 
 let relayerWallet = null;
@@ -67,31 +65,27 @@ async function runReputationDecay() {
 
   const oneHundredEightyDaysAgo = new Date(Date.now() - 180 * 24 * 3600 * 1000);
 
-  // KRİT-13 Fix: İki durum ayrı ayrı sorgulanıyor
-  //
-  // Durum 1: banned_until geçerli bir tarih, 180+ gün önce dolmuş
-  //   → checkBanExpiry() henüz çağrılmamış kullanıcılar
-  //
-  // Durum 2: banned_until null AMA consecutive_bans > 0
-  //   → checkBanExpiry() çağrılmış, DB'de null yapılmış ama on-chain temizlenmemiş
-  //   ÖNCEKİ: Bu grup $lt null eşleşmediği için HİÇ bulunmuyordu!
-  const usersToClean = await User.find({
-    $or: [
-      // Durum 1: banned_until geçerli tarih ve 180 gün dolmuş
-      {
-        banned_until:    { $lt: oneHundredEightyDaysAgo, $ne: null },
-        consecutive_bans: { $gt: 0 },
-      },
-      // Durum 2: banned_until null (checkBanExpiry temizlemiş) ama consecutive_bans hâlâ > 0
-      // KRİT-13 Fix: Bu durumu da yakalıyoruz
-      {
-        banned_until:    null,
-        consecutive_bans: { $gt: 0 },
-        // [TR] is_banned false olmak zorunda — aktif banlı değil, temizlenmiş
-        is_banned:       false,
-      },
-    ],
-  }).limit(50); // [TR] Gas maliyetlerini kontrol altında tutmak için bir seferde max 50
+  // [TR] Stale mirror riskini azaltmak için adayları geniş havuzdan al, nihai kararı on-chain ver.
+  // [EN] Reduce stale mirror risk: pick a broad candidate pool, decide eligibility on-chain.
+  const candidates = await User.find({ is_banned: false })
+    .select("wallet_address")
+    .limit(200);
+
+  const usersToClean = [];
+  for (const user of candidates) {
+    try {
+      const rep = await contract.reputation(user.wallet_address);
+      const bannedUntil = Number(rep.bannedUntil);
+      const consecutiveBans = Number(rep.consecutiveBans);
+      if (!bannedUntil || consecutiveBans <= 0) continue;
+      if (new Date(bannedUntil * 1000) < oneHundredEightyDaysAgo) {
+        usersToClean.push(user);
+      }
+      if (usersToClean.length >= 50) break;
+    } catch (err) {
+      logger.warn(`[DecayJob] reputation() okunamadı: ${user.wallet_address} err=${err.message}`);
+    }
+  }
 
   if (usersToClean.length === 0) {
     logger.info("[DecayJob] Temizlenecek itibara sahip kullanıcı bulunamadı.");

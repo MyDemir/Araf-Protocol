@@ -28,7 +28,7 @@ Araf operates as a **Web 2.5 Hybrid System**, combining blockchain security with
 | **Web2 (Off-Chain)** | Privacy & Performance | Node.js, MongoDB, Redis | PII data (IBAN) is not stored on-chain for GDPR compliance. Sub-50ms listing queries. |
 
 ### ⚡ Key Engineering Solutions
-* **🔐 Zero Private Key Backend:** The server acts only as a "Relayer" and has no keys to move user funds.
+* **🔐 Non-custodial Backend Key Model:** The backend does not hold user-fund custody keys; optional relayer/automation signer keys may exist for operational jobs.
 * **🛡 Anti-Sybil Shield:** Filters like Wallet Age (min. 7 days), Dust limits, and cooldowns prevent bot attacks.
 * **🔒 Envelope Encryption:** Sensitive data is encrypted with AES-256-GCM; even a DB leak won't expose PII.
 * **🤝 Gasless Agreement (EIP-712):** Mutual decisions like cancellations are signed off-chain without gas fees.
@@ -57,7 +57,7 @@ Araf, blokzincirin tavizsiz güvenliğini modern webin kullanıcı deneyimi ve g
 | **Web2 (Off-Chain)** | Gizlilik & Performans | Node.js, MongoDB, Redis | IBAN verileri KVKK/GDPR gereği on-chain'e yazılmaz. İlanlar 50ms altında sorgulanır. |
 
 ### ⚡ Öne Çıkan Mühendislik Çözümleri
-* **🔐 Sıfır Özel Anahtar (Zero-PK) Backend:** Sunucumuz sadece bir "Relayer"dır. Fonları hareket ettirecek anahtarlara sahip değildir.
+* **🔐 Non-custodial Anahtar Modeli:** Backend kullanıcı fonlarını kontrol eden anahtar taşımaz; operasyonel relayer/automation signer anahtarı bulunabilir.
 * **🛡 Anti-Sybil Kalkanı:** Cüzdan yaşı (min. 7 gün), Dust limiti ve cooldown filtreleri ile bot saldırıları engellenir.
 * **🔒 Zarf Şifreleme (Envelope Encryption):** Hassas veriler AES-256-GCM ile şifrelenir. Master Key sadece KMS ortamında yaşar.
 * **🤝 Gassız Uzlaşma (EIP-712):** İptal gibi ortak kararlar off-chain imzalanarak gassız ve cezasız gerçekleştirilir.

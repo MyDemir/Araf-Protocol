@@ -34,6 +34,11 @@ const { runReputationDecay } = require("./jobs/reputationDecay");
 // [EN] Periodic job that saves daily protocol stats to MongoDB
 const { runStatsSnapshot } = require("./jobs/statsSnapshot");
 const { runPendingListingCleanup } = require("./jobs/cleanupPendingListings");
+const { getReadiness, getLiveness } = require("./services/health");
+const {
+  runReceiptCleanup,
+  runPIISnapshotCleanup,
+} = require("./jobs/cleanupSensitiveData");
 
 // [TR] Global Express hata yakalayıcı
 // [EN] Global Express error handler
@@ -256,6 +261,17 @@ async function bootstrap() {
     }, 90_000);
     pendingCleanupInterval = setInterval(runPendingListingCleanup, 60 * 60 * 1000);
 
+    // [TR] Hassas veri retention cleanup — her 30 dakikada bir
+    const sensitiveCleanupDelay = setTimeout(async () => {
+      await runReceiptCleanup();
+      await runPIISnapshotCleanup();
+      logger.info("Receipt/PII retention cleanup görevi zamanlandı (her 30 dakikada bir).");
+    }, 120_000);
+    const sensitiveCleanupInterval = setInterval(async () => {
+      await runReceiptCleanup();
+      await runPIISnapshotCleanup();
+    }, 30 * 60 * 1000);
+
     // [TR] Rotalar DB ve Redis hazır olduktan sonra yüklenir
     // [EN] Routes loaded after DB and Redis are ready
     
@@ -281,11 +297,11 @@ async function bootstrap() {
     app.use("/api/stats",    statsRoutes);
     app.use("/api/receipts", receiptRoutes);
 
-    app.get("/health", (req, res) => res.json({
-      status:    "ok",
-      worker:    "active",
-      timestamp: new Date().toISOString(),
-    }));
+    app.get("/health", (req, res) => res.json(getLiveness()));
+    app.get("/ready", async (req, res) => {
+      const readiness = await getReadiness({ worker, provider: worker.provider });
+      return res.status(readiness.ok ? 200 : 503).json(readiness);
+    });
 
     app.use((req, res) => res.status(404).json({ error: "İstenen endpoint bulunamadı" }));
 
@@ -296,7 +312,7 @@ async function bootstrap() {
       logger.info(`===========================================================`);
       logger.info(`🚀 Araf Protocol Backend Dinleniyor: Port ${PORT}`);
       logger.info(`🌍 Ortam: ${process.env.NODE_ENV || 'development'}`);
-      logger.warn(`🛡️  Güvenlik: Zero Private Key Modu Aktif.`);
+      logger.info(`🛡️  Güvenlik: Non-custodial backend (opsiyonel automation signer olabilir).`);
       logger.info(`===========================================================`);
     });
 

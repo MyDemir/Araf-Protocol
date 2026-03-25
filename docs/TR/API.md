@@ -10,7 +10,7 @@ Bu doküman, Araf Protokolü'nün backend API endpoint'leri için detaylı bir r
 
 API, güvenlik için iki katmanlı bir token sistemi kullanır:
 
-1.  **Auth JWT (JSON Web Token):** SIWE (Sign-In with Ethereum) akışı ile elde edilen, kısa ömürlü (15 dk) bir token. **AUDIT FIX F-01:** JWT artık `araf_jwt` adlı `httpOnly + Secure + SameSite=Strict` cookie olarak set edilir. JavaScript tarafından erişilemez (XSS koruması). Sonraki isteklerde `credentials: 'include'` ile otomatik gönderilir.
+1.  **Auth JWT (JSON Web Token):** SIWE (Sign-In with Ethereum) akışı ile elde edilen, kısa ömürlü (15 dk) bir token. **AUDIT FIX F-01:** JWT artık `araf_jwt` adlı `httpOnly + Secure + SameSite=Lax` cookie olarak set edilir. JavaScript tarafından erişilemez (XSS koruması). Sonraki isteklerde `credentials: 'include'` ile otomatik gönderilir.
 2.  **Refresh Token:** JWT süresi dolduğunda yeni token çifti almak için kullanılan, 7 günlük `araf_refresh` cookie'si. Sadece `/api/auth/*` endpoint'lerine gönderilir (`path: /api/auth`).
 3.  **PII Token:** IBAN gibi hassas PII verilerine erişmek için özel olarak gereken, daha da kısa ömürlü (15 dk) ve işlem bazlı (trade-scoped) bir token. Bu token `Authorization: Bearer <piiToken>` header'ı ile gönderilir (cookie değil).
 
@@ -158,12 +158,12 @@ API, güvenlik için iki katmanlı bir token sistemi kullanır:
 ### İşlem Rotaları (`/api/trades`)
 
 #### `GET /api/trades/my`
-* **Açıklama:** Kullanıcının aktif (çözülmemiş) işlemlerini listeler.
+* **Açıklama:** Kullanıcının aktif (çözülmemiş) işlemlerini veri minimizasyonu projection'ı ile listeler (`receipt_encrypted`, `pii_snapshot`, imzalar ve `ip_hash` dönülmez).
 * **Yetkilendirme:** Auth JWT Cookie
 * **Başarılı Yanıt (200 OK):** `{ "trades": [ ... ] }`
 
 #### `GET /api/trades/history`
-* **Açıklama:** Kullanıcının tamamlanmış işlem geçmişini listeler (RESOLVED, CANCELED, BURNED).
+* **Açıklama:** Kullanıcının tamamlanmış işlem geçmişini aynı güvenli projection ile listeler (RESOLVED, CANCELED, BURNED).
 * **Yetkilendirme:** Auth JWT Cookie
 * **Query Parametreleri:** `page`, `limit`
 * **Başarılı Yanıt (200 OK):** `{ "trades": [ ... ], "total": 5, "page": 1, "limit": 10 }`
@@ -225,7 +225,7 @@ Bu rotalar, en yüksek güvenlik seviyesine sahip endpoint'lerdir. Rate limit: 3
   "bankOwner": "Ahmet Yılmaz",
   "iban": "TR330006100519786457841326",
   "telegram": "ahmet_tr",
-  "notice": "This information is end-to-end encrypted. It is not stored on-chain or in logs."
+  "notice": "Bu bilgi at-rest şifreli tutulur ve sadece kontrollü backend runtime yolunda çözülür. On-chain saklanmaz."
 }
 ```
 
@@ -265,9 +265,19 @@ Bu rotalar, en yüksek güvenlik seviyesine sahip endpoint'lerdir. Rate limit: 3
 * **Başarılı Yanıt (201 Created):** `{ "success": true }`
 
 #### `GET /health`
-* **Açıklama:** Backend ve event listener'ın sağlık durumunu döndürür. Fly.io health check tarafından kullanılır.
+* **Açıklama:** Liveness probe endpoint'idir. Sadece süreç ayakta bilgisini döndürür.
 * **Yetkilendirme:** Herkese Açık
 * **Başarılı Yanıt (200 OK):**
 ```json
-{ "status": "ok", "worker": "active", "timestamp": "2026-03-19T10:00:00.000Z" }
+{ "status": "ok", "timestamp": "2026-03-19T10:00:00.000Z" }
 ```
+
+
+#### `GET /ready`
+* **Açıklama:** Readiness probe endpoint'idir. Kritik bağımlılıkları (`worker`, MongoDB, Redis, RPC/provider, zorunlu config) doğrular.
+* **Yetkilendirme:** Herkese Açık
+* **Başarılı Yanıt (200 OK):**
+```json
+{ "ok": true, "checks": { "mongo": true, "redis": true, "worker": true, "provider": true, "config": true }, "missingConfig": [] }
+```
+* **Hata Yanıtı (503):** Readiness kontrollerinden biri başarısızsa döner.

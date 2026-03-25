@@ -103,12 +103,28 @@ const tradeSchema = new mongoose.Schema(
     },
 
     financials: {
-      crypto_amount:  { type: Number, required: true },
+      // [TR] Otoritatif tutar: zincirdeki ham token miktarı (base units) String.
+      // [EN] Authoritative amount: raw on-chain token amount (base units) as String.
+      crypto_amount:  { type: String, required: true },
+      // [TR] Yaklaşık Number cache (analytics/UI aggregation). Enforcement amaçlı KULLANILMAZ.
+      // [EN] Approximate Number cache (analytics/UI aggregation). NOT for enforcement.
+      crypto_amount_num: { type: Number, default: 0 },
       fiat_amount:    { type: Number, default: null },
       exchange_rate:  { type: Number, required: true },
       crypto_asset:   { type: String, enum: ["USDT", "USDC"], required: true },
       fiat_currency:  { type: String, enum: ["TRY", "USD", "EUR"], required: true },
-      total_decayed:  { type: Number, default: 0 },
+      // [TR] Otoritatif kümülatif erime: String (BigInt güvenli).
+      // [EN] Authoritative cumulative decay: String (BigInt-safe).
+      total_decayed:  { type: String, default: "0" },
+      // [TR] Yaklaşık Number cache (sadece telemetry/dashboard).
+      // [EN] Approximate Number cache (telemetry/dashboard only).
+      total_decayed_num: { type: Number, default: 0 },
+      // [TR] İdempotency ve denetim için decay tx hash listesi.
+      // [EN] Decay tx hash list for idempotency and audit.
+      decay_tx_hashes: { type: [String], default: [] },
+      // [TR] Her BleedingDecayed miktarı (String, base units).
+      // [EN] Each BleedingDecayed amount (String, base units).
+      decayed_amounts: { type: [String], default: [] },
     },
 
     status: {
@@ -173,6 +189,8 @@ const tradeSchema = new mongoose.Schema(
 
     cancel_proposal: {
       proposed_by:     { type: String, lowercase: true, default: null },
+      proposed_at:     { type: Date,   default: null },
+      approved_by:     { type: String, lowercase: true, default: null },
       maker_signed:    { type: Boolean, default: false },
       taker_signed:    { type: Boolean, default: false },
       maker_signature: { type: String, default: null },

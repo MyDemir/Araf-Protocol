@@ -97,6 +97,21 @@ const ARAF_ABI = [
   "event EscrowBurned(uint256 indexed tradeId, uint256 burnedAmount)",
 ];
 
+const EVENT_ARG_KEYS = {
+  WalletRegistered:  ["wallet", "timestamp"],
+  EscrowCreated:     ["tradeId", "maker", "token", "amount", "tier"],
+  EscrowLocked:      ["tradeId", "taker", "takerBond"],
+  PaymentReported:   ["tradeId", "ipfsHash", "timestamp"],
+  EscrowReleased:    ["tradeId", "maker", "taker", "takerFee", "makerFee"],
+  DisputeOpened:     ["tradeId", "challenger", "timestamp"],
+  CancelProposed:    ["tradeId", "proposer"],
+  EscrowCanceled:    ["tradeId", "makerRefund", "takerRefund"],
+  MakerPinged:       ["tradeId", "pinger", "timestamp"],
+  ReputationUpdated: ["wallet", "successful", "failed", "bannedUntil", "effectiveTier"],
+  BleedingDecayed:   ["tradeId", "decayedAmount", "timestamp"],
+  EscrowBurned:      ["tradeId", "burnedAmount"],
+};
+
 class EventWorker {
   constructor() {
     this.provider  = null;
@@ -513,9 +528,14 @@ class EventWorker {
     // FEL-08 Fix: Number() yerine toString() — BigInt hassasiyeti korunuyor
     const financials = {
       crypto_amount: amount.toString(), // MongoDB'de String — hassasiyet kaybı yok
+      crypto_amount_num: Number(amount),
       exchange_rate: listing.exchange_rate,
       crypto_asset:  listing.crypto_asset,
       fiat_currency: listing.fiat_currency,
+      total_decayed: "0",
+      total_decayed_num: 0,
+      decay_tx_hashes: [],
+      decayed_amounts: [],
     };
 
     await Trade.findOneAndUpdate(
@@ -771,6 +791,14 @@ class EventWorker {
     }
 
     // FEL-08 Fix: Number() yerine toString()
+    const trade = await Trade.findOne({ onchain_escrow_id: tradeIdNum })
+      .select("financials.total_decayed")
+      .lean();
+    if (!trade) return;
+
+    const currentTotal = BigInt(trade.financials?.total_decayed || "0");
+    const nextTotal    = (currentTotal + BigInt(decayedAmount.toString())).toString();
+
     await Trade.findOneAndUpdate(
       { onchain_escrow_id: tradeIdNum },
       {
@@ -852,4 +880,31 @@ class EventWorker {
 }
 
 const worker = new EventWorker();
+worker.buildSyntheticEventFromDLQEntry = function buildSyntheticEventFromDLQEntry(entry) {
+  const mappedArgs = { ...(entry.namedArgs || {}) };
+  if (!Object.keys(mappedArgs).length && Array.isArray(entry.args)) {
+    const keys = EVENT_ARG_KEYS[entry.eventName] || [];
+    keys.forEach((key, i) => {
+      if (entry.args[i] !== undefined) mappedArgs[key] = entry.args[i];
+    });
+  }
+  return {
+    eventName:       entry.eventName,
+    transactionHash: entry.txHash,
+    blockNumber:     entry.blockNumber,
+    args:            mappedArgs,
+  };
+};
+
+worker.reprocessDLQEntry = async function reprocessDLQEntry(entry) {
+  if (!entry?.eventName) return false;
+  try {
+    const syntheticEvent = worker.buildSyntheticEventFromDLQEntry(entry);
+    await worker._processEvent(syntheticEvent);
+    return true;
+  } catch (err) {
+    logger.error(`[Worker] DLQ re-drive başarısız: ${entry.eventName} tx=${entry.txHash} err=${err.message}`);
+    return false;
+  }
+};
 module.exports = worker;

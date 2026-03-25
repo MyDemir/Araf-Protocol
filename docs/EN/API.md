@@ -10,7 +10,7 @@ This document provides a detailed reference for the backend API endpoints of the
 
 The API uses a two-layer token system for security:
 
-1.  **Auth JWT (JSON Web Token):** A short-lived (15 min) token obtained via the SIWE (Sign-In with Ethereum) flow. **AUDIT FIX F-01:** JWT is now set as an `httpOnly + Secure + SameSite=Strict` cookie named `araf_jwt`. It is inaccessible by JavaScript (XSS protection). It is automatically sent with `credentials: 'include'` in subsequent requests.
+1.  **Auth JWT (JSON Web Token):** A short-lived (15 min) token obtained via the SIWE (Sign-In with Ethereum) flow. **AUDIT FIX F-01:** JWT is now set as an `httpOnly + Secure + SameSite=Lax` cookie named `araf_jwt`. It is inaccessible by JavaScript (XSS protection). It is automatically sent with `credentials: 'include'` in subsequent requests.
 2.  **Refresh Token:** A 7-day `araf_refresh` cookie used to obtain a new token pair when the JWT expires. Sent only to `/api/auth/*` endpoints (`path: /api/auth`).
 3.  **PII Token:** An even shorter-lived (15 min) and trade-scoped token specifically required to access sensitive PII data like an IBAN. This token is sent via the `Authorization: Bearer <piiToken>` header (not a cookie).
 
@@ -158,12 +158,12 @@ The API uses a two-layer token system for security:
 ### Trade Routes (`/api/trades`)
 
 #### `GET /api/trades/my`
-* **Description:** Lists the user's active (unresolved) trades.
+* **Description:** Lists the user's active (unresolved) trades with data minimization projection (sensitive fields like `receipt_encrypted`, `pii_snapshot`, signatures, and `ip_hash` are excluded).
 * **Authorization:** Auth JWT Cookie
 * **Success Response (200 OK):** `{ "trades": [ ... ] }`
 
 #### `GET /api/trades/history`
-* **Description:** Lists the user's completed trade history (RESOLVED, CANCELED, BURNED).
+* **Description:** Lists the user's completed trade history (RESOLVED, CANCELED, BURNED) with the same safe projection.
 * **Authorization:** Auth JWT Cookie
 * **Query Parameters:** `page`, `limit`
 * **Success Response (200 OK):** `{ "trades": [ ... ], "total": 5, "page": 1, "limit": 10 }`
@@ -225,7 +225,7 @@ These routes are the highest security endpoints. Rate limit: 3 requests / 10 min
   "bankOwner": "John Doe",
   "iban": "TR330006100519786457841326",
   "telegram": "john_tr",
-  "notice": "This information is end-to-end encrypted. It is not stored on-chain or in logs."
+  "notice": "This information is encrypted at rest and decrypted in controlled backend runtime paths. It is not stored on-chain."
 }
 ```
 
@@ -265,9 +265,19 @@ These routes are the highest security endpoints. Rate limit: 3 requests / 10 min
 * **Success Response (201 Created):** `{ "success": true }`
 
 #### `GET /health`
-* **Description:** Returns the health status of the backend and event listener. Used by the Fly.io health check.
+* **Description:** Liveness probe. Returns process-up signal only.
 * **Authorization:** Public
 * **Success Response (200 OK):**
 ```json
-{ "status": "ok", "worker": "active", "timestamp": "2026-03-19T10:00:00.000Z" }
+{ "status": "ok", "timestamp": "2026-03-19T10:00:00.000Z" }
 ```
+
+
+#### `GET /ready`
+* **Description:** Readiness probe. Validates critical dependencies (`worker`, MongoDB, Redis, RPC/provider, required config).
+* **Authorization:** Public
+* **Success Response (200 OK):**
+```json
+{ "ok": true, "checks": { "mongo": true, "redis": true, "worker": true, "provider": true, "config": true }, "missingConfig": [] }
+```
+* **Error Response (503):** Returned when one or more readiness checks fail.
