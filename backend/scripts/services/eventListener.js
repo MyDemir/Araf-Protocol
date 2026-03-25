@@ -53,9 +53,8 @@ const { Trade, Listing } = require("../models/Trade");
 const User               = require("../models/User");
 const logger             = require("../utils/logger");
 
-const SAFE_CHECKPOINT_KEY        = "worker:last_safe_block";
-const SEEN_BLOCK_KEY             = "worker:last_seen_block";
-const LEGACY_CHECKPOINT_KEY      = "worker:last_block";
+const CHECKPOINT_KEY             = "worker:last_block";
+const LAST_SAFE_BLOCK_KEY        = "worker:last_safe_block";
 const DLQ_KEY                    = "worker:dlq";
 const RETRY_DELAY_MS             = 5_000;
 const MAX_RETRIES                = 3;
@@ -103,12 +102,10 @@ class EventWorker {
     this.provider  = null;
     this.contract  = null;
     this.isRunning = false;
-    this._lastSafeCheckpointBlock = 0;
-    this._lastSeenBlock = 0;
-    this._blockAcks = new Map();
-    this._replayInProgress = false;
-    this._retrySuccessCount = 0;
-    this._retryFailureCount = 0;
+    this._lastCheckpointBlock = 0;
+    this._state = "booting";
+    this._reconnectPromise = null;
+    this._listenersAttached = false;
   }
 
   async start() {
@@ -125,7 +122,15 @@ class EventWorker {
     if (this.provider) {
       this.provider.removeAllListeners();
     }
+    this._listenersAttached = false;
+    this._setState("stopped", "worker stop çağrıldı");
     logger.info("[Worker] Event listener durduruldu.");
+  }
+
+  _setState(nextState, reason) {
+    if (this._state === nextState) return;
+    logger.info(`[Worker][StateMachine] ${this._state} -> ${nextState}${reason ? ` | ${reason}` : ""}`);
+    this._state = nextState;
   }
 
   async _connect() {
@@ -160,24 +165,23 @@ class EventWorker {
 
     this.contract = new ethers.Contract(contractAddress, ARAF_ABI, this.provider);
     logger.info(`[Worker] Kontrat izleniyor: ${contractAddress}`);
+    this._setState("connected", "provider + kontrat hazır");
   }
 
   async _replayMissedEvents() {
     if (!this.contract) return;
 
     const redis      = getRedisClient();
-    const savedSafe = await redis.get(SAFE_CHECKPOINT_KEY);
-    const legacySafe = await redis.get(LEGACY_CHECKPOINT_KEY);
-    const checkpointRaw = savedSafe || legacySafe;
-    const fromBlock  = checkpointRaw ? parseInt(checkpointRaw) + 1 : 0;
-    this._lastSafeCheckpointBlock = checkpointRaw ? parseInt(checkpointRaw) : 0;
+    const savedBlock = await redis.get(CHECKPOINT_KEY);
     const toBlock    = await this.provider.getBlockNumber();
+    const fromBlock  = this._resolveReplayStartBlock(savedBlock, toBlock);
 
     if (fromBlock > toBlock) {
       logger.info("[Worker] Kaçırılan event yok. Checkpoint güncel.");
       return;
     }
 
+    this._setState("replaying", `replay aralığı: ${fromBlock}-${toBlock}`);
     logger.info(`[Worker] ${fromBlock} - ${toBlock} blok aralığı tekrar işleniyor...`);
 
     for (let from = fromBlock; from <= toBlock; from += BLOCK_BATCH_SIZE) {
@@ -217,12 +221,11 @@ class EventWorker {
       logger.debug(`[Worker] Replay: ${from}-${to} (${allEvents.length} event)`);
     }
 
-    this._lastSeenBlock = Math.max(this._lastSeenBlock, toBlock);
     logger.info("[Worker] Replay tamamlandı.");
   }
 
   _attachLiveListeners() {
-    if (!this.contract) return;
+    if (!this.contract || this._listenersAttached) return;
 
     for (const eventName of EVENT_NAMES) {
       this.contract.on(eventName, async (...args) => {
@@ -261,6 +264,9 @@ class EventWorker {
       logger.error(`[Worker] Provider hatası: ${err.message}. Yeniden bağlanılıyor...`);
       await this._reconnect();
     });
+
+    this._listenersAttached = true;
+    this._setState("live", "canlı listener'lar bağlandı");
   }
 
   async _updateSafeCheckpointIfHigher(blockNumber) {
@@ -276,69 +282,46 @@ class EventWorker {
 
   async _updateSeenBlockIfHigher(blockNumber) {
     const redis   = getRedisClient();
-    const current = parseInt(await redis.get(SEEN_BLOCK_KEY) || "0");
+    const current = parseInt(await redis.get(LAST_SAFE_BLOCK_KEY) || await redis.get(CHECKPOINT_KEY) || "0");
     if (blockNumber > current) {
-      await redis.set(SEEN_BLOCK_KEY, blockNumber.toString());
-      this._lastSeenBlock = blockNumber;
+      const safeBlock = blockNumber.toString();
+      await redis.set(LAST_SAFE_BLOCK_KEY, safeBlock);
+      // Geriye dönük uyumluluk: eski key de güncel kalsın
+      await redis.set(CHECKPOINT_KEY, safeBlock);
+      this._lastCheckpointBlock = blockNumber;
     }
   }
 
-  _getEventId(event) {
-    const txHash = event.transactionHash || "unknown";
-    const logIndex = Number.isInteger(event.logIndex) ? event.logIndex : -1;
-    return `${txHash}:${logIndex}`;
-  }
 
-  _trackLiveEventSeen(event) {
-    const blockNumber = event.blockNumber;
-    const eventId = this._getEventId(event);
-    if (!this._blockAcks.has(blockNumber)) {
-      this._blockAcks.set(blockNumber, { seen: new Set(), acked: new Set(), hasFailure: false });
-    }
-    this._blockAcks.get(blockNumber).seen.add(eventId);
-  }
-
-  _trackLiveEventAck(event) {
-    const blockNumber = event.blockNumber;
-    const eventId = this._getEventId(event);
-    if (!this._blockAcks.has(blockNumber)) return;
-    this._blockAcks.get(blockNumber).acked.add(eventId);
-  }
-
-  _markBlockUnsafe(blockNumber, eventId) {
-    if (!this._blockAcks.has(blockNumber)) {
-      this._blockAcks.set(blockNumber, { seen: new Set(), acked: new Set(), hasFailure: false });
-    }
-    const ack = this._blockAcks.get(blockNumber);
-    ack.hasFailure = true;
-    logger.error(`[Worker][Metrics] poison_event_count=1 block=${blockNumber} event_id=${eventId}`);
-  }
-
-  async _advanceSafeCheckpointFromAcks(finalizedUpTo) {
-    if (finalizedUpTo <= this._lastSafeCheckpointBlock) return;
-
-    for (let block = this._lastSafeCheckpointBlock + 1; block <= finalizedUpTo; block++) {
-      const ack = this._blockAcks.get(block);
-
-      if (ack && ack.hasFailure) {
-        logger.warn(`[Worker] Block ${block} unsafe işaretli. replay-from-safe-window zorunlu.`);
-        break;
+  _resolveReplayStartBlock(savedBlock, currentBlock) {
+    if (savedBlock !== null && savedBlock !== undefined) {
+      const checkpoint = Number(savedBlock);
+      if (!Number.isInteger(checkpoint) || checkpoint < 0) {
+        throw new Error(`[Worker] Geçersiz checkpoint değeri: ${savedBlock}`);
       }
-
-      if (ack && ack.seen.size !== ack.acked.size) {
-        // [TR] Eventlerin hepsi ACK olmadan safe ilerletme yapılmaz
-        break;
+      if (checkpoint > currentBlock) {
+        throw new Error(`[Worker] Checkpoint current block'u aşıyor: checkpoint=${checkpoint} current=${currentBlock}`);
       }
-
-      await this._updateSafeCheckpointIfHigher(block);
-      this._blockAcks.delete(block);
+      return checkpoint + 1;
     }
-  }
 
-  _getRetrySuccessRate() {
-    const total = this._retrySuccessCount + this._retryFailureCount;
-    if (!total) return 100;
-    return Math.round((this._retrySuccessCount / total) * 100);
+    const configuredStartRaw = process.env.ARAF_DEPLOYMENT_BLOCK ?? process.env.WORKER_START_BLOCK;
+
+    if (configuredStartRaw === undefined || configuredStartRaw === null || configuredStartRaw === "") {
+      logger.warn("[Worker] Checkpoint bulunamadı ve ARAF_DEPLOYMENT_BLOCK/WORKER_START_BLOCK tanımlı değil. Varsayılan başlangıç bloğu: 0.");
+      return 0;
+    }
+
+    const configuredStart = Number(configuredStartRaw);
+    if (!Number.isInteger(configuredStart) || configuredStart < 0) {
+      throw new Error(`[Worker] Geçersiz başlangıç bloğu: ${configuredStartRaw}. Beklenen: >= 0 tam sayı.`);
+    }
+    if (configuredStart > currentBlock) {
+      throw new Error(`[Worker] Başlangıç bloğu current block'tan büyük olamaz: start=${configuredStart} current=${currentBlock}`);
+    }
+
+    logger.info(`[Worker] Checkpoint bulunamadı. Başlangıç bloğu env'den alındı: ${configuredStart}`);
+    return configuredStart;
   }
 
   /**
@@ -347,24 +330,42 @@ class EventWorker {
    * Her reconnect'te zombi WebSocket birikiyordu → OOM.
    */
   async _reconnect() {
-    // [TR] Eski provider'ı tamamen temizle
-    if (this.provider) {
-      try {
-        this.provider.removeAllListeners();
-        if (this.provider.destroy) {
-          await this.provider.destroy();
-        }
-      } catch (err) {
-        logger.warn(`[Worker] Provider temizleme hatası: ${err.message}`);
-      }
-      this.provider = null;
-      this.contract = null;
+    if (this._reconnectPromise) {
+      logger.warn("[Worker] Reconnect zaten devam ediyor, mevcut işlem bekleniyor.");
+      return this._reconnectPromise;
     }
 
-    await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
-    await this._connect();
-    if (this.contract) {
-      this._attachLiveListeners();
+    this._reconnectPromise = (async () => {
+      this._setState("reconnecting", "provider error sonrası yeniden bağlanma");
+
+    // [TR] Eski provider'ı tamamen temizle
+      if (this.provider) {
+        try {
+          this.provider.removeAllListeners();
+          if (this.provider.destroy) {
+            await this.provider.destroy();
+          }
+        } catch (err) {
+          logger.warn(`[Worker] Provider temizleme hatası: ${err.message}`);
+        }
+        this.provider = null;
+        this.contract = null;
+        this._listenersAttached = false;
+      }
+
+      await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+      await this._connect();
+      // Reconnect sonrası replay zorunlu
+      await this._replayMissedEvents();
+      if (this.contract) {
+        this._attachLiveListeners();
+      }
+    })();
+
+    try {
+      await this._reconnectPromise;
+    } finally {
+      this._reconnectPromise = null;
     }
   }
 
