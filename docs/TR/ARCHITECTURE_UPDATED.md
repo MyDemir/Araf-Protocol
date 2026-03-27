@@ -1,8 +1,8 @@
 # 🌀 Araf Protokolü — Kanonik Mimari & Teknik Referans
 
-> **Versiyon:** 2.6 | **Ağ:** Base (Katman 2) | **Durum:** Testnete Hazır | **Son Güncelleme:** Mart 2026
+> **Versiyon:** 2.10 | **Ağ:** Base (Katman 2) | **Durum:** Testnete Hazır | **Son Güncelleme:** Mart 2026
 
-> **Sürüm Notu (aktif çalışma kopyası):** Bu revizyon, `stats.js` ve `trades.js` route davranışlarını mimariye işlemiş 2.6 sürümüdür. Son eklenen kapsam: `/api/stats` için Redis önbellekli ve null-safe 30 günlük karşılaştırma akışı, `SAFE_TRADE_PROJECTION` ile trade detaylarında alan daraltma, müşterek iptal teklifinde deadline sabitleme ve manipülasyon reddi, `chargeback-ack` için gerçek IP hash üretimi ile atomik/idempotent kayıt mantığı ve kullanıcı trade görünümünde aktif/geçmiş ayrımı.
+> **Sürüm Notu (aktif çalışma kopyası):** Bu revizyon, `eventListener.js` worker davranışlarını mimariye işlemiş 2.10 sürümüdür. Son eklenen kapsam: safe checkpoint semantiğinin yalnız başarılı/ack'lenmiş bloklar üzerinden ilerlemesi, replay batch başarısızlığında checkpoint'in durdurulması, reconnect öncesi provider/listener temizliği, `EscrowCreated` için zero `listingRef` durumunun recoverable değil kritik bütünlük ihlali kabul edilmesi, authoritative `listing_ref` bağlama disiplini, `EscrowReleased` / `EscrowBurned` transaction atomikliği, `BleedingDecayed` idempotency anahtarı (`txHash:logIndex`), `MakerPinged` için DB state gelmeden tahmin yapılmaması ve büyük finansal miktarların string mirror olarak tutulması.
 
 ---
 
@@ -85,7 +85,7 @@ Araf **Web2.5 Hibrit Sistem** olarak çalışır. Güvenlik açısından kritik 
 | Veritabanı | MongoDB + Mongoose | v8.x — İlanlar, İşlemler, Kullanıcılar; `maxPoolSize=100`, `socketTimeoutMS=20000`, `serverSelectionTimeoutMS=5000` |
 | Önbellek / Auth / Koordinasyon | Redis | v4.x — Hız limitleri, nonce'lar, event checkpoint, DLQ, readiness gate |
 | Zamanlanmış Görevler | Node.js jobs | Pending listing cleanup, PII/dekont retention cleanup, on-chain reputation decay, günlük stats snapshot |
-| Şifreleme | AES-256-GCM + HKDF | Zarf şifreleme, cüzdan başına DEK |
+| Şifreleme | AES-256-GCM + HKDF + KMS/Vault | Zarf şifreleme, cüzdan başına deterministik DEK, üretimde harici anahtar yöneticisi |
 | Kimlik Doğrulama | SIWE + JWT (HS256) | EIP-4361, 15 dakika geçerlilik |
 | Frontend | React 18 + Vite + Wagmi | Tailwind CSS, viem, EIP-712 |
 | Sözleşme ABI | Deploy'da otomatik oluşturulur | `frontend/src/abi/ArafEscrow.json` |
@@ -366,6 +366,17 @@ Taker, `pingMaker` fonksiyonunu çağırdıktan 24 saat sonra hala yanıt alamam
 - Route, `bankOwner`, `iban`, `telegram` alanlarını normalize eder; Joi ile doğrular; ardından `encryptPII()` çağırarak yalnızca şifreli alanları (`pii_data.*_enc`) MongoDB'ye yazar.
 - Plaintext PII kalıcı olarak saklanmaz; route katmanı yalnızca kısa ömürlü validation/normalization yüzeyi olarak çalışır.
 
+**SIWE servis otoritesi ve token politikası**
+- `getSiweConfig()` production'da gevşek fallback kabul etmez: `SIWE_DOMAIN` ve `SIWE_URI` zorunludur; `SIWE_URI` mutlaka `https` olmalı ve host değeri `SIWE_DOMAIN` ile birebir eşleşmelidir. Böylece imza mesajında farklı origin/domain kullanılarak session elde edilmesi engellenir.
+- `generateNonce()` Redis'i nonce için **tek otorite** kabul eder. Aynı cüzdan için eşzamanlı iki istek yarışırsa, `SET NX` başarısız olan taraf kendi yerel nonce'ını döndürmez; Redis'te gerçekten yaşayan nonce'ı tekrar okuyup onu döndürür. Bu sayede frontend'e verilen nonce ile Redis'te doğrulanacak nonce drift etmez.
+- `consumeNonce()` `getDel` semantiğiyle çalışır; nonce tek kullanımlıktır ve başarılı/başarısız verify denemesi sonrası yeniden kullanılamaz.
+- `verifySiweSignature()`, imzayı doğrulamadan önce domain/origin eşleşmesini ve nonce bütünlüğünü kontrol eder; sonra `SiweMessage.verify()` ile imza doğrular. Böylece önce context, sonra kriptografik doğrulama zinciri kurulmuş olur.
+- `JWT_SECRET` yalnızca tanımlı olmakla yetmez; minimum uzunluk, placeholder yasakları ve Shannon entropy kontrolünden geçmelidir. Secret yeterince güçlü değilse servis başlangıçta fail eder.
+- JWT blacklist kontrolü Redis erişim hatasında ortama göre fail-mode uygular: production'da varsayılan **fail-closed**, geliştirmede varsayılan **fail-open**. Bu seçim `JWT_BLACKLIST_FAIL_MODE` ile override edilebilir.
+- Refresh token'lar tekil değerler halinde değil **family** mantığıyla yönetilir. Normal rotasyonda kullanılan token tek seferlik tüketilir ve aynı aile içinde yeni token üretilir; reuse / geçersiz token denemesinde ilgili wallet'ın tüm aileleri kapatılır.
+- `revokeRefreshToken(wallet)` tek bir token'ı değil, o cüzdana ait tüm aktif refresh ailelerini temizler. Böylece logout, session mismatch veya güvenlik ihlali sonrası backend tarafında kalıntı refresh yolu bırakılmaz.
+
+
 ### 9.2 Müşterek İptal Akışı (EIP-712 ile Gassız Anlaşma)
 
 Protokol, tarafların on-chain bir işlem yapmadan (ve gas ödemeden) anlaşmaya varmalarını sağlamak için **EIP-712** standardını kullanır. Bu, özellikle "Müşterek İptal" senaryosunda kritik bir rol oynar.
@@ -397,16 +408,28 @@ Bu akış sayesinde, anlaşma süreci tamamen off-chain ve gassız bir şekilde 
 
 ### 9.3 PII Şifreleme (Zarf Şifreleme)
 
-IBAN ve banka sahibi adı yalnızca MongoDB'de, AES-256-GCM ile şifreli olarak saklanır. Master Key hiçbir zaman KMS ortamından çıkmaz. Her cüzdan, HKDF (RFC 5869, SHA-256) ile deterministik olarak türetilmiş benzersiz bir Veri Şifreleme Anahtarı (DEK) alır.
+IBAN, banka sahibi adı, Telegram ve dekont payload'ı yalnızca backend tarafında AES-256-GCM ile şifreli tutulur. Düz metin PII kalıcı depoya yazılmaz. Master Key üretimde uygulama ayar dosyasından okunmaz; çalışma zamanında harici anahtar yöneticisinden çözülür/alınır ve kısa süreli bellekte tutulur. Her cüzdan için DEK, **aynı cüzdan için deterministik ama cüzdanlar arasında benzersiz** olacak şekilde HKDF (RFC 5869, SHA-256) ile türetilir.
 
 | Özellik | Değer |
 |---|---|
 | Algoritma | AES-256-GCM (doğrulanmış şifreleme) |
-| Anahtar Türetme | HKDF (SHA-256, RFC 5869) — yerel Node.js crypto |
-| DEK Kapsamı | Cüzdan başına benzersiz DEK — hiçbir zaman yeniden kullanılmaz |
-| Master Key Depolama | Ortam değişkeni (geliştirme) / AWS KMS veya Vault (üretim) |
-| Ham IP Depolama | Hiçbir zaman saklanmaz. Yalnızca SHA-256(IP) hash'i — GDPR uyumlu |
+| Anahtar Türetme | Node.js native `crypto.hkdf()` ile HKDF (SHA-256, RFC 5869 tam uyum) |
+| Salt Politikası | Sıfır-salt değil; `wallet` bağımlı deterministik salt (`sha256("araf-pii-salt-v1:<wallet>")`) |
+| DEK Kapsamı | Cüzdan başına deterministik DEK — depolanmaz, ihtiyaç anında yeniden türetilir |
+| Ciphertext Formatı | `iv(12B) + authTag(16B) + ciphertext`, hex-encoded |
+| Master Key Kaynağı | Development: `.env` (`KMS_PROVIDER=env`) / Production: **AWS KMS** veya **HashiCorp Vault** |
+| Production Koruması | `NODE_ENV=production` iken `KMS_PROVIDER=env` bilinçli olarak engellenir |
+| Master Key Cache | KMS/Vault çağrı maliyetini azaltmak için bellek içi kısa ömürlü cache; shutdown/rotation'da zero-fill ile temizlenir |
 | IBAN Erişim Akışı | Auth JWT → PII token (15 dk, işlem kapsamlı) → **anlık trade statü kontrolü** → şifre çözme |
+
+**Anahtar yönetimi ve operasyon politikası**
+- `_getMasterKey()` bir sağlayıcı soyutlamasıdır: `env` yalnızca geliştirme içindir; üretimde `aws` veya `vault` beklenir.
+- AWS KMS modunda uygulama, şifreli data key'i runtime'da KMS `Decrypt` ile çözer; plaintext key yalnızca proses belleğinde yaşar.
+- Vault modunda uygulama, Transit / datakey uç noktasından plaintext master key alır; yine yalnızca proses belleğinde tutulur.
+- Master key her encrypt/decrypt çağrısında tekrar tekrar uzaktan alınmaz; performans için cache'lenir. Ancak bu cache kalıcı değildir; restart veya `clearMasterKeyCache()` çağrısıyla silinir.
+- DEK kullanım penceresi `_withDataKey()` ile daraltılır; operasyon bitince türetilen anahtar buffer'ı `fill(0)` ile sıfırlanır.
+- HKDF implementasyonu önceki özel/elle yazılmış türetme mantığı yerine native `crypto.hkdf()`'e taşınmıştır. Bu, şifreleme formatı ve türetme zinciri açısından **migrasyon etkisi** doğurur; eski ciphertext'ler için yeniden şifreleme planı gerekebilir.
+- Cüzdan formatı normalize edilmeden türetme veya şifre çözme yapılmaz; büyük/küçük harf varyasyonları ayrı anahtar uzaylarına dönüşmez.
 
 **PII route otorite kuralları**
 - `GET /api/pii/my`, yalnızca kullanıcının kendi `pii_data` alanını çözer; erişim `piiLimiter` ile sınırlandırılır ve loglarda tam cüzdan yerine kısaltılmış kimlik kullanılır.
@@ -465,14 +488,39 @@ IBAN ve banka sahibi adı yalnızca MongoDB'de, AES-256-GCM ile şifreli olarak 
 - PII scrub işlemi yalnızca production'da değil tüm ortamlarda uygulanır; geliştirme logları plaintext IBAN / isim sızıntı kanalı olarak kullanılmaz.
 - Mongoose validation, duplicate key, JWT ve bilinçli `statusCode` hataları ayrı response sınıflarına ayrılır; geri kalan tüm beklenmeyen hatalar standart internal error cevabına düşer.
 
+### 9.5.2 Health, Readiness ve Bootstrap Kontrolleri
+
+- `getLiveness()` en hafif health probe'dur; yalnızca prosesin yaşadığını ve zaman damgasını döndürür. Orkestratörlerin “uygulama ayakta mı?” sorusu için kullanılır; bağımlılık doğrulaması yapmaz.
+- `getReadiness()` ise gerçek servislenebilirliği ölçer ve **mongo / redis / worker / provider / config / replayBootstrap** alt kontrollerini ayrı ayrı raporlar.
+- Mongo readiness, `mongoose.connection.readyState === 1` ile; Redis readiness ise `isReady()` ile belirlenir. Böylece sadece client nesnesinin varlığı değil, gerçekten komut kabul eden durum esas alınır.
+- Worker readiness, event worker'ın çalışır olmasıyla; provider readiness ise doğrudan `provider.getBlockNumber()` çağrısının başarıyla dönmesiyle ölçülür. Salt provider objesinin bellekte bulunması yeterli sayılmaz.
+- Production'da config readiness için en az şu değişkenler zorunludur: `MONGODB_URI`, `REDIS_URL`, `JWT_SECRET`, `SIWE_DOMAIN`, `SIWE_URI`, `ARAF_ESCROW_ADDRESS`, `BASE_RPC_URL`.
+- Production'da `SIWE_URI` ayrıca semantik olarak da doğrulanır: `https` olmak zorundadır ve host değeri `SIWE_DOMAIN` ile birebir eşleşmelidir. Yanlış ama “tanımlı” config hazır sayılmaz.
+- Replay bootstrap readiness, worker'ın ilk nereden başlayacağını gerçekten bilip bilmediğini doğrular. Production ortamında ya Redis checkpoint (`worker:last_safe_block` / `worker:last_block`) bulunmalı ya da `ARAF_DEPLOYMENT_BLOCK` / `WORKER_START_BLOCK` tanımlı olmalıdır.
+- Bu koşul sağlanmazsa servis “yarı canlı” kabul edilmez; çünkü event aynalama katmanı güvenli başlangıç bloğunu bilmeden on-chain geçmişi eksik okuyabilir.
+- `BASE_WS_RPC_URL` readiness için zorunlu değildir ama `wsRecommended` sinyali olarak raporlanır; websocket provider gözlem/latency avantajı sunar ancak HTTP provider yokluğunu telafi etmez.
+
 ### 9.6 Olay Dinleyici Güvenilirliği
 
-- **Kontrol Noktası:** Her batch sonrası son işlenen blok numarası Redis'e kaydedilir.
-- **Tekrar Oynatma:** Yeniden başlatmada kaçırılan bloklar kontrol noktasından taranır.
-- **Yeniden Deneme:** Başarısız olaylar üstel geri çekilmeyle 3 kez yeniden denenir.
-- **Ölü Mektup Kuyruğu (DLQ):** Tüm denemelerde başarısız olan olaylar Redis DLQ'ya yazılır.
-- **DLQ Monitörü:** Her 60 saniyede çalışır — DLQ ≥ 5 girdide uyarı verir.
-- **Yeniden Bağlanma:** RPC sağlayıcı arızasında otomatik yeniden bağlanır.
+- **Durum Makinesi:** Worker iç durumunu `booting -> connected -> replaying -> live -> reconnecting -> stopped` çizgisinde izler; bu sayede sağlık sinyalleri ve loglar yalnız “çalışıyor/çalışmıyor” seviyesinde kalmaz.
+- **Replay Başlangıcı:** Worker, başlangıç bloğunu önce Redis checkpoint'inden (`worker:last_safe_block`, yoksa `worker:last_block`) çözer. Checkpoint yoksa yalnız tanımlı `ARAF_DEPLOYMENT_BLOCK` / `WORKER_START_BLOCK` üzerinden başlar; production'da bunlardan hiçbiri yoksa başlatılmaz.
+- **Safe Checkpoint Semantiği:** Checkpoint körlemesine “son görülen blok”a ilerletilmez. Canlı akışta her blok için `seen / acked / unsafe` durumu tutulur; yalnız tüm event'leri başarıyla ack'lenmiş ve unsafe işaretlenmemiş bloklar güvenli checkpoint'e alınır.
+- **Replay Batch Disiplini:** Replay sırasında batch içindeki tek bir event bile başarısız olursa ilgili blok aralığı için safe checkpoint ilerletilmez. Böylece “işlenmemiş ama checkpoint geçmiş” sessiz veri kaybı önlenir.
+- **Yeniden Deneme:** Başarısız olaylar önce worker tarafında sınırlı deneme ile yeniden işlenir; kalıcı başarısızlıklar Redis DLQ'ya alınır.
+- **Ölü Mektup Kuyruğu (DLQ):** DLQ girdileri Redis listesinde (`worker:dlq`) tutulur; event adı, `txHash`, `logIndex`, idempotency anahtarı, block numarası, serialized argümanlar, deneme sayısı ve `next_retry_at` alanlarını taşır.
+- **Re-drive Worker:** Ayrı bir processor DLQ'yu batch halinde tarar, zamanı gelmiş girdileri `eventListener.reDriveEvent()` ile yeniden sürer; başarılı girdileri kuyruktan siler. Re-drive başarısızsa ilgili blok unsafe işaretlenir.
+- **Exponential Backoff:** Başarısız re-drive denemeleri `attempt` sayısına göre artan bekleme süresiyle kuyruğun sonuna yazılır; üst sınır 30 dakikadır.
+- **Poison Event Politikası:** Yüksek deneme sayısına rağmen düzelmeyen girdiler poison event olarak metriklenir; otomatik silinmez, manuel inceleme için görünür kalır.
+- **DLQ Arşivleme / Kırpma:** Kuyruk boyu güvenli eşiği aşarsa eski girdiler 7 günlük arşive taşınır ve ana DLQ kontrollü şekilde kırpılır.
+- **Alarm / Soğuma Süresi:** DLQ derinliği kritik eşiği aştığında sürekli spam üretmemek için cooldown'lu alarm logu atılır.
+- **Reconnect Hijyeni:** Provider hatasında reconnect öncesi eski listener'lar ve varsa WebSocket provider `destroy()` ile temizlenir; zombi socket / duplicate listener birikimine izin verilmez.
+- **Authoritative Linkage Doktrini:** `EscrowCreated` yalnız kanonik `listing_ref` üzerinden eşleştirilir. Zero veya eksik `listingRef` recoverable gecikme değil, kritik kontrat/API bütünlük ihlalidir; event DLQ'ya kritik hata olarak gönderilir. Heuristik backfill yapılmaz.
+- **Authoritative Eşleşme Kontrolleri:** `listing_ref` bulunduğunda dahi maker, tier ve token adresi on-chain event ile birebir doğrulanır. Uyuşmazlık varsa event kabul edilmez ve DLQ'ya alınır.
+- **Atomik Bağlama:** `Listing.onchain_escrow_id` alanı yalnız atomik update ile bağlanır; aynı ilanı iki farklı escrow'a sessizce bağlayan yarışlara izin verilmez.
+- **Atomik Sonlandırma:** `EscrowReleased` ve `EscrowBurned` akışları Mongo transaction ile yürür; trade statüsü, retention tarihleri ve reputation side-effect'leri tek atomik işlem içinde tutulur.
+- **İdempotent Decay Aynalama:** `BleedingDecayed` event'leri `txHash:logIndex` anahtarıyla aynalanır; aynı decay event'i tekrar gelse bile `total_decayed` ikinci kez büyütülmez.
+- **Sıra Tahmini Yapmama İlkesi:** `MakerPinged` işlendiğinde `taker_address` henüz DB'de yoksa worker zincirden tahmin üretmez; event DLQ'ya alınır ve doğru sıralama beklenir.
+- **Büyük Sayı Aynası:** On-chain finansal miktarlar (`crypto_amount`, `total_decayed`) Mongo'da string olarak tutulur; Number alanları yalnız approx analytics/UI amaçlı cache'tir.
 - **Mongo ölçekleme notu:** Event replay ile eşzamanlı canlı API trafiği Mongo üzerinde ani paralellik yaratabileceğinden, olay aynalama katmanı düşük pool varsayımıyla tasarlanmamıştır.
 - **Temiz yeniden başlatma ilkesi:** DB bağlantısı koptuğunda worker ve API aynı process'te kirli reconnect yapmak yerine container/process supervisor tarafından temiz biçimde yeniden başlatılır.
 ### 9.7 Zamanlanmış Görevler ve Veri Yaşam Döngüsü
@@ -722,6 +770,9 @@ Bu bölüm, backend model katmanının gerçek veri sözleşmesini özetler. Kri
 | Backend anahtar hırsızlığı | Kritik | Sıfır özel anahtar mimarisi — yalnızca relayer | ✅ Giderildi |
 | JWT ele geçirme / eski wallet session'ının yanlışlıkla geçerli görünmesi | Yüksek | 15 dakika geçerlilik + cookie-only auth + `/api/auth/me` strict wallet authority check + session-wallet mismatch durumunda aktif session invalidation + işlem kapsamlı PII tokenları | ✅ Giderildi |
 | PII veri sızıntısı | Kritik | AES-256-GCM + HKDF + hız sınırı (3 / 10 dk) + retention cleanup job'ları + error log scrub | ✅ Giderildi |
+| Production'da `.env` master key ile tüm PII'nın toplu açığa çıkması | Kritik | `KMS_PROVIDER=env` üretimde bloklanır; AWS KMS / Vault zorunludur | ✅ Giderildi |
+| Yanlış / standart dışı HKDF ile anahtar türetme uyumsuzluğu | Orta | Node.js native `crypto.hkdf()` (RFC 5869) + planlı migrasyon gereksinimi | ✅ Giderildi |
+| Bellekte uzun yaşayan master key / DEK kalıntısı | Orta | `_withDataKey()` sonrası zero-fill, `clearMasterKeyCache()` ve proses restart modeli | ✅ Giderildi |
 | İşlem bittikten sonra hayalet PII erişimi | Kritik | `request-token` ve `GET /api/pii/:tradeId` aşamalarında anlık trade statü kontrolü; yalnızca `LOCKED/PAID/CHALLENGED` durumlarında erişim | ✅ Giderildi |
 | Taker isminin trade sonrasında görünmeye devam etmesi | Orta | `taker-name` endpoint'inde de aynı aktif durum kümesi zorunlu | ✅ Giderildi |
 | Public profile üzerinden alan sızması | Orta | `toPublicProfile()` allowlist/fail-safe tasarım; yalnızca açık seçilmiş alanlar döner | ✅ Giderildi |
@@ -743,13 +794,23 @@ Bu bölüm, backend model katmanının gerçek veri sözleşmesini özetler. Kri
 | Cancel teklifinde deadline ezilmesi ile deadlock | Yüksek | İlk teklif deadline'ı sabitler; sonraki imza aynı deadline ile gelmek zorunda | ✅ Giderildi |
 | Chargeback onayında yarış koşulu / çift kayıt | Orta | Atomik `findOneAndUpdate` + `acknowledged != true` filtresi | ✅ Giderildi |
 | Proxy arkasında yanlış IP hash üretimi | Orta | `trust proxy` uyumlu gerçek IP belirleme + SHA-256 hash saklama | ✅ Giderildi |
+| DLQ'da biriken / zehirli event'lerin sessizce kaybolması | Yüksek | Redis DLQ, re-drive worker, poison event metrikleri, arşivleme ve alarm cooldown | ✅ Giderildi |
+| Zero / eksik `listingRef` ile kanonik bağın kaybedilmesi | Kritik | `EscrowCreated` için zero ref kritik bütünlük ihlali kabul edilir; heuristik fallback yok, DLQ + manuel inceleme | ✅ Giderildi |
+| Canlı event'lerde checkpoint'in körlemesine ilerleyip sessiz veri kaybı yaratması | Kritik | `seen/acked/unsafe` blok takibi + yalnız safe checkpoint'in ilerletilmesi | ✅ Giderildi |
+| Reconnect sonrası zombi listener / duplicate socket birikimi | Yüksek | Reconnect öncesi provider listener temizliği ve varsa `destroy()` çağrısı | ✅ Giderildi |
+| SIWE nonce yarışında frontend'e Redis'te olmayan nonce dönülmesi | Yüksek | Nonce için Redis authoritative; `SET NX` yarışı sonrası re-read ve güvenli retry | ✅ Giderildi |
+| Zayıf / placeholder JWT secret ile token sahteciliği riski | Kritik | Minimum 64 karakter, placeholder yasağı, entropy kontrolü, startup fail-fast | ✅ Giderildi |
+| Replay worker'ın başlangıç bloğunu bilmeden ayağa kalkması | Yüksek | Readiness içinde checkpoint veya deployment/start block zorunluluğu | ✅ Giderildi |
+| Liveness başarılı görünürken bağımlılıkların aslında hazır olmaması | Orta | Ayrı readiness kontrolleri: mongo, redis, worker, provider, config, replay bootstrap | ✅ Giderildi |
+
+| Hayalet config / backend'de sahte ekonomik parametre fallback'i | Yüksek | On-chain config loader + Redis cache + `CONFIG_UNAVAILABLE` ile bilinçli 503 | ✅ Giderildi |
 | Kur Manipülasyonu (Rate Manipulation) | Kritik | Sistem fiat limitlerini kullanmaz. Tier kısıtlamaları doğrudan mutlak kripto miktarı (USDT/USDC) üzerinden on-chain limitlere dayanır. | ✅ Giderildi |
 
 ---
 
 ## 13. Kesinleşmiş Protokol Parametreleri
 
-Aşağıdaki tüm değerler Solidity `public constant` olarak deploy edilmiştir — **backend tarafından değiştirilemez.**
+Aşağıdaki tüm değerler Solidity `public constant` olarak deploy edilmiştir — **backend tarafından değiştirilemez.** Backend bu değerler için hard-code fallback kullanmaz; `protocolConfig` servisi bunları on-chain'den okuyup Redis'te kısa ömürlü cache'ler. Kontrat adresi / RPC eksikse sistem sahte varsayılan üretmek yerine `CONFIG_UNAVAILABLE` durumuna geçer ve ilgili route'lar `503 Service Unavailable` döndürür.
 
 | Parametre | Değer | Sözleşme Sabiti |
 |---|---|---|
