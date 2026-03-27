@@ -1,5 +1,56 @@
 "use strict";
+/*## auth.js hardening
 
+This PR updates `backend/scripts/routes/auth.js` to preserve the existing auth safety improvements while adding strict wallet/session authority checks to `/api/auth/me`.
+
+### Existing fixes that remain
+
+This file already contained several important protections, and they remain in place:
+
+- auth cookies continue to use `SameSite=Lax` for Web3 redirect compatibility
+- `/profile` remains protected by `authLimiter` to prevent crypto-heavy abuse
+- logout still blacklists the current JWT before clearing cookies
+- nonce, refresh, and SIWE verification flows still rely on the hardened `siwe.js` service behavior
+
+### Previous behavior
+
+`GET /api/auth/me` only checked whether the cookie JWT was valid and then returned:
+
+- `wallet`
+- `authenticated: true`
+
+That meant the endpoint behaved like a session presence check, but not a strict wallet authority check.
+
+In practice, if the connected wallet changed on the frontend, `/me` could still return a valid session for the old wallet unless another layer explicitly caught the mismatch.
+
+### New behavior
+
+`/api/auth/me` now becomes strict when the frontend sends `x-wallet-address`.
+
+New behavior:
+
+- the cookie JWT wallet remains authoritative
+- if `x-wallet-address` is present, it is normalized and compared against `req.wallet`
+- if the connected wallet does not match the authenticated wallet:
+  - auth cookies are cleared
+  - refresh token family is revoked
+  - the endpoint returns `409 SESSION_WALLET_MISMATCH`
+
+If there is no mismatch, `/me` continues to return the authenticated wallet as before.
+
+### Effect
+
+This closes the gap between:
+
+- “a valid cookie session exists”
+and
+- “that session actually belongs to the wallet currently connected in the UI”
+
+It makes `/api/auth/me` part of the wallet/session authority boundary instead of only a passive auth check.
+
+### Scope
+
+Only `backend/scripts/routes/auth.js` was targeted here. */
 const express = require("express");
 const Joi = require("joi");
 const router = express.Router();
