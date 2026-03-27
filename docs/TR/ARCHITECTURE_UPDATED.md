@@ -82,6 +82,7 @@ Araf **Web2.5 Hibrit Sistem** olarak çalışır. Güvenlik açısından kritik 
 | Backend | Node.js + Express | CommonJS, non-custodial relayer |
 | Veritabanı | MongoDB + Mongoose | v8.x — İlanlar, İşlemler, Kullanıcılar; `maxPoolSize=100`, `socketTimeoutMS=20000`, `serverSelectionTimeoutMS=5000` |
 | Önbellek / Auth / Koordinasyon | Redis | v4.x — Hız limitleri, nonce'lar, event checkpoint, DLQ, readiness gate |
+| Zamanlanmış Görevler | Node.js jobs | Pending listing cleanup, PII/dekont retention cleanup, on-chain reputation decay, günlük stats snapshot |
 | Şifreleme | AES-256-GCM + HKDF | Zarf şifreleme, cüzdan başına DEK |
 | Kimlik Doğrulama | SIWE + JWT (HS256) | EIP-4361, 15 dakika geçerlilik |
 | Frontend | React 18 + Vite + Wagmi | Tailwind CSS, viem, EIP-712 |
@@ -420,16 +421,45 @@ IBAN ve banka sahibi adı yalnızca MongoDB'de, AES-256-GCM ile şifreli olarak 
 - **Yeniden Bağlanma:** RPC sağlayıcı arızasında otomatik yeniden bağlanır.
 - **Mongo ölçekleme notu:** Event replay ile eşzamanlı canlı API trafiği Mongo üzerinde ani paralellik yaratabileceğinden, olay aynalama katmanı düşük pool varsayımıyla tasarlanmamıştır.
 - **Temiz yeniden başlatma ilkesi:** DB bağlantısı koptuğunda worker ve API aynı process'te kirli reconnect yapmak yerine container/process supervisor tarafından temiz biçimde yeniden başlatılır.
+### 9.7 Zamanlanmış Görevler ve Veri Yaşam Döngüsü
 
-### 9.7 Şifreli Dekont Depolama ve Unutulma Hakkı (TTL)
+Backend, uygulama mantığının bir bölümünü periyodik job'lar ile yürütür. Bu görevler **yetkili durum kaynağını değiştirmez**; on-chain gerçekliği tamamlayan retention, bakım ve analytics işlevleri sağlar.
+
+#### Pending Listing Cleanup
+
+- `PENDING` durumda kalmış ve hiçbir zaman on-chain `tradeId` / `onchain_escrow_id` almamış ilanlar geçici kabul edilir.
+- `created_at` üzerinden **12 saat** geçen ve hala on-chain'e düşmemiş kayıtlar `DELETED` durumuna çekilir.
+- Amaç, başarısız oluşturma akışlarından kalan yarım ilanları orderbook'tan temizlemektir.
+
+#### Sensitive Data Cleanup
+
+- Dekont payload'ı (`evidence.receipt_encrypted`, `evidence.receipt_timestamp`) kendi `receipt_delete_at` zamanına ulaştığında null'lanır.
+- Snapshot PII alanları (`pii_snapshot.*`) kendi `snapshot_delete_at` zamanına ulaştığında null'lanır.
+- Bu temizlik işi hard delete yerine **alan bazlı scrub** uygular; işlem kaydı, denetim izi ve finansal tarihçe korunur.
+
+#### On-Chain Reputation Decay Job
+
+- `decayReputation(address)` fonksiyonu kullanıcılar adına backend job'ı tarafından periyodik olarak tetiklenebilir.
+- Aday seçiminde Mongo yalnızca **geniş aday havuzu** sağlar; nihai uygunluk `reputation(address)` on-chain okumasına göre belirlenir.
+- Bu yaklaşım, `banned_until` veya `consecutive_bans` gibi DB aynalarının stale kalması halinde yanlış decay uygulanmasını engeller.
+- Job, relayer signer ile yalnızca kontratın izin verdiği `decayReputation()` çağrısını yapar; itibarı off-chain değiştiremez.
+
+#### Daily Stats Snapshot
+
+- Güncel protokol istatistikleri Mongo aggregation ile DB seviyesinde hesaplanır.
+- Sonuçlar `historical_stats` koleksiyonunda **gün bazlı idempotent upsert** ile saklanır.
+- Aynı gün içinde job tekrar çalışsa bile mevcut gün kaydı güncellenir; duplicate günlük snapshot oluşmaz.
+
+
+### 9.8 Şifreli Dekont Depolama ve Unutulma Hakkı (TTL)
 
 Taker dekont yüklediğinde public IPFS'e atmak yerine, backend üzerinde AES-256-GCM ile şifrelenir ve veritabanına/geçici storage'a kaydedilir. Dosyanın SHA-256 hash'i frontend'e dönülür ve akıllı kontrata kaydedilir. İşlem `RESOLVED` veya `CANCELED` statüsüne geçtiğinde dekont verisi maksimum 24 saat içinde silinir. `CHALLENGED` veya `BURNED` işlemlerde ise süreci takip eden 30 gün sonra kalıcı olarak silinir.
 
-### 9.8 Triangulation Fraud (Üçgen Dolandırıcılık) Koruması
+### 9.9 Triangulation Fraud (Üçgen Dolandırıcılık) Koruması
 
 Üçgen dolandırıcılığı önlemek için; işlem `LOCKED` durumuna geçtiğinde, Maker'ın (Satıcı) Trade Room ekranında, Backend'den şifresi çözülerek gelen Taker'ın (Alıcı) "İsim Soyisim" bilgisi gösterilir. Maker'a, gelen paranın gönderici ismi ile bu ismin kesinlikle eşleştiğini teyit etmesi için uyarı yapılır. Eşleşmeme durumunda işlem iptaline (Cancel) yönlendirilir.
 
-### 9.9 On-Chain Güvenlik Fonksiyonları
+### 9.10 On-Chain Güvenlik Fonksiyonları
 
 | Fonksiyon | Açıklama |
 |---|---|
@@ -458,6 +488,7 @@ Taker dekont yüklediğinde public IPFS'e atmak yerine, backend üzerinde AES-25
 | `consecutive_bans` | Sayı (varsayılan: 0) | On-chain ardışık yasak sayısı aynası |
 | `max_allowed_tier` | Sayı (varsayılan: 4) | On-chain tier tavanı aynası — yalnızca görüntüleme |
 | `last_login` | Tarih | TTL: 2 yıl hareketsizlik sonrası otomatik silme (GDPR) |
+| `wallet_address` seçilmiş subset | Dize | Reputation decay job aday havuzu için hızlı taranabilir kullanıcı kümesi |
 
 ### İlanlar Koleksiyonu
 
@@ -471,8 +502,8 @@ Taker dekont yüklediğinde public IPFS'e atmak yerine, backend üzerinde AES-25
 | `tier_rules.required_tier` | 0 – 4 | Bu ilanı almak için gereken minimum tier |
 | `tier_rules.maker_bond_pct` | Sayı | Maker teminat yüzdesi |
 | `tier_rules.taker_bond_pct` | Sayı | Taker teminat yüzdesi |
-| `status` | `OPEN` \| `PAUSED` \| `COMPLETED` \| `DELETED` | İlan yaşam döngüsü durumu |
-| `onchain_escrow_id` | Sayı \| null | Escrow oluşturulduğunda on-chain `tradeId` |
+| `status` | `PENDING` \| `OPEN` \| `PAUSED` \| `COMPLETED` \| `DELETED` | `PENDING` = henüz on-chain'e yazılmamış geçici ilan; cleanup job tarafından süpürülebilir |
+| `onchain_escrow_id` | Sayı \| null | Escrow oluşturulduğunda on-chain `tradeId`; `null` + eski `PENDING` kayıtlar yetim ilan sinyalidir |
 | `token_address` | Dize | Base'deki ERC-20 sözleşme adresi |
 
 ### İşlemler Koleksiyonu
@@ -483,9 +514,10 @@ Taker dekont yüklediğinde public IPFS'e atmak yerine, backend üzerinde AES-25
 | Finansal | `crypto_amount` (String, authoritative), `crypto_amount_num` (Number, cache), `exchange_rate`, `total_decayed` (String), `total_decayed_num` (Number, cache), `decay_tx_hashes`, `decayed_amounts` | `*_num` alanları yalnızca analytics/UI için yaklaşık değerdir; enforcement için kullanılmaz |
 | Durum | `status` | On-chain durum makinesini yansıtır |
 | Zamanlayıcılar | `locked_at`, `paid_at`, `challenged_at`, `resolved_at`, `last_decay_at` | `last_decay_at` = son `BleedingDecayed` olayı |
-| Kanıt | `ipfs_receipt_hash`, `receipt_timestamp` | Ödeme makbuzunun IPFS hash'i |
+| Kanıt | `ipfs_receipt_hash`, `receipt_timestamp`, `evidence.receipt_encrypted`, `evidence.receipt_delete_at` | Hash on-chain referansıdır; şifreli payload retention süresi dolunca scrub edilir |
 | İptal Önerisi | `proposed_by`, `proposed_at`, `approved_by`, `maker_signed`, `taker_signed`, imzalar | On-chain gönderimden önce toplanan EIP-712 imzaları |
 | Chargeback Onayı | `acknowledged`, `acknowledged_by`, `acknowledged_at`, `ip_hash` | `releaseFunds` öncesi Maker'ın yasal onayı. `ip_hash = SHA-256(IP)` |
+| PII Snapshot | `pii_snapshot.*`, `pii_snapshot.snapshot_delete_at`, `pii_snapshot.captured_at` | Karşı taraf gösterimi için geçici snapshot; retention job alanları null'lar |
 | Tier | `tier` (0–4) | İşlem oluşturma anındaki on-chain tier |
 
 ---
@@ -521,8 +553,11 @@ Taker dekont yüklediğinde public IPFS'e atmak yerine, backend üzerinde AES-25
 | Tek taraflı iptal tacizi | Yüksek | 2/2 EIP-712 — tek taraflı iptal imkansız | ✅ Giderildi |
 | Backend anahtar hırsızlığı | Kritik | Sıfır özel anahtar mimarisi — yalnızca relayer | ✅ Giderildi |
 | JWT ele geçirme | Yüksek | 15 dakika geçerlilik + işlem kapsamlı PII tokenları | ✅ Giderildi |
-| PII veri sızıntısı | Kritik | AES-256-GCM + HKDF + hız sınırı (3 / 10 dk) | ✅ Giderildi |
+| PII veri sızıntısı | Kritik | AES-256-GCM + HKDF + hız sınırı (3 / 10 dk) + retention cleanup job'ları | ✅ Giderildi |
 | Redis tek nokta hatası | Yüksek | Readiness kontrolü + rate limiter fail-open davranışı | ✅ Giderildi |
+| Yetim `PENDING` ilan birikimi | Orta | 12 saatlik cleanup job ile `DELETED`'a süpürme | ✅ Giderildi |
+| Stale reputation mirror ile yanlış decay | Yüksek | Nihai uygunluğu on-chain `reputation()` ile doğrulayan decay job | ✅ Giderildi |
+| Duplicate günlük istatistik kaydı | Düşük | Gün bazlı idempotent upsert (`historical_stats`) | ✅ Giderildi |
 | Mongo reconnect kaosu / topology bozulması | Yüksek | Fail-fast process restart + supervisor yeniden başlatması | ✅ Giderildi |
 | Kur Manipülasyonu (Rate Manipulation) | Kritik | Sistem fiat limitlerini kullanmaz. Tier kısıtlamaları doğrudan mutlak kripto miktarı (USDT/USDC) üzerinden on-chain limitlere dayanır. | ✅ Giderildi |
 
