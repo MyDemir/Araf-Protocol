@@ -3,7 +3,7 @@
 # 🌀 Araf Protokolü
 ### Kanonik Mimari & Teknik Referans
 
-[![Version](https://img.shields.io/badge/versiyon-2.1+_final-00c9a7?style=flat-square)](.)
+[![Version](https://img.shields.io/badge/versiyon-2.1-00c9a7?style=flat-square)](.)
 [![Network](https://img.shields.io/badge/ağ-Base_L2_(8453)-0052FF?style=flat-square&logo=coinbase)](.)
 [![Status](https://img.shields.io/badge/durum-Testnete_Hazır-f5a623?style=flat-square)](.)
 [![Updated](https://img.shields.io/badge/güncelleme-Mart_2026-purple?style=flat-square)](.)
