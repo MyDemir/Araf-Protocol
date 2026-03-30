@@ -4,7 +4,6 @@ const express     = require("express");
 const router      = express.Router();
 const logger      = require("../utils/logger");
 const rateLimit   = require("express-rate-limit");
-const { isReady } = require("../config/redis");
 
 /**
  * Client Error Logger — Frontend Hata Yakalayıcı
@@ -23,7 +22,7 @@ const { isReady } = require("../config/redis");
  *
  * Not: requireAuth kasıtlı olarak EKLENMEDİ.
  * Frontend ErrorBoundary, kullanıcı oturum açmadan önce de çökebilir.
- * Kimlik doğrulama bu endpoint'in işlevini bozur. Rate limit yeterli koruma sağlar.
+ * Kimlik doğrulama bu endpoint'in işlevini bozar. Rate limit yeterli koruma sağlar.
  */
 
 // [TR] Bellekte rate limit (Redis yokken fallback)
@@ -43,13 +42,11 @@ function inMemoryRateLimit(ip, limit = 10) {
  * Redis varsa Redis'i, yoksa bellekteki sayacı kullanır.
  */
 const logRateLimiter = rateLimit({
-  windowMs:    60 * 1000,  // 1 dakika
-  max:         10,         // IP başına dakikada 10 istek
+  windowMs:    60 * 1000,
+  max:         10,
   keyGenerator:(req) => req.ip,
-  // [TR] Redis erişilemezse in-memory fallback kullan, fail-open YOK (log DoS riski)
   skip:        () => false,
-  handler:     (req, res) => {
-    // [TR] Rate limit aşıldıysa ek log yazma — log spam'ini önle
+  handler:     (_req, res) => {
     res.status(429).json({ error: "Çok fazla log isteği." });
   },
   standardHeaders: true,
@@ -64,12 +61,10 @@ const logRateLimiter = rateLimit({
 router.post("/client-error", logRateLimiter, (req, res) => {
   const { message, stack, componentStack, url } = req.body || {};
 
-  // [TR] message alanı olmayan istekleri sessizce reddet (bot testi engeli)
   if (!message || typeof message !== "string") {
     return res.status(400).json({ error: "message alanı zorunludur." });
   }
 
-  // [TR] Maksimum mesaj uzunluğu — log bombalamasını önle
   const safeMessage        = String(message).slice(0, 500);
   const safeStack          = stack          ? String(stack).slice(0, 2000)          : undefined;
   const safeComponentStack = componentStack ? String(componentStack).slice(0, 1000) : undefined;
@@ -84,7 +79,6 @@ router.post("/client-error", logRateLimiter, (req, res) => {
     ip:             req.ip,
   });
 
-  // [TR] 204 No Content — gövdesiz yanıt (sisteme yük bindirme)
   res.status(204).end();
 });
 

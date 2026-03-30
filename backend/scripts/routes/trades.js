@@ -14,11 +14,17 @@ const SAFE_TRADE_PROJECTION = [
   "_id",
   "onchain_escrow_id",
   "listing_id",
+  "parent_order_id",
+  "trade_origin",
+  "parent_order_side",
+  "canonical_refs",
+  "token_address",
   "maker_address",
   "taker_address",
   "status",
   "tier",
   "financials",
+  "fill_metadata",
   "timers",
   "cancel_proposal.proposed_by",
   "cancel_proposal.proposed_at",
@@ -30,6 +36,8 @@ const SAFE_TRADE_PROJECTION = [
   "evidence.receipt_timestamp",
   "chargeback_ack.acknowledged",
   "chargeback_ack.acknowledged_at",
+  "created_at",
+  "updated_at",
 ].join(" ");
 
 /**
@@ -53,6 +61,11 @@ const SAFE_TRADE_PROJECTION = [
  *   her ikisi de acknowledged: false okuyabilir ve iki kayıt yazılabilirdi.
  *   ŞİMDİ: findOneAndUpdate tek atomik sorguyla hem kontrol hem güncelleme yapıyor.
  *   acknowledged: false koşulu filtreye eklendi — sadece ilk istek başarılı olur.
+ *
+ * V3 Notu:
+ *   - Trade modeli artık çoğu durumda ORDER_CHILD child trade mirror'ıdır.
+ *   - Yani bu route parent order değil, gerçek child trade yaşam döngüsünü sunar.
+ *   - Direct escrow kalıntıları varsa `trade_origin=LEGACY_DIRECT` ile ayrışır.
  */
 
 // ─── GET /api/trades/my ───────────────────────────────────────────────────────
@@ -61,7 +74,11 @@ router.get("/my", requireAuth, tradesLimiter, async (req, res, next) => {
     const trades = await Trade.find({
       $or: [{ maker_address: req.wallet }, { taker_address: req.wallet }],
       status: { $nin: ["RESOLVED", "CANCELED", "BURNED"] },
-    }).select(SAFE_TRADE_PROJECTION).sort({ created_at: -1 }).lean();
+    })
+      .select(SAFE_TRADE_PROJECTION)
+      .sort({ created_at: -1, _id: -1 })
+      .lean();
+
     return res.json({ trades });
   } catch (err) { next(err); }
 });
@@ -72,6 +89,7 @@ router.get("/history", requireAuth, tradesLimiter, async (req, res, next) => {
     const schema = Joi.object({
       page:  Joi.number().integer().min(1).default(1),
       limit: Joi.number().integer().min(1).max(50).default(10),
+      origin: Joi.string().valid("LEGACY_DIRECT", "ORDER_CHILD").optional(),
     });
     const { error, value } = schema.validate(req.query);
     if (error) return res.status(400).json({ error: error.message });
@@ -80,14 +98,38 @@ router.get("/history", requireAuth, tradesLimiter, async (req, res, next) => {
       $or:    [{ maker_address: req.wallet }, { taker_address: req.wallet }],
       status: { $in: ["RESOLVED", "CANCELED", "BURNED"] },
     };
+    if (value.origin) filter.trade_origin = value.origin;
+
     const skip   = (value.page - 1) * value.limit;
     const trades = await Trade.find(filter)
       .select(SAFE_TRADE_PROJECTION)
-      .sort({ "timers.resolved_at": -1 })
-      .skip(skip).limit(value.limit).lean();
+      .sort({ "timers.resolved_at": -1, _id: -1 })
+      .skip(skip)
+      .limit(value.limit)
+      .lean();
     const total  = await Trade.countDocuments(filter);
 
     return res.json({ trades, total, page: value.page, limit: value.limit });
+  } catch (err) { next(err); }
+});
+
+// ─── GET /api/trades/by-parent-order/:onchainOrderId ─────────────────────────
+router.get("/by-parent-order/:onchainOrderId", requireAuth, tradesLimiter, async (req, res, next) => {
+  try {
+    const onchainOrderId = Number(req.params.onchainOrderId);
+    if (!Number.isInteger(onchainOrderId) || onchainOrderId <= 0) {
+      return res.status(400).json({ error: "Geçersiz on-chain order ID formatı." });
+    }
+
+    const trades = await Trade.find({
+      parent_order_id: onchainOrderId,
+      $or: [{ maker_address: req.wallet }, { taker_address: req.wallet }],
+    })
+      .select(SAFE_TRADE_PROJECTION)
+      .sort({ created_at: -1, _id: -1 })
+      .lean();
+
+    return res.json({ trades });
   } catch (err) { next(err); }
 });
 
@@ -100,7 +142,7 @@ router.get("/by-escrow/:onchainId", requireAuth, tradesLimiter, async (req, res,
       return res.status(400).json({ error: "Geçersiz on-chain ID formatı." });
     }
     const trade = await Trade.findOne({ onchain_escrow_id: onchainId })
-      .select("_id onchain_escrow_id maker_address taker_address status")
+      .select(SAFE_TRADE_PROJECTION)
       .lean();
     if (!trade) return res.status(404).json({ error: "Trade bulunamadı." });
     if (trade.maker_address !== req.wallet && trade.taker_address !== req.wallet) {
@@ -135,7 +177,6 @@ router.post("/propose-cancel", requireAuth, requireSessionWalletMatch, tradesLim
     const { error, value } = schema.validate(req.body);
     if (error) return res.status(400).json({ error: error.message });
 
-    // [TR] Deadline sunucu tarafında da doğrulanıyor
     const now = Math.floor(Date.now() / 1000);
     const MAX_DEADLINE_SECONDS = 7 * 24 * 60 * 60;
     if (value.deadline <= now) {
@@ -152,12 +193,10 @@ router.post("/propose-cancel", requireAuth, requireSessionWalletMatch, tradesLim
     const isTaker = trade.taker_address === req.wallet;
     if (!isMaker && !isTaker) return res.status(403).json({ error: "Bu işlemin tarafı değilsin." });
 
-    // KRİT-12 Fix: Deadline sabitleme — ilk teklifte set et, sonra EŞLEŞMESİ gerekiyor
     const existingDeadline = trade.cancel_proposal.deadline;
     if (existingDeadline) {
-      // [TR] İkinci taraf farklı bir deadline ile gelirse ret
       const existingTs = Math.floor(new Date(existingDeadline).getTime() / 1000);
-      if (Math.abs(existingTs - value.deadline) > 60) { // 60sn tolerans (blok zaman farkı)
+      if (Math.abs(existingTs - value.deadline) > 60) {
         logger.warn(
           `[Trades] Deadline manipülasyon denemesi: ` +
           `mevcut=${existingTs} gelen=${value.deadline} wallet=${req.wallet}`
@@ -167,15 +206,12 @@ router.post("/propose-cancel", requireAuth, requireSessionWalletMatch, tradesLim
         });
       }
     } else {
-      // [TR] İlk teklif — deadline'ı set et
       trade.cancel_proposal.deadline = new Date(value.deadline * 1000);
     }
 
-    // ORTA-01 Fix: proposed_by sadece ilk teklifte set ediliyor
     if (!trade.cancel_proposal.proposed_by) {
       trade.cancel_proposal.proposed_by = req.wallet;
     }
-    // [TR] İkinci tarafın onayı ayrı alanda tutuluyor (audit trail korunuyor)
     if (!trade.cancel_proposal.approved_by && trade.cancel_proposal.proposed_by !== req.wallet) {
       trade.cancel_proposal.approved_by = req.wallet;
     }
@@ -201,34 +237,26 @@ router.post("/propose-cancel", requireAuth, requireSessionWalletMatch, tradesLim
   } catch (err) { next(err); }
 });
 
-// ─── POST /api/trades/:id/chargeback-ack ─────────────────────────────────────
-// [TR] Bu endpoint yalnızca audit/log içindir. On-chain release akışına veto uygulamaz.
-//      Başarısızlığı kontrat çağrısını engelleyecek bir protocol gate olarak kullanılmamalıdır.
-
 /**
  * ORTA-12 Fix: Gerçek IP belirleme fonksiyonu.
  * app.js'de trust proxy aktif olduğunda req.ip doğru IP'yi döndürür.
- * Bu fonksiyon ek güvence katmanı sağlar.
  */
 function _getRealIP(req) {
-  // [TR] trust proxy aktifse req.ip zaten doğru — bu sadece ekstra güvence
-  const forwarded = req.headers['x-forwarded-for'];
-  if (forwarded && process.env.NODE_ENV === 'production') {
-    // [TR] En soldaki IP gerçek istemcidir (en sağdaki proxy'dir)
-    return forwarded.split(',')[0].trim();
+  const forwarded = req.headers["x-forwarded-for"];
+  if (forwarded && process.env.NODE_ENV === "production") {
+    return forwarded.split(",")[0].trim();
   }
   return req.ip || req.socket?.remoteAddress || "unknown";
 }
 
+// ─── POST /api/trades/:id/chargeback-ack ─────────────────────────────────────
+// [TR] Bu endpoint yalnızca audit/log içindir. On-chain release akışına veto uygulamaz.
 router.post("/:id/chargeback-ack", requireAuth, requireSessionWalletMatch, tradesLimiter, async (req, res, next) => {
   try {
     if (!/^[a-fA-F0-9]{24}$/.test(req.params.id)) {
       return res.status(400).json({ error: "Geçersiz trade ID formatı." });
     }
 
-    // ORTA-14 Fix: findOneAndUpdate ile atomik kontrol + güncelleme
-    // ÖNCEKİ: findOne + ayrı save() = race condition
-    // ŞİMDİ: Tek sorgu — acknowledged: false koşulu filtrede
     const rawIp  = _getRealIP(req);
     const ipHash = crypto.createHash("sha256").update(rawIp).digest("hex");
 
@@ -237,7 +265,6 @@ router.post("/:id/chargeback-ack", requireAuth, requireSessionWalletMatch, trade
         _id:            req.params.id,
         maker_address:  req.wallet,
         status:         { $in: ["PAID", "CHALLENGED"] },
-        // ORTA-14 Fix: Sadece henüz onaylanmamışsa güncelle
         "chargeback_ack.acknowledged": { $ne: true },
       },
       {
@@ -252,7 +279,6 @@ router.post("/:id/chargeback-ack", requireAuth, requireSessionWalletMatch, trade
     );
 
     if (!updatedTrade) {
-      // [TR] Güncelleme yapılamadıysa nedeni anla
       const existing = await Trade.findById(req.params.id).select("maker_address status chargeback_ack").lean();
       if (!existing)                                  return res.status(404).json({ error: "İşlem bulunamadı." });
       if (existing.maker_address !== req.wallet)      return res.status(403).json({ error: "Bu işlem için yetkiniz yok." });

@@ -22,8 +22,8 @@ router.post("/", requireAuth, feedbackLimiter, async (req, res, next) => {
     const schema = Joi.object({
       rating:  Joi.number().integer().min(1).max(5).required(),
       comment: Joi.string().max(1000).allow("").optional(),
-      // YENİ: Geri bildirimleri sınıflandırmak için kategori alanı
-      category: Joi.string().valid('bug', 'suggestion', 'ui/ux', 'other').required(),
+      // Geri bildirimleri sınıflandırmak için kategori alanı
+      category: Joi.string().valid("bug", "suggestion", "ui/ux", "other").required(),
     });
 
     const { error, value } = schema.validate(req.body);

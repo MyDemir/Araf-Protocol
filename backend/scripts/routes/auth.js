@@ -25,7 +25,7 @@ In practice, if the connected wallet changed on the frontend, `/me` could still 
 
 ### New behavior
 
-`/api/auth/me` now becomes strict when the frontend sends `x-wallet-address`.
+`/me` now becomes strict when the frontend sends `x-wallet-address`.
 
 New behavior:
 
