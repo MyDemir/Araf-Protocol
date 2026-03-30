@@ -1,39 +1,44 @@
 "use strict";
 
 require("dotenv").config();
-const express       = require("express");
-const helmet        = require("helmet");
-const cors          = require("cors");
+const express = require("express");
+const helmet = require("helmet");
+const cors = require("cors");
 const mongoSanitize = require("express-mongo-sanitize");
-const mongoose      = require("mongoose");
-const cookieParser  = require("cookie-parser");
+const mongoose = require("mongoose");
+const cookieParser = require("cookie-parser");
 
 // [TR] Yapılandırma ve yardımcı araçlar
 // [EN] Configuration and utility helpers
-const { connectDB }    = require("./config/db");
-const { connectRedis, getRedisClient } = require("./config/redis");
-const logger           = require("./utils/logger");
+const { connectDB } = require("./config/db");
+const { connectRedis, closeRedis } = require("./config/redis");
+const logger = require("./utils/logger");
 
 // [TR] On-chain event'lerini MongoDB'ye yansıtan servis
 // [EN] Service that mirrors on-chain events to MongoDB
 const worker = require("./services/eventListener");
 
-// [TR] Kontrat public constant'larını startup'ta on-chain'den yükler
-// [EN] Loads contract public constants from on-chain at startup
+// [TR] V3 mutable protocol config'ini startup'ta on-chain'den yükler
+// [EN] Loads V3 mutable protocol config from on-chain at startup
 const { loadProtocolConfig } = require("./services/protocolConfig");
 
-// [TR] Başarısız event'lerini izleyen ve uyaran Dead Letter Queue monitörü
-// [EN] Dead Letter Queue monitor that tracks and alerts on failed events
+// [TR] Başarısız event'leri izleyen ve yeniden süren DLQ monitörü
+// [EN] DLQ monitor that re-drives failed events
 const { processDLQ } = require("./services/dlqProcessor");
 
 // [TR] 180 günlük temiz sayfa kuralını on-chain'de tetikleyen periyodik görev
 // [EN] Periodic job that triggers the 180-day clean slate rule on-chain
 const { runReputationDecay } = require("./jobs/reputationDecay");
 
-// [TR] Günlük protokol istatistiklerini MongoDB'ye kaydeden periyodik görev
-// [EN] Periodic job that saves daily protocol stats to MongoDB
+// [TR] Günlük V3 order + child-trade istatistik snapshot görevi
+// [EN] Daily V3 order + child-trade snapshot job
 const { runStatsSnapshot } = require("./jobs/statsSnapshot");
+
+// [TR] V2 listing cleanup mirası — V3'te no-op/compatibility olabilir.
+//      app.js yine de bu job'u schedule edebilir; authoritative market state artık Order'dır.
+// [EN] V2 listing cleanup legacy — may be a no-op/compatibility layer in V3.
 const { runPendingListingCleanup } = require("./jobs/cleanupPendingListings");
+
 const { getReadiness, getLiveness } = require("./services/health");
 const {
   runReceiptCleanup,
@@ -53,19 +58,19 @@ let server = null;
 let isShuttingDown = false;
 const FATAL_EXIT_TIMEOUT_MS = 8_000;
 
-// [TR] Proxy arkasında gerçek client IP'yi her ortamda doğru almak için koşulsuz trust proxy.
-// [EN] Unconditional trust proxy so real client IP is preserved behind reverse proxies.
+// [TR] Proxy arkasında gerçek client IP'yi her ortamda doğru almak için trust proxy.
+// [EN] trust proxy so real client IP is preserved behind reverse proxies.
 app.set("trust proxy", 1);
 
-// ─Güvenlik Middleware / Security Middleware ─
+// ── Güvenlik Middleware / Security Middleware ────────────────────────────────
 
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc:  ["'self'"],
-      styleSrc:   ["'self'", "'unsafe-inline'"],
-      imgSrc:     ["'self'", "data:", "https:"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "https:"],
     },
   },
   hsts: process.env.NODE_ENV === "production"
@@ -75,8 +80,8 @@ app.use(helmet({
 
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || "http://localhost:5173")
   .split(",")
-  .map(o => o.trim())
-  .filter(o => o.length > 0);
+  .map((o) => o.trim())
+  .filter((o) => o.length > 0);
 
 // [TR] Production'da CORS wildcard ve boş origin engellenir
 // [EN] CORS wildcard and empty origins blocked in production
@@ -106,7 +111,7 @@ app.use(cors({
 
 app.use(express.json({ limit: "50kb" }));
 
-// [TR] JWT, JWT refresh token'ı httpOnly cookie'den okumak için
+// [TR] JWT ve refresh token'ı httpOnly cookie'den okumak için
 // [EN] Required to read JWT and refresh token from httpOnly cookie
 app.use(cookieParser());
 
@@ -115,7 +120,7 @@ app.use(mongoSanitize({
   onSanitize: ({ key }) => logger.warn(`[GÜVENLİK] Mongo injection denemesi engellendi: ${key}`),
 }));
 
-//Bootstrap
+// ── Bootstrap ────────────────────────────────────────────────────────────────
 
 async function bootstrap() {
   let dlqInterval = null;
@@ -125,6 +130,8 @@ async function bootstrap() {
   let statsSnapshotInterval = null;
   let pendingCleanupDelay = null;
   let pendingCleanupInterval = null;
+  let sensitiveCleanupDelay = null;
+  let sensitiveCleanupInterval = null;
 
   const clearRuntimeSchedulers = () => {
     if (dlqInterval) clearInterval(dlqInterval);
@@ -134,6 +141,8 @@ async function bootstrap() {
     if (statsSnapshotInterval) clearInterval(statsSnapshotInterval);
     if (pendingCleanupDelay) clearTimeout(pendingCleanupDelay);
     if (pendingCleanupInterval) clearInterval(pendingCleanupInterval);
+    if (sensitiveCleanupDelay) clearTimeout(sensitiveCleanupDelay);
+    if (sensitiveCleanupInterval) clearInterval(sensitiveCleanupInterval);
   };
 
   const shutdown = async ({ signal = "UNKNOWN", exitCode = 0, reason = null }) => {
@@ -177,15 +186,7 @@ async function bootstrap() {
         logger.info("[ORCHESTRATOR] MongoDB bağlantısı kapatıldı.");
       }
 
-      try {
-        const redisClient = getRedisClient();
-        if (redisClient?.isOpen) {
-          await redisClient.quit();
-          logger.info("[ORCHESTRATOR] Redis bağlantısı kapatıldı.");
-        }
-      } catch (redisErr) {
-        logger.warn("[ORCHESTRATOR] Redis kapatma adımı atlandı/başarısız:", { message: redisErr.message });
-      }
+      await closeRedis();
     } catch (shutdownErr) {
       logger.error("[ORCHESTRATOR] Shutdown sırasında hata oluştu:", {
         message: shutdownErr.message,
@@ -230,10 +231,13 @@ async function bootstrap() {
     await connectRedis();
     logger.info("MongoDB ve Redis bağlantıları başarıyla sağlandı.");
 
+    // [TR] V3 mutable protocol config mirror'ı yüklenir.
+    //      Config yüklenemiyorsa server tamamen çökmez; route'lar CONFIG_UNAVAILABLE dönebilir.
+    // [EN] V3 mutable protocol config mirror is loaded here.
     await loadProtocolConfig();
 
     await worker.start();
-    logger.info("Event Listener (Zincir Dinleyici) aktif: Base L2 ağı izleniyor.");
+    logger.info("Event Listener aktif: V3 Order + Child Trade topology izleniyor.");
 
     // [TR] DLQ monitörü — her 60 saniyede başarısız event'leri kontrol eder
     // [EN] DLQ monitor — checks failed events every 60 seconds
@@ -249,78 +253,84 @@ async function bootstrap() {
 
     statsSnapshotDelay = setTimeout(() => {
       runStatsSnapshot();
-      logger.info("Periyodik İstatistik Kaydetme görevi zamanlandı (her 24 saatte bir).");
+      logger.info("Periyodik V3 istatistik snapshot görevi zamanlandı (her 24 saatte bir).");
     }, 60_000);
     statsSnapshotInterval = setInterval(runStatsSnapshot, 24 * 60 * 60 * 1000);
 
-    // [TR] PENDING listing cleanup — her saat stale kayıtları temizler
-    // [EN] PENDING listing cleanup — purges stale records hourly
+    // [TR] Legacy/compat listing cleanup — V3 market authority Order olsa da
+    //      elde eski/yardımcı kayıtlar varsa onları süpürür. No-op olabilir.
+    // [EN] Legacy/compat listing cleanup.
     pendingCleanupDelay = setTimeout(() => {
       runPendingListingCleanup();
-      logger.info("Periyodik PENDING listing temizlik görevi zamanlandı (her 1 saatte bir).");
+      logger.info("Periyodik compatibility listing cleanup görevi zamanlandı (her 1 saatte bir).");
     }, 90_000);
     pendingCleanupInterval = setInterval(runPendingListingCleanup, 60 * 60 * 1000);
 
     // [TR] Hassas veri retention cleanup — her 30 dakikada bir
-    const sensitiveCleanupDelay = setTimeout(async () => {
+    sensitiveCleanupDelay = setTimeout(async () => {
       await runReceiptCleanup();
       await runPIISnapshotCleanup();
       logger.info("Receipt/PII retention cleanup görevi zamanlandı (her 30 dakikada bir).");
     }, 120_000);
-    const sensitiveCleanupInterval = setInterval(async () => {
+    sensitiveCleanupInterval = setInterval(async () => {
       await runReceiptCleanup();
       await runPIISnapshotCleanup();
     }, 30 * 60 * 1000);
 
     // [TR] Rotalar DB ve Redis hazır olduktan sonra yüklenir
     // [EN] Routes loaded after DB and Redis are ready
-    
-    // [TR] Frontend Senkronize Log Rotası (Yük bindirmeyen yapı)
-    const logRoutes      = require("./routes/logs");
-    
-    const authRoutes     = require("./routes/auth");
-    const listingRoutes  = require("./routes/listings");
-    const tradeRoutes    = require("./routes/trades");
-    const piiRoutes      = require("./routes/pii");
+
+    // [TR] Frontend senkronize log rotası (yük bindirmeyen yapı)
+    const logRoutes = require("./routes/logs");
+
+    const authRoutes = require("./routes/auth");
+    const listingRoutes = require("./routes/listings");
+    const orderRoutes = require("./routes/orders");
+    const tradeRoutes = require("./routes/trades");
+    const piiRoutes = require("./routes/pii");
     const feedbackRoutes = require("./routes/feedback");
-    const statsRoutes    = require("./routes/stats");
-    const receiptRoutes  = require("./routes/receipts");
+    const statsRoutes = require("./routes/stats");
+    const receiptRoutes = require("./routes/receipts");
 
     // [TR] Log rotası en üstte tanımlanır
-    app.use("/api/logs",     logRoutes);
-    
-    app.use("/api/auth",     authRoutes);
+    app.use("/api/logs", logRoutes);
+
+    app.use("/api/auth", authRoutes);
     app.use("/api/listings", listingRoutes);
-    app.use("/api/trades",   tradeRoutes);
-    app.use("/api/pii",      piiRoutes);
+    app.use("/api/orders", orderRoutes);
+    app.use("/api/trades", tradeRoutes);
+    app.use("/api/pii", piiRoutes);
     app.use("/api/feedback", feedbackRoutes);
-    app.use("/api/stats",    statsRoutes);
+    app.use("/api/stats", statsRoutes);
     app.use("/api/receipts", receiptRoutes);
 
-    app.get("/health", (req, res) => res.json(getLiveness()));
-    app.get("/ready", async (req, res) => {
+    app.get("/health", (_req, res) => res.json(getLiveness()));
+    app.get("/ready", async (_req, res) => {
       const readiness = await getReadiness({ worker, provider: worker.provider });
       return res.status(readiness.ok ? 200 : 503).json(readiness);
     });
 
-    app.use((req, res) => res.status(404).json({ error: "İstenen endpoint bulunamadı" }));
+    app.use((_req, res) => res.status(404).json({ error: "İstenen endpoint bulunamadı" }));
 
     app.use(globalErrorHandler);
 
     const PORT = process.env.PORT || 4000;
     server = app.listen(PORT, () => {
-      logger.info(`===========================================================`);
+      logger.info("===========================================================");
       logger.info(`🚀 Araf Protocol Backend Dinleniyor: Port ${PORT}`);
-      logger.info(`🌍 Ortam: ${process.env.NODE_ENV || 'development'}`);
-      logger.info(`🛡️  Güvenlik: Non-custodial backend (opsiyonel automation signer olabilir).`);
-      logger.info(`===========================================================`);
+      logger.info(`🌍 Ortam: ${process.env.NODE_ENV || "development"}`);
+      logger.info("🧭 Mimari: V3-native Order + Child Trade backend mirror");
+      logger.info("🛡️  Güvenlik: Non-custodial backend (opsiyonel automation signer olabilir).");
+      logger.info("===========================================================");
     });
 
     process.on("SIGTERM", () => shutdown({ signal: "SIGTERM", exitCode: 0 }));
-    process.on("SIGINT",  () => shutdown({ signal: "SIGINT", exitCode: 0 }));
-
+    process.on("SIGINT", () => shutdown({ signal: "SIGINT", exitCode: 0 }));
   } catch (err) {
-    logger.error("Uygulama başlatılırken kritik hata oluştu:", err);
+    logger.error("Uygulama başlatılırken kritik hata oluştu:", {
+      message: err.message,
+      stack: err.stack,
+    });
     process.exit(1);
   }
 }
