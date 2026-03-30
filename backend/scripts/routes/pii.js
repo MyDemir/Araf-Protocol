@@ -29,6 +29,33 @@ const logger = require("../utils/logger");
 // [EN] PII is available only while the child trade is actively in-flight.
 const ALLOWED_TRADE_STATES = ["LOCKED", "PAID", "CHALLENGED"];
 
+// [TR] Snapshot zorunluluğu: V3 güvenlik sınırında current profile fallback kapalıdır.
+//      Trade sırasında görülen PII, lock-anındaki snapshot ile sınırlı kalmalıdır.
+// [EN] Snapshot is mandatory in V3. Current profile fallback is disabled to prevent post-lock drift.
+function respondSnapshotUnavailable(res, message = "PII snapshot bu trade için hazır değil.") {
+  return res.status(409).json({
+    error: message,
+    code: "SNAPSHOT_UNAVAILABLE",
+  });
+}
+
+// [TR] Snapshot var mı ve ilgili maker alanları okunabilir mi kontrol eder.
+//      Telegram burada trade-scoped optional kabul edilir; varsa snapshot'tan döner,
+//      yoksa current profile fallback yapılmaz ve null kalır.
+// [EN] Telegram is treated as optional trade-scoped snapshot data. No current-profile fallback.
+function hasMakerPIISnapshot(trade) {
+  return Boolean(
+    trade?.pii_snapshot?.maker_bankOwner_enc &&
+      trade?.pii_snapshot?.maker_iban_enc
+  );
+}
+
+// [TR] Taker-name route'u yalnız snapshot üstünden çalışır.
+// [EN] Taker-name route is snapshot-only to keep child-trade visibility stable.
+function hasTakerNameSnapshot(trade) {
+  return Boolean(trade?.pii_snapshot?.taker_bankOwner_enc);
+}
+
 // ─── GET /api/pii/my ─────────────────────────────────────────────────────────
 // [TR] Kullanıcının kendi kayıtlı PII profilini döndürür.
 //      V3'te economic authority üretmez; yalnız şifreli profil bilgisini çözer.
@@ -46,6 +73,11 @@ router.get("/my", requireAuth, requireSessionWalletMatch, piiLimiter, async (req
 
     // [TR] Tüm wallet adresini log'a yazmıyoruz; yalnız kısaltılmış iz bırakıyoruz.
     logger.info(`[PII] /my accessed: wallet=${req.wallet.slice(0, 10)}...`);
+
+    // [TR] Ara katman cache'leri hassas yanıtı saklamasın.
+    res.set("Cache-Control", "no-store, max-age=0");
+    res.set("Pragma", "no-cache");
+
     return res.json({ pii: decrypted });
   } catch (err) {
     next(err);
@@ -85,25 +117,28 @@ router.get("/taker-name/:onchainId", requireAuth, requireSessionWalletMatch, pii
       return res.json({ bankOwner: null });
     }
 
-    // [TR] Öncelik snapshot verisinde. Böylece profil sonradan değişse bile,
-    //      trade sırasında görülen karşı taraf bilgisi stabil kalır.
-    // [EN] Prefer snapshot data so counterpart details stay stable during the trade.
-    let bankOwner = null;
-
-    if (trade.pii_snapshot?.taker_bankOwner_enc) {
-      bankOwner = await decryptField(trade.pii_snapshot.taker_bankOwner_enc, trade.taker_address);
-    } else {
-      const takerUser = await User.findOne({ wallet_address: trade.taker_address })
-        .select("pii_data")
-        .lean();
-
-      if (takerUser?.pii_data?.bankOwner_enc) {
-        const decrypted = await decryptPII(takerUser.pii_data, trade.taker_address);
-        bankOwner = decrypted.bankOwner;
-      }
+    // [TR] V3 güvenlik sınırında current profile fallback kapalıdır.
+    //      Snapshot yoksa erişim kontrollü şekilde reddedilir.
+    // [EN] Current profile fallback is disabled in V3. Missing snapshot returns a controlled error.
+    if (!hasTakerNameSnapshot(trade)) {
+      logger.warn(`[PII] taker-name snapshot unavailable: onchain=#${onchainId}`);
+      return respondSnapshotUnavailable(
+        res,
+        "Karşı taraf isim snapshot'ı bu trade için hazır değil."
+      );
     }
 
+    const bankOwner = await decryptField(
+      trade.pii_snapshot.taker_bankOwner_enc,
+      trade.taker_address
+    );
+
     logger.info(`[PII] taker-name accessed: onchain=#${onchainId}`);
+
+    // [TR] Ara katman cache'leri hassas yanıtı saklamasın.
+    res.set("Cache-Control", "no-store, max-age=0");
+    res.set("Pragma", "no-cache");
+
     return res.json({ bankOwner });
   } catch (err) {
     next(err);
@@ -149,83 +184,101 @@ router.post("/request-token/:tradeId", requireAuth, requireSessionWalletMatch, p
 // ─── GET /api/pii/:tradeId ────────────────────────────────────────────────────
 // [TR] Trade-scoped token ile maker'ın ödeme bilgilerini çözer.
 //      Burada ek olarak anlık trade statüsü tekrar kontrol edilir; token tek başına yeterli değildir.
-router.get("/:tradeId", requirePIIToken, piiLimiter, async (req, res, next) => {
-  try {
-    const { tradeId } = req.params;
-    const callerWallet = req.wallet;
+router.get(
+  "/:tradeId",
+  requireAuth,
+  requireSessionWalletMatch,
+  requirePIIToken,
+  piiLimiter,
+  async (req, res, next) => {
+    try {
+      const { tradeId } = req.params;
+      const callerWallet = req.wallet;
 
-    if (!/^[a-fA-F0-9]{24}$/.test(tradeId)) {
-      return res.status(400).json({ error: "Geçersiz tradeId formatı." });
-    }
-
-    const trade = await Trade.findById(tradeId)
-      .select("maker_address status taker_address pii_snapshot")
-      .lean();
-
-    if (!trade) {
-      return res.status(404).json({ error: "Trade bulunamadı." });
-    }
-
-    if (trade.taker_address !== callerWallet) {
-      return res.status(403).json({ error: "Yetkisiz erişim." });
-    }
-
-    // [TR] Token alındıktan sonra trade kapanmış olabilir.
-    //      Bu yüzden şifre çözmeden önce canlı state tekrar kontrol edilir.
-    if (!ALLOWED_TRADE_STATES.includes(trade.status)) {
-      return res.status(403).json({
-        error: `İşlem artık aktif değil (${trade.status}). PII erişimi kaldırıldı.`,
-      });
-    }
-
-    // [TR] Öncelik snapshot verisinde; yoksa legacy user.pii_data fallback.
-    // [EN] Prefer snapshot data; fallback to current encrypted profile when snapshot is missing.
-    let bankOwner = null;
-    let iban = null;
-    let telegram = null;
-
-    if (trade.pii_snapshot?.maker_bankOwner_enc || trade.pii_snapshot?.maker_iban_enc) {
-      if (trade.pii_snapshot?.maker_bankOwner_enc) {
-        bankOwner = await decryptField(trade.pii_snapshot.maker_bankOwner_enc, trade.maker_address);
+      if (!/^[a-fA-F0-9]{24}$/.test(tradeId)) {
+        return res.status(400).json({ error: "Geçersiz tradeId formatı." });
       }
-      if (trade.pii_snapshot?.maker_iban_enc) {
-        iban = await decryptField(trade.pii_snapshot.maker_iban_enc, trade.maker_address);
-      }
-    } else {
-      const makerUser = await User.findOne({ wallet_address: trade.maker_address })
-        .select("pii_data")
+
+      const trade = await Trade.findById(tradeId)
+        .select("maker_address status taker_address pii_snapshot")
         .lean();
 
-      if (!makerUser || !makerUser.pii_data) {
-        return res.status(404).json({ error: "Satıcı ödeme bilgilerini henüz girmemiş." });
+      if (!trade) {
+        return res.status(404).json({ error: "Trade bulunamadı." });
       }
 
-      const decrypted = await decryptPII(makerUser.pii_data, trade.maker_address);
-      bankOwner = decrypted.bankOwner;
-      iban = decrypted.iban;
-      telegram = decrypted.telegram;
+      if (trade.taker_address !== callerWallet) {
+        return res.status(403).json({ error: "Yetkisiz erişim." });
+      }
+
+      // [TR] Token alındıktan sonra trade kapanmış olabilir.
+      //      Bu yüzden şifre çözmeden önce canlı state tekrar kontrol edilir.
+      if (!ALLOWED_TRADE_STATES.includes(trade.status)) {
+        return res.status(403).json({
+          error: `İşlem artık aktif değil (${trade.status}). PII erişimi kaldırıldı.`,
+        });
+      }
+
+      // [TR] V3 güvenlik sınırında current profile fallback kapalıdır.
+      //      Gerekli maker snapshot alanları yoksa kontrollü hata döneriz.
+      // [EN] Current profile fallback is disabled in V3. Required maker snapshot fields must exist.
+      if (!hasMakerPIISnapshot(trade)) {
+        logger.warn(`[PII] snapshot unavailable: trade=${tradeId.slice(0, 8)}...`);
+        return respondSnapshotUnavailable(
+          res,
+          "Satıcı ödeme snapshot'ı bu trade için hazır değil."
+        );
+      }
+
+      let bankOwner = null;
+      let iban = null;
+      let telegram = null;
+
+      if (trade.pii_snapshot?.maker_bankOwner_enc) {
+        bankOwner = await decryptField(
+          trade.pii_snapshot.maker_bankOwner_enc,
+          trade.maker_address
+        );
+      }
+
+      if (trade.pii_snapshot?.maker_iban_enc) {
+        iban = await decryptField(
+          trade.pii_snapshot.maker_iban_enc,
+          trade.maker_address
+        );
+      }
+
+      // [TR] Telegram alanı da snapshot disiplinine dahil edilir.
+      //      Varsa trade snapshot'ından çözülür; yoksa current profile fallback yapılmaz.
+      // [EN] Telegram is included under the same snapshot discipline.
+      if (trade.pii_snapshot?.maker_telegram_enc) {
+        telegram = await decryptField(
+          trade.pii_snapshot.maker_telegram_enc,
+          trade.maker_address
+        );
+      }
+
+      logger.info(`[PII] Accessed: trade=${tradeId.slice(0, 8)}...`);
+
+      // [TR] Ara katman cache'leri hassas yanıtı saklamasın.
+      res.set("Cache-Control", "no-store, max-age=0");
+      res.set("Pragma", "no-cache");
+
+      return res.json({
+        bankOwner,
+        iban,
+        telegram,
+        notice: "Bu bilgiler şifreli kanaldan iletildi. Blockchain'e veya loglara kaydedilmez.",
+      });
+    } catch (err) {
+      if (err.message?.includes("Unsupported state") || err.message?.includes("Invalid auth tag")) {
+        logger.error(`[PII] Şifre çözme hatası: trade=${req.params.tradeId.slice(0, 8)}...`);
+        return res.status(500).json({ error: "Şifre çözme başarısız. Lütfen daha sonra tekrar deneyin." });
+      }
+
+      next(err);
     }
-
-    logger.info(`[PII] Accessed: trade=${tradeId.slice(0, 8)}...`);
-
-    // [TR] Ara katman cache'leri hassas yanıtı saklamasın.
-    res.set("Cache-Control", "no-store, max-age=0");
-    res.set("Pragma", "no-cache");
-
-    return res.json({
-      bankOwner,
-      iban,
-      telegram,
-      notice: "Bu bilgiler şifreli kanaldan iletildi. Blockchain'e veya loglara kaydedilmez.",
-    });
-  } catch (err) {
-    if (err.message?.includes("Unsupported state") || err.message?.includes("Invalid auth tag")) {
-      logger.error(`[PII] Şifre çözme hatası: trade=${req.params.tradeId.slice(0, 8)}...`);
-      return res.status(500).json({ error: "Şifre çözme başarısız. Lütfen daha sonra tekrar deneyin." });
-    }
-
-    next(err);
   }
-});
+);
 
 module.exports = router;
