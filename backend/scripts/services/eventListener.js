@@ -13,6 +13,12 @@
  *   - Child trade gerçek escrow lifecycle'ıdır.
  *   - remainingAmount, reserve ve fee snapshot kontrattan gelir.
  *   - Heuristik linkage YOK; explicit orderId / tradeId / orderRef kullanılır.
+ *
+ * Bu sürüm, ArafEscrow-yeni.sol V3 surface'ına göre güncellenmiştir:
+ *   - OrderCreated / OrderFilled / OrderCanceled event'leri
+ *   - FeeConfigUpdated / CooldownConfigUpdated / TokenConfigUpdated event'leri
+ *   - getTrade(), getOrder(), getReputation() getter'ları
+ *   - Trade.parentOrderId alanı
  */
 const { ethers } = require("ethers");
 const mongoose = require("mongoose");
@@ -502,7 +508,6 @@ class EventWorker {
       "timers.canceled_at": opts.canceledAt || undefined,
     };
 
-    // [TR] undefined alanları istemsiz overwrite etmesin diye temizle.
     Object.keys(payload).forEach((k) => payload[k] === undefined && delete payload[k]);
 
     await Order.findOneAndUpdate(
@@ -632,9 +637,7 @@ class EventWorker {
   async _onOrderFilled(event) {
     const { orderId, tradeId, filler, fillAmount, remainingAmount } = event.args;
     const tradeIdNum = _toNum(tradeId);
-    const existingTrade = await Trade.findOne({ onchain_escrow_id: tradeIdNum })
-      .select("onchain_escrow_id")
-      .lean();
+    const existingTrade = await Trade.findOne({ onchain_escrow_id: tradeIdNum }).select("onchain_escrow_id").lean();
 
     const [orderData, tradeData] = await Promise.all([
       this._fetchOrderFromChain(orderId),
@@ -650,8 +653,6 @@ class EventWorker {
       remainingAmountAfterFill: remainingAmount,
     });
 
-    // [TR] Idempotency: aynı child trade zaten mirror edilmişse order stats tekrar artırılmaz.
-    // [EN] Do not bump order stats again if the same child trade was already mirrored.
     if (!existingTrade) {
       await this._bumpOrderChildStats(_toNum(orderId), (stats) => ({
         child_trade_count: (stats.child_trade_count || 0) + 1,
@@ -689,8 +690,6 @@ class EventWorker {
     const tradeIdNum = _toNum(tradeId);
     const trade = await Trade.findOne({ onchain_escrow_id: tradeIdNum }).select("maker_address taker_address status").lean();
 
-    // [TR] same-tx create+lock zincirinde create mirror henüz düşmediyse retry et.
-    // [EN] Retry if the create mirror has not landed yet in the same-tx create+lock chain.
     if (!trade) {
       if (attempt < MAX_RETRIES) {
         await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * attempt));
@@ -750,8 +749,6 @@ class EventWorker {
       );
       if (!trade) { await session.abortTransaction(); return; }
 
-      // [TR] V3 kuralı: challenged -> resolved akışında haksız itiraz eden maker mirror edilir.
-      // [EN] Use authoritative on-chain challengedAt instead of stale DB status.
       if (wasDisputed && trade.maker_address) {
         const scoreType = "unjust_challenge";
         const score = FAILURE_SCORE_WEIGHTS[scoreType];
@@ -894,21 +891,22 @@ class EventWorker {
       ? tradeData.taker.toLowerCase()
       : null;
 
+    const update = {
+      "cancel_proposal.proposed_by": proposerAddress,
+      "cancel_proposal.proposed_at": new Date(),
+      "cancel_proposal.maker_signed": Boolean(tradeData.cancelProposedByMaker),
+      "cancel_proposal.taker_signed": Boolean(tradeData.cancelProposedByTaker),
+    };
+
+    if (tradeData.cancelProposedByMaker && tradeData.cancelProposedByTaker) {
+      update["cancel_proposal.approved_by"] = proposerAddress;
+    } else if (proposerAddress !== makerAddress && proposerAddress === takerAddress) {
+      update["cancel_proposal.approved_by"] = proposerAddress;
+    }
+
     await Trade.findOneAndUpdate(
       { onchain_escrow_id: _toNum(tradeId) },
-      {
-        $set: {
-          "cancel_proposal.proposed_by": proposerAddress,
-          "cancel_proposal.proposed_at": new Date(),
-          "cancel_proposal.approved_by":
-            tradeData.cancelProposedByMaker && tradeData.cancelProposedByTaker ? proposerAddress : null,
-          "cancel_proposal.maker_signed": Boolean(tradeData.cancelProposedByMaker),
-          "cancel_proposal.taker_signed": Boolean(tradeData.cancelProposedByTaker),
-          ...(proposerAddress !== makerAddress && proposerAddress === takerAddress
-            ? { "cancel_proposal.approved_by": proposerAddress }
-            : {}),
-        },
-      }
+      { $set: update }
     );
   }
 
@@ -935,8 +933,6 @@ class EventWorker {
     const banTimestamp = _toNum(bannedUntil);
     const isBanned = banTimestamp > Math.floor(Date.now() / 1000);
 
-    // [TR] Event payload consecutiveBans içermediğinde authoritative chain read ile tamamla.
-    // [EN] Backfill consecutive bans from chain because the event payload is intentionally slim.
     let consecutiveBans = 0;
     try {
       const rep = await this._fetchReputationFromChain(wallet);
@@ -953,11 +949,13 @@ class EventWorker {
         $set: {
           "reputation_cache.success_rate": successRate,
           "reputation_cache.total_trades": totalTrades,
+          "reputation_cache.successful_trades": _toNum(successful),
           "reputation_cache.failed_disputes": _toNum(failed),
           "reputation_cache.effective_tier": _toNum(effectiveTier),
           "is_banned": isBanned,
           "banned_until": isBanned ? new Date(banTimestamp * 1000) : null,
           "consecutive_bans": consecutiveBans,
+          "last_onchain_sync_at": new Date(),
         },
       },
       { upsert: true }
