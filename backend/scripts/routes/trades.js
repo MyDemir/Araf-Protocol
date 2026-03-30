@@ -148,7 +148,7 @@ async function _attachBankProfileRisk(trades) {
 }
 
 // ─── GET /api/trades/my ───────────────────────────────────────────────────────
-router.get("/my", requireAuth, tradesLimiter, async (req, res, next) => {
+router.get("/my", requireAuth, requireSessionWalletMatch, tradesLimiter, async (req, res, next) => {
   try {
     const trades = await Trade.find({
       $or: [{ maker_address: req.wallet }, { taker_address: req.wallet }],
@@ -166,7 +166,7 @@ router.get("/my", requireAuth, tradesLimiter, async (req, res, next) => {
 });
 
 // ─── GET /api/trades/history ──────────────────────────────────────────────────
-router.get("/history", requireAuth, tradesLimiter, async (req, res, next) => {
+router.get("/history", requireAuth, requireSessionWalletMatch, tradesLimiter, async (req, res, next) => {
   try {
     const schema = Joi.object({
       page: Joi.number().integer().min(1).default(1),
@@ -207,7 +207,7 @@ router.get("/history", requireAuth, tradesLimiter, async (req, res, next) => {
 // ─── GET /api/trades/by-escrow/:onchainId ────────────────────────────────────
 // [TR] GET /:id'den önce tanımlanmalı — yoksa Express yanlış route'a girebilir.
 // [TR] Buradaki kimlik parent order id değil, child trade / escrow id'dir.
-router.get("/by-escrow/:onchainId", requireAuth, tradesLimiter, async (req, res, next) => {
+router.get("/by-escrow/:onchainId", requireAuth, requireSessionWalletMatch, tradesLimiter, async (req, res, next) => {
   try {
     const onchainId = Number(req.params.onchainId);
     if (!Number.isInteger(onchainId) || onchainId <= 0) {
@@ -234,7 +234,7 @@ router.get("/by-escrow/:onchainId", requireAuth, tradesLimiter, async (req, res,
 });
 
 // ─── GET /api/trades/:id ──────────────────────────────────────────────────────
-router.get("/:id", requireAuth, tradesLimiter, async (req, res, next) => {
+router.get("/:id", requireAuth, requireSessionWalletMatch, tradesLimiter, async (req, res, next) => {
   try {
     if (!/^[a-fA-F0-9]{24}$/.test(req.params.id)) {
       return res.status(400).json({ error: "Geçersiz trade ID formatı." });
