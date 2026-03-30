@@ -39,6 +39,15 @@ This keeps the original availability goal for the wider platform while preventin
 
 ### Scope
 Only `backend/scripts/middleware/rateLimiter.js` was targeted here.
+
+### V3 note
+Bu middleware, V3 order + child trade mimarisine göre adlandırma genişletmesi alır:
+- market read yüzeyi,
+- order creation yüzeyi,
+- child trade / room yüzeyi
+ayrı ama uyumlu limit kümeleriyle yönetilir.
+
+Backend burada authority üretmez; yalnız abuse yüzeyini daraltır.
 */
 
 const rateLimit = require("express-rate-limit");
@@ -88,10 +97,7 @@ function _authInMemoryCheck(key) {
   }
 
   entry.count += 1;
-  if (entry.count > AUTH_INMEM_MAX) {
-    return true;
-  }
-  return false;
+  return entry.count > AUTH_INMEM_MAX;
 }
 
 // Eski in-memory kayıtları temizler.
@@ -100,7 +106,7 @@ setInterval(() => {
   for (const [key, entry] of _authInMemory.entries()) {
     if (now > entry.resetAt) _authInMemory.delete(key);
   }
-}, 5 * 60_000);
+}, 5 * 60 * 1000);
 
 /**
  * Auth yüzeyi için Redis yoksa istekleri tamamen serbest bırakmayız.
@@ -169,13 +175,13 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// ─── Listings GET — Public Okuma ──────────────────────────────────────────────
+// ─── Market Read Surface — Public Okuma ─────────────────────────────────────
 // 1 dakikada 100 istek — IP bazlı
-const listingsReadLimiter = rateLimit({
+const marketReadLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 100,
   keyGenerator: (req) => req.ip,
-  store: makeStore("listings-read"),
+  store: makeStore("market-read"),
   skip: makeSkipFn(),
   handler: (req, res) => {
     onLimitReached(req);
@@ -185,23 +191,23 @@ const listingsReadLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// ─── Listings POST — İlan Oluşturma ──────────────────────────────────────────
+// ─── Orders Write Surface — Parent Order Oluşturma / Güncelleme ─────────────
 // Saatte 5 istek — wallet bazlı
-const listingsWriteLimiter = rateLimit({
+const ordersWriteLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 5,
   keyGenerator: (req) => req.wallet || req.ip,
-  store: makeStore("listings-write"),
+  store: makeStore("orders-write"),
   skip: makeSkipFn(),
   handler: (req, res) => {
     onLimitReached(req);
-    res.status(429).json({ error: "İlan oluşturma limiti: Saatte 5 istek." });
+    res.status(429).json({ error: "Order oluşturma limiti: Saatte 5 istek." });
   },
   standardHeaders: true,
   legacyHeaders: false,
 });
 
-// ─── Trades — İşlem Odası & İptal İşlemleri ──────────────────────────────────
+// ─── Trades / Child Trade Room Surface ──────────────────────────────────────
 // 1 dakikada 30 istek — wallet bazlı
 const tradesLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -233,9 +239,17 @@ const feedbackLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// ── Backward-compatible aliases ──────────────────────────────────────────────
+// [TR] Route katmanını bir turda tamamen taşımak zorunda kalmamak için alias veriyoruz.
+// [EN] Aliases keep existing imports working while routes migrate toward V3 naming.
+const listingsReadLimiter = marketReadLimiter;
+const listingsWriteLimiter = ordersWriteLimiter;
+
 module.exports = {
   piiLimiter,
   authLimiter,
+  marketReadLimiter,
+  ordersWriteLimiter,
   listingsReadLimiter,
   listingsWriteLimiter,
   tradesLimiter,

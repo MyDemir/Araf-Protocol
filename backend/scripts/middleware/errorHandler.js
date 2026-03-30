@@ -3,13 +3,14 @@
 
 const logger = require("../utils/logger");
 
-// [TR] Loglanmadan önce temizlenecek PII alanları
-// [EN] PII field names to scrub before logging
+// [TR] Loglanmadan önce temizlenecek PII / hassas alanlar
+// [EN] PII / sensitive field names to scrub before logging
 const PII_FIELD_NAMES = new Set([
-  'bankOwner', 'bankOwner_enc',
-  'iban', 'iban_enc',
-  'telegram', 'telegram_enc',
-  'password', 'token', 'refreshToken', 'signature',
+  "bankOwner", "bankOwner_enc",
+  "iban", "iban_enc",
+  "telegram", "telegram_enc",
+  "password", "token", "refreshToken", "signature",
+  "piiToken", "receipt_encrypted",
 ]);
 
 /**
@@ -20,19 +21,25 @@ const PII_FIELD_NAMES = new Set([
  *   ÖNCEKİ: development'ta `body: req.body` doğrudan loglanıyordu.
  *   PUT /api/auth/profile gönderilen bankOwner, iban plaintext log dosyasına yazılıyordu.
  *   ŞİMDİ: Bilinen PII alanları [REDACTED] ile değiştiriliyor.
+ *
+ * V3 notu:
+ * Parent order / child trade geçişinde de log katmanı authority üretmez.
+ * Buradaki amaç yalnız hata ayıklama sağlamak ve hassas veriyi log yüzeyinden uzak tutmaktır.
  */
 function scrubBody(body) {
-  if (!body || typeof body !== 'object') return {};
-  const clean = {};
+  if (!body || typeof body !== "object") return {};
+  const clean = Array.isArray(body) ? [] : {};
+
   for (const [key, value] of Object.entries(body)) {
     if (PII_FIELD_NAMES.has(key)) {
-      clean[key] = '[REDACTED]';
-    } else if (typeof value === 'object' && value !== null) {
+      clean[key] = "[REDACTED]";
+    } else if (typeof value === "object" && value !== null) {
       clean[key] = scrubBody(value); // nested obje
     } else {
       clean[key] = value;
     }
   }
+
   return clean;
 }
 
@@ -56,14 +63,14 @@ function globalErrorHandler(err, req, res, next) {
 
   // 1. Hata Detaylarını Hazırla — PII scrub edilmiş body ile
   const errorDetails = {
-    message:   err.message,
-    path:      req.path,
-    method:    req.method,
-    ip:        req.ip,
-    wallet:    req.wallet || "anon",
+    message: err.message,
+    path: req.path,
+    method: req.method,
+    ip: req.ip,
+    wallet: req.wallet || "anon",
     // ORTA-09 Fix: Her ortamda scrub — plaintext PII loglanmaz
-    body:      scrubBody(req.body),
-    stack:     process.env.NODE_ENV !== "production" ? err.stack : undefined,
+    body: scrubBody(req.body),
+    stack: process.env.NODE_ENV !== "production" ? err.stack : undefined,
     timestamp: new Date().toISOString(),
   };
 
@@ -78,7 +85,7 @@ function globalErrorHandler(err, req, res, next) {
   // 3. Mongoose Duplicate Key
   if (err.code === 11000) {
     return res.status(409).json({
-      error:   "Duplicate entry",
+      error: "Duplicate entry",
       message: "Bu veri zaten mevcut.",
     });
   }
@@ -86,7 +93,7 @@ function globalErrorHandler(err, req, res, next) {
   // 4. JWT Hataları
   if (err.name === "JsonWebTokenError" || err.name === "TokenExpiredError") {
     return res.status(401).json({
-      error:   "Geçersiz veya süresi dolmuş token.",
+      error: "Geçersiz veya süresi dolmuş token.",
       message: "Lütfen yeniden giriş yapın.",
     });
   }
@@ -101,7 +108,7 @@ function globalErrorHandler(err, req, res, next) {
   // 6. Fallback — Tüm diğer beklenmeyen hatalar
   // [TR] Eklendi: Önceki kodda bu fallback yoktu → istek asılı kalıyordu!
   return res.status(500).json({
-    error:   "Internal server error",
+    error: "Internal server error",
     message: "Sunucu tarafında beklenmedik bir sorun oluştu.",
   });
 }

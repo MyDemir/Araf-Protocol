@@ -44,10 +44,28 @@ Instead of only rejecting the mismatched request, the backend now actively termi
 
 ### Scope
 
-Only `backend/scripts/middleware/auth.js` was targeted here.*/
+Only `backend/scripts/middleware/auth.js` was targeted here.
+
+### V3 note
+
+Bu middleware, V3'e geçişte authority üretmez.
+Auth katmanı yalnızca:
+- cookie session doğrulaması,
+- aktif bağlı cüzdan eşleşmesi,
+- trade-scoped kısa ömürlü PII token doğrulaması
+sağlar.
+
+Parent order / child trade authority kontratta kalır; middleware bunları yeniden yorumlamaz.
+*/
 
 const { verifyJWT, isJWTBlacklisted, revokeRefreshToken } = require("../services/siwe");
 const logger = require("../utils/logger");
+
+const COOKIE_OPTIONS_BASE = {
+  httpOnly: true,
+  sameSite: "lax",
+  path: "/",
+};
 
 /**
  * Yalnızca httpOnly auth cookie'den JWT okur.
@@ -77,6 +95,10 @@ async function _getTokenPayload(req) {
 
 /**
  * PII token'ı Authorization header'dan okur.
+ *
+ * V3 notu:
+ * Bu token parent order için değil, belirli bir child trade belgesi için geçerlidir.
+ * Böylece PII erişimi yalnız aktif trade bağlamında kısa ömürlü ve dar kapsamlı kalır.
  */
 function _getPIITokenPayload(req) {
   const authHeader = req.headers.authorization;
@@ -113,6 +135,11 @@ async function requireAuth(req, res, next) {
 /**
  * Cookie ile doğrulanan session wallet ile istemcinin aktif bağlı cüzdanını eşleştirir.
  * Header hiçbir zaman tek başına auth kaynağı değildir.
+ *
+ * V3 notu:
+ * Backend'in "order açılabilir mi / fill yapılabilir mi" gibi ekonomik kararlara
+ * hükmetmediğini özellikle koruyoruz. Bu middleware yalnız session authority sınırını
+ * uygular; order / trade kuralları yine kontrat tarafından belirlenir.
  */
 async function requireSessionWalletMatch(req, res, next) {
   const headerWalletRaw = req.headers["x-wallet-address"];
@@ -146,9 +173,8 @@ async function requireSessionWalletMatch(req, res, next) {
       logger.warn(`[Auth] Mismatch revoke başarısız: ${revokeErr.message}`);
     }
 
-    const cookieOpts = { httpOnly: true, sameSite: "lax", path: "/" };
-    res.clearCookie("araf_jwt", { ...cookieOpts });
-    res.clearCookie("araf_refresh", { ...cookieOpts, path: "/api/auth" });
+    res.clearCookie("araf_jwt", { ...COOKIE_OPTIONS_BASE, path: "/" });
+    res.clearCookie("araf_refresh", { ...COOKIE_OPTIONS_BASE, path: "/api/auth" });
 
     return res.status(409).json({
       error: "Oturum cüzdanı aktif bağlı cüzdanla eşleşmiyor. Lütfen yeniden giriş yapın.",
@@ -161,6 +187,10 @@ async function requireSessionWalletMatch(req, res, next) {
 
 /**
  * IBAN / PII erişimi için trade-scoped token kontrolü.
+ *
+ * Bu middleware parent order seviyesinde değil, child trade seviyesinde çalışır.
+ * V3'te de PII erişimi order niyetine göre değil, gerçek aktif trade bağlamına göre
+ * verilmelidir. Böylece kullanıcıya ait ödeme bilgileri yalnız gerekli dar kapsamda açılır.
  */
 function requirePIIToken(req, res, next) {
   try {
