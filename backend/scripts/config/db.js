@@ -5,6 +5,7 @@ const mongoose = require("mongoose");
 const logger   = require("../utils/logger");
 
 let isConnected = false;
+let listenersAttached = false;
 
 /**
  * MongoDB bağlantısını kurar.
@@ -28,12 +29,24 @@ let isConnected = false;
  *   bağlantı havuzu oluşuyor, "Topology Destroyed" hatası ve memory leak çıkıyordu.
  *   ŞİMDİ: Disconnected'da process.exit(1) — PM2/Docker container'ı temiz başlatır.
  *   Bu bulut mimarisinde en güvenilir yaklaşımdır (Fail-Fast).
+ *
+ * V3 Notu:
+ *   Bu dosya protokol semantiğinden büyük ölçüde bağımsızdır.
+ *   Parent Order + Child Trade mimarisi connection davranışını değiştirmez;
+ *   fakat event replay + order/trade mirror yükü nedeniyle havuz kapasitesi ve
+ *   fail-fast yaklaşımı daha da önemli hale gelir.
  */
 async function connectDB() {
-  if (isConnected) return;
+  if (isConnected || mongoose.connection.readyState === 1) {
+    isConnected = true;
+    return mongoose.connection;
+  }
 
   const uri = process.env.MONGODB_URI;
   if (!uri) throw new Error("MONGODB_URI ortam değişkeni zorunludur.");
+
+  // [TR] Sorgu davranışını daha öngörülebilir kıl.
+  mongoose.set("strictQuery", true);
 
   await mongoose.connect(uri, {
     // ALT-01 Fix: Worker + API trafiğini kaldıracak bağlantı havuzu
@@ -47,18 +60,25 @@ async function connectDB() {
   // [TR] Kimlik bilgilerini loglamaktan kaçın (@ işaretinden sonrasını al)
   logger.info(`[DB] MongoDB bağlantısı kuruldu: ${uri.split("@").pop()}`);
 
-  mongoose.connection.on("error", (err) => {
-    logger.error(`[DB] Bağlantı hatası: ${err.message}`);
-  });
+  if (!listenersAttached) {
+    mongoose.connection.on("error", (err) => {
+      logger.error(`[DB] Bağlantı hatası: ${err.message}`);
+    });
 
-  // ALT-05 Fix: Bağlantı koptuğunda Fail-Fast — temiz yeniden başlatma
-  // ÖNCEKİ: isConnected = false + uyarı logu → parallel reconnect riski
-  // ŞİMDİ: process.exit(1) → PM2 veya Docker container'ı otomatik yeniden başlatır
-  mongoose.connection.on("disconnected", () => {
-    logger.error("[DB] MongoDB bağlantısı koptu — süreç sonlandırılıyor (Fail-Fast).");
-    logger.error("[DB] PM2 veya Docker bu süreci otomatik yeniden başlatmalı.");
-    process.exit(1);
-  });
+    // ALT-05 Fix: Bağlantı koptuğunda Fail-Fast — temiz yeniden başlatma
+    // ÖNCEKİ: isConnected = false + uyarı logu → parallel reconnect riski
+    // ŞİMDİ: process.exit(1) → PM2 veya Docker container'ı otomatik yeniden başlatır
+    mongoose.connection.on("disconnected", () => {
+      isConnected = false;
+      logger.error("[DB] MongoDB bağlantısı koptu — süreç sonlandırılıyor (Fail-Fast).");
+      logger.error("[DB] PM2 veya Docker bu süreci otomatik yeniden başlatmalı.");
+      process.exit(1);
+    });
+
+    listenersAttached = true;
+  }
+
+  return mongoose.connection;
 }
 
 module.exports = { connectDB };

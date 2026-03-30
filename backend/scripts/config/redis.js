@@ -5,6 +5,7 @@ const { createClient } = require("redis");
 const logger = require("../utils/logger");
 
 let redisClient = null;
+let listenersAttached = false;
 
 /**
  * Redis bağlantısını kurar.
@@ -22,8 +23,22 @@ let redisClient = null;
  *   ŞİMDİ: REDIS_URL'de "rediss://" prefix'i varsa otomatik TLS aktif.
  *   REDIS_TLS_SKIP_VERIFY=true ile self-signed sertifikaları da destekleniyor
  *   (sadece geliştirme için — production'da kullanmayın).
+ *
+ * V3 Notu:
+ *   Redis artık yalnız rate limit için değil; event checkpoint, DLQ,
+ *   mutable protocol config cache ve worker koordinasyonu için de kullanılıyor.
+ *   Bu nedenle "bağlı mı?" sorusundan çok "hazır mı?" sorusu önemlidir.
  */
 async function connectRedis() {
+  if (redisClient?.isReady) {
+    return redisClient;
+  }
+
+  if (redisClient?.isOpen && !redisClient.isReady) {
+    logger.warn("[Redis] Mevcut client açık ama hazır değil — hazır hale gelmesi bekleniyor.");
+    return redisClient;
+  }
+
   const url = process.env.REDIS_URL || "redis://127.0.0.1:6379";
 
   // ALT-03 Fix: TLS desteği — rediss:// prefix'i veya REDIS_TLS=true
@@ -43,12 +58,16 @@ async function connectRedis() {
 
   redisClient = createClient(clientOptions);
 
-  redisClient.on("error",        (err) => logger.error(`[Redis] Hata: ${err.message}`));
-  redisClient.on("connect",      ()    => logger.info("[Redis] Bağlantı kuruldu."));
-  redisClient.on("reconnecting", ()    => logger.warn("[Redis] Yeniden bağlanıyor..."));
-  redisClient.on("ready",        ()    => logger.info("[Redis] Hazır."));
+  if (!listenersAttached) {
+    redisClient.on("error",        (err) => logger.error(`[Redis] Hata: ${err.message}`));
+    redisClient.on("connect",      ()    => logger.info("[Redis] Bağlantı kuruldu."));
+    redisClient.on("reconnecting", ()    => logger.warn("[Redis] Yeniden bağlanıyor..."));
+    redisClient.on("ready",        ()    => logger.info("[Redis] Hazır."));
+    listenersAttached = true;
+  }
 
   await redisClient.connect();
+  return redisClient;
 }
 
 function getRedisClient() {
@@ -73,4 +92,27 @@ function isReady() {
   }
 }
 
-module.exports = { connectRedis, getRedisClient, isReady };
+/**
+ * Uygulama kapanırken Redis istemcisini zarif şekilde kapatır.
+ *
+ * V3 Notu:
+ *   Worker checkpoint ve DLQ flush mantığı shutdown sırasına bağımlı olabilir.
+ *   Bu yüzden app.js tarafında mümkünse quit() çağrısı yapılmalıdır.
+ */
+async function closeRedis() {
+  if (!redisClient) return;
+
+  try {
+    if (redisClient.isOpen) {
+      await redisClient.quit();
+      logger.info("[Redis] Bağlantı kapatıldı.");
+    }
+  } catch (err) {
+    logger.warn(`[Redis] Kapatma hatası: ${err.message}`);
+  } finally {
+    redisClient = null;
+    listenersAttached = false;
+  }
+}
+
+module.exports = { connectRedis, getRedisClient, isReady, closeRedis };
