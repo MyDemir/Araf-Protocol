@@ -8,6 +8,7 @@ const router = express.Router();
 const { requireAuth, requireSessionWalletMatch } = require("../middleware/auth");
 const { tradesLimiter } = require("../middleware/rateLimiter");
 const Trade = require("../models/Trade");
+const User = require("../models/User");
 const logger = require("../utils/logger");
 
 /**
@@ -23,7 +24,14 @@ const logger = require("../utils/logger");
  *   - /by-escrow/:onchainId yalnız TRADE/ESCROW id ile çalışır
  *
  * Bu route, parent order authority üretmez ve order book kurallarını yeniden yorumlamaz.
+ *
+ * Banka profil riski notu:
+ *   - highRiskBankProfile DB'de kalıcı ayrı bir state olarak tutulmaz
+ *   - her response'ta trade snapshot + güncel maker profileVersion birlikte değerlendirilir
+ *   - amaç UI'a karar desteği vermektir; protocol authority üretmek değildir
  */
+
+const BANK_PROFILE_RISK_THRESHOLD_7D = 3;
 
 const SAFE_TRADE_PROJECTION = [
   "_id",
@@ -41,6 +49,10 @@ const SAFE_TRADE_PROJECTION = [
   "fill_metadata",
   "financials",
   "timers",
+  "pii_snapshot.profileVersionAtLock",
+  "pii_snapshot.lastBankChangeAt",
+  "pii_snapshot.bankChangeCount7d",
+  "pii_snapshot.bankChangeCount30d",
   "cancel_proposal.proposed_by",
   "cancel_proposal.proposed_at",
   "cancel_proposal.approved_by",
@@ -53,6 +65,88 @@ const SAFE_TRADE_PROJECTION = [
   "chargeback_ack.acknowledged_at",
 ].join(" ");
 
+/**
+ * Tek bir trade için banka profil risk sinyalini üretir.
+ *
+ * Kural:
+ *   - lock anındaki bankChangeCount7d >= 3  → riskli
+ *   - currentProfileVersion > profileVersionAtLock → çok riskli / profil lock sonrası oynatılmış
+ */
+function _buildBankProfileRisk(trade, makerUser) {
+  const snapshot = trade?.pii_snapshot || {};
+
+  const profileVersionAtLock = Number(snapshot.profileVersionAtLock ?? 0);
+  const currentProfileVersion = Number(makerUser?.profileVersion ?? 0);
+  const bankChangeCount7dAtLock = Number(snapshot.bankChangeCount7d ?? 0);
+  const bankChangeCount30dAtLock = Number(snapshot.bankChangeCount30d ?? 0);
+
+  const changedAfterLock =
+    profileVersionAtLock > 0 && currentProfileVersion > profileVersionAtLock;
+
+  const frequentRecentChanges =
+    bankChangeCount7dAtLock >= BANK_PROFILE_RISK_THRESHOLD_7D;
+
+  const highRiskBankProfile = frequentRecentChanges || changedAfterLock;
+
+  return {
+    highRiskBankProfile,
+    changedAfterLock,
+    frequentRecentChanges,
+    threshold7d: BANK_PROFILE_RISK_THRESHOLD_7D,
+    profileVersionAtLock,
+    currentProfileVersion,
+    bankChangeCount7dAtLock,
+    bankChangeCount30dAtLock,
+    lastBankChangeAtAtLock: snapshot.lastBankChangeAt || null,
+  };
+}
+
+/**
+ * Trade listesine trade-scoped banka risk sinyalini ekler.
+ *
+ * Neden ayrı helper?
+ *   - /my
+ *   - /history
+ *   - /by-escrow
+ *   - /:id
+ * hepsi aynı risk üretimini paylaşsın; tekrar olmasın.
+ */
+async function _attachBankProfileRisk(trades) {
+  if (!Array.isArray(trades) || trades.length === 0) {
+    return [];
+  }
+
+  const makerAddresses = [
+    ...new Set(
+      trades
+        .map((trade) => trade?.maker_address)
+        .filter(Boolean)
+    ),
+  ];
+
+  const makerUsers = await User.find({ wallet_address: { $in: makerAddresses } })
+    .select("wallet_address profileVersion lastBankChangeAt")
+    .lean();
+
+  const makerMap = new Map(
+    makerUsers.map((user) => [user.wallet_address, user])
+  );
+
+  return trades.map((trade) => {
+    const makerUser = makerMap.get(trade.maker_address) || null;
+    const bankProfileRisk = _buildBankProfileRisk(trade, makerUser);
+
+    // [TR] Internal snapshot alanlarını response'ta doğrudan açmıyoruz;
+    //      onun yerine türetilmiş risk nesnesi veriyoruz.
+    const { pii_snapshot, ...safeTrade } = trade;
+
+    return {
+      ...safeTrade,
+      bank_profile_risk: bankProfileRisk,
+    };
+  });
+}
+
 // ─── GET /api/trades/my ───────────────────────────────────────────────────────
 router.get("/my", requireAuth, tradesLimiter, async (req, res, next) => {
   try {
@@ -64,7 +158,8 @@ router.get("/my", requireAuth, tradesLimiter, async (req, res, next) => {
       .sort({ created_at: -1, onchain_escrow_id: -1 })
       .lean();
 
-    return res.json({ trades });
+    const enrichedTrades = await _attachBankProfileRisk(trades);
+    return res.json({ trades: enrichedTrades });
   } catch (err) {
     next(err);
   }
@@ -96,7 +191,14 @@ router.get("/history", requireAuth, tradesLimiter, async (req, res, next) => {
       Trade.countDocuments(filter),
     ]);
 
-    return res.json({ trades, total, page: value.page, limit: value.limit });
+    const enrichedTrades = await _attachBankProfileRisk(trades);
+
+    return res.json({
+      trades: enrichedTrades,
+      total,
+      page: value.page,
+      limit: value.limit,
+    });
   } catch (err) {
     next(err);
   }
@@ -124,7 +226,8 @@ router.get("/by-escrow/:onchainId", requireAuth, tradesLimiter, async (req, res,
       return res.status(403).json({ error: "Erişim reddedildi." });
     }
 
-    return res.json({ trade });
+    const [enrichedTrade] = await _attachBankProfileRisk([trade]);
+    return res.json({ trade: enrichedTrade });
   } catch (err) {
     next(err);
   }
@@ -149,7 +252,8 @@ router.get("/:id", requireAuth, tradesLimiter, async (req, res, next) => {
       return res.status(403).json({ error: "Erişim reddedildi." });
     }
 
-    return res.json({ trade });
+    const [enrichedTrade] = await _attachBankProfileRisk([trade]);
+    return res.json({ trade: enrichedTrade });
   } catch (err) {
     next(err);
   }
