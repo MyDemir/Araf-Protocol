@@ -11,6 +11,12 @@
  *   - Backend hassas veriyi kalıcı otorite olarak tutmaz.
  *   - Kullanım amacı biten payload ve snapshot alanları retention süresi dolunca silinir.
  *   - On-chain referanslar (örn. receipt hash) korunur; plaintext / decryptable payload temizlenir.
+ *
+ * Bu dosyanın V3 banka profili riski ile ilgili ek sorumluluğu:
+ *   - LOCKED anında trade'e snapshot alınan banka risk metadata'sı da
+ *     snapshot retention süresi dolunca temizlenmelidir.
+ *   - Bu alanlar PII'nin kendisi değildir; ancak trade-scoped risk izi taşır.
+ *   - Bu yüzden decryptable snapshot ile aynı retention sınırına tabi tutulur.
  */
 
 const Trade = require("../models/Trade");
@@ -55,6 +61,7 @@ async function runReceiptCleanup(now = new Date()) {
         `[Job:ReceiptCleanup] ${result.modifiedCount} child trade kaydında dekont payload temizlendi.`
       );
     }
+
     return result.modifiedCount;
   } catch (err) {
     logger.error(`[Job:ReceiptCleanup] Temizlik başarısız: ${err.message}`);
@@ -67,11 +74,18 @@ async function runReceiptCleanup(now = new Date()) {
  *
  * Temizlik etkisi:
  *   - maker/taker şifreli snapshot alanları -> null
- *   - captured_at                         -> null
- *   - snapshot_delete_at                  -> null
+ *   - captured_at                           -> null
+ *   - snapshot_delete_at                    -> null
+ *
+ * V3 ek notu:
+ *   Trade snapshot'ına eklenen banka profili risk metadata'sı da burada temizlenir:
+ *   - profileVersionAtLock
+ *   - lastBankChangeAt
+ *   - bankChangeCount7d
+ *   - bankChangeCount30d
  *
  * Böylece child trade analitiği ve state mirror'ı korunurken,
- * decryptable PII kalıcı depoda gereksiz yere yaşamaz.
+ * decryptable / risk-bearing snapshot verisi kalıcı depoda gereksiz yere yaşamaz.
  */
 async function runPIISnapshotCleanup(now = new Date()) {
   try {
@@ -82,6 +96,10 @@ async function runPIISnapshotCleanup(now = new Date()) {
           { "pii_snapshot.maker_bankOwner_enc": { $ne: null } },
           { "pii_snapshot.maker_iban_enc": { $ne: null } },
           { "pii_snapshot.taker_bankOwner_enc": { $ne: null } },
+          { "pii_snapshot.profileVersionAtLock": { $ne: null } },
+          { "pii_snapshot.lastBankChangeAt": { $ne: null } },
+          { "pii_snapshot.bankChangeCount7d": { $gt: 0 } },
+          { "pii_snapshot.bankChangeCount30d": { $gt: 0 } },
           { "pii_snapshot.captured_at": { $ne: null } },
         ],
       },
@@ -90,6 +108,12 @@ async function runPIISnapshotCleanup(now = new Date()) {
           "pii_snapshot.maker_bankOwner_enc": null,
           "pii_snapshot.maker_iban_enc": null,
           "pii_snapshot.taker_bankOwner_enc": null,
+
+          "pii_snapshot.profileVersionAtLock": null,
+          "pii_snapshot.lastBankChangeAt": null,
+          "pii_snapshot.bankChangeCount7d": 0,
+          "pii_snapshot.bankChangeCount30d": 0,
+
           "pii_snapshot.captured_at": null,
           "pii_snapshot.snapshot_delete_at": null,
         },
@@ -98,9 +122,10 @@ async function runPIISnapshotCleanup(now = new Date()) {
 
     if (result.modifiedCount > 0) {
       logger.info(
-        `[Job:PIISnapshotCleanup] ${result.modifiedCount} child trade kaydında snapshot PII temizlendi.`
+        `[Job:PIISnapshotCleanup] ${result.modifiedCount} child trade kaydında snapshot PII ve risk metadata temizlendi.`
       );
     }
+
     return result.modifiedCount;
   } catch (err) {
     logger.error(`[Job:PIISnapshotCleanup] Temizlik başarısız: ${err.message}`);
