@@ -274,11 +274,6 @@ class EventWorker {
     const blockNumber = event?.blockNumber;
     const blockDate = await this._getBlockTimestampDate(blockNumber);
 
-    // [TR] V3 kapanış kuralı: local clock fallback YOK.
-    //      Event zamanı yalnız explicit on-chain timestamp veya block timestamp olabilir.
-    //      Timestamp çözülemezse event retry/DLQ hattına düşmelidir.
-    // [EN] No local clock fallback. Event time must come from explicit on-chain time
-    //      or block timestamp; otherwise the event must fail and be retried / DLQ'd.
     if (!blockDate) {
       throw new Error(
         `[Worker] BLOCK_TIMESTAMP_UNAVAILABLE: event=${event?.eventName || "unknown"} block=${blockNumber}`
@@ -699,7 +694,11 @@ class EventWorker {
           },
         },
       },
-      { upsert: true }
+      {
+        upsert: true,
+        session: opts.session,
+        setDefaultsOnInsert: true,
+      }
     );
   }
 
@@ -749,8 +748,6 @@ class EventWorker {
         ipfs_receipt_hash: tradeData.ipfsReceiptHash || null,
       },
 
-      // [TR] timers subdocument overwrite riski nedeniyle tüm obje replace edilmiyor.
-      //      Yalnız değişen timer alanları dotted $set ile güncellenir.
       "timers.created_at_onchain": opts.createdAt || null,
       "timers.locked_at": _toDateOrNull(tradeData.lockedAt),
       "timers.paid_at": _toDateOrNull(tradeData.paidAt),
@@ -770,21 +767,70 @@ class EventWorker {
       };
     }
 
-    await Trade.findOneAndUpdate(
+    const result = await Trade.findOneAndUpdate(
       { onchain_escrow_id: tradeId },
       { $set: setPayload },
-      { upsert: true }
+      {
+        upsert: true,
+        new: true,
+        includeResultMetadata: true,
+        session: opts.session,
+        setDefaultsOnInsert: true,
+      }
     );
+
+    const inserted =
+      result?.lastErrorObject?.upserted !== undefined ||
+      result?.lastErrorObject?.updatedExisting === false;
+
+    return {
+      inserted,
+      doc: result?.value || null,
+    };
   }
 
-  async _bumpOrderChildStats(orderId, updater) {
+  async _incrementOrderFillStatsAtomically(orderId, fillAmount, session) {
     if (!orderId) return;
 
-    const order = await Order.findOne({ onchain_order_id: orderId }).lean();
-    if (!order) return;
+    const fillAmountStr = _toStr(fillAmount);
+    const fillAmountNum = _toNum(fillAmount);
 
-    const next = updater(order.stats || {});
-    await Order.updateOne({ onchain_order_id: orderId }, { $set: { stats: next } });
+    await Order.updateOne(
+      { onchain_order_id: orderId },
+      [
+        {
+          $set: {
+            "stats.child_trade_count": {
+              $add: [{ $ifNull: ["$stats.child_trade_count", 0] }, 1],
+            },
+            "stats.active_child_trade_count": {
+              $add: [{ $ifNull: ["$stats.active_child_trade_count", 0] }, 1],
+            },
+            "stats.resolved_child_trade_count": {
+              $ifNull: ["$stats.resolved_child_trade_count", 0],
+            },
+            "stats.canceled_child_trade_count": {
+              $ifNull: ["$stats.canceled_child_trade_count", 0],
+            },
+            "stats.burned_child_trade_count": {
+              $ifNull: ["$stats.burned_child_trade_count", 0],
+            },
+            "stats.total_filled_amount": {
+              $toString: {
+                $add: [
+                  { $toDecimal: { $ifNull: ["$stats.total_filled_amount", "0"] } },
+                  { $toDecimal: fillAmountStr },
+                ],
+              },
+            },
+            "stats.total_filled_amount_num": {
+              $add: [{ $ifNull: ["$stats.total_filled_amount_num", 0] }, fillAmountNum],
+            },
+          },
+        },
+      ],
+      { session }
+    );
   }
 
   async _processEvent(event) {
@@ -837,37 +883,44 @@ class EventWorker {
   async _onOrderFilled(event) {
     const { orderId, tradeId, filler, fillAmount, remainingAmount } = event.args;
     const fillEventAt = await this._getEventDate(event);
-    const tradeIdNum = _toNum(tradeId);
 
-    const existingTrade = await Trade.findOne({ onchain_escrow_id: tradeIdNum })
-      .select("onchain_escrow_id")
-      .lean();
+    const session = await mongoose.startSession();
+    session.startTransaction();
 
-    const [orderData, tradeData] = await Promise.all([
-      this._fetchOrderFromChain(orderId),
-      this._fetchTradeFromChain(tradeId),
-    ]);
+    try {
+      const [orderData, tradeData] = await Promise.all([
+        this._fetchOrderFromChain(orderId),
+        this._fetchTradeFromChain(tradeId),
+      ]);
 
-    await this._upsertOrderMirror(orderData, { lastFilledAt: fillEventAt });
-    await this._upsertTradeMirror(tradeData, {
-      parentOrder: orderData,
-      createdAt: fillEventAt,
-      fillAmount,
-      filler,
-      remainingAmountAfterFill: remainingAmount,
-    });
+      await this._upsertOrderMirror(orderData, {
+        lastFilledAt: fillEventAt,
+        session,
+      });
 
-    if (!existingTrade) {
-      await this._bumpOrderChildStats(_toNum(orderId), (stats) => ({
-        child_trade_count: (stats.child_trade_count || 0) + 1,
-        active_child_trade_count: (stats.active_child_trade_count || 0) + 1,
-        resolved_child_trade_count: stats.resolved_child_trade_count || 0,
-        canceled_child_trade_count: stats.canceled_child_trade_count || 0,
-        burned_child_trade_count: stats.burned_child_trade_count || 0,
-        total_filled_amount:
-          String(BigInt(stats.total_filled_amount || "0") + BigInt(_toStr(fillAmount))),
-        total_filled_amount_num: (stats.total_filled_amount_num || 0) + _toNum(fillAmount),
-      }));
+      const tradeUpsert = await this._upsertTradeMirror(tradeData, {
+        parentOrder: orderData,
+        createdAt: fillEventAt,
+        fillAmount,
+        filler,
+        remainingAmountAfterFill: remainingAmount,
+        session,
+      });
+
+      if (tradeUpsert.inserted) {
+        await this._incrementOrderFillStatsAtomically(
+          _toNum(orderId),
+          fillAmount,
+          session
+        );
+      }
+
+      await session.commitTransaction();
+    } catch (err) {
+      await session.abortTransaction();
+      throw err;
+    } finally {
+      await session.endSession();
     }
   }
 
