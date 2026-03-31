@@ -16,8 +16,16 @@ const historicalStatSchema = new mongoose.Schema({
     unique: true,
     match: /^\d{4}-\d{2}-\d{2}$/,
   },
+
+  // [TR] Approximate analytics cache alanları.
+  //      Büyük hacimlerde sessiz precision drift riskini azaltmak için
+  //      string-safe karşılıkları ayrı tutulur.
   total_volume_usdt: { type: Number, required: true, default: 0 },
+  total_volume_usdt_str: { type: String, required: true, default: "0" },
+
   executed_volume_usdt: { type: Number, required: true, default: 0 },
+  executed_volume_usdt_str: { type: String, required: true, default: "0" },
+
   completed_trades: { type: Number, required: true, default: 0 },
   child_trade_count: { type: Number, required: true, default: 0 },
   active_child_trades: { type: Number, required: true, default: 0 },
@@ -26,7 +34,10 @@ const historicalStatSchema = new mongoose.Schema({
   partially_filled_orders: { type: Number, required: true, default: 0 },
   filled_orders: { type: Number, required: true, default: 0 },
   canceled_orders: { type: Number, required: true, default: 0 },
+
   burned_bonds_usdt: { type: Number, required: true, default: 0 },
+  burned_bonds_usdt_str: { type: String, required: true, default: "0" },
+
   avg_trade_hours: { type: Number, default: null },
 }, {
   timestamps: { createdAt: "created_at", updatedAt: false },
