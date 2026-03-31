@@ -1015,12 +1015,11 @@ class EventWorker {
     const [makerUser, takerUser] = await Promise.all([
       User.findOne({ wallet_address: trade.maker_address })
         .select(
-          "pii_data.bankOwner_enc pii_data.iban_enc pii_data.telegram_enc " +
-          "profileVersion lastBankChangeAt bankChangeCount7d bankChangeCount30d"
+          "payout_profile"
         )
         .lean(),
       User.findOne({ wallet_address: takerAddress })
-        .select("pii_data.bankOwner_enc")
+        .select("payout_profile")
         .lean(),
     ]);
 
@@ -1034,16 +1033,28 @@ class EventWorker {
           status: "LOCKED",
           taker_address: takerAddress,
           "timers.locked_at": lockedAt,
-          "pii_snapshot.maker_bankOwner_enc": makerUser?.pii_data?.bankOwner_enc || null,
-          "pii_snapshot.maker_iban_enc": makerUser?.pii_data?.iban_enc || null,
-          "pii_snapshot.maker_telegram_enc": makerUser?.pii_data?.telegram_enc || null,
-          "pii_snapshot.taker_bankOwner_enc": takerUser?.pii_data?.bankOwner_enc || null,
-          "pii_snapshot.profileVersionAtLock": makerUser?.profileVersion ?? 0,
-          "pii_snapshot.lastBankChangeAt": makerUser?.lastBankChangeAt || null,
-          "pii_snapshot.bankChangeCount7d": makerUser?.bankChangeCount7d ?? 0,
-          "pii_snapshot.bankChangeCount30d": makerUser?.bankChangeCount30d ?? 0,
-          "pii_snapshot.captured_at": lockedAt,
-          "pii_snapshot.snapshot_delete_at": new Date(lockedAt.getTime() + 30 * 24 * 3600 * 1000),
+
+          "payout_snapshot.maker.rail": makerUser?.payout_profile?.rail || "TR_IBAN",
+          "payout_snapshot.maker.country": makerUser?.payout_profile?.country || "TR",
+          "payout_snapshot.maker.contact_channel": makerUser?.payout_profile?.contact?.channel || null,
+          "payout_snapshot.maker.contact_value_enc": makerUser?.payout_profile?.contact?.value_enc || null,
+          "payout_snapshot.maker.payout_details_enc": makerUser?.payout_profile?.payout_details_enc || null,
+          "payout_snapshot.maker.fingerprint_hash_at_lock":
+            makerUser?.payout_profile?.fingerprint?.hash || null,
+          "payout_snapshot.maker.profile_version_at_lock":
+            makerUser?.payout_profile?.fingerprint?.version ?? 0,
+
+          "payout_snapshot.taker.rail": takerUser?.payout_profile?.rail || null,
+          "payout_snapshot.taker.country": takerUser?.payout_profile?.country || null,
+          "payout_snapshot.taker.contact_channel": takerUser?.payout_profile?.contact?.channel || null,
+          "payout_snapshot.taker.contact_value_enc": takerUser?.payout_profile?.contact?.value_enc || null,
+          "payout_snapshot.taker.payout_details_enc": takerUser?.payout_profile?.payout_details_enc || null,
+          "payout_snapshot.taker.fingerprint_hash_at_lock":
+            takerUser?.payout_profile?.fingerprint?.hash || null,
+          "payout_snapshot.taker.profile_version_at_lock":
+            takerUser?.payout_profile?.fingerprint?.version ?? 0,
+          "payout_snapshot.captured_at": lockedAt,
+          "payout_snapshot.snapshot_delete_at": new Date(lockedAt.getTime() + 30 * 24 * 3600 * 1000),
         },
       }
     );

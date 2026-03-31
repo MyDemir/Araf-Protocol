@@ -260,35 +260,86 @@ async function decryptField(cipherHex, walletAddress) {
   });
 }
 
-/**
- * Encrypts all PII fields for a user.
- *
- * @param {{ bankOwner: string, iban: string, telegram?: string }} rawPII
- * @param {string} walletAddress
- * @returns {Promise<{ bankOwner_enc: string, iban_enc: string, telegram_enc: string|null }>}
- */
-async function encryptPII(rawPII, walletAddress) {
-  const addr = _normalizeWalletAddress(walletAddress);
-  return {
-    bankOwner_enc: rawPII.bankOwner ? await encryptField(rawPII.bankOwner, addr) : null,
-    iban_enc:      rawPII.iban      ? await encryptField(rawPII.iban,      addr) : null,
-    telegram_enc:  rawPII.telegram  ? await encryptField(rawPII.telegram,  addr) : null,
-  };
+function _normalizeGenericDetailsForHash(details = {}) {
+  if (!details || typeof details !== "object") return "{}";
+  const sorted = Object.keys(details)
+    .sort()
+    .reduce((acc, key) => {
+      const value = details[key];
+      acc[key] = typeof value === "string" ? value.trim() : value;
+      return acc;
+    }, {});
+  return JSON.stringify(sorted);
+}
+
+function buildPayoutFingerprint(details = {}) {
+  const normalized = _normalizeGenericDetailsForHash(details);
+  return crypto.createHash("sha256").update(normalized).digest("hex");
 }
 
 /**
- * Decrypts all PII fields for a user.
+ * Generic payout profile encryption helper.
  *
- * @param {{ bankOwner_enc: string, iban_enc: string, telegram_enc?: string }} encPII
+ * @param {{
+ *   rail: string,
+ *   country?: string,
+ *   contact?: { channel?: string, value?: string|null },
+ *   details?: Record<string, any>,
+ *   fingerprintVersion?: number
+ * }} rawProfile
  * @param {string} walletAddress
- * @returns {Promise<{ bankOwner: string, iban: string, telegram: string|null }>}
  */
-async function decryptPII(encPII, walletAddress) {
+async function encryptPayoutProfile(rawProfile, walletAddress) {
   const addr = _normalizeWalletAddress(walletAddress);
+  const safeDetails = rawProfile?.details && typeof rawProfile.details === "object"
+    ? rawProfile.details
+    : {};
+
+  const payout_details_enc = await encryptField(JSON.stringify(safeDetails), addr);
+  const contactValue = rawProfile?.contact?.value || null;
+  const contact_value_enc = contactValue ? await encryptField(contactValue, addr) : null;
+
   return {
-    bankOwner: encPII.bankOwner_enc ? await decryptField(encPII.bankOwner_enc, addr) : null,
-    iban:      encPII.iban_enc      ? await decryptField(encPII.iban_enc,      addr) : null,
-    telegram:  encPII.telegram_enc  ? await decryptField(encPII.telegram_enc,  addr) : null,
+    rail: rawProfile?.rail || null,
+    country: rawProfile?.country || null,
+    contact: {
+      channel: rawProfile?.contact?.channel || null,
+      value_enc: contact_value_enc,
+    },
+    payout_details_enc,
+    fingerprint: {
+      hash: buildPayoutFingerprint(safeDetails),
+      version: Number.isInteger(rawProfile?.fingerprintVersion) ? rawProfile.fingerprintVersion : 0,
+      last_changed_at: new Date(),
+    },
+    updated_at: new Date(),
+  };
+}
+
+async function decryptPayoutProfile(encProfile, walletAddress) {
+  const addr = _normalizeWalletAddress(walletAddress);
+  const detailsJson = encProfile?.payout_details_enc
+    ? await decryptField(encProfile.payout_details_enc, addr)
+    : "{}";
+  const contactValue = encProfile?.contact?.value_enc
+    ? await decryptField(encProfile.contact.value_enc, addr)
+    : null;
+
+  let details = {};
+  try {
+    details = JSON.parse(detailsJson);
+  } catch {
+    details = {};
+  }
+
+  return {
+    rail: encProfile?.rail || null,
+    country: encProfile?.country || null,
+    contact: {
+      channel: encProfile?.contact?.channel || null,
+      value: contactValue,
+    },
+    fields: details,
   };
 }
 
@@ -304,4 +355,11 @@ function clearMasterKeyCache() {
   }
 }
 
-module.exports = { encryptPII, decryptPII, encryptField, decryptField, clearMasterKeyCache };
+module.exports = {
+  encryptPayoutProfile,
+  decryptPayoutProfile,
+  buildPayoutFingerprint,
+  encryptField,
+  decryptField,
+  clearMasterKeyCache,
+};

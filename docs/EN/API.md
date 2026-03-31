@@ -109,6 +109,23 @@ The API uses a two-layer token system for security:
 { "success": true, "message": "Profile information updated." }
 ```
 
+> **March 2026 Update (Generic Payout):** The endpoint now also accepts rail-aware payloads.
+```json
+{
+  "rail": "TR_IBAN | US_ACH | SEPA_IBAN",
+  "country": "TR | US | EU",
+  "contactChannel": "telegram | email | phone",
+  "contactValue": "string",
+  "bankOwner": "string",
+  "iban": "string",
+  "routingNumber": "string",
+  "accountNumber": "string",
+  "accountType": "checking|savings",
+  "bic": "string",
+  "bankName": "string"
+}
+```
+
 ---
 
 ### Listing Routes (`/api/listings`)
@@ -222,9 +239,12 @@ These routes are the highest security endpoints. Rate limit: 3 requests / 10 min
 * **Success Response (200 OK):**
 ```json
 {
-  "bankOwner": "John Doe",
-  "iban": "TR330006100519786457841326",
-  "telegram": "john_tr",
+  "payoutProfile": {
+    "rail": "TR_IBAN",
+    "country": "TR",
+    "contact": { "channel": "telegram", "value": "john_tr" },
+    "fields": { "account_holder_name": "John Doe", "iban": "TR330006100519786457841326" }
+  },
   "notice": "This information is encrypted at rest and decrypted in controlled backend runtime paths. It is not stored on-chain."
 }
 ```

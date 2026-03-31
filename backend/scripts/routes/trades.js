@@ -49,10 +49,10 @@ const SAFE_TRADE_PROJECTION = [
   "fill_metadata",
   "financials",
   "timers",
-  "pii_snapshot.profileVersionAtLock",
-  "pii_snapshot.lastBankChangeAt",
-  "pii_snapshot.bankChangeCount7d",
-  "pii_snapshot.bankChangeCount30d",
+  "payout_snapshot.maker.rail",
+  "payout_snapshot.maker.country",
+  "payout_snapshot.maker.fingerprint_hash_at_lock",
+  "payout_snapshot.maker.profile_version_at_lock",
   "cancel_proposal.proposed_by",
   "cancel_proposal.proposed_at",
   "cancel_proposal.approved_by",
@@ -73,31 +73,31 @@ const SAFE_TRADE_PROJECTION = [
  *   - currentProfileVersion > profileVersionAtLock → çok riskli / profil lock sonrası oynatılmış
  */
 function _buildBankProfileRisk(trade, makerUser) {
-  const snapshot = trade?.pii_snapshot || {};
+  const payoutSnapshot = trade?.payout_snapshot?.maker || {};
 
-  const profileVersionAtLock = Number(snapshot.profileVersionAtLock ?? 0);
-  const currentProfileVersion = Number(makerUser?.profileVersion ?? 0);
-  const bankChangeCount7dAtLock = Number(snapshot.bankChangeCount7d ?? 0);
-  const bankChangeCount30dAtLock = Number(snapshot.bankChangeCount30d ?? 0);
-
+  const profileVersionAtLock = Number(
+    payoutSnapshot.profile_version_at_lock ?? 0
+  );
+  const currentProfileVersion = Number(
+    makerUser?.payout_profile?.fingerprint?.version ?? makerUser?.profileVersion ?? 0
+  );
   const changedAfterLock =
     profileVersionAtLock > 0 && currentProfileVersion > profileVersionAtLock;
-
-  const frequentRecentChanges =
-    bankChangeCount7dAtLock >= BANK_PROFILE_RISK_THRESHOLD_7D;
-
-  const highRiskBankProfile = frequentRecentChanges || changedAfterLock;
+  const frequentRecentChanges = false;
+  const highRiskBankProfile = changedAfterLock;
 
   return {
     highRiskBankProfile,
+    rail: payoutSnapshot.rail || "TR_IBAN",
+    country: payoutSnapshot.country || null,
     changedAfterLock,
     frequentRecentChanges,
     threshold7d: BANK_PROFILE_RISK_THRESHOLD_7D,
     profileVersionAtLock,
     currentProfileVersion,
-    bankChangeCount7dAtLock,
-    bankChangeCount30dAtLock,
-    lastBankChangeAtAtLock: snapshot.lastBankChangeAt || null,
+    bankChangeCount7dAtLock: null,
+    bankChangeCount30dAtLock: null,
+    lastBankChangeAtAtLock: null,
   };
 }
 
@@ -125,7 +125,7 @@ async function _attachBankProfileRisk(trades) {
   ];
 
   const makerUsers = await User.find({ wallet_address: { $in: makerAddresses } })
-    .select("wallet_address profileVersion lastBankChangeAt")
+    .select("wallet_address profileVersion lastBankChangeAt payout_profile")
     .lean();
 
   const makerMap = new Map(
@@ -138,7 +138,7 @@ async function _attachBankProfileRisk(trades) {
 
     // [TR] Internal snapshot alanlarını response'ta doğrudan açmıyoruz;
     //      onun yerine türetilmiş risk nesnesi veriyoruz.
-    const { pii_snapshot, ...safeTrade } = trade;
+    const { payout_snapshot, ...safeTrade } = trade;
 
     return {
       ...safeTrade,

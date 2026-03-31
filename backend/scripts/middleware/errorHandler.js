@@ -11,6 +11,9 @@ const PII_FIELD_NAMES = new Set([
   "telegram", "telegram_enc",
   "password", "token", "refreshToken", "signature",
   "piiToken", "receipt_encrypted",
+  "payoutProfile", "payout_profile", "payout_snapshot",
+  "payout_details_enc", "contact_value_enc", "routingNumber",
+  "accountNumber", "bic", "swiftCode", "sortCode",
 ]);
 
 /**
