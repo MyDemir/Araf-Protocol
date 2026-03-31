@@ -15,7 +15,7 @@ const { getRedisClient } = require("../config/redis");
 const HistoricalStat = require("../models/HistoricalStat");
 
 const STATS_CACHE_KEY = "cache:protocol_stats:v3";
-const STATS_CACHE_TTL = 3600;
+const STATS_CACHE_TTL = 300; // [TR] 1 saat yerine 5 dakika — freshness / drift görünürlüğü için daha güvenli.
 
 function calculateChange(current, previous) {
   if (previous == null || previous === 0) return null;
@@ -58,7 +58,18 @@ router.get("/", async (_req, res, next) => {
       }
     }
 
-    const finalStats = { ...currentStats, changes_30d };
+    // [TR] Approximate alanların yanına string-safe analytics alanlarını da döndürüyoruz.
+    //      Frontend isterse approximate sayıyı gösterir, isterse raw string alanları da kullanabilir.
+    const finalStats = {
+      ...currentStats,
+      changes_30d,
+      meta: {
+        cache_ttl_seconds: STATS_CACHE_TTL,
+        open_order_semantics: "OPEN + PARTIALLY_FILLED",
+        numeric_fields_are_approximate: true,
+      },
+    };
+
     await redis.setEx(STATS_CACHE_KEY, STATS_CACHE_TTL, JSON.stringify(finalStats));
     return res.json({ stats: finalStats });
   } catch (err) { next(err); }
