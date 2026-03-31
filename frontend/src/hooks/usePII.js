@@ -39,7 +39,7 @@ const API_BASE = import.meta.env.VITE_API_URL || (
  * @param {Function} authenticatedFetch App.jsx'ten gelen JWT yönetimli fetch wrapper'ı
  */
 export function usePII(tradeId, authenticatedFetch) {
-  const [pii, setPii]         = useState(null);   // { bankOwner, iban, telegram }
+  const [pii, setPii]         = useState(null);   // { payoutProfile }
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState(null);
 
@@ -118,9 +118,7 @@ export function usePII(tradeId, authenticatedFetch) {
       // [TR] Sadece hâlâ mount ve iptal edilmemişse state güncelle
       if (mountedRef.current && !signal.aborted) {
         setPii({
-          bankOwner: data.bankOwner || '—',
-          iban:      data.iban      || '—',
-          telegram:  data.telegram  || null,
+          payoutProfile: data.payoutProfile || null,
         });
       }
     } catch (err) {

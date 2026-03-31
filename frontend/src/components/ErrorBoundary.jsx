@@ -26,6 +26,9 @@ import React from 'react';
 const PII_PATTERNS = [
   // IBAN: TR + 24 rakam
   /TR\d{24}/gi,
+  // US routing number (9 digits)
+  /\brouting[_\s-]?number[:=\s-]*\d{9}\b/gi,
+  /\baccount[_\s-]?number[:=\s-]*\d{4,17}\b/gi,
   // Kart numaraları (16 hane)
   /\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b/g,
   // Türk telefon numaraları

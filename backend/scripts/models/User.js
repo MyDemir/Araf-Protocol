@@ -32,12 +32,31 @@ const userSchema = new mongoose.Schema(
       index: true,
     },
 
-    // ── Şifreli PII (AES-256-GCM) ────────────────────────────────────────────
-    // Ham değerler ASLA saklanmaz. Service katmanında şifrelenerek kaydedilir.
-    pii_data: {
-      bankOwner_enc: { type: String, default: null },
-      iban_enc: { type: String, default: null },
-      telegram_enc: { type: String, default: null },
+    // ── Generic Payout Profile (rail-aware) ──────────────────────────────────
+    // Geçiş notu:
+    //   - Tüm payout yazımları bu alan üstünden yapılır.
+    payout_profile: {
+      rail: {
+        type: String,
+        enum: ["TR_IBAN", "US_ACH", "SEPA_IBAN", "UK_FPS", "SWIFT", null],
+        default: null,
+      },
+      country: { type: String, default: null, uppercase: true },
+      contact: {
+        channel: {
+          type: String,
+          enum: ["telegram", "email", "phone", null],
+          default: null,
+        },
+        value_enc: { type: String, default: null },
+      },
+      payout_details_enc: { type: String, default: null },
+      fingerprint: {
+        hash: { type: String, default: null },
+        version: { type: Number, default: 0, min: 0 },
+        last_changed_at: { type: Date, default: null },
+      },
+      updated_at: { type: Date, default: null },
     },
 
     // ── Banka Profili Risk Metadatası (off-chain signal, authority değil) ───

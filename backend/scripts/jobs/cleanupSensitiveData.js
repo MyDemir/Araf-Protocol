@@ -3,40 +3,13 @@
 /**
  * Sensitive Data Cleanup Jobs — V3 Child Trade Privacy Retention
  *
- * V3'te PII snapshot ve dekont payload'ları parent order üzerinde değil,
- * gerçek escrow lifecycle'ını taşıyan child trade üzerinde yaşar.
- * Bu job'lar da doğrudan Trade (child trade mirror) koleksiyonu üzerinde çalışır.
- *
- * Felsefe:
- *   - Backend hassas veriyi kalıcı otorite olarak tutmaz.
- *   - Kullanım amacı biten payload ve snapshot alanları retention süresi dolunca silinir.
- *   - On-chain referanslar (örn. receipt hash) korunur; plaintext / decryptable payload temizlenir.
- *
- * Bu dosyanın V3 banka profili riski ile ilgili ek sorumluluğu:
- *   - LOCKED anında trade'e snapshot alınan banka risk metadata'sı da
- *     snapshot retention süresi dolunca temizlenmelidir.
- *   - Bu alanlar PII'nin kendisi değildir; ancak trade-scoped risk izi taşır.
- *   - Bu yüzden decryptable snapshot ile aynı retention sınırına tabi tutulur.
+ * Generic payout snapshot ve dekont payload'ları retention süresi dolunca temizlenir.
+ * On-chain referanslar korunur; decryptable içerik kaldırılır.
  */
 
 const Trade = require("../models/Trade");
 const logger = require("../utils/logger");
 
-/**
- * Şifreli dekont payload'larını temizler.
- *
- * Temizlik etkisi:
- *   - evidence.receipt_encrypted  -> null
- *   - evidence.receipt_timestamp  -> null
- *   - evidence.receipt_delete_at  -> null
- *
- * Bilinçli olarak korunur:
- *   - evidence.ipfs_receipt_hash
- *
- * Neden hash korunuyor?
- *   Çünkü bu alan on-chain rapor referansı ve denetim izi taşır;
- *   hassas payload değildir.
- */
 async function runReceiptCleanup(now = new Date()) {
   try {
     const result = await Trade.updateMany(
@@ -69,60 +42,43 @@ async function runReceiptCleanup(now = new Date()) {
   }
 }
 
-/**
- * LOCKED anında alınan PII snapshot alanlarını temizler.
- *
- * Temizlik etkisi:
- *   - maker/taker şifreli snapshot alanları -> null
- *   - captured_at                           -> null
- *   - snapshot_delete_at                    -> null
- *
- * V3 ek notu:
- *   Trade snapshot'ına eklenen banka profili risk metadata'sı da burada temizlenir:
- *   - profileVersionAtLock
- *   - lastBankChangeAt
- *   - bankChangeCount7d
- *   - bankChangeCount30d
- *
- * Böylece child trade analitiği ve state mirror'ı korunurken,
- * decryptable / risk-bearing snapshot verisi kalıcı depoda gereksiz yere yaşamaz.
- */
 async function runPIISnapshotCleanup(now = new Date()) {
   try {
     const result = await Trade.updateMany(
       {
-        "pii_snapshot.snapshot_delete_at": { $lte: now },
+        "payout_snapshot.snapshot_delete_at": { $lte: now },
         $or: [
-          { "pii_snapshot.maker_bankOwner_enc": { $ne: null } },
-          { "pii_snapshot.maker_iban_enc": { $ne: null } },
-          { "pii_snapshot.taker_bankOwner_enc": { $ne: null } },
-          { "pii_snapshot.profileVersionAtLock": { $ne: null } },
-          { "pii_snapshot.lastBankChangeAt": { $ne: null } },
-          { "pii_snapshot.bankChangeCount7d": { $gt: 0 } },
-          { "pii_snapshot.bankChangeCount30d": { $gt: 0 } },
-          { "pii_snapshot.captured_at": { $ne: null } },
+          { "payout_snapshot.maker.payout_details_enc": { $ne: null } },
+          { "payout_snapshot.taker.payout_details_enc": { $ne: null } },
+          { "payout_snapshot.captured_at": { $ne: null } },
         ],
       },
       {
         $set: {
-          "pii_snapshot.maker_bankOwner_enc": null,
-          "pii_snapshot.maker_iban_enc": null,
-          "pii_snapshot.taker_bankOwner_enc": null,
+          "payout_snapshot.maker.rail": null,
+          "payout_snapshot.maker.country": null,
+          "payout_snapshot.maker.contact_channel": null,
+          "payout_snapshot.maker.contact_value_enc": null,
+          "payout_snapshot.maker.payout_details_enc": null,
+          "payout_snapshot.maker.fingerprint_hash_at_lock": null,
+          "payout_snapshot.maker.profile_version_at_lock": 0,
 
-          "pii_snapshot.profileVersionAtLock": null,
-          "pii_snapshot.lastBankChangeAt": null,
-          "pii_snapshot.bankChangeCount7d": 0,
-          "pii_snapshot.bankChangeCount30d": 0,
-
-          "pii_snapshot.captured_at": null,
-          "pii_snapshot.snapshot_delete_at": null,
+          "payout_snapshot.taker.rail": null,
+          "payout_snapshot.taker.country": null,
+          "payout_snapshot.taker.contact_channel": null,
+          "payout_snapshot.taker.contact_value_enc": null,
+          "payout_snapshot.taker.payout_details_enc": null,
+          "payout_snapshot.taker.fingerprint_hash_at_lock": null,
+          "payout_snapshot.taker.profile_version_at_lock": 0,
+          "payout_snapshot.captured_at": null,
+          "payout_snapshot.snapshot_delete_at": null,
         },
       }
     );
 
     if (result.modifiedCount > 0) {
       logger.info(
-        `[Job:PIISnapshotCleanup] ${result.modifiedCount} child trade kaydında snapshot PII ve risk metadata temizlendi.`
+        `[Job:PIISnapshotCleanup] ${result.modifiedCount} child trade kaydında payout snapshot temizlendi.`
       );
     }
 

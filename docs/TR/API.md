@@ -109,6 +109,23 @@ API, güvenlik için iki katmanlı bir token sistemi kullanır:
 { "success": true, "message": "Profil bilgilerin güncellendi." }
 ```
 
+> **Mart 2026 Güncellemesi (Generic Payout):** Endpoint artık rail-aware payload da kabul eder.
+```json
+{
+  "rail": "TR_IBAN | US_ACH | SEPA_IBAN",
+  "country": "TR | US | EU",
+  "contactChannel": "telegram | email | phone",
+  "contactValue": "string",
+  "bankOwner": "string",
+  "iban": "string",
+  "routingNumber": "string",
+  "accountNumber": "string",
+  "accountType": "checking|savings",
+  "bic": "string",
+  "bankName": "string"
+}
+```
+
 ---
 
 ### İlan Rotaları (`/api/listings`)
@@ -222,9 +239,12 @@ Bu rotalar, en yüksek güvenlik seviyesine sahip endpoint'lerdir. Rate limit: 3
 * **Başarılı Yanıt (200 OK):**
 ```json
 {
-  "bankOwner": "Ahmet Yılmaz",
-  "iban": "TR330006100519786457841326",
-  "telegram": "ahmet_tr",
+  "payoutProfile": {
+    "rail": "TR_IBAN",
+    "country": "TR",
+    "contact": { "channel": "telegram", "value": "ahmet_tr" },
+    "fields": { "account_holder_name": "Ahmet Yılmaz", "iban": "TR330006100519786457841326" }
+  },
   "notice": "Bu bilgi at-rest şifreli tutulur ve sadece kontrollü backend runtime yolunda çözülür. On-chain saklanmaz."
 }
 ```

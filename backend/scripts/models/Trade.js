@@ -197,32 +197,29 @@ const tradeSchema = new mongoose.Schema(
       receipt_delete_at: { type: Date, default: null },
     },
 
-    // [TR] LOCKED anında yakalanan PII snapshot (bait-and-switch koruması).
-    //      Amaç:
-    //        - Trade sırasında görülen banka sahibini/IBAN'ı sabitlemek
-    //        - Profil sonradan değişse bile lock anındaki referansı korumak
-    //        - Üçgen dolandırıcılık / profil oynatma riskini trade bazında izlemek
-    //
-    // [EN] PII snapshot captured at LOCKED (bait-and-switch protection).
-    pii_snapshot: {
-      maker_bankOwner_enc: { type: String, default: null },
-      maker_iban_enc:      { type: String, default: null },
-      // [TR] Telegram snapshot'ı da aynı trade-scoped PII disiplinine dahildir.
-      //      Current profile fallback yapılmaması için LOCKED anında yakalanır.
-      // [EN] Telegram snapshot follows the same trade-scoped PII discipline.
-      maker_telegram_enc:  { type: String, default: null },
-      taker_bankOwner_enc: { type: String, default: null },
-
-      // [TR] Lock anında maker profil risk meta snapshot'ı.
-      //      Bunlar frontend state'te değil, trade belgesinde tutulur;
-      //      çünkü "işlem başladığında görülen durum" sonradan değişmemelidir.
-      profileVersionAtLock: { type: Number, default: null, min: 0 },
-      lastBankChangeAt:     { type: Date,   default: null },
-      bankChangeCount7d:    { type: Number, default: 0, min: 0 },
-      bankChangeCount30d:   { type: Number, default: 0, min: 0 },
-
-      captured_at:         { type: Date, default: null },
-      snapshot_delete_at:  { type: Date, default: null },
+    // [TR] Generic payout snapshot (rail-aware).
+    //      Reveal ve risk değerlendirmesi bu snapshot üstünden yapılır.
+    payout_snapshot: {
+      maker: {
+        rail: { type: String, default: null },
+        country: { type: String, default: null },
+        contact_channel: { type: String, default: null },
+        contact_value_enc: { type: String, default: null },
+        payout_details_enc: { type: String, default: null },
+        fingerprint_hash_at_lock: { type: String, default: null },
+        profile_version_at_lock: { type: Number, default: 0, min: 0 },
+      },
+      taker: {
+        rail: { type: String, default: null },
+        country: { type: String, default: null },
+        contact_channel: { type: String, default: null },
+        contact_value_enc: { type: String, default: null },
+        payout_details_enc: { type: String, default: null },
+        fingerprint_hash_at_lock: { type: String, default: null },
+        profile_version_at_lock: { type: Number, default: 0, min: 0 },
+      },
+      captured_at: { type: Date, default: null },
+      snapshot_delete_at: { type: Date, default: null },
     },
 
     cancel_proposal: {

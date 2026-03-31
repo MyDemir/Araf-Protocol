@@ -21,7 +21,7 @@ const { requireAuth, requirePIIToken, requireSessionWalletMatch } = require("../
 const { piiLimiter } = require("../middleware/rateLimiter");
 const Trade = require("../models/Trade");
 const User = require("../models/User");
-const { decryptPII, decryptField } = require("../services/encryption");
+const { decryptField, decryptPayoutProfile } = require("../services/encryption");
 const { issuePIIToken } = require("../services/siwe");
 const logger = require("../utils/logger");
 
@@ -44,16 +44,13 @@ function respondSnapshotUnavailable(res, message = "PII snapshot bu trade için 
 //      yoksa current profile fallback yapılmaz ve null kalır.
 // [EN] Telegram is treated as optional trade-scoped snapshot data. No current-profile fallback.
 function hasMakerPIISnapshot(trade) {
-  return Boolean(
-    trade?.pii_snapshot?.maker_bankOwner_enc &&
-      trade?.pii_snapshot?.maker_iban_enc
-  );
+  return Boolean(trade?.payout_snapshot?.maker?.payout_details_enc);
 }
 
 // [TR] Taker-name route'u yalnız snapshot üstünden çalışır.
 // [EN] Taker-name route is snapshot-only to keep child-trade visibility stable.
 function hasTakerNameSnapshot(trade) {
-  return Boolean(trade?.pii_snapshot?.taker_bankOwner_enc);
+  return Boolean(trade?.payout_snapshot?.taker?.payout_details_enc);
 }
 
 // ─── GET /api/pii/my ─────────────────────────────────────────────────────────
@@ -62,14 +59,14 @@ function hasTakerNameSnapshot(trade) {
 router.get("/my", requireAuth, requireSessionWalletMatch, piiLimiter, async (req, res, next) => {
   try {
     const user = await User.findOne({ wallet_address: req.wallet })
-      .select("pii_data")
+      .select("payout_profile")
       .lean();
 
-    if (!user || !user.pii_data) {
+    if (!user || !user.payout_profile) {
       return res.json({ pii: null });
     }
 
-    const decrypted = await decryptPII(user.pii_data, req.wallet);
+    const decrypted = await decryptPayoutProfile(user.payout_profile, req.wallet);
 
     // [TR] Tüm wallet adresini log'a yazmıyoruz; yalnız kısaltılmış iz bırakıyoruz.
     logger.info(`[PII] /my accessed: wallet=${req.wallet.slice(0, 10)}...`);
@@ -95,7 +92,7 @@ router.get("/taker-name/:onchainId", requireAuth, requireSessionWalletMatch, pii
     }
 
     const trade = await Trade.findOne({ onchain_escrow_id: onchainId })
-      .select("maker_address taker_address status pii_snapshot")
+      .select("maker_address taker_address status payout_snapshot")
       .lean();
 
     if (!trade) {
@@ -128,10 +125,12 @@ router.get("/taker-name/:onchainId", requireAuth, requireSessionWalletMatch, pii
       );
     }
 
-    const bankOwner = await decryptField(
-      trade.pii_snapshot.taker_bankOwner_enc,
+    const takerDetailsRaw = await decryptField(
+      trade.payout_snapshot.taker.payout_details_enc,
       trade.taker_address
     );
+    const takerDetails = JSON.parse(takerDetailsRaw);
+    const bankOwner = takerDetails.account_holder_name || null;
 
     logger.info(`[PII] taker-name accessed: onchain=#${onchainId}`);
 
@@ -200,7 +199,7 @@ router.get(
       }
 
       const trade = await Trade.findById(tradeId)
-        .select("maker_address status taker_address pii_snapshot")
+        .select("maker_address status taker_address payout_snapshot")
         .lean();
 
       if (!trade) {
@@ -230,33 +229,25 @@ router.get(
         );
       }
 
-      let bankOwner = null;
-      let iban = null;
-      let telegram = null;
+      const detailsJson = await decryptField(
+        trade.payout_snapshot.maker.payout_details_enc,
+        trade.maker_address
+      );
+      const details = JSON.parse(detailsJson);
 
-      if (trade.pii_snapshot?.maker_bankOwner_enc) {
-        bankOwner = await decryptField(
-          trade.pii_snapshot.maker_bankOwner_enc,
-          trade.maker_address
-        );
-      }
+      const contactValue = trade.payout_snapshot?.maker?.contact_value_enc
+        ? await decryptField(trade.payout_snapshot.maker.contact_value_enc, trade.maker_address)
+        : null;
 
-      if (trade.pii_snapshot?.maker_iban_enc) {
-        iban = await decryptField(
-          trade.pii_snapshot.maker_iban_enc,
-          trade.maker_address
-        );
-      }
-
-      // [TR] Telegram alanı da snapshot disiplinine dahil edilir.
-      //      Varsa trade snapshot'ından çözülür; yoksa current profile fallback yapılmaz.
-      // [EN] Telegram is included under the same snapshot discipline.
-      if (trade.pii_snapshot?.maker_telegram_enc) {
-        telegram = await decryptField(
-          trade.pii_snapshot.maker_telegram_enc,
-          trade.maker_address
-        );
-      }
+      const payoutProfile = {
+        rail: trade.payout_snapshot?.maker?.rail || null,
+        country: trade.payout_snapshot?.maker?.country || null,
+        contact: {
+          channel: trade.payout_snapshot?.maker?.contact_channel || null,
+          value: contactValue,
+        },
+        fields: details,
+      };
 
       logger.info(`[PII] Accessed: trade=${tradeId.slice(0, 8)}...`);
 
@@ -265,9 +256,7 @@ router.get(
       res.set("Pragma", "no-cache");
 
       return res.json({
-        bankOwner,
-        iban,
-        telegram,
+        payoutProfile,
         notice: "Bu bilgiler şifreli kanaldan iletildi. Blockchain'e veya loglara kaydedilmez.",
       });
     } catch (err) {

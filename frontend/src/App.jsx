@@ -817,10 +817,12 @@ function App() {
         const res = await authenticatedFetch(`${API_URL}/api/pii/my`);
         if (!res.ok) return;
         const data = await res.json();
-        if (data.pii) {
-          setPiiBankOwner(data.pii.bankOwner || '');
-          setPiiIban(data.pii.iban || '');
-          setPiiTelegram(data.pii.telegram || '');
+        if (data.pii?.fields) {
+          setPiiBankOwner(data.pii.fields.account_holder_name || '');
+          setPiiIban(data.pii.fields.iban || '');
+          setPiiTelegram(
+            data.pii?.contact?.channel === 'telegram' ? (data.pii?.contact?.value || '') : ''
+          );
         }
       } catch (err) {
         console.error('Mevcut PII verisi çekilemedi:', err);
@@ -1721,9 +1723,18 @@ function App() {
       const res = await authenticatedFetch(`${API_URL}/api/auth/profile`, {
         method: 'PUT',
         body: JSON.stringify({
+          rail: 'TR_IBAN',
+          country: 'TR',
+          contactChannel: 'telegram',
+          contactValue: piiTelegram.replace(/^@/, '').trim(),
           bankOwner: piiBankOwner,
           iban:      piiIban.replace(/\s/g, ''),
           telegram:  piiTelegram.replace(/^@/, '').trim(),
+          routingNumber: '',
+          accountNumber: '',
+          accountType: '',
+          bic: '',
+          bankName: '',
         }),
       });
       const data = await res.json();

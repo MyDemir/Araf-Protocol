@@ -87,8 +87,9 @@ export default function PIIDisplay({ tradeId, lang = 'tr', getSafeTelegramUrl, a
 
   // ORTA-15 Fix: Clipboard kopyalama güvenli ve hata toleranslı
   const handleCopyIban = async () => {
-    if (!pii?.iban) return;
-    const cleanIban = pii.iban.replace(/\s/g, '');
+    const iban = pii?.payoutProfile?.fields?.iban;
+    if (!iban) return;
+    const cleanIban = String(iban).replace(/\s/g, '');
 
     // [TR] Güvenli bağlam kontrolü (HTTPS veya localhost)
     if (!window.isSecureContext) {
@@ -193,12 +194,31 @@ export default function PIIDisplay({ tradeId, lang = 'tr', getSafeTelegramUrl, a
       {pii ? (
         <>
           <p className="text-slate-400 text-[10px] mb-0.5 uppercase tracking-widest">Ad Soyad</p>
-          <p className="font-bold text-white text-base mb-3">{pii.bankOwner}</p>
+          <p className="font-bold text-white text-base mb-3">{pii?.payoutProfile?.fields?.account_holder_name || '—'}</p>
 
           <p className="text-slate-400 text-[10px] mb-0.5 uppercase tracking-widest">IBAN</p>
           <p className="font-mono text-emerald-400 mb-3 break-all text-sm tracking-wider">
-            {pii.iban}
+            {pii?.payoutProfile?.fields?.iban || '—'}
           </p>
+
+          {pii.payoutProfile?.rail && (
+            <p className="text-[11px] text-blue-300 mb-3">
+              Rail: <span className="font-mono">{pii.payoutProfile.rail}</span>
+            </p>
+          )}
+
+          {pii.payoutProfile?.fields && (
+            <div className="mb-3 p-2 rounded-lg border border-slate-700 bg-slate-800/40">
+              {Object.entries(pii.payoutProfile.fields).map(([key, value]) => {
+                if (value == null || value === '' || key === 'iban' || key === 'account_holder_name') return null;
+                return (
+                  <p key={key} className="text-xs text-slate-300 break-all">
+                    <span className="text-slate-500">{key}:</span> {String(value)}
+                  </p>
+                );
+              })}
+            </div>
+          )}
 
           <div className="flex space-x-2 mb-3">
             <button
@@ -225,15 +245,15 @@ export default function PIIDisplay({ tradeId, lang = 'tr', getSafeTelegramUrl, a
             </button>
           </div>
 
-          {pii.telegram ? (
+          {(pii?.payoutProfile?.contact?.channel === 'telegram' && pii?.payoutProfile?.contact?.value) ? (
             <a
-              href={buildTelegramUrl(pii.telegram)}
+              href={buildTelegramUrl(pii.payoutProfile.contact.value)}
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center justify-center space-x-2 w-full py-2.5 rounded-xl bg-[#24A1DE]/10 border border-[#24A1DE]/30 text-[#24A1DE] hover:bg-[#24A1DE]/20 text-sm font-bold transition-all mb-3"
             >
               <span>💬</span>
-              <span>{t.telegramBtn} (@{pii.telegram})</span>
+              <span>{t.telegramBtn} (@{pii.payoutProfile.contact.value})</span>
             </a>
           ) : (
             <div className="flex items-center justify-center space-x-2 w-full py-2 rounded-xl bg-slate-800/50 border border-slate-700 text-slate-500 text-xs mb-3">
