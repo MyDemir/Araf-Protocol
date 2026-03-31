@@ -153,6 +153,38 @@ function _inferCryptoAssetFromToken(tokenAddress) {
   return null;
 }
 
+const TRADE_STATE_ORDER = {
+  OPEN: 0,
+  LOCKED: 1,
+  PAID: 2,
+  CHALLENGED: 3,
+  RESOLVED: 4,
+  CANCELED: 5,
+  BURNED: 6,
+};
+
+const TERMINAL_TRADE_STATES = new Set(["RESOLVED", "CANCELED", "BURNED"]);
+
+function _getTradeStateOrder(state) {
+  return TRADE_STATE_ORDER[state] ?? -1;
+}
+
+function _isTradeStateRegression(currentState, nextState) {
+  if (!currentState || !nextState) return false;
+  return _getTradeStateOrder(nextState) < _getTradeStateOrder(currentState);
+}
+
+/**
+ * [TR] Timer alanlarını yalnız gerçekten yeni değer geldiyse set ederiz.
+ *      Böylece replay / partial mirror update sırasında null-reset oluşmaz.
+ * [EN] Only set timer fields when a real new value exists, preventing null-reset.
+ */
+function _setIfDefined(target, key, value) {
+  if (value !== undefined) {
+    target[key] = value;
+  }
+}
+
 class EventWorker {
   constructor() {
     this.provider = null;
@@ -747,15 +779,22 @@ class EventWorker {
       evidence: {
         ipfs_receipt_hash: tradeData.ipfsReceiptHash || null,
       },
-
-      "timers.created_at_onchain": opts.createdAt || null,
-      "timers.locked_at": _toDateOrNull(tradeData.lockedAt),
-      "timers.paid_at": _toDateOrNull(tradeData.paidAt),
-      "timers.challenged_at": _toDateOrNull(tradeData.challengedAt),
-      "timers.resolved_at": opts.resolvedAt || null,
-      "timers.pinged_at": _toDateOrNull(tradeData.pingedAt),
-      "timers.challenge_pinged_at": _toDateOrNull(tradeData.challengePingedAt),
     };
+
+    _setIfDefined(setPayload, "timers.created_at_onchain", opts.createdAt);
+    _setIfDefined(setPayload, "timers.resolved_at", opts.resolvedAt);
+
+    const lockedAt = _toDateOrNull(tradeData.lockedAt);
+    const paidAt = _toDateOrNull(tradeData.paidAt);
+    const challengedAt = _toDateOrNull(tradeData.challengedAt);
+    const pingedAt = _toDateOrNull(tradeData.pingedAt);
+    const challengePingedAt = _toDateOrNull(tradeData.challengePingedAt);
+
+    if (lockedAt) setPayload["timers.locked_at"] = lockedAt;
+    if (paidAt) setPayload["timers.paid_at"] = paidAt;
+    if (challengedAt) setPayload["timers.challenged_at"] = challengedAt;
+    if (pingedAt) setPayload["timers.pinged_at"] = pingedAt;
+    if (challengePingedAt) setPayload["timers.challenge_pinged_at"] = challengePingedAt;
 
     if (opts.fillAmount !== undefined) {
       setPayload.fill_metadata = {
@@ -964,6 +1003,13 @@ class EventWorker {
       throw new Error("EscrowLocked geldi ama trade mirror bulunamadı.");
     }
 
+    if (TERMINAL_TRADE_STATES.has(trade.status)) {
+      logger.warn(
+        `[Worker] EscrowLocked replay/regression engellendi: trade=${tradeIdNum} current_status=${trade.status}`
+      );
+      return;
+    }
+
     const takerAddress = taker.toLowerCase();
 
     const [makerUser, takerUser] = await Promise.all([
@@ -979,7 +1025,10 @@ class EventWorker {
     ]);
 
     await Trade.findOneAndUpdate(
-      { onchain_escrow_id: tradeIdNum },
+      {
+        onchain_escrow_id: tradeIdNum,
+        status: { $nin: ["RESOLVED", "CANCELED", "BURNED"] },
+      },
       {
         $set: {
           status: "LOCKED",
@@ -1006,7 +1055,10 @@ class EventWorker {
     const safeHash = CID_PATTERN.test(ipfsHash) ? ipfsHash : null;
 
     await Trade.findOneAndUpdate(
-      { onchain_escrow_id: _toNum(tradeId) },
+      {
+        onchain_escrow_id: _toNum(tradeId),
+        status: { $in: ["LOCKED", "PAID"] },
+      },
       {
         $set: {
           status: "PAID",
@@ -1032,7 +1084,7 @@ class EventWorker {
       const trade = await Trade.findOneAndUpdate(
         {
           onchain_escrow_id: tradeIdNum,
-          status: { $ne: "RESOLVED" },
+          status: { $in: ["LOCKED", "PAID", "CHALLENGED"] },
         },
         {
           $set: {
@@ -1096,7 +1148,10 @@ class EventWorker {
     const challengedAt = await this._getEventDate(event, timestamp);
 
     await Trade.findOneAndUpdate(
-      { onchain_escrow_id: _toNum(tradeId) },
+      {
+        onchain_escrow_id: _toNum(tradeId),
+        status: { $in: ["LOCKED", "PAID", "CHALLENGED"] },
+      },
       {
         $set: {
           status: "CHALLENGED",
@@ -1113,7 +1168,7 @@ class EventWorker {
     const trade = await Trade.findOneAndUpdate(
       {
         onchain_escrow_id: _toNum(tradeId),
-        status: { $ne: "CANCELED" },
+        status: { $in: ["OPEN", "LOCKED", "PAID", "CHALLENGED"] },
       },
       {
         $set: {
@@ -1145,7 +1200,7 @@ class EventWorker {
       const trade = await Trade.findOneAndUpdate(
         {
           onchain_escrow_id: tradeIdNum,
-          status: { $ne: "BURNED" },
+          status: { $in: ["LOCKED", "PAID", "CHALLENGED"] },
         },
         {
           $set: {
