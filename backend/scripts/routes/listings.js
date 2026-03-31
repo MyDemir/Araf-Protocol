@@ -16,7 +16,7 @@ const express = require("express");
 const Joi = require("joi");
 const router = express.Router();
 
-const { listingsReadLimiter, listingsWriteLimiter } = require("../middleware/rateLimiter");
+const { marketReadLimiter, ordersWriteLimiter } = require("../middleware/rateLimiter");
 const { requireAuth, requireSessionWalletMatch } = require("../middleware/auth");
 const Order = require("../models/Order");
 const logger = require("../utils/logger");
@@ -61,7 +61,7 @@ router.get("/config", async (_req, res, next) => {
   }
 });
 
-router.get("/", listingsReadLimiter, async (req, res, next) => {
+router.get("/", marketReadLimiter, async (req, res, next) => {
   try {
     const schema = Joi.object({
       fiat: Joi.string().valid("TRY", "USD", "EUR").optional(),
@@ -94,14 +94,14 @@ router.get("/", listingsReadLimiter, async (req, res, next) => {
 
 // [TR] Listing write yüzeyi artık authoritative değildir. Frontend create/fill/cancel
 //      akışları V3 contract fonksiyonlarına taşınmalıdır.
-router.post("/", requireAuth, requireSessionWalletMatch, listingsWriteLimiter, async (_req, res) => {
+router.post("/", requireAuth, requireSessionWalletMatch, ordersWriteLimiter, async (_req, res) => {
   return res.status(410).json({
     error: "Listing create route V3'te deprecated. createSellOrder/createBuyOrder akışını kullanın.",
     code: "LISTINGS_WRITE_DEPRECATED_IN_V3",
   });
 });
 
-router.delete("/:id", requireAuth, requireSessionWalletMatch, listingsWriteLimiter, async (req, res) => {
+router.delete("/:id", requireAuth, requireSessionWalletMatch, ordersWriteLimiter, async (req, res) => {
   logger.warn(`[Listings] Deprecated delete çağrısı: caller=${req.wallet} id=${req.params.id}`);
   return res.status(410).json({
     error: "Listing delete route V3'te deprecated. cancelSellOrder/cancelBuyOrder akışını kullanın.",
