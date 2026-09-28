@@ -8,12 +8,16 @@ export const SecondaryActionsPanel = ({ secondaryActions = [], actionCallbacks, 
   return (
     <div className="mb-3 bg-surface border border-borderSubtle rounded-xl p-3 text-sm text-textSecondary space-y-3" data-testid="trade-secondary-guidance">
       <p className="text-textMuted font-bold uppercase tracking-wide text-xs">{t(lang, 'Diğer seçenekler', 'Other available paths')}</p>
-      {secondaryActions.map((action) => (
-        <div key={action.key}>
-          <p>{action.description || action.key}</p>
-          <ActionGuidanceButton action={action} actionCallbacks={actionCallbacks} disabledReasons={disabledReasons} variant="secondary" />
-        </div>
-      ))}
+      {secondaryActions.map((action) => {
+        const hasButton = Boolean(actionCallbacks?.[action.key]) && ['contract', 'conditional'].includes(action.type);
+        return (
+          <div key={action.key}>
+            {/* [TR] Buton varsa açıklama tekrarlanmaz; yalnız bilgi amaçlı yollar metin gösterir. */}
+            {!hasButton && <p>{action.description || action.key}</p>}
+            <ActionGuidanceButton action={action} actionCallbacks={actionCallbacks} disabledReasons={disabledReasons} variant="secondary" />
+          </div>
+        );
+      })}
     </div>
   );
 };

@@ -157,6 +157,11 @@ const tradeSchema = new mongoose.Schema(
       // [EN] Decay tx hash list for idempotency and audit.
       decay_tx_hashes: { type: [String], default: [] },
       decayed_amounts: { type: [String], default: [] },
+
+      // [TR] burnExpired ile treasury'ye aktarılan toplam (EscrowBurned.burnedAmount aynası).
+      // [EN] Total moved to treasury by burnExpired (mirror of EscrowBurned.burnedAmount).
+      burned_amount: { type: String, default: "0" },
+      burned_amount_num: { type: Number, default: 0 },
     },
 
     status: {

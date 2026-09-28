@@ -24,8 +24,11 @@ const logger = require("../utils/logger");
 const DECAY_ABI = [
   "function decayReputation(address _wallet)",
   "function getReputation(address _wallet) view returns (uint256 successful, uint256 failed, uint256 bannedUntil, uint256 consecutiveBans, uint8 effectiveTier)",
+  "function cleanPeriod() view returns (uint256)",
 ];
 
+// [TR] Fallback değer; gerçek süre kontrattaki mutable cleanPeriod'dan okunur (setReputationPolicy).
+// [EN] Fallback only; the real window is the contract's mutable cleanPeriod (setReputationPolicy).
 const CLEAN_SLATE_DAYS = 90;
 const DEFAULT_CANDIDATE_LIMIT = Number(process.env.REPUTATION_DECAY_CANDIDATE_LIMIT || 250);
 const DEFAULT_TX_LIMIT = Number(process.env.REPUTATION_DECAY_TX_LIMIT || 50);
@@ -70,7 +73,14 @@ async function runReputationDecay() {
   const contract = getDecayContract();
   if (!contract) return { success: false, reason: "contract_unavailable" };
 
-  const cutoffMs = Date.now() - CLEAN_SLATE_DAYS * 24 * 3600 * 1000;
+  let cleanPeriodMs = CLEAN_SLATE_DAYS * 24 * 3600 * 1000;
+  try {
+    const onchainCleanPeriod = Number(await contract.cleanPeriod());
+    if (Number.isFinite(onchainCleanPeriod) && onchainCleanPeriod > 0) cleanPeriodMs = onchainCleanPeriod * 1000;
+  } catch (err) {
+    logger.warn(`[DecayJob] cleanPeriod() okunamadı, ${CLEAN_SLATE_DAYS} gün fallback kullanılıyor: ${err.message}`);
+  }
+  const cutoffMs = Date.now() - cleanPeriodMs;
   let hadErrors = false;
 
   // [TR] Mirror alanları stale olabilir. Bu yüzden query yalnız aday havuzu içindir.

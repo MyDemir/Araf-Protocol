@@ -1,3 +1,16 @@
+const path = require("path");
+
+// [TR] Testler repo kökündeki ../test/contracts altında. Node modül çözümlemesi test dosyasının
+//      dizininden yukarı çıktığı için contracts/node_modules'a hiç ulaşmaz ve `chai` bulunamaz.
+//      NODE_PATH ile contracts/node_modules global arama yoluna eklenir.
+// [EN] Tests live in ../test/contracts; module resolution walks up from the test file and never
+//      reaches contracts/node_modules, so `chai` fails to resolve. Add it via NODE_PATH.
+const CONTRACTS_NODE_MODULES = path.join(__dirname, "node_modules");
+if (!String(process.env.NODE_PATH || "").split(path.delimiter).includes(CONTRACTS_NODE_MODULES)) {
+  process.env.NODE_PATH = [CONTRACTS_NODE_MODULES, process.env.NODE_PATH].filter(Boolean).join(path.delimiter);
+  require("module").Module._initPaths();
+}
+
 require("@nomicfoundation/hardhat-toolbox");
 require("dotenv").config();
 const { extendEnvironment } = require("hardhat/config");

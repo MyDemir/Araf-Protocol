@@ -64,6 +64,7 @@ contract ArafRewards is Ownable, ReentrancyGuard, Pausable {
     error InvalidRecipient();
     error EpochDustAlreadySwept();
     error NothingToSweep();
+    error EpochClaimsStarted();
 
     uint256 public constant BPS = 10_000;
     uint256 public constant SCALE = 100_000_000; // outcomeBps(1e4) * tierBps(1e4)
@@ -98,6 +99,11 @@ contract ArafRewards is Ownable, ReentrancyGuard, Pausable {
     mapping(uint256 => mapping(address => bool)) public epochTokenAllocated;
     mapping(uint256 => mapping(address => bool)) public epochTokenFinalized;
     mapping(uint256 => mapping(address => bool)) public epochDustSwept;
+    // [TR] Epoch'ta ilk claim yapıldıktan sonra ağırlıklar dondurulur; aksi halde geç kaydedilen
+    //      trade'ler totalWeight'i büyütür, erken claim edenler fazla pay alır ve havuz aşılır.
+    // [EN] Weights freeze once the first claim for an epoch happens; otherwise late records grow
+    //      totalWeight after early claimers were paid on a smaller denominator and overdraw the pool.
+    mapping(uint256 => bool) public epochClaimsStarted;
 
     event TradeOutcomeRecorded(
         uint256 indexed tradeId,
@@ -148,6 +154,7 @@ contract ArafRewards is Ownable, ReentrancyGuard, Pausable {
         if (t.tier == 0) revert TierZeroNotRewardable();
 
         uint256 epoch = t.terminalAt / epochDuration;
+        if (epochClaimsStarted[epoch]) revert EpochClaimsStarted();
         uint256 outcomeBps = _outcomeMultiplierBps(t);
         uint256 tierBps = _tierMultiplierBps(t.tier);
 
@@ -201,6 +208,7 @@ contract ArafRewards is Ownable, ReentrancyGuard, Pausable {
         uint256 amount = (epochRewardPool[epoch][token] * uWeight) / tWeight;
         if (amount == 0) revert ZeroAmount();
         claimed[epoch][msg.sender][token] = true;
+        if (!epochClaimsStarted[epoch]) epochClaimsStarted[epoch] = true;
         epochClaimedAmount[epoch][token] += amount;
         epochClaimedWeight[epoch][token] += uWeight;
         IERC20(token).safeTransfer(msg.sender, amount);

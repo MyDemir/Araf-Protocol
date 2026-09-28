@@ -500,6 +500,38 @@ describe("ArafEscrow V3 reputation authority", () => {
     expect(makerEvent.args.lastNegativeEventAt).to.equal(makerRep.lastNegativeEventAt);
   });
 
+  it("security_positive_signal_does_not_rearm_ban_or_lower_tier_ceiling", async () => {
+    const { escrow, maker, taker, mockUSDT } = await loadFixture(deployFixture);
+    const token = await mockUSDT.getAddress();
+
+    const autoReleaseTrade = async (label) => {
+      const tradeId = await openLockedTrade({ escrow, maker, taker, token, refLabel: label });
+      await escrow.connect(taker).reportPayment(tradeId, `Qm-${label}`);
+      await time.increase(REF_2D + 1);
+      await escrow.connect(taker).pingMaker(tradeId);
+      await time.increase(REF_1D + 1);
+      await escrow.connect(taker).autoRelease(tradeId);
+    };
+
+    await autoReleaseTrade("neg-1");
+    await autoReleaseTrade("neg-2");
+
+    const banned = await escrow.getReputation(maker.address);
+    expect(banned.consecutiveBans).to.equal(1n);
+    expect(banned.riskPoints).to.be.gte(100n);
+    const maxTierBefore = await escrow.maxAllowedTier(maker.address);
+
+    await time.increaseTo(Number(banned.bannedUntil) + 1);
+    const tradeId = await openLockedTrade({ escrow, maker, taker, token, refLabel: "pos-1" });
+    await escrow.connect(taker).reportPayment(tradeId, "Qm-pos-1");
+    await escrow.connect(maker).releaseFunds(tradeId);
+
+    const after = await escrow.getReputation(maker.address);
+    expect(after.consecutiveBans).to.equal(1n);
+    expect(after.bannedUntil).to.equal(banned.bannedUntil);
+    expect(await escrow.maxAllowedTier(maker.address)).to.equal(maxTierBefore);
+  });
+
   it("keeps tier progression eligible with zero manual reward by initializing firstSuccessfulTradeAt", async () => {
     const { escrow, owner, maker, taker, mockUSDT } = await loadFixture(deployFixture);
     const token = await mockUSDT.getAddress();

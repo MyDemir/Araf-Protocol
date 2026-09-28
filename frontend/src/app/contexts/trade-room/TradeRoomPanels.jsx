@@ -2,47 +2,33 @@ import React from 'react';
 
 const t = (lang, tr, en) => (lang === 'TR' ? tr : en);
 
+// [TR] Özet kartı tek başlık + tek açıklama satırına indirildi. "Şimdi / Sonraki" kutuları ve durum/rol
+//      çipleri, sayfa başlığı ve aksiyon paneliyle aynı bilgiyi tekrar ediyordu.
+// [EN] Summary trimmed to a headline + one line; the Now/Next boxes and chips duplicated other panels.
 export const TradeSummaryCard = ({
   headline,
   subheadline,
-  nowLabel,
   nowDescription,
-  nextLabel,
-  nextDescription,
-  stateLabel,
   roleLabel,
   lang = 'EN',
 }) => (
   <section className="mb-3 bg-surface border border-borderSubtle rounded-xl p-4 text-textSecondary" data-testid="trade-summary-card">
-    <div className="mb-3">
-      <p className="text-xs font-bold uppercase tracking-wide text-brand">{t(lang, 'İşlem özeti', 'Trade summary')}</p>
-      <h2 className="mt-1 text-lg font-bold text-textPrimary">{headline || t(lang, 'İşlem durumunu kontrol edin', 'Review the trade status')}</h2>
-      {subheadline && <p className="mt-1 text-sm leading-relaxed text-textSecondary">{subheadline}</p>}
+    <div className="flex items-start justify-between gap-3">
+      <h2 className="text-base md:text-lg font-bold text-textPrimary">{headline || t(lang, 'İşlem durumunu kontrol edin', 'Review the trade status')}</h2>
+      {roleLabel && <span className="shrink-0 rounded-full border border-borderSubtle px-2 py-0.5 text-xs text-textMuted">{roleLabel}</span>}
     </div>
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-      <div className="rounded-lg border border-borderSubtle bg-elevated p-3">
-        <p className="text-xs font-bold uppercase tracking-wide text-textMuted">{nowLabel || t(lang, 'Şimdi', 'Now')}</p>
-        <p className="mt-1 text-sm leading-relaxed text-textPrimary">{nowDescription}</p>
-      </div>
-      <div className="rounded-lg border border-borderSubtle bg-elevated p-3">
-        <p className="text-xs font-bold uppercase tracking-wide text-textMuted">{nextLabel || t(lang, 'Sonraki adım', 'Next')}</p>
-        <p className="mt-1 text-sm leading-relaxed text-textPrimary">{nextDescription}</p>
-      </div>
-    </div>
-    <div className="mt-3 flex flex-wrap gap-2 text-xs text-textMuted">
-      <span className="rounded-full border border-borderSubtle px-2 py-1">{t(lang, 'Durum', 'Status')}: <span className="text-textSecondary">{stateLabel}</span></span>
-      <span className="rounded-full border border-borderSubtle px-2 py-1">{t(lang, 'Rol', 'Role')}: <span className="text-textSecondary">{roleLabel}</span></span>
-    </div>
+    {(subheadline || nowDescription) && <p className="mt-1 text-sm leading-relaxed text-textSecondary">{subheadline || nowDescription}</p>}
   </section>
 );
 
-export const StateGuidancePanel = ({ guidance = [], riskCopy }) => {
-  if (!guidance.length && !riskCopy) return null;
+// [TR] Genel risk uyarıları (chargeback/settlement) her durumda tekrarlanıyordu; yalnız duruma özgü rehber kalır.
+// [EN] Generic risk lines repeated in every state; only state-specific guidance remains.
+export const StateGuidancePanel = ({ guidance = [] }) => {
+  const lines = (Array.isArray(guidance) ? guidance : []).filter(Boolean);
+  if (!lines.length) return null;
   return (
-    <div className="mb-3 bg-surface border border-borderSubtle rounded-xl p-3 text-sm text-textSecondary space-y-2" data-testid="trade-guidance-panel">
-      {guidance.map((g, i) => <p key={i}>{g}</p>)}
-      {riskCopy?.chargeback && <p className="text-textMuted">{riskCopy.chargeback}</p>}
-      {riskCopy?.settlement && <p className="text-textMuted">{riskCopy.settlement}</p>}
+    <div className="mb-3 bg-surface border border-borderSubtle rounded-xl p-3 text-sm text-textSecondary space-y-1" data-testid="trade-guidance-panel">
+      {lines.map((g, i) => <p key={i}>{g}</p>)}
     </div>
   );
 };

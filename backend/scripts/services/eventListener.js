@@ -41,6 +41,7 @@ const {
 } = require("./protocolConfig");
 const { assertProviderExpectedChainOrThrow } = require("./expectedChain");
 const { inferCryptoAssetFromTokenAddress } = require("./tokenEnv");
+const { readPendingMarketMeta } = require("./orderMarketMeta");
 
 const CHECKPOINT_KEY = "worker:last_block";
 const LAST_SAFE_BLOCK_KEY = "worker:last_safe_block";
@@ -69,7 +70,7 @@ const DEFAULT_WORKER_FINALITY_DEPTH = process.env.NODE_ENV === "production" ? 6 
 const WORKER_FINALITY_DEPTH = _getPositiveIntEnv("WORKER_FINALITY_DEPTH", DEFAULT_WORKER_FINALITY_DEPTH);
 const BLOCK_TIMESTAMP_CACHE_LIMIT = 2_048;
 
-const EVENT_NAMES = [
+const ESCROW_EVENT_NAMES = [
   "WalletRegistered",
   "EscrowCreated", "EscrowLocked", "PaymentReported",
   "EscrowReleased", "DisputeOpened",
@@ -80,9 +81,14 @@ const EVENT_NAMES = [
   "OrderCreated", "OrderFilled", "OrderCanceled",
   "FeeConfigUpdated", "CooldownConfigUpdated", "TokenConfigUpdated",
   "ProtocolRevenueSent",
-  "EscrowRevenueReceived", "ExternalRewardFunded", "ProductRewardFunded",
-  "EpochRewardAllocated", "TradeOutcomeRecorded", "RewardClaimed",
 ];
+// [TR] Bu event'ler escrow değil ArafRevenueVault / ArafRewards adresinden yayınlanır.
+//      Escrow kontratı üzerinden sorgulanırsa hiçbir zaman bulunamazlar.
+// [EN] These events are emitted by ArafRevenueVault / ArafRewards, not by the escrow.
+//      Querying them on the escrow address would never return anything.
+const VAULT_EVENT_NAMES = ["EscrowRevenueReceived", "ExternalRewardFunded", "ProductRewardFunded"];
+const REWARDS_EVENT_NAMES = ["EpochRewardAllocated", "TradeOutcomeRecorded", "RewardClaimed"];
+const EVENT_NAMES = [...ESCROW_EVENT_NAMES, ...VAULT_EVENT_NAMES, ...REWARDS_EVENT_NAMES];
 
 const ARAF_ABI = [
   "event WalletRegistered(address indexed wallet, uint256 timestamp)",
@@ -124,7 +130,25 @@ const ARAF_ABI = [
   // [TR] getReputation getter tuple sırası frontend + contract ile lock-step kalmalıdır.
   // [EN] Keep getReputation tuple order in lock-step with frontend + contract.
   "function getReputation(address _wallet) view returns (uint256 successful,uint256 failed,uint256 bannedUntil,uint256 consecutiveBans,uint8 effectiveTier,uint256 manualReleaseCount,uint256 autoReleaseCount,uint256 mutualCancelCount,uint256 disputedResolvedCount,uint256 burnCount,uint256 disputeWinCount,uint256 disputeLossCount,uint256 partialSettlementCount,uint256 riskPoints,uint256 lastPositiveEventAt,uint256 lastNegativeEventAt)",
+  "function getRewardableTrade(uint256 _tradeId) view returns ((uint256 tradeId,uint256 parentOrderId,address maker,address taker,address token,uint256 stableNotional,uint256 takerFeePaid,uint256 makerFeePaid,uint8 tier,uint8 outcome,uint256 lockedAt,uint256 paidAt,uint256 terminalAt,bool hadChallenge,bool isOrderChild))",
 ];
+
+// [TR] Kontratın TerminalOutcome enum'u → read-model resolution_type eşlemesi.
+// [EN] Contract TerminalOutcome enum → read-model resolution_type mapping.
+const TERMINAL_OUTCOME_TO_RESOLUTION = {
+  1: "MANUAL_RELEASE",
+  2: "AUTO_RELEASE",
+  3: "MUTUAL_CANCEL",
+  4: "PARTIAL_SETTLEMENT",
+  5: "DISPUTED_RESOLUTION",
+  6: "BURNED",
+};
+
+function _isConfiguredAddress(addr) {
+  return typeof addr === "string"
+    && /^0x[a-fA-F0-9]{40}$/.test(addr)
+    && addr !== "0x0000000000000000000000000000000000000000";
+}
 
 const EVENT_ARG_KEYS = {
   WalletRegistered: ["wallet", "timestamp"],
@@ -328,6 +352,8 @@ class EventWorker {
   constructor() {
     this.provider = null;
     this.contract = null;
+    this.vaultContract = null;
+    this.rewardsContract = null;
     this.isRunning = false;
     this._lastCheckpointBlock = 0;
     this._state = "booting";
@@ -395,7 +421,21 @@ class EventWorker {
 
     this.provider = null;
     this.contract = null;
+    this.vaultContract = null;
+    this.rewardsContract = null;
     this._listenersAttached = false;
+  }
+
+  /**
+   * [TR] Event adına göre doğru kaynak kontratı döndürür (escrow / vault / rewards).
+   *      Vault/rewards adresi tanımlı değilse null döner ve o event'ler atlanır.
+   * [EN] Returns the emitting contract for an event name (escrow / vault / rewards).
+   *      Returns null when vault/rewards is not configured so those events are skipped.
+   */
+  _contractForEvent(eventName) {
+    if (VAULT_EVENT_NAMES.includes(eventName)) return this.vaultContract;
+    if (REWARDS_EVENT_NAMES.includes(eventName)) return this.rewardsContract;
+    return this.contract;
   }
 
   async _connect() {
@@ -453,6 +493,18 @@ class EventWorker {
 
     this.contract = new ethers.Contract(contractAddress, ARAF_ABI, this.provider);
     logger.info(`[Worker] Kontrat izleniyor: ${contractAddress}`);
+
+    const vaultAddress = process.env.ARAF_REVENUE_VAULT_ADDRESS;
+    const rewardsAddress = process.env.ARAF_REWARDS_ADDRESS;
+    this.vaultContract = _isConfiguredAddress(vaultAddress)
+      ? new ethers.Contract(vaultAddress, ARAF_ABI, this.provider)
+      : null;
+    this.rewardsContract = _isConfiguredAddress(rewardsAddress)
+      ? new ethers.Contract(rewardsAddress, ARAF_ABI, this.provider)
+      : null;
+    if (!this.vaultContract || !this.rewardsContract) {
+      logger.warn("[Worker] ARAF_REVENUE_VAULT_ADDRESS / ARAF_REWARDS_ADDRESS eksik — reward mirror event'leri izlenmiyor.");
+    }
     this._setState("connected", "provider + kontrat hazır");
   }
 
@@ -536,8 +588,10 @@ class EventWorker {
       const allEvents = [];
 
       for (const eventName of EVENT_NAMES) {
+        const source = this._contractForEvent(eventName);
+        if (!source) continue;
         try {
-          const filtered = await this.contract.queryFilter(eventName, from, to);
+          const filtered = await source.queryFilter(eventName, from, to);
           if (Array.isArray(filtered)) allEvents.push(...filtered);
         } catch (err) {
           logger.warn(`[Worker] Replay: ${eventName} sorgusu başarısız (${from}-${to}): ${err.message}`);
@@ -625,7 +679,9 @@ class EventWorker {
         const allEvents = [];
 
         for (const eventName of EVENT_NAMES) {
-          const filtered = await this.contract.queryFilter(eventName, from, to);
+          const source = this._contractForEvent(eventName);
+          if (!source) continue;
+          const filtered = await source.queryFilter(eventName, from, to);
           if (Array.isArray(filtered)) allEvents.push(...filtered);
         }
 
@@ -880,6 +936,17 @@ class EventWorker {
     return this.contract.getReputation(wallet);
   }
 
+  async _fetchTerminalResolutionType(tradeId) {
+    if (!this.contract?.getRewardableTrade) return null;
+    try {
+      const view = await this.contract.getRewardableTrade(tradeId);
+      return TERMINAL_OUTCOME_TO_RESOLUTION[_toNum(view?.outcome ?? view?.[9])] || null;
+    } catch (err) {
+      logger.warn(`[Worker] terminal outcome okunamadı: trade=${tradeId} err=${err.message}`);
+      return null;
+    }
+  }
+
   async _upsertOrderMirror(orderData, opts = {}) {
     const orderId = _toIdentityString(orderData.id);
     const payload = {
@@ -889,9 +956,9 @@ class EventWorker {
       status: _normalizeOrderState(orderData.state),
       tier: _toNum(orderData.tier),
       token_address: orderData.tokenAddress.toLowerCase(),
-      market: {
-        crypto_asset: _inferCryptoAssetFromToken(orderData.tokenAddress),
-      },
+      // [TR] Dotted path: nested obje fiat_currency/exchange_rate enrichment'ını her fill/iptalde silerdi.
+      // [EN] Dotted path: a nested object would wipe fiat_currency/exchange_rate on every fill/cancel.
+      "market.crypto_asset": _inferCryptoAssetFromToken(orderData.tokenAddress),
       amounts: {
         total_amount: _toStr(orderData.totalAmount),
         total_amount_num: _toSafeNum(orderData.totalAmount),
@@ -921,7 +988,7 @@ class EventWorker {
 
     Object.keys(payload).forEach((key) => payload[key] === undefined && delete payload[key]);
 
-    await Order.findOneAndUpdate(
+    const orderDoc = await Order.findOneAndUpdate(
       _buildIdentityLookup("onchain_order_id", orderId),
       {
         $set: payload,
@@ -939,10 +1006,41 @@ class EventWorker {
       },
       {
         upsert: true,
+        new: true,
         session: opts.session,
         setDefaultsOnInsert: true,
       }
     );
+
+    return this._applyPendingMarketMeta(orderDoc, opts.session);
+  }
+
+  /**
+   * [TR] Maker'ın POST /orders/market-meta ile bıraktığı kur/fiat niyetini, order mirror
+   *      oluştuğunda ve sahibi eşleştiğinde uygular (set-once). Güncel market bilgisini döndürür.
+   * [EN] Applies the maker's pending fiat/rate intent once the order mirror exists and the
+   *      owner matches (set-once). Returns the effective market enrichment.
+   */
+  async _applyPendingMarketMeta(orderDoc, session) {
+    const currentMarket = orderDoc?.market || null;
+    if (!orderDoc?.refs?.order_ref || Number(currentMarket?.exchange_rate) > 0) return currentMarket;
+
+    const owner = String(orderDoc.owner_address || "").toLowerCase();
+    let intent = null;
+    try {
+      intent = await readPendingMarketMeta(orderDoc.refs.order_ref, owner);
+    } catch (err) {
+      logger.warn(`[Worker] market meta niyeti okunamadı: ${err.message}`);
+      return currentMarket;
+    }
+    if (!intent || intent.owner !== owner) return currentMarket;
+
+    await Order.updateOne(
+      { onchain_order_id: orderDoc.onchain_order_id, "market.exchange_rate": null },
+      { $set: { "market.fiat_currency": intent.fiat_currency, "market.exchange_rate": intent.exchange_rate } },
+      { session }
+    );
+    return { ...(currentMarket || {}), fiat_currency: intent.fiat_currency, exchange_rate: intent.exchange_rate };
   }
 
   async _upsertTradeMirror(tradeData, opts = {}) {
@@ -955,6 +1053,12 @@ class EventWorker {
     const parentOrderSide = parentOrder ? _normalizeSide(parentOrder.side) : null;
     const orderRef = parentOrder ? _toStr(parentOrder.orderRef).toLowerCase() : null;
 
+    // [TR] Tüm nested alanlar dotted path ile set edilir. Nested obje ile $set yapmak;
+    //      replay/yeniden işleme sırasında şifreli dekontu (evidence.receipt_*), decay
+    //      muhasebesini (financials.total_decayed / decay_tx_hashes) ve fiat/kur
+    //      zenginleştirmesini sessizce silerdi.
+    // [EN] All nested fields use dotted paths. A nested-object $set would silently wipe the
+    //      encrypted receipt, decay accounting and fiat/rate enrichment on replay.
     const setPayload = {
       onchain_escrow_id: tradeId,
       parent_order_id: parentOrderId === "0" ? null : parentOrderId,
@@ -966,32 +1070,33 @@ class EventWorker {
           ? tradeData.taker.toLowerCase()
           : null,
       token_address: tradeData.tokenAddress.toLowerCase(),
-      canonical_refs: {
-        listing_ref: opts.listingRef || null,
-        order_ref: orderRef,
-      },
-      fee_snapshot: {
-        taker_fee_bps: _toNum(tradeData.takerFeeBpsSnapshot),
-        maker_fee_bps: _toNum(tradeData.makerFeeBpsSnapshot),
-      },
+      "canonical_refs.order_ref": orderRef,
+      "fee_snapshot.taker_fee_bps": _toNum(tradeData.takerFeeBpsSnapshot),
+      "fee_snapshot.maker_fee_bps": _toNum(tradeData.makerFeeBpsSnapshot),
       payment_risk_level_snapshot: _normalizePaymentRiskLevel(tradeData.paymentRiskLevelSnapshot),
-      financials: {
-        crypto_amount: _toStr(tradeData.cryptoAmount),
-        crypto_amount_num: _toSafeNum(tradeData.cryptoAmount),
-        maker_bond: _toStr(tradeData.makerBond),
-        maker_bond_num: _toSafeNum(tradeData.makerBond),
-        taker_bond: _toStr(tradeData.takerBond),
-        taker_bond_num: _toSafeNum(tradeData.takerBond),
-        crypto_asset: _inferCryptoAssetFromToken(tradeData.tokenAddress),
-      },
+      "financials.crypto_amount": _toStr(tradeData.cryptoAmount),
+      "financials.crypto_amount_num": _toSafeNum(tradeData.cryptoAmount),
+      "financials.maker_bond": _toStr(tradeData.makerBond),
+      "financials.maker_bond_num": _toSafeNum(tradeData.makerBond),
+      "financials.taker_bond": _toStr(tradeData.takerBond),
+      "financials.taker_bond_num": _toSafeNum(tradeData.takerBond),
+      "financials.crypto_asset": _inferCryptoAssetFromToken(tradeData.tokenAddress),
       tier: _toNum(tradeData.tier),
       status: _normalizeTradeState(tradeData.state),
       pinged_by_taker: Boolean(tradeData.pingedByTaker),
       challenge_pinged_by_maker: Boolean(tradeData.challengePingedByMaker),
-      evidence: {
-        ipfs_receipt_hash: tradeData.ipfsReceiptHash || null,
-      },
     };
+
+    if (opts.listingRef) setPayload["canonical_refs.listing_ref"] = opts.listingRef;
+    if (tradeData.ipfsReceiptHash) setPayload["evidence.ipfs_receipt_hash"] = tradeData.ipfsReceiptHash;
+
+    // [TR] Parent order'daki maker kur/fiat bilgisi (UI enrichment) child trade'e fill anında kopyalanır.
+    // [EN] Copy the maker's fiat/rate enrichment from the parent order into the child trade at fill time.
+    const marketMeta = opts.marketMeta || null;
+    if (marketMeta?.fiat_currency && Number(marketMeta?.exchange_rate) > 0) {
+      setPayload["financials.fiat_currency"] = marketMeta.fiat_currency;
+      setPayload["financials.exchange_rate"] = Number(marketMeta.exchange_rate);
+    }
 
     _setIfDefined(setPayload, "timers.created_at_onchain", opts.createdAt);
     _setIfDefined(setPayload, "timers.resolved_at", opts.resolvedAt);
@@ -1009,13 +1114,11 @@ class EventWorker {
     if (challengePingedAt) setPayload["timers.challenge_pinged_at"] = challengePingedAt;
 
     if (opts.fillAmount !== undefined) {
-      setPayload.fill_metadata = {
-        fill_amount: _toStr(opts.fillAmount),
-        fill_amount_num: _toSafeNum(opts.fillAmount),
-        filler_address: opts.filler?.toLowerCase() || null,
-        remaining_amount_after_fill: _toStr(opts.remainingAmountAfterFill ?? 0),
-        remaining_amount_after_fill_num: _toSafeNum(opts.remainingAmountAfterFill ?? 0),
-      };
+      setPayload["fill_metadata.fill_amount"] = _toStr(opts.fillAmount);
+      setPayload["fill_metadata.fill_amount_num"] = _toSafeNum(opts.fillAmount);
+      setPayload["fill_metadata.filler_address"] = opts.filler?.toLowerCase() || null;
+      setPayload["fill_metadata.remaining_amount_after_fill"] = _toStr(opts.remainingAmountAfterFill ?? 0);
+      setPayload["fill_metadata.remaining_amount_after_fill_num"] = _toSafeNum(opts.remainingAmountAfterFill ?? 0);
     }
 
     const result = await Trade.findOneAndUpdate(
@@ -1141,7 +1244,7 @@ class EventWorker {
   async runReconciliationReport({ limit = 100 } = {}) {
     const max = Math.max(1, Number(limit) || 100);
     const terminalTrades = await Trade.find({ status: { $in: ["RESOLVED", "CANCELED", "BURNED"] } })
-      .select("onchain_escrow_id status timers.released_at timers.canceled_at timers.burned_at")
+      .select("onchain_escrow_id status timers.resolved_at")
       .limit(max)
       .lean();
 
@@ -1152,9 +1255,9 @@ class EventWorker {
       if (key) {
         seenByEscrowId.set(key, (seenByEscrowId.get(key) || 0) + 1);
       }
-      if (t.status === "RESOLVED" && !t?.timers?.released_at) missingTerminalTimestamp.push(t);
-      if (t.status === "CANCELED" && !t?.timers?.canceled_at) missingTerminalTimestamp.push(t);
-      if (t.status === "BURNED" && !t?.timers?.burned_at) missingTerminalTimestamp.push(t);
+      // [TR] Tüm terminal handler'lar timers.resolved_at yazar; şemada released_at/canceled_at/burned_at yoktur.
+      // [EN] Every terminal handler writes timers.resolved_at; released_at/canceled_at/burned_at do not exist.
+      if (!t?.timers?.resolved_at) missingTerminalTimestamp.push(t);
     }
 
     const duplicateProjection = [...seenByEscrowId.entries()]
@@ -1241,13 +1344,14 @@ class EventWorker {
         this._fetchTradeFromChain(tradeId),
       ]);
 
-      await this._upsertOrderMirror(orderData, {
+      const marketMeta = await this._upsertOrderMirror(orderData, {
         lastFilledAt: fillEventAt,
         session,
       });
 
       const tradeUpsert = await this._upsertTradeMirror(tradeData, {
         parentOrder: orderData,
+        marketMeta,
         createdAt: fillEventAt,
         listingRef: childListingRef ? _toStr(childListingRef).toLowerCase() : null,
         fillAmount,
@@ -1482,6 +1586,10 @@ class EventWorker {
       //      to DISPUTED_RESOLUTION is deterministic read-model classification, not backend authority.
       if (existingTrade?.status === "CHALLENGED") {
         releaseResolutionType = "DISPUTED_RESOLUTION";
+      } else {
+        // [TR] Manuel/otomatik ayrımı heuristikle değil, kontratın terminal snapshot'ından okunur.
+        // [EN] Manual vs auto is read from the contract's terminal snapshot, never inferred.
+        releaseResolutionType = await this._fetchTerminalResolutionType(tradeIdNum) || "UNKNOWN";
       }
 
       const trade = await Trade.findOneAndUpdate(
@@ -1596,7 +1704,7 @@ class EventWorker {
   }
 
   async _onEscrowBurned(event) {
-    const { tradeId } = event.args;
+    const { tradeId, burnedAmount } = event.args;
     const burnedAt = await this._getEventDate(event);
     const tradeIdNum = _toIdentityString(tradeId);
 
@@ -1614,6 +1722,10 @@ class EventWorker {
             status: "BURNED",
             resolution_type: "BURNED",
             "timers.resolved_at": burnedAt,
+            // [TR] burnExpired BleedingDecayed yaymaz; yakılan toplam yalnız bu event'te gelir.
+            // [EN] burnExpired emits no BleedingDecayed; the burned total only arrives here.
+            "financials.burned_amount": _toStr(burnedAmount ?? 0),
+            "financials.burned_amount_num": _toSafeNum(burnedAmount ?? 0),
             "evidence.receipt_delete_at": new Date(burnedAt.getTime() + 30 * 24 * 3600 * 1000),
           },
         },
@@ -1981,7 +2093,11 @@ class EventWorker {
     const insertResult = await RewardEpochAllocationEvent.findOneAndUpdate(
       { tx_hash, log_index },
       { $setOnInsert: { tx_hash, log_index, epoch: _toStr(epoch), token: token?.toLowerCase?.() || null, amount: _toStr(amount) } },
-      { upsert: true, new: false, rawResult: true }
+      // [TR] Mongoose 8'de rawResult kaldırıldı; includeResultMetadata olmadan replay'de
+      //      updatedExisting okunamaz ve epoch havuzu iki kez sayılırdı.
+      // [EN] rawResult was removed in Mongoose 8; without includeResultMetadata the replay
+      //      guard never fires and the epoch pool is double counted.
+      { upsert: true, new: false, includeResultMetadata: true }
     );
     if (insertResult?.lastErrorObject?.updatedExisting) return;
 

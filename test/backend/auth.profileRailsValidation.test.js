@@ -63,7 +63,7 @@ describe("auth profile payout rail validation", () => {
           rail: "TR_IBAN",
           country: "TR",
           contact: { channel: "telegram", value: "tester1" },
-          fields: { account_holder_name: "Test User", iban: "TR123456789012345678901234", bank_name: "Bank" },
+          fields: { account_holder_name: "Test User", iban: "TR963456789012345678901234", bank_name: "Bank" },
         }),
         buildPayoutFingerprint: jest.fn().mockImplementation((details) => JSON.stringify(details)),
       }));
@@ -87,7 +87,7 @@ describe("auth profile payout rail validation", () => {
       contact: { channel: "telegram", value: "tester1" },
       fields: {
         account_holder_name: "Test User",
-        iban: "TR123456789012345678901234",
+        iban: "TR963456789012345678901234",
         routing_number: null,
         account_number: null,
         account_type: null,
@@ -152,17 +152,31 @@ describe("auth profile payout rail validation", () => {
     expect(sepaTr.status).toBe(400);
   });
 
+  it("security_rejects_iban_with_invalid_mod97_checksum_or_country_mismatch", async () => {
+    const typo = await request(app).put("/api/auth/profile").send(makePayload({
+      fields: { account_holder_name: "Test User", iban: "TR963456789012345678901235", routing_number: null, account_number: null, account_type: null, bic: null, bank_name: null },
+    }));
+    expect(typo.status).toBe(400);
+
+    const sepaCountryMismatch = await request(app).put("/api/auth/profile").send(makePayload({
+      rail: "SEPA_IBAN",
+      country: "FR",
+      fields: { account_holder_name: "Test User", iban: "DE89370400440532013000", routing_number: null, account_number: null, account_type: null, bic: null, bank_name: null },
+    }));
+    expect(sepaCountryMismatch.status).toBe(400);
+  });
+
   it("validates widened account holder names and rejects noisy ones", async () => {
     const goodNames = ["Jean-Luc Picard", "O'Connor", "José María", "M. Dupont"];
     for (const n of goodNames) {
       const res = await request(app).put("/api/auth/profile").send(makePayload({
-        fields: { account_holder_name: n, iban: "TR123456789012345678901234", routing_number: null, account_number: null, account_type: null, bic: null, bank_name: null },
+        fields: { account_holder_name: n, iban: "TR963456789012345678901234", routing_number: null, account_number: null, account_type: null, bic: null, bank_name: null },
       }));
       expect(res.status).toBe(200);
     }
 
     const badName = await request(app).put("/api/auth/profile").send(makePayload({
-      fields: { account_holder_name: "1234@@", iban: "TR123456789012345678901234", routing_number: null, account_number: null, account_type: null, bic: null, bank_name: null },
+      fields: { account_holder_name: "1234@@", iban: "TR963456789012345678901234", routing_number: null, account_number: null, account_type: null, bic: null, bank_name: null },
     }));
     expect(badName.status).toBe(400);
   });
@@ -198,7 +212,7 @@ describe("auth profile payout rail validation", () => {
         contact: { channel: "email", value: "a@b.com" },
         fields: {
           account_holder_name: "Test User",
-          iban: "TR123456789012345678901234",
+          iban: "TR963456789012345678901234",
           routing_number: null, account_number: null, account_type: null, bic: null, bank_name: null,
         },
       },
@@ -216,7 +230,7 @@ describe("auth profile payout rail validation", () => {
         contact: { channel: "telegram", value: "tester2" },
         fields: {
           account_holder_name: "Test User",
-          iban: "TR123456789012345678901234",
+          iban: "TR963456789012345678901234",
           routing_number: null, account_number: null, account_type: null, bic: null, bank_name: "Bank",
         },
       },

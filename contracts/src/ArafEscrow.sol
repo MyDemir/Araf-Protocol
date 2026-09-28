@@ -400,12 +400,16 @@ contract ArafEscrow is ReentrancyGuard, EIP712, Ownable, Pausable {
     uint256 public orderCounter;
     address public treasury;
 
-    mapping(uint256 => Trade) public trades;
-    mapping(uint256 => Order) public orders;
-    mapping(uint256 => SettlementProposal) public settlementProposalsByTrade;
+    // [TR] Struct mapping'leri internal: aynı veri getTrade/getOrder/getReputation/getSettlementProposal/
+    //      getTokenConfig ile okunur. Otomatik public getter'lar EIP-170 (24KB) sınırını aşan kopya bytecode üretir.
+    // [EN] Struct mappings are internal: the same data is served by the named getters above.
+    //      Auto-generated public getters duplicated bytecode and pushed the contract past EIP-170 (24KB).
+    mapping(uint256 => Trade) internal trades;
+    mapping(uint256 => Order) internal orders;
+    mapping(uint256 => SettlementProposal) internal settlementProposalsByTrade;
     mapping(uint256 => TerminalTradeSnapshot) internal terminalTradeSnapshots;
     mapping(uint256 => uint256) public settlementProposalNonceByTrade;
-    mapping(address => Reputation) public reputation;
+    mapping(address => Reputation) internal reputation;
 
     mapping(address => uint256) public walletRegisteredAt;
     mapping(address => uint256) public lastTradeAt;
@@ -414,7 +418,7 @@ contract ArafEscrow is ReentrancyGuard, EIP712, Ownable, Pausable {
     mapping(address => bool)  public hasTierPenalty;
 
     mapping(address => uint256) public firstSuccessfulTradeAt;
-    mapping(address => TokenConfig) public tokenConfigs;
+    mapping(address => TokenConfig) internal tokenConfigs;
     mapping(address => mapping(uint256 => uint256)) public sigNonces;
 
     // [TR] Owner kontrollü mutable fee / cooldown alanları
@@ -1791,7 +1795,10 @@ contract ArafEscrow is ReentrancyGuard, EIP712, Ownable, Pausable {
             if (rep.riskPoints <= rewardPts) rep.riskPoints = 0;
             else rep.riskPoints -= rewardPts;
         }
-        _refreshTierAndBanState(_wallet, rep);
+        // [TR] Pozitif sinyal ban/tier cezası tetiklemez. Eşik üstündeyken başarılı bir işlem
+        //      yeni (üstel uzayan) ban başlatıp tier tavanını düşürmemelidir.
+        // [EN] Positive signals never trigger ban/tier penalties. A successful trade while still
+        //      above the threshold must not start a new (escalating) ban or lower the tier ceiling.
     }
 
     function _applyNegativeSignal(address _wallet, Reputation storage rep, uint32 penaltyPts) internal {

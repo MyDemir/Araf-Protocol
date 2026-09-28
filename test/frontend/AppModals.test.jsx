@@ -146,14 +146,16 @@ describe('AppModals side-aware behaviors', () => {
   });
 
 
-  it('renders maker modal as guided sections without raw TR order-side wording', () => {
+  it('renders maker modal as a compact form without raw TR order-side wording', () => {
     const modals = buildAppModals(makeCtx({ lang: 'TR', t: { createAd: 'Order Oluştur' }, profileTab: 'ayarlar', showProfileModal: false }));
 
     render(<div>{modals.renderMakerModal()}</div>);
 
-    ['Order yönü', 'Varlık', 'Miktar', 'Kur', 'Limitler', 'Tier', 'Reserve önizlemesi', 'Ödeme yöntemi karmaşıklığı', 'Onay'].forEach((label) => {
+    ['Miktar', 'Kur (1 USDT)', 'Tier', 'Ödeme yöntemi karmaşıklığı'].forEach((label) => {
       expect(screen.getAllByText(label).length).toBeGreaterThan(0);
     });
+    expect(screen.getByLabelText(/Min\. işlem/)).toBeInTheDocument();
+    expect(screen.queryByText('Maksimum limit')).not.toBeInTheDocument();
     expect(screen.queryByText('Order Side')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Kripto Satıyor' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Kripto Alıyor' })).toBeInTheDocument();
@@ -298,9 +300,11 @@ describe('AppModals side-aware behaviors', () => {
     render(<div>{modals.renderProfileModal()}</div>);
     expect(screen.getByText('Trust Visibility')).toBeInTheDocument();
     expect(screen.getByText(/Informational only/i)).toBeInTheDocument();
-    expect(screen.getByText(/readOnly: true/i)).toBeInTheDocument();
-    expect(screen.getByText(/nonBlocking: true/i)).toBeInTheDocument();
-    expect(screen.getByText(/canBlockProtocolActions: false/i)).toBeInTheDocument();
+    // [TR] Geliştirici jargonu (readOnly/nonBlocking/canBlockProtocolActions) kullanıcıya gösterilmez.
+    // [EN] Developer jargon flags are no longer rendered to end users.
+    expect(screen.queryByText(/readOnly: true/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/canBlockProtocolActions/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/bank-change frequency/i)).toBeInTheDocument();
   });
 
   it('fails soft when trust payload is missing', () => {
@@ -311,7 +315,7 @@ describe('AppModals side-aware behaviors', () => {
     }));
 
     render(<div>{modals.renderProfileModal()}</div>);
-    expect(screen.getByText(/No signal is available for active maker-linked trades/i)).toBeInTheDocument();
+    expect(screen.getByText(/No signals to show/i)).toBeInTheDocument();
   });
 
   it('renders generic contact channel selector in settings form', () => {

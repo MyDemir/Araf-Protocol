@@ -4,12 +4,8 @@ import {
   getMakerOrderValidationError,
   getRestrictedPaymentRiskEntry,
   MAKER_ORDER_DEFAULTS,
+  resolveTierMaxAmounts,
 } from '../../actions/orderCreationActions';
-
-const FEE_ON_TRANSFER_WARNING = {
-  TR: 'Not: Fee-on-transfer / deflasyonist tokenlar desteklenmez.',
-  EN: 'Note: Fee-on-transfer / deflationary tokens are not supported.',
-};
 
 export const useMakerOrderForm = ({
   isPaused,
@@ -34,6 +30,8 @@ export const useMakerOrderForm = ({
   canonicalizePayoutProfileDraft,
   payoutProfileDraft,
   paymentRiskConfig,
+  authenticatedFetch = null,
+  onchainTokenMap = {},
 }) => {
   const [makerTier, setMakerTier] = React.useState(MAKER_ORDER_DEFAULTS.makerTier);
   const [makerAmount, setMakerAmount] = React.useState(MAKER_ORDER_DEFAULTS.makerAmount);
@@ -64,9 +62,16 @@ export const useMakerOrderForm = ({
     setMakerSide(MAKER_ORDER_DEFAULTS.makerSide);
   }, []);
 
+  // [TR] Tier limitleri seçili token'ın on-chain config'inden okunur (fallback: sabit tablo).
+  // [EN] Tier limits come from the selected token's on-chain config (fallback: static table).
+  const tierMaxAmounts = React.useMemo(() => {
+    const tokenAddress = String(supportedTokens?.[makerToken]?.address || '').toLowerCase();
+    return resolveTierMaxAmounts(onchainTokenMap?.[tokenAddress]);
+  }, [supportedTokens, makerToken, onchainTokenMap]);
+
   const validationError = React.useMemo(
-    () => getMakerOrderValidationError({ ...formState, lang }),
-    [formState, lang],
+    () => getMakerOrderValidationError({ ...formState, tierMaxAmounts, lang }),
+    [formState, tierMaxAmounts, lang],
   );
 
   const canonicalPayoutProfile = React.useMemo(
@@ -106,6 +111,8 @@ export const useMakerOrderForm = ({
     canonicalizePayoutProfileDraft,
     payoutProfileDraft,
     paymentRiskConfig,
+    authenticatedFetch,
+    tierMaxAmounts,
   }), [
     getFormState,
     resetMakerOrderForm,
@@ -130,6 +137,8 @@ export const useMakerOrderForm = ({
     canonicalizePayoutProfileDraft,
     payoutProfileDraft,
     paymentRiskConfig,
+    authenticatedFetch,
+    tierMaxAmounts,
   ]);
 
   const handleOpenMakerModal = React.useCallback(() => {
@@ -139,7 +148,6 @@ export const useMakerOrderForm = ({
     }
     if (!requireSignedSessionForActiveWallet()) return;
     setShowMakerModal(true);
-    showToast(lang === 'TR' ? FEE_ON_TRANSFER_WARNING.TR : FEE_ON_TRANSFER_WARNING.EN, 'info');
   }, [isPaused, lang, requireSignedSessionForActiveWallet, setShowMakerModal, showToast]);
 
   return {
@@ -154,6 +162,7 @@ export const useMakerOrderForm = ({
     setMakerSide,
     resetMakerOrderForm,
     validationError,
+    tierMaxAmounts,
     payoutRiskEntry,
     isCreateTemporarilyDisabledByRisk,
     handleCreateOrder,

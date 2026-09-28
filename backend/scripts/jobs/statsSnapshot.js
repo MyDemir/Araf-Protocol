@@ -16,6 +16,29 @@ const Trade = require("../models/Trade");
 const Order = require("../models/Order");
 const HistoricalStat = require("../models/HistoricalStat");
 const logger = require("../utils/logger");
+const { getConfig } = require("../services/protocolConfig");
+
+const DEFAULT_STABLE_DECIMALS = 6;
+
+/**
+ * [TR] Ham base-unit toplamlarını (token bazında) insan-okunur stable birimine çevirir.
+ *      *_num alanları base-unit'tir (1 USDT = 1_000_000); ölçeklenmeden gösterilirse
+ *      hacim 10^6 kat şişer. Decimals on-chain token config'ten okunur (fallback 6).
+ * [EN] Converts per-token raw base-unit sums into human stable units using on-chain decimals.
+ */
+function _scaleByTokenDecimals(rows = [], field) {
+  let tokenMap = {};
+  try {
+    tokenMap = getConfig().tokenMap || {};
+  } catch (_) {
+    tokenMap = {};
+  }
+  return rows.reduce((acc, row) => {
+    const decimals = Number(tokenMap?.[String(row?._id || "").toLowerCase()]?.decimals);
+    const safeDecimals = Number.isInteger(decimals) && decimals > 0 && decimals <= 18 ? decimals : DEFAULT_STABLE_DECIMALS;
+    return acc + Number(row?.[field] || 0) / 10 ** safeDecimals;
+  }, 0);
+}
 
 /**
  * [TR] Number cache alanları analytics kolaylığı içindir; canonical authority değildir.
@@ -62,8 +85,6 @@ async function computeCurrentStats() {
 
   const [
     resolvedAgg,
-    executedAgg,
-    burnedAgg,
     resolvedTrades,
     executedTrades,
     burnedTrades,
@@ -99,25 +120,6 @@ async function computeCurrentStats() {
         },
       },
     ]),
-    Trade.aggregate([
-      { $match: { status: { $in: executedTradeStates } } },
-      {
-        $group: {
-          _id: null,
-          totalExecutedVolumeApprox: { $sum: "$financials.crypto_amount_num" },
-          count: { $sum: 1 },
-        },
-      },
-    ]),
-    Trade.aggregate([
-      { $match: { status: "BURNED" } },
-      {
-        $group: {
-          _id: null,
-          totalDecayedApprox: { $sum: "$financials.total_decayed_num" },
-        },
-      },
-    ]),
     Trade.find({ status: "RESOLVED" })
       .select("financials.crypto_amount")
       .lean(),
@@ -125,7 +127,7 @@ async function computeCurrentStats() {
       .select("financials.crypto_amount")
       .lean(),
     Trade.find({ status: "BURNED" })
-      .select("financials.total_decayed")
+      .select("financials.total_decayed financials.burned_amount")
       .lean(),
     Trade.countDocuments({}),
     Trade.countDocuments({ status: { $in: activeTradeStates } }),
@@ -136,9 +138,35 @@ async function computeCurrentStats() {
     Order.countDocuments({ status: "CANCELED" }),
   ]);
 
+  const [resolvedByToken, executedByToken, burnedByToken] = await Promise.all([
+    Trade.aggregate([
+      { $match: { status: "RESOLVED" } },
+      { $group: { _id: "$token_address", volume: { $sum: "$financials.crypto_amount_num" } } },
+    ]),
+    Trade.aggregate([
+      { $match: { status: { $in: executedTradeStates } } },
+      { $group: { _id: "$token_address", volume: { $sum: "$financials.crypto_amount_num" } } },
+    ]),
+    // [TR] Eriyen hazine = tüm trade'lerde bleeding decay + burnExpired ile yakılan toplam.
+    // [EN] Burned treasury = bleeding decay across all trades + totals burned by burnExpired.
+    Trade.aggregate([
+      {
+        $group: {
+          _id: "$token_address",
+          burned: {
+            $sum: {
+              $add: [
+                { $ifNull: ["$financials.total_decayed_num", 0] },
+                { $ifNull: ["$financials.burned_amount_num", 0] },
+              ],
+            },
+          },
+        },
+      },
+    ]),
+  ]);
+
   const resolved = resolvedAgg[0] || { totalVolumeApprox: 0, count: 0, totalDurationMs: 0 };
-  const executed = executedAgg[0] || { totalExecutedVolumeApprox: 0, count: 0 };
-  const burned = burnedAgg[0] || { totalDecayedApprox: 0 };
 
   const totalVolumeStr = _sumDecimalStrings(
     resolvedTrades.map((trade) => trade?.financials?.crypto_amount || "0")
@@ -149,7 +177,10 @@ async function computeCurrentStats() {
   );
 
   const burnedBondsStr = _sumDecimalStrings(
-    burnedTrades.map((trade) => trade?.financials?.total_decayed || "0")
+    burnedTrades.flatMap((trade) => [
+      trade?.financials?.total_decayed || "0",
+      trade?.financials?.burned_amount || "0",
+    ])
   );
 
   const avgTradeHours = resolved.count > 0
@@ -157,9 +188,9 @@ async function computeCurrentStats() {
     : null;
 
   return {
-    total_volume_usdt: _toSafeFixedNumber(resolved.totalVolumeApprox, 6),
+    total_volume_usdt: _toSafeFixedNumber(_scaleByTokenDecimals(resolvedByToken, "volume"), 2),
     total_volume_usdt_str: totalVolumeStr,
-    executed_volume_usdt: _toSafeFixedNumber(executed.totalExecutedVolumeApprox, 6),
+    executed_volume_usdt: _toSafeFixedNumber(_scaleByTokenDecimals(executedByToken, "volume"), 2),
     executed_volume_usdt_str: executedVolumeStr,
     completed_trades: resolved.count,
     child_trade_count: childTradeCount,
@@ -169,7 +200,7 @@ async function computeCurrentStats() {
     partially_filled_orders: partiallyFilledOrders,
     filled_orders: filledOrders,
     canceled_orders: canceledOrders,
-    burned_bonds_usdt: _toSafeFixedNumber(burned.totalDecayedApprox, 6),
+    burned_bonds_usdt: _toSafeFixedNumber(_scaleByTokenDecimals(burnedByToken, "burned"), 2),
     burned_bonds_usdt_str: burnedBondsStr,
     avg_trade_hours: avgTradeHours,
   };

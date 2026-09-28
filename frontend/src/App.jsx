@@ -172,9 +172,12 @@ function App() {
 
   // [TR] Toast bildirimi gösterir — 4 sn sonra otomatik kapanır
   // [EN] Shows toast notification — auto-closes after 4s
+  // [TR] Her toast kendi id'si ile kapanır; eski zamanlayıcı yeni toast'ı erken silmez.
+  // [EN] Each toast closes by its own id so an older timer never clears a newer toast.
   const showToast = React.useCallback((message, type = 'success') => {
-    setToast({ id: Date.now(), message, type });
-    setTimeout(() => setToast(null), 4000);
+    const id = Date.now() + Math.random();
+    setToast({ id, message, type });
+    setTimeout(() => setToast((current) => (current?.id === id ? null : current)), type === 'error' ? 6000 : 4000);
   }, []);
 
   // ═══════════════════════════════════════════
@@ -671,6 +674,8 @@ function App() {
     canonicalizePayoutProfileDraft,
     payoutProfileDraft,
     paymentRiskConfig,
+    authenticatedFetch,
+    onchainTokenMap,
   });
 
   const orderForm = React.useMemo(() => ({
@@ -1193,6 +1198,15 @@ function App() {
     devTradeDecisionInput: effectiveTradeDecisionInput,
     devTradeActionCallbacks: effectiveActionCallbacks,
     operationsActionSetters,
+    payoutProfileDraft,
+    setPayoutProfileDraft,
+    canonicalizePayoutProfileDraft,
+    SEPA_COUNTRIES,
+    myOrders,
+    confirmDeleteId,
+    tradeHistory,
+    profileContextTab,
+    setProfileContextTab,
   });
 
   const {
@@ -1299,6 +1313,7 @@ function App() {
     isWalletRegistered,
     sybilStatus,
     walletAgeRemainingDays,
+    decayReputation,
     tokenDecimalsMap,
     DEFAULT_TOKEN_DECIMALS,
     formatTokenAmountFromRaw,
@@ -1362,19 +1377,29 @@ function App() {
         />
       )}
 
+      {/* [TR] Mobilde yalnız ikon: içerik ve başlıkların üstüne binmez. [EN] Icon-only on mobile. */}
       <button
         onClick={() => setShowFeedbackModal(true)}
         title={lang === 'TR' ? 'Geri Bildirim' : 'Feedback'}
-        className="fixed top-[calc(1.25rem_+_env(safe-area-inset-top))] right-[calc(1.25rem_+_env(safe-area-inset-right))] md:top-6 md:right-6 z-40 h-11 max-w-[calc(100vw_-_2rem)] px-4 bg-surface hover:bg-elevated border border-borderSubtle rounded-2xl flex items-center justify-center gap-2 text-sm font-semibold text-textPrimary shadow-[0_0_15px_rgba(0,0,0,0.18)] transition-transform hover:scale-[1.02] hover:border-borderStrong"
+        aria-label={lang === 'TR' ? 'Geri Bildirim' : 'Feedback'}
+        className="fixed top-[calc(0.75rem_+_env(safe-area-inset-top))] right-[calc(0.75rem_+_env(safe-area-inset-right))] md:top-6 md:right-6 z-40 h-10 w-10 md:w-auto md:px-4 bg-surface/90 hover:bg-elevated border border-borderSubtle rounded-full md:rounded-2xl flex items-center justify-center gap-2 text-sm font-semibold text-textPrimary shadow-sm backdrop-blur transition hover:border-borderStrong"
       >
-        <span>💬</span>
-        <span>{lang === 'TR' ? 'Geri Bildirim' : 'Feedback'}</span>
+        <span aria-hidden="true">💬</span>
+        <span className="hidden md:inline">{lang === 'TR' ? 'Geri Bildirim' : 'Feedback'}</span>
       </button>
 
       {toast && (
-        <div className="fixed bottom-[calc(5rem_+_env(safe-area-inset-bottom))] md:bottom-6 left-1/2 -translate-x-1/2 md:left-auto md:-translate-x-0 md:right-6 z-[100] animate-bounce-in w-[90%] max-w-[calc(100vw_-_2rem)] sm:w-auto">
-          <div className={`px-4 md:px-6 py-3 md:py-4 rounded-xl shadow-2xl border text-sm font-bold backdrop-blur-md text-center md:text-left ${toast.type === 'error' ? 'bg-[#1a0f0f]/90 border-red-900/50 text-red-400' : toast.type === 'info' ? 'bg-[#0a1a2a]/90 border-blue-900/50 text-blue-400' : 'bg-[#0a1a10]/90 border-emerald-900/50 text-emerald-400'}`}>
-            {toast.message}
+        <div
+          role={toast.type === 'error' ? 'alert' : 'status'}
+          aria-live={toast.type === 'error' ? 'assertive' : 'polite'}
+          className="fixed bottom-[calc(5rem_+_env(safe-area-inset-bottom))] md:bottom-6 left-1/2 -translate-x-1/2 md:left-auto md:-translate-x-0 md:right-6 z-[100] animate-bounce-in w-[90%] max-w-[calc(100vw_-_2rem)] sm:w-auto sm:max-w-md"
+        >
+          <div className={`flex items-start gap-3 px-4 py-3 rounded-xl shadow-2xl border bg-surface text-sm font-semibold text-textPrimary ${toast.type === 'error' ? 'border-danger/60' : toast.type === 'info' ? 'border-info/60' : 'border-brand/60'}`}>
+            <span aria-hidden="true" className={toast.type === 'error' ? 'text-danger' : toast.type === 'info' ? 'text-info' : 'text-brand'}>
+              {toast.type === 'error' ? '⚠' : toast.type === 'info' ? 'ℹ' : '✓'}
+            </span>
+            <span className="flex-1 leading-snug">{toast.message}</span>
+            <button type="button" onClick={() => setToast(null)} aria-label={lang === 'TR' ? 'Kapat' : 'Close'} className="text-textMuted hover:text-textPrimary leading-none">×</button>
           </div>
         </div>
       )}

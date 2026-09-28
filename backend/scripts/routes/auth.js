@@ -171,6 +171,25 @@ function _buildCanonicalDetailsByRail(rail, fields = {}) {
   };
 }
 
+/**
+ * [TR] ISO 13616 IBAN mod-97 kontrolü. Yalnız regex ile tek hane hatalı IBAN kabul edilir ve
+ *      taker parayı yanlış hesaba gönderir; bu da gereksiz uyuşmazlık/bleeding üretir.
+ * [EN] ISO 13616 IBAN mod-97 checksum; a regex alone accepts single-digit typos.
+ */
+function _isValidIbanChecksum(iban) {
+  const normalized = String(iban || "").toUpperCase();
+  if (!/^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/.test(normalized)) return false;
+  const rearranged = normalized.slice(4) + normalized.slice(0, 4);
+  let remainder = 0;
+  for (const ch of rearranged) {
+    const digits = /[A-Z]/.test(ch) ? String(ch.charCodeAt(0) - 55) : ch;
+    for (const d of digits) {
+      remainder = (remainder * 10 + Number(d)) % 97;
+    }
+  }
+  return remainder === 1;
+}
+
 const PROFILE_SCHEMA = Joi.object({
   payoutProfile: Joi.object({
     rail: Joi.string().valid("TR_IBAN", "US_ACH", "SEPA_IBAN").required(),
@@ -235,6 +254,12 @@ const PROFILE_SCHEMA = Joi.object({
     if (!/^[A-Z]{2}[A-Z0-9]{13,32}$/.test(fields.iban || "")) {
       return helpers.error("any.invalid", { message: "SEPA_IBAN için iban formatı geçersiz." });
     }
+    if (fields.iban.slice(0, 2) !== payoutProfile.country) {
+      return helpers.error("any.invalid", { message: "IBAN ülke kodu seçilen ülkeyle eşleşmiyor." });
+    }
+  }
+  if ((rail === "TR_IBAN" || rail === "SEPA_IBAN") && !_isValidIbanChecksum(fields.iban)) {
+    return helpers.error("any.invalid", { message: "IBAN kontrol basamağı geçersiz. Lütfen IBAN'ı kontrol edin." });
   }
   if (rail === "US_ACH") {
     if (!/^\d{9}$/.test(fields.routing_number || "") || !/^\d{4,17}$/.test(fields.account_number || "")) {

@@ -145,8 +145,14 @@ contract ArafRevenueVault is Ownable, ReentrancyGuard, Pausable {
         uint256 amount,
         uint8 kind,
         uint256 tradeId
-    ) external onlyEscrow whenNotPaused nonReentrant {
-        if (!supportedToken[token]) revert UnsupportedRewardToken();
+    ) external onlyEscrow nonReentrant {
+        // [TR] Bu hook escrow'daki release/cancel/burn işlemlerinin içinde çalışır. Revert ederse
+        //      escrow RevenueHookFailed ile tüm kullanıcı çıkışını geri alır. Bu yüzden pause veya
+        //      desteklenmeyen token durumunda revert edilmez. Bölüşüm (rewardBps) her durumda aynı
+        //      kalır; böylece owner pause/token ayarıyla ödül payını hazineye yönlendiremez.
+        // [EN] This hook runs inside escrow release/cancel/burn. A revert here rolls back the user's
+        //      exit via RevenueHookFailed, so pause / unsupported token never revert. The rewardBps
+        //      split is unchanged in every case so the owner cannot divert the reward share.
         if (amount == 0) revert ZeroAmount();
 
         bytes32 key = _revenueIntentKey(token, kind, tradeId);
@@ -309,8 +315,9 @@ contract ArafRevenueVault is Ownable, ReentrancyGuard, Pausable {
         uint256 amount,
         uint8 kind,
         uint256 tradeId
-    ) external onlyEscrow whenNotPaused {
-        if (!supportedToken[token]) revert UnsupportedRewardToken();
+    ) external onlyEscrow {
+        // [TR] onArafRevenue ile aynı gerekçe: escrow çıkışlarını bloklamamak için pause/token kontrolü yok.
+        // [EN] Same rationale as onArafRevenue: no pause/token gate so escrow exits are never blocked.
         if (amount == 0) revert ZeroAmount();
 
         bytes32 key = _revenueIntentKey(token, kind, tradeId);

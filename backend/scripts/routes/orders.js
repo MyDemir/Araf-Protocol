@@ -14,12 +14,16 @@ const Joi = require("joi");
 const router = express.Router();
 
 const { requireAuth, requireSessionWalletMatch } = require("../middleware/auth");
-const { marketReadLimiter, ordersReadLimiter } = require("../middleware/rateLimiter");
+const { marketReadLimiter, ordersReadLimiter, ordersWriteLimiter } = require("../middleware/rateLimiter");
 const Order = require("../models/Order");
 const Trade = require("../models/Trade");
 const User = require("../models/User");
+const logger = require("../utils/logger");
 const { getConfig } = require("../services/protocolConfig");
 const { buildTradeHealthSignals } = require("./tradeRisk");
+const { ALLOWED_FIAT, normalizeMarketMeta, storePendingMarketMeta } = require("../services/orderMarketMeta");
+
+const FILLABLE_ORDER_STATUSES = ["OPEN", "PARTIALLY_FILLED"];
 
 const SAFE_ORDER_PROJECTION = [
   "_id",
@@ -166,7 +170,7 @@ function _buildIdentityLookup(field, idString) {
   return { [field]: idString };
 }
 
-router.get("/config", async (_req, res, next) => {
+router.get("/config", marketReadLimiter, async (_req, res, next) => {
   try {
     const config = getConfig();
     return res.json({
@@ -186,7 +190,7 @@ router.get("/config", async (_req, res, next) => {
   }
 });
 
-router.get("/payment-risk-config", async (_req, res, next) => {
+router.get("/payment-risk-config", marketReadLimiter, async (_req, res, next) => {
   try {
     const config = getConfig();
     return res.json({
@@ -206,7 +210,10 @@ router.get("/", marketReadLimiter, async (req, res, next) => {
   try {
     const schema = Joi.object({
       side: Joi.string().valid("SELL_CRYPTO", "BUY_CRYPTO").optional(),
-      status: Joi.string().valid("OPEN", "PARTIALLY_FILLED", "FILLED", "CANCELED").optional(),
+      // [TR] ACTIVE = fill edilebilir (OPEN + PARTIALLY_FILLED). Pazar yeri bunu kullanır;
+      //      filtresiz sorgu alfabetik status sıralamasıyla iptal/dolu emirleri öne çıkarıyordu.
+      // [EN] ACTIVE = fillable (OPEN + PARTIALLY_FILLED), used by the marketplace feed.
+      status: Joi.string().valid("ACTIVE", "OPEN", "PARTIALLY_FILLED", "FILLED", "CANCELED").optional(),
       tier: Joi.number().valid(0, 1, 2, 3, 4).optional(),
       token_address: Joi.string().pattern(/^0x[a-fA-F0-9]{40}$/).optional(),
       owner_address: Joi.string().pattern(/^0x[a-fA-F0-9]{40}$/).optional(),
@@ -218,7 +225,8 @@ router.get("/", marketReadLimiter, async (req, res, next) => {
 
     const filter = {};
     if (value.side) filter.side = value.side;
-    if (value.status) filter.status = value.status;
+    if (value.status === "ACTIVE") filter.status = { $in: FILLABLE_ORDER_STATUSES };
+    else if (value.status) filter.status = value.status;
     if (value.tier !== undefined) filter.tier = value.tier;
     if (value.token_address) filter.token_address = value.token_address.toLowerCase();
     if (value.owner_address) filter.owner_address = value.owner_address.toLowerCase();
@@ -268,6 +276,53 @@ router.get("/my", requireAuth, requireSessionWalletMatch, ordersReadLimiter, asy
     ]);
 
     return res.json({ orders, total, page: value.page, limit: value.limit });
+  } catch (err) { next(err); }
+});
+
+// ─── POST /api/orders/market-meta ────────────────────────────────────────────
+// [TR] Maker'ın kur/fiat bilgisini (zincirde tutulmayan UI enrichment) set-once kaydeder.
+//      Protokol otoritesi değildir; yalnız pazar yerinde fiyat gösterimi içindir.
+// [EN] Stores the maker's off-chain fiat/rate (UI enrichment only) with set-once semantics.
+router.post("/market-meta", requireAuth, requireSessionWalletMatch, ordersWriteLimiter, async (req, res, next) => {
+  try {
+    const schema = Joi.object({
+      orderRef: Joi.string().pattern(/^0x[a-fA-F0-9]{64}$/).required(),
+      fiatCurrency: Joi.string().valid(...ALLOWED_FIAT).required(),
+      exchangeRate: Joi.number().positive().max(1_000_000).required(),
+    });
+    const { error, value } = schema.validate(req.body || {});
+    if (error) return res.status(400).json({ error: error.message });
+
+    const meta = normalizeMarketMeta(value);
+    if (!meta) return res.status(400).json({ error: "Geçersiz kur veya para birimi." });
+    const orderRef = value.orderRef.toLowerCase();
+
+    const existing = await Order.findOne({ "refs.order_ref": orderRef })
+      .select("owner_address market")
+      .lean();
+
+    if (existing) {
+      if (existing.owner_address !== req.wallet) {
+        return res.status(403).json({ error: "Bu order sana ait değil." });
+      }
+      if (Number(existing.market?.exchange_rate) > 0) {
+        return res.status(409).json({ error: "Kur bilgisi zaten kayıtlı.", code: "MARKET_META_ALREADY_SET" });
+      }
+      await Order.updateOne(
+        { "refs.order_ref": orderRef, owner_address: req.wallet, "market.exchange_rate": null },
+        { $set: { "market.fiat_currency": meta.fiat_currency, "market.exchange_rate": meta.exchange_rate } }
+      );
+      return res.status(201).json({ success: true, applied: true });
+    }
+
+    // [TR] Mirror henüz oluşmadıysa niyet Redis'e yazılır; worker OrderCreated'da sahibini doğrulayıp uygular.
+    // [EN] Mirror not ready yet: store the intent; the worker verifies ownership on OrderCreated.
+    const stored = await storePendingMarketMeta(orderRef, req.wallet, meta);
+    if (!stored) {
+      return res.status(409).json({ error: "Kur bilgisi zaten kayıtlı.", code: "MARKET_META_ALREADY_SET" });
+    }
+    logger.info(`[Orders] market meta niyeti kaydedildi: ref=${orderRef.slice(0, 10)}...`);
+    return res.status(202).json({ success: true, applied: false });
   } catch (err) { next(err); }
 });
 

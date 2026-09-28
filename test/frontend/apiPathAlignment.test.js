@@ -23,7 +23,7 @@ describe('frontend ↔ backend API path alignment', () => {
     const session = readFront('src/app/useAppSessionData.jsx');
     [
       "buildApiUrl('orders/config')",
-      "buildApiUrl('orders')",
+      "buildApiUrl('orders?status=ACTIVE&limit=50')",
       'buildApiUrl(`${endpoint}?page=${requestedPage}&limit=${MY_ITEMS_PAGE_LIMIT}`)',
       "endpoint: 'orders/my'",
       "endpoint: 'trades/my'",

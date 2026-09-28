@@ -388,6 +388,36 @@ describe("ArafRewards global epoch weight accounting", function () {
       .to.be.revertedWithCustomError(rewards, "AlreadyClaimed");
   });
 
+  it("security_recordTradeOutcome_reverts_after_epoch_claims_started", async function () {
+    const { rewards, vault, token, mockEscrow, owner, caller, maker, taker, other } = await loadFixture(deployFixture);
+    const now = (await ethers.provider.getBlock("latest")).timestamp;
+    const epochDuration = 7 * 24 * 3600;
+    const epoch = Math.floor(now / epochDuration);
+    const terminalAt = epoch * epochDuration + 100;
+    await setTrade(mockEscrow, mkTrade({ tradeId: 40, maker: maker.address, taker: taker.address, tier: 1, terminalAt, paidAt: terminalAt - 100 }));
+    await rewards.connect(caller).recordTradeOutcome(40);
+    const alloc = (NOTIONAL * 4000n) / 10000n;
+    await vault.connect(owner).noteEscrowRevenueIntent(await token.getAddress(), NOTIONAL, 0, 1040);
+    await token.mint(await vault.getAddress(), NOTIONAL);
+    await vault.connect(owner).onArafRevenue(await token.getAddress(), NOTIONAL, 0, 1040);
+    await rewards.connect(owner).allocateEpochRewards(epoch, await token.getAddress(), alloc);
+    await ethers.provider.send("evm_increaseTime", [9 * 24 * 3600]);
+    await ethers.provider.send("evm_mine", []);
+    await rewards.connect(owner).finalizeEpochToken(epoch, await token.getAddress());
+    await ethers.provider.send("evm_increaseTime", [2 * 24 * 3600]);
+    await ethers.provider.send("evm_mine", []);
+    await rewards.connect(maker).claim(epoch, await token.getAddress());
+
+    // [TR] Claim başladıktan sonra aynı epoch'a geç ağırlık eklenemez (havuz aşımı engeli).
+    // [EN] Late weight cannot be added once claims started (prevents pool overdraw).
+    await setTrade(mockEscrow, mkTrade({ tradeId: 41, maker: other.address, taker: caller.address, tier: 1, terminalAt: terminalAt + 1, paidAt: terminalAt - 50 }));
+    await expect(rewards.connect(caller).recordTradeOutcome(41))
+      .to.be.revertedWithCustomError(rewards, "EpochClaimsStarted");
+
+    await rewards.connect(taker).claim(epoch, await token.getAddress());
+    expect(await rewards.epochClaimedAmount(epoch, await token.getAddress())).to.be.lte(alloc);
+  });
+
   it("test_claim_distributes_global_pool_pro_rata", async function () {
     const { rewards, vault, token, mockEscrow, owner, caller, maker, taker, other } = await loadFixture(deployFixture);
     const now = (await ethers.provider.getBlock("latest")).timestamp;

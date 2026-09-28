@@ -20,6 +20,7 @@ import { usePublicClient, useWalletClient, useChainId } from 'wagmi';
 import { parseAbi, getAddress, decodeEventLog } from 'viem';
 import { resolveClientErrorLogUrl } from '../app/apiConfig';
 import { getSupportedChainsMap, isMintTokenEnabled } from '../app/chainPolicy';
+import { ARAF_CONTRACT_ERROR_ABI, decorateContractError } from '../app/contractErrors';
 
 const ArafEscrowABI = parseAbi([
   'function registerWallet()',
@@ -60,6 +61,9 @@ const ArafEscrowABI = parseAbi([
   'function paused() view returns (bool)',
   'event OrderCreated(uint256 indexed orderId, address indexed owner, uint8 side, address token, uint256 totalAmount, uint256 minFillAmount, uint8 tier, uint8 paymentRiskLevel, bytes32 orderRef)',
   'event OrderFilled(uint256 indexed orderId, uint256 indexed tradeId, address indexed filler, uint256 fillAmount, uint256 remainingAmount, uint8 paymentRiskLevelSnapshot, bytes32 childListingRef)',
+  // [TR] Custom error tanımları: bunlar olmadan viem revert nedenini çözemez ("execution reverted").
+  // [EN] Custom error fragments: without them viem cannot decode revert reasons.
+  ...ARAF_CONTRACT_ERROR_ABI,
 ]);
 
 // ERC-20 approve ABI — create/fill order akışlarında safeTransferFrom için zorunlu.
@@ -68,7 +72,47 @@ const ERC20_ABI = parseAbi([
   'function approve(address spender, uint256 amount) returns (bool)',
   'function allowance(address owner, address spender) view returns (uint256)',
   'function decimals() view returns (uint8)',
+  ...ARAF_CONTRACT_ERROR_ABI,
 ]);
+
+/**
+ * [TR] viem waitForTransactionReceipt revert olmuş tx'i de "başarılı" döndürür; status kontrol edilmezse
+ *      UI zincirde başarısız olan işlemi tamamlandı sanar.
+ * [EN] viem returns a receipt for reverted txs too; without a status check the UI reports false success.
+ */
+export function assertReceiptSucceeded(receipt, functionName = 'transaction') {
+  if (receipt && receipt.status && receipt.status !== 'success') {
+    const err = new Error(`${functionName} zincirde başarısız oldu (reverted).`);
+    err.shortMessage = err.message;
+    err.receipt = receipt;
+    throw err;
+  }
+  return receipt;
+}
+
+/**
+ * [TR] viem çoklu dönüşü dizi olarak verir; UI isimli alan bekliyor. Tek normalize nokta.
+ * [EN] viem returns multi-output reads as arrays; UI expects named fields.
+ */
+export function normalizeCurrentAmounts(raw) {
+  if (!raw) return null;
+  const pick = (name, index) => {
+    const value = Array.isArray(raw) ? raw[index] : raw?.[name];
+    try { return BigInt(value ?? 0); } catch { return 0n; }
+  };
+  const currentCrypto = pick('currentCrypto', 0);
+  const currentMakerBond = pick('currentMakerBond', 1);
+  const currentTakerBond = pick('currentTakerBond', 2);
+  const totalDecayed = pick('totalDecayed', 3);
+  return {
+    currentCrypto,
+    currentMakerBond,
+    currentTakerBond,
+    totalDecayed,
+    makerBondRemaining: currentMakerBond,
+    takerBondRemaining: currentTakerBond,
+  };
+}
 
 const ESCROW_ADDRESS = import.meta.env.VITE_ESCROW_ADDRESS;
 
@@ -274,8 +318,9 @@ export function useArafContract() {
       if (typeof window !== "undefined") {
         localStorage.removeItem("araf_pending_tx");
       }
-      return receipt;
+      return assertReceiptSucceeded(receipt, functionName);
     } catch (error) {
+      decorateContractError(error);
       //Revert hatalarını daha okunabilir hale getir
       const errorMessage = error.shortMessage || error.reason || error.message || "Bilinmeyen Kontrat Hatası";
       
@@ -435,8 +480,9 @@ export function useArafContract() {
         functionName: 'approve',
         args: [getAddress(ESCROW_ADDRESS), amount],
       });
-      return await publicClient.waitForTransactionReceipt({ hash });
+      return assertReceiptSucceeded(await publicClient.waitForTransactionReceipt({ hash }), 'approve');
     } catch (error) {
+      decorateContractError(error);
       // Token Onayı iptallerini backend'e logla
       const errorMessage = error.shortMessage || error.message || "Bilinmeyen Onay Hatası";
       const logUrl = resolveClientErrorLogUrl();
@@ -470,7 +516,7 @@ export function useArafContract() {
         abi: parseAbi(['function mint()']), // Sabit parametresiz mint işlemi
         functionName: 'mint',
       });
-      return await publicClient.waitForTransactionReceipt({ hash });
+      return assertReceiptSucceeded(await publicClient.waitForTransactionReceipt({ hash }), 'mint');
     } catch (error) {
        // Faucet iptallerini backend'e logla
        const errorMessage = error.shortMessage || error.message || "Bilinmeyen Faucet Hatası";
@@ -645,12 +691,12 @@ export function useArafContract() {
       async (tradeId) => {
         if (!_isValidAddress) return null;
         try {
-          return await publicClient.readContract({
+          return normalizeCurrentAmounts(await publicClient.readContract({
             address: getAddress(ESCROW_ADDRESS),
             abi: ArafEscrowABI,
             functionName: 'getCurrentAmounts',
             args: [BigInt(tradeId)],
-          });
+          }));
         } catch (err) {
           console.error('[ArafContract] getCurrentAmounts hatası:', err.message);
           return null;
@@ -743,7 +789,7 @@ export function useArafContract() {
     ),
     getTakerFeeBps: useCallback(
       async () => {
-        if (!_isValidAddress) return 10n;
+        if (!_isValidAddress) return 15n;
         try {
           const feeConfig = await publicClient.readContract({
             address: getAddress(ESCROW_ADDRESS),
@@ -753,9 +799,11 @@ export function useArafContract() {
           const takerFee = typeof feeConfig.currentTakerFeeBps !== 'undefined'
             ? feeConfig.currentTakerFeeBps
             : feeConfig[0];
-          return BigInt(takerFee ?? 10);
+          return BigInt(takerFee ?? 15);
         } catch {
-          return 10n;
+          // [TR] Kontrat varsayılanı DEFAULT_TAKER_FEE_BPS = 15.
+          // [EN] Contract default DEFAULT_TAKER_FEE_BPS = 15.
+          return 15n;
         }
       },
       [publicClient]

@@ -3,6 +3,7 @@ import PaymentProfilePanel from './PaymentProfilePanel';
 import MyOrdersPanel from './MyOrdersPanel';
 import ActiveTradesPanel from './ActiveTradesPanel';
 import { AccountPanel, HistoryPanel, ReputationPanel, SecurityPanel } from './ProfilePanels';
+import RewardsPanel from './RewardsPanel';
 
 export const ProfileContextPanel = ({ activeTab, ...props }) => {
   if (activeTab === 'account') return <AccountPanel {...props} />;
@@ -12,6 +13,7 @@ export const ProfileContextPanel = ({ activeTab, ...props }) => {
   if (activeTab === 'active') return <ActiveTradesPanel {...props} />;
   if (activeTab === 'history') return <HistoryPanel {...props} />;
   if (activeTab === 'security') return <SecurityPanel {...props} />;
+  if (activeTab === 'rewards') return <RewardsPanel {...props} />;
   return null;
 };
 
