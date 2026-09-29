@@ -1091,24 +1091,40 @@ function App() {
   // [TR] Çeviri sözlüğü — yalnızca pazar yeri ana metinleri
   // [EN] Translation dictionary — marketplace main labels only
   // ─────────────────────────────────────────────
+  // [TR] SSS yanıtları kontrat sabitlerine dayanır (ArafEscrow: 48s ödeme penceresi, 48s+24s otomatik serbest,
+  //      itirazda 48s sonra teminat erimesi, 144s sonra ana para erimesi, 240s'te yakım). Ücret kontrattan okunur.
+  // [EN] FAQ answers follow contract constants; the fee comes from the contract fee config.
+  const feeText = (() => {
+    const tb = Number(protocolFeeConfig?.takerFeeBps);
+    const mb = Number(protocolFeeConfig?.makerFeeBps);
+    if (!Number.isFinite(tb) || !Number.isFinite(mb)) return null;
+    const f = (b) => (lang === 'TR' ? `%${(b / 100).toLocaleString('tr-TR')}` : `${(b / 100).toLocaleString('en-US')}%`);
+    return lang === 'TR' ? `alıcıdan ${f(tb)}, satıcıdan ${f(mb)}` : `${f(tb)} from the buyer and ${f(mb)} from the seller`;
+  })();
   const faqItems = lang === 'TR'
     ? [
-        { q: 'Araf Protokolü hakem kullanıyor mu?', a: 'Hayır. Uyuşmazlıklarda insan hakem yok. Süreç tamamen on-chain zamanlayıcılar ve ekonomik teşviklerle çalışır.' },
-        { q: 'Platform fonlara erişebiliyor mu?', a: 'Hayır. Sistem non-custodial\'dır; fonlar akıllı kontratta kilitli kalır. Backend, serbest bırakma kararı veremez.' },
-        { q: 'Neden Tier ve teminat var?', a: 'Tier sistemi yeni cüzdanların riskini sınırlar; teminatlar ise kötü niyetli davranışı ekonomik olarak pahalı hale getirir.' },
-        { q: 'Neden feedback önemli?', a: 'Feedback verileri TX maliyeti, akış netliği ve hata tespitini iyileştirerek gereksiz revert ve zaman kaybını azaltır.' },
+        { q: 'Araf hakem kullanıyor mu?', a: 'Hayır. Uyuşmazlıkta insan hakem yoktur. Süreç zincirdeki zamanlayıcılar ve ekonomik teşviklerle ilerler; son söz kontratındır.' },
+        { q: 'Platform fonlarıma erişebilir mi?', a: 'Hayır. Fonlar akıllı kontratta kilitlidir. Backend yalnız zinciri yansıtır; serbest bırakma kararı veremez.' },
+        { q: 'Satıcı ödemeyi onaylamazsa ne olur?', a: 'Ödeme bildiriminden 48 saat sonra alıcı satıcıyı uyarır; 24 saat içinde yanıt gelmezse kripto otomatik olarak alıcıya geçer.' },
+        { q: 'Eriyen kasa nedir?', a: 'İtiraz açıldıktan 48 saat sonra iki tarafın teminatı saat saat erimeye başlar; 144. saatten itibaren ana para da erir. 10 gün içinde uzlaşma olmazsa kalan tutar yakılır.' },
+        { q: 'Neden tier ve teminat var?', a: 'Tier sistemi yeni cüzdanların emir büyüklüğünü sınırlar; teminatlar kötü niyeti pahalı hale getirir. Temiz sicil teminatı %1 düşürür, risk puanı %3 artırır.' },
+        { q: 'Ücret ne kadar?', a: feeText ? `Başarılı işlemde kontrat ${feeText} ücret keser.` : 'Ücret oranı kontratta tanımlıdır ve işlem kilitlenirken sabitlenir.' },
       ]
     : [
-        { q: 'Does Araf Protocol use arbitrators?', a: 'No. There are no human arbitrators in disputes. The flow is enforced by on-chain timers and economic incentives.' },
-        { q: 'Can the platform access user funds?', a: 'No. The system is non-custodial; funds stay locked in the smart contract. Backend cannot force release outcomes.' },
-        { q: 'Why are tiers and bonds required?', a: 'Tiers limit cold-start risk for new wallets, while bonds make dishonest behavior economically expensive.' },
-        { q: 'Why does feedback matter?', a: 'Feedback helps optimize TX flow clarity, reduce avoidable reverts, and improve cost-efficient UX.' },
+        { q: 'Does Araf use arbitrators?', a: 'No. There are no human arbitrators. The flow runs on on-chain timers and economic incentives; the contract has the final say.' },
+        { q: 'Can the platform access my funds?', a: 'No. Funds stay locked in the smart contract. The backend only mirrors the chain and cannot release funds.' },
+        { q: 'What if the seller never confirms payment?', a: '48 hours after the payment report the buyer can ping the seller; with no response within 24 hours the crypto is released to the buyer automatically.' },
+        { q: 'What is the bleeding escrow?', a: 'Starting 48 hours after a dispute opens, both bonds decay every hour; from hour 144 the principal decays too. Without a settlement within 10 days the rest is burned.' },
+        { q: 'Why tiers and bonds?', a: 'Tiers cap order size for new wallets; bonds make bad faith expensive. A clean record lowers the bond by 1%, risk points raise it by 3%.' },
+        { q: 'What are the fees?', a: feeText ? `On a successful trade the contract charges ${feeText}.` : 'The fee rate is defined in the contract and fixed when a trade locks.' },
       ];
 
+  // [TR] Ayarlanmamış sosyal linkler gösterilmez (önceden github.com / x.com ana sayfasına gidiyordu).
+  // [EN] Unconfigured social links are hidden (they used to point at bare github.com / x.com).
   const socialLinks = {
-    github: import.meta.env.VITE_SOCIAL_GITHUB || 'https://github.com/',
-    twitter: import.meta.env.VITE_SOCIAL_TWITTER || 'https://x.com/',
-    farcaster: import.meta.env.VITE_SOCIAL_FARCASTER || 'https://warpcast.com/',
+    github: import.meta.env.VITE_SOCIAL_GITHUB || 'https://github.com/MyDemir/Araf-Protokol',
+    twitter: import.meta.env.VITE_SOCIAL_TWITTER || '',
+    farcaster: import.meta.env.VITE_SOCIAL_FARCASTER || '',
   };
 
   const t = {
