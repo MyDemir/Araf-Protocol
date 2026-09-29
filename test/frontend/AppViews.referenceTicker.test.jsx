@@ -6,10 +6,10 @@ describe('AppViews reference ticker placement', () => {
   it('mounts ReferenceRateTicker in renderMarket between header and order list', () => {
     const source = fs.readFileSync(path.resolve(process.cwd(), 'src/app/AppViews.jsx'), 'utf8');
 
-    const marketStart = source.indexOf('const renderMarket = () => (');
+    const marketStart = source.indexOf('const renderMarket = () => {');
     const headerLine = source.indexOf('<h2 className="text-xl font-bold text-textPrimary">', marketStart);
     const tickerLine = source.indexOf('<ReferenceRateTicker lang={lang} />', marketStart);
-    const listLine = source.indexOf('<div className="space-y-3">', marketStart);
+    const listLine = source.indexOf('<div className="space-y-2">', marketStart);
 
     expect(marketStart).toBeGreaterThan(-1);
     expect(headerLine).toBeGreaterThan(-1);

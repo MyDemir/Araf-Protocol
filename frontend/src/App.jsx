@@ -11,6 +11,7 @@ import { useSessionActions } from './app/providers/SessionProvider';
 import { useAppSessionData } from './app/useAppSessionData';
 import AdminPanel from './AdminPanel';
 import DevScenarioController from './dev/ui-lab/DevScenarioController';
+import useFullscreen from './app/shell/useFullscreen';
 import { isUiLabEnabled } from './dev/ui-lab/isUiLabEnabled';
 import { createMockAdminFetch } from './dev/mocks/mockAdminFetch';
 import { createSetterAction, createTradeRoomActionCallbacks } from './dev/mocks/mockActions';
@@ -132,6 +133,7 @@ function App() {
   //    View routing + modal open/close flags
   // ═══════════════════════════════════════════
   const uiLabEnabled = isUiLabEnabled();
+  const fullscreen = useFullscreen();
   const initialView = 'home';
   const [currentView, setCurrentView] = useState(initialView);
   const [showMakerModal, setShowMakerModal] = useState(false);
@@ -156,6 +158,7 @@ function App() {
   const [isContractLoading, setIsContractLoading] = useState(false);
   const [filterTier1, setFilterTier1] = useState(false);
   const [filterToken, setFilterToken] = useState('ALL');
+  const [marketSide, setMarketSide] = useState('ALL');
   const [searchAmount, setSearchAmount] = useState('');
   const [toast, setToast] = useState(null);
   const [termsAccepted, setTermsAccepted] = useState(getInitialTermsAccepted);
@@ -1120,11 +1123,14 @@ function App() {
     setFilterTier1,
     filterToken,
     setFilterToken,
+    marketSide,
+    setMarketSide,
     searchAmount,
     setSearchAmount,
     filteredOrders,
     orders,
     ordersFeedError,
+    fullscreen,
     activeEscrows: effectiveActiveEscrows,
     setActiveEscrows,
     loading,
