@@ -56,6 +56,8 @@ describe("GET /api/orders/config", () => {
     expect(res.body).toHaveProperty("tokenMap");
     expect(res.body).toHaveProperty("paymentRiskConfig");
     expect(res.body).toHaveProperty("selectedOrderRiskLevel");
+    // [TR] Politika event'i henüz görülmediyse null döner; frontend kontrat varsayılanına düşer.
+    expect(res.body.reputationPolicy).toBeNull();
     expect(res.body.feeConfig.currentTakerFeeBps).toBe(10);
     expect(res.body.tokenMap.usdt.decimals).toBe(6);
     expect(res.body.paymentRiskConfig.TR.TR_IBAN.riskLevel).toBe("MEDIUM");

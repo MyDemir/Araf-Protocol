@@ -162,6 +162,11 @@ async function loadProtocolConfig() {
     }
   }
 
+  // [TR] İtibar politikasının kontratta getter'ı yok (EIP-170); yalnız event ile öğrenilir.
+  //      Zincirden yeniden yükleme event'ten gelen son değeri silmemeli.
+  // [EN] Reputation policy has no on-chain getter; it is learned from events only, so a reload must keep it.
+  const previousReputationPolicy = protocolConfig?.reputationPolicy || null;
+
   protocolConfig = {
     loaded_at: new Date().toISOString(),
     bondMap: {
@@ -181,6 +186,7 @@ async function loadProtocolConfig() {
     },
     tokenMap,
     paymentRiskConfig: PAYMENT_RISK_CONFIG,
+    reputationPolicy: previousReputationPolicy,
   };
 
   await _writeCache(redis, protocolConfig);
@@ -259,6 +265,15 @@ async function updateCachedTokenConfig(tokenAddress, tokenConfig) {
   });
 }
 
+// [TR] ReputationPolicyUpdated / ReputationTierThresholdsUpdated event'lerinin aynası.
+//      Kontrat constructor'ı ilk değerleri de yayınladığı için replay bu alanı doldurur.
+// [EN] Mirror of the reputation policy events; the constructor emits initial values, so replay fills it.
+async function updateCachedReputationPolicy(patch) {
+  return _patchAndPersist((cfg) => {
+    cfg.reputationPolicy = { ...(cfg.reputationPolicy || {}), ...patch, source: "onchain_event" };
+  });
+}
+
 function getConfig() {
   if (!_isConfigLoaded(protocolConfig)) {
     const err = new Error(
@@ -280,4 +295,5 @@ module.exports = {
   updateCachedFeeConfig,
   updateCachedCooldownConfig,
   updateCachedTokenConfig,
+  updateCachedReputationPolicy,
 };

@@ -181,8 +181,9 @@ describe('App smoke', () => {
     expect(appIndex).toBeGreaterThan(providersIndex);
   });
 
-  it('keeps profile tab default aligned with modal tabs', () => {
+  it('routes every profile entry to the Profile Center page', () => {
     const source = fs.readFileSync(path.resolve(process.cwd(), 'src/App.jsx'), 'utf8');
-    expect(source).toContain("useState('ayarlar')");
+    expect(source).toContain("const openProfilePage = React.useCallback((tab = 'account')");
+    expect(source).not.toContain('renderProfileModal');
   });
 });

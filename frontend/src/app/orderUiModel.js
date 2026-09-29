@@ -256,9 +256,9 @@ export const mapOffchainHealthToUi = ({ signal, lang = 'TR' }) => {
 
   const severityBand = severityScore >= 3 ? 'RED' : severityScore >= 1 ? 'YELLOW' : 'GREEN';
   const severityMeta = {
-    GREEN: { TR: 'Düşük Sinyal', EN: 'Low Signal', chipClass: 'text-emerald-400 border-emerald-700/60 bg-emerald-900/20' },
-    YELLOW: { TR: 'Orta Sinyal', EN: 'Medium Signal', chipClass: 'text-amber-400 border-amber-700/60 bg-amber-900/20' },
-    RED: { TR: 'Yüksek Sinyal', EN: 'High Signal', chipClass: 'text-red-400 border-red-700/60 bg-red-900/20' },
+    GREEN: { TR: 'Düşük Sinyal', EN: 'Low Signal', chipClass: 'text-success border-success/40 bg-success/10' },
+    YELLOW: { TR: 'Orta Sinyal', EN: 'Medium Signal', chipClass: 'text-warning border-warning/40 bg-warning/10' },
+    RED: { TR: 'Yüksek Sinyal', EN: 'High Signal', chipClass: 'text-danger border-danger/40 bg-danger/10' },
   }[severityBand];
 
   return {
@@ -280,11 +280,11 @@ export const mapCompactTrustSummary = ({ compactSummary, signal, lang = 'TR' }) 
   // [EN] Prefer backend-provided market-safe compact summary field.
   if (compactSummary && typeof compactSummary === 'object' && compactSummary.available === true) {
     const band = compactSummary.band || null;
-    const fallbackChip = 'text-slate-400 border-slate-700/60 bg-slate-900/20';
+    const fallbackChip = 'text-textSecondary border-borderSubtle bg-elevated';
     const chipByBand = {
-      GREEN: 'text-emerald-400 border-emerald-700/60 bg-emerald-900/20',
-      YELLOW: 'text-amber-400 border-amber-700/60 bg-amber-900/20',
-      RED: 'text-red-400 border-red-700/60 bg-red-900/20',
+      GREEN: 'text-success border-success/40 bg-success/10',
+      YELLOW: 'text-warning border-warning/40 bg-warning/10',
+      RED: 'text-danger border-danger/40 bg-danger/10',
     };
     return {
       available: true,
@@ -303,7 +303,7 @@ export const mapCompactTrustSummary = ({ compactSummary, signal, lang = 'TR' }) 
       available: false,
       band: null,
       label: lang === 'TR' ? 'Sinyal yok' : 'Signal unavailable',
-      chipClass: 'text-slate-400 border-slate-700/60 bg-slate-900/20',
+      chipClass: 'text-textSecondary border-borderSubtle bg-elevated',
     };
   }
 
@@ -346,6 +346,10 @@ export const mapApiOrderToUi = ({ order, lang = 'TR', bondMap = {}, tokenMap = {
   const remainingAmount = remainingAmountRaw != null
     ? rawToNumber(remainingAmountRaw, tokenDecimals)
     : Number(order?.amounts?.remaining_amount_num ?? 0);
+  const totalAmountRaw = order?.amounts?.total_amount;
+  const totalAmount = totalAmountRaw != null
+    ? rawToNumber(totalAmountRaw, tokenDecimals)
+    : Number(order?.amounts?.total_amount_num ?? 0);
 
   const tier = order?.tier ?? 0;
   const makerBondPct = Number(bondMap?.[tier]?.maker ?? 0);
@@ -401,6 +405,7 @@ export const mapApiOrderToUi = ({ order, lang = 'TR', bondMap = {}, tokenMap = {
     tokenDecimals,
     minFillAmount,
     remainingAmount,
+    totalAmount,
     limitLabel,
     bondLabel: sideBondPct != null && sideBondPct > 0 ? `${sideBondPct}%` : '—',
     tokenAddress,

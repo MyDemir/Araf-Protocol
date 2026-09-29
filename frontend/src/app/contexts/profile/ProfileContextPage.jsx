@@ -37,8 +37,16 @@ export const ProfileContextPage = (props) => {
   return (
     <div className="w-full max-w-[1200px] px-4 md:px-8">
       <h1 className="text-2xl font-bold text-textPrimary mb-4">{lang === 'TR' ? 'Profil Merkezi' : 'Profile Center'}</h1>
-      <ProfileNav lang={lang} activeTab={activeTab} setActiveTab={setActiveTab} />
-      <ProfileContextPanel activeTab={activeTab} {...props} />
+      <ProfileNav
+        lang={lang}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        badges={{
+          active: (props.activeEscrows || []).length,
+          orders: (props.myOrders || []).filter((o) => o.status === 'OPEN' || o.status === 'PARTIALLY_FILLED').length,
+        }}
+      />
+      <ProfileContextPanel activeTab={activeTab} {...props} onNavigateTab={setActiveTab} />
     </div>
   );
 };

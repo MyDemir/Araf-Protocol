@@ -142,7 +142,6 @@ function App() {
   const initialView = 'home';
   const [currentView, setCurrentView] = useState(initialView);
   const [showMakerModal, setShowMakerModal] = useState(false);
-  const [showProfileModal, setShowProfileModal] = useState(false);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [showWalletModal, setShowWalletModal] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -157,7 +156,6 @@ function App() {
   const SUPPORTED_TOKEN_ADDRESSES = Object.fromEntries(
     Object.entries(SUPPORTED_TOKENS).map(([symbol, meta]) => [symbol, meta.address])
   );
-  const [profileTab, setProfileTab] = useState('ayarlar');
   const [lang, setLang] = useState(getInitialLang);
   const [loadingText, setLoadingText] = useState('');
   const [isContractLoading, setIsContractLoading] = useState(false);
@@ -178,6 +176,11 @@ function App() {
   const devScenarioSnapshotRef = React.useRef(null);
   const [profileContextTab, setProfileContextTab] = useState('account');
   const devScenarioActive = Boolean(uiLabEnabled && devScenario);
+  // [TR] Tüm profil girişleri (cüzdan butonu, geçmiş kısayolları) aynı sayfaya ve sekmeye gider.
+  const openProfilePage = React.useCallback((tab = 'account') => {
+    setProfileContextTab(tab);
+    setCurrentView('profile');
+  }, [setCurrentView]);
 
   // [TR] Toast bildirimi gösterir — 4 sn sonra otomatik kapanır
   // [EN] Shows toast notification — auto-closes after 4s
@@ -288,6 +291,7 @@ function App() {
     onchainBondMap,
     onchainTokenMap,
     protocolFeeConfig,
+    reputationPolicy,
     paymentRiskConfig,
     takerFeeBps,
     tokenDecimalsMap,
@@ -335,13 +339,10 @@ function App() {
     chainId,
     publicClient,
     currentView,
-    showProfileModal,
-    profileTab,
     lang,
     isContractLoading,
     connectedWallet,
     setShowMakerModal,
-    setShowProfileModal,
     setCurrentView,
     showToast,
     getTakerFeeBps,
@@ -376,7 +377,7 @@ function App() {
   const activeScenarioPayload = devScenario?.scenario || null;
 
   const effectiveActiveEscrows = React.useMemo(() => {
-    if (activeScenarioCategory === 'activeTrades' || activeScenarioCategory === 'operations') {
+    if (activeScenarioCategory === 'activeTrades' || activeScenarioCategory === 'operations' || activeScenarioCategory === 'profile') {
       return activeScenarioPayload?.activeEscrows || [];
     }
     return activeEscrows;
@@ -518,7 +519,7 @@ function App() {
   // [TR] Lab senaryolarında izleyici adresi senaryodan gelir; aksi halde "yanıtınız bekleniyor" şeridi hiç oluşmaz.
   const effectiveAddress = activeScenarioCategory === 'tradeRoom'
     ? (activeScenarioPayload?.viewerAddress || address)
-    : (activeScenarioCategory === 'operations' || activeScenarioCategory === 'activeTrades')
+    : (activeScenarioCategory === 'operations' || activeScenarioCategory === 'activeTrades' || activeScenarioCategory === 'profile')
       ? (activeScenarioPayload?.address || address)
       : address;
   const effectiveCancelStatus = activeScenarioCategory === 'tradeRoom' ? (activeScenarioPayload?.cancelStatus ?? null) : cancelStatus;
@@ -554,7 +555,6 @@ function App() {
       };
     }
     setDevScenario({ categoryKey, scenarioId: scenario.id, scenario, appendLog });
-    setShowProfileModal(false);
     setShowMakerModal(false);
     setSidebarOpen(false);
 
@@ -571,6 +571,12 @@ function App() {
     if (categoryKey === 'activeTrades') {
       setActiveTradesFilter(scenario.initialFilter || 'ALL');
       setProfileContextTab('active');
+      setCurrentView('profile');
+      return;
+    }
+
+    if (categoryKey === 'profile') {
+      setProfileContextTab(scenario.tab || 'account');
       setCurrentView('profile');
       return;
     }
@@ -615,20 +621,16 @@ function App() {
     setSidebarOpen(prev => !prev);
   };
 
-  // [TR] Profil modalı açıkken cüzdan/auth düşerse modalı effect katmanında kapat.
-  //      Böylece render sırasında setter çağrısı yapılmaz (regression crash fix).
-  // [EN] Close profile modal from effect when auth disconnects to avoid
-  //      setState during render.
+  // [TR] Emir modalı açıkken cüzdan/auth düşerse modalı effect katmanında kapat
+  //      (render sırasında setter çağrısı yapılmaz).
+  // [EN] Close the maker modal from an effect when auth disconnects.
   React.useEffect(() => {
     if (!authChecked) return;
-    if (showProfileModal && (!isConnected || !isAuthenticated)) {
-      setShowProfileModal(false);
-    }
     // Lab order-creation scenarios preview the modal without a wallet session.
     if (showMakerModal && (!isConnected || !isAuthenticated) && activeScenarioCategory !== 'makerOrder') {
       setShowMakerModal(false);
     }
-  }, [authChecked, showProfileModal, showMakerModal, isConnected, isAuthenticated, activeScenarioCategory]);
+  }, [authChecked, showMakerModal, isConnected, isAuthenticated, activeScenarioCategory]);
 
 
   const {
@@ -655,8 +657,7 @@ function App() {
     bestEffortBackendLogout,
     clearLocalSessionState,
     setShowWalletModal,
-    setProfileTab,
-    setShowProfileModal,
+    openProfilePage,
   });
 
 
@@ -669,6 +670,12 @@ function App() {
   }), [loginWithSIWE, handleAuthAction, handleLogoutAndDisconnect, requireSignedSessionForActiveWallet, hasSignedSessionForActiveWallet]);
 
   const labMakerScenario = activeScenarioCategory === 'makerOrder' ? activeScenarioPayload : null;
+  // [TR] Lab "Profil Merkezi": kontrat itibarı ve backend kayıtları senaryodan gelir; sayaçlar seçim anına göre.
+  const labProfile = React.useMemo(() => (
+    activeScenarioCategory === 'profile' && activeScenarioPayload
+      ? { ...activeScenarioPayload, userReputation: activeScenarioPayload.build?.() || null }
+      : null
+  ), [activeScenarioCategory, activeScenarioPayload]);
 
   const {
     makerTier,
@@ -1190,8 +1197,7 @@ function App() {
     handleUpdatePII,
     handleLogoutAndDisconnect,
     activeEscrowCounts: effectiveActiveEscrowCounts,
-    setShowProfileModal,
-    setProfileTab,
+    openProfilePage,
     setConfirmDeleteId,
     activeTradesFilter,
     setActiveTradesFilter,
@@ -1266,13 +1272,22 @@ function App() {
     tradeHistory,
     profileContextTab,
     setProfileContextTab,
+    labProfile,
+    reputationPolicy,
+    isBanned,
+    decayReputation: labProfile ? devScenarioActions?.setter('decay_reputation') : decayReputation,
+    historyLoading,
+    tradeHistoryPage,
+    setTradeHistoryPage,
+    tradeHistoryTotal,
+    tradeHistoryLimit,
+    authenticatedWallet,
   });
 
   const {
     renderWalletModal,
     renderFeedbackModal,
     renderMakerModal,
-    renderProfileModal,
     renderTermsModal,
   } = buildAppModals({
     lang,
@@ -1332,10 +1347,6 @@ function App() {
     isContractLoading,
     setIsContractLoading,
     loadingText,
-    showProfileModal,
-    setShowProfileModal,
-    profileTab,
-    setProfileTab,
     isBanned,
     tradeHistory,
     historyLoading,
@@ -1428,7 +1439,6 @@ function App() {
             {renderWalletModal()}
             {renderFeedbackModal()}
             {renderMakerModal()}
-            {renderProfileModal()}
             {renderTermsModal()}
           </>
         )}

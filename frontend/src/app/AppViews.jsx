@@ -67,7 +67,7 @@ export const buildAppViews = (ctx) => {
     handleOpenMakerModal,
     activeEscrowCounts,
     setShowProfileModal,
-    setProfileTab,
+    openProfilePage,
     setShowFeedbackModal,
     protocolStats,
     statsLoading,
@@ -166,7 +166,7 @@ export const buildAppViews = (ctx) => {
           <Briefcase className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" /> {activeEscrows.length > 0 && <span className="absolute top-2 right-2 w-2 h-2 bg-orange-500 rounded-full animate-pulse"></span>}
         </button>
         <button onClick={() => setCurrentView('profile')} title={lang === 'TR' ? 'Profil Merkezi' : 'Profile Center'} className={`w-10 h-10 flex items-center justify-center rounded-xl transition ${currentView === 'profile' ? 'bg-elevated text-success border border-borderStrong' : 'text-textMuted hover:text-textPrimary hover:bg-elevated'}`}><UserRound className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" /></button>
-        <button onClick={() => { if (!isConnected || !isAuthenticated) { handleAuthAction(); return; } setProfileTab('gecmis'); setShowProfileModal(true); }} title={lang === 'TR' ? 'İşlem Geçmişi' : 'Trade History'} className="w-10 h-10 flex items-center justify-center rounded-xl text-textMuted hover:text-textPrimary hover:bg-elevated transition"><History className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" /></button>
+        <button onClick={() => { if (!isConnected || !isAuthenticated) { handleAuthAction(); return; } openProfilePage?.('history'); }} title={lang === 'TR' ? 'İşlem Geçmişi' : 'Trade History'} className="w-10 h-10 flex items-center justify-center rounded-xl text-textMuted hover:text-textPrimary hover:bg-elevated transition"><History className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" /></button>
       </div>
       <div className="space-y-3 flex flex-col items-center w-full px-2">
         <div className="w-full flex justify-center">
@@ -924,7 +924,7 @@ export const buildAppViews = (ctx) => {
               primaryInput = (
                 <div className="grid grid-cols-2 gap-2">
                   <button type="button" onClick={() => setCurrentView('market')} className="h-10 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold">{lang === 'TR' ? 'Pazara dön' : 'Back to market'}</button>
-                  <button type="button" onClick={() => { if (!isConnected || !isAuthenticated) { handleAuthAction(); return; } setProfileTab('gecmis'); setShowProfileModal(true); }} className="h-10 rounded-lg border border-borderStrong bg-surface text-textPrimary text-sm font-semibold hover:bg-elevated">{lang === 'TR' ? 'İşlem geçmişi' : 'Trade history'}</button>
+                  <button type="button" onClick={() => { if (!isConnected || !isAuthenticated) { handleAuthAction(); return; } openProfilePage?.('history'); }} className="h-10 rounded-lg border border-borderStrong bg-surface text-textPrimary text-sm font-semibold hover:bg-elevated">{lang === 'TR' ? 'İşlem geçmişi' : 'Trade history'}</button>
                 </div>
               );
             }
@@ -1020,44 +1020,60 @@ export const buildAppViews = (ctx) => {
   };
 
 
-  const renderProfileContext = () => (
-    <ProfileContextPage
-      lang={lang}
-      onConnect={handleAuthAction}
-      address={address}
-      formatAddress={formatAddress}
-      // [TR] Lab "Aktif İşlemler" senaryosu cüzdan kapısına takılmasın diye oturum varsayılır.
-      isConnected={isConnected || ctx.devScenarioCategory === 'activeTrades'}
-      isAuthenticated={isAuthenticated || ctx.devScenarioCategory === 'activeTrades'}
-      payoutProfileDraft={ctx.payoutProfileDraft}
-      setPayoutProfileDraft={ctx.setPayoutProfileDraft}
-      handleUpdatePII={ctx.handleUpdatePII}
-      userReputation={userReputation}
-      myOrders={ctx.myOrders || []}
-      setConfirmDeleteId={ctx.setConfirmDeleteId || (() => {})}
-      confirmDeleteId={ctx.confirmDeleteId ?? null}
-      handleDeleteOrder={ctx.orderActions?.handleDeleteOrder}
-      initialActiveTab={ctx.profileContextTab}
-      setInitialActiveTab={ctx.setProfileContextTab}
-      activeTradesFilter={ctx.activeTradesFilter}
-      setActiveTradesFilter={ctx.setActiveTradesFilter}
-      activeEscrows={activeEscrows}
-      setActiveTrade={setActiveTrade}
-      setUserRole={setUserRole}
-      setTradeState={setTradeState}
-      setChargebackAccepted={setChargebackAccepted}
-      setCurrentView={setCurrentView}
-      setShowProfileModal={setShowProfileModal}
-      tradeHistory={ctx.tradeHistory || []}
-      mapResolutionTypeLabel={mapResolutionTypeLabel}
-      handleLogoutAndDisconnect={ctx.handleLogoutAndDisconnect}
-      canonicalizePayoutProfileDraft={ctx.canonicalizePayoutProfileDraft}
-      SEPA_COUNTRIES={ctx.SEPA_COUNTRIES}
-      isContractLoading={isContractLoading}
-      tokenDecimalsMap={tokenDecimalsMap}
-      showToast={showToast}
-    />
-  );
+  const renderProfileContext = () => {
+    // [TR] Lab "Profil Merkezi" senaryosu itibar/kayıt verisini sağlar; gerçek oturum verisinin yerine geçer.
+    const lp = ctx.labProfile || null;
+    const labSession = ctx.devScenarioCategory === 'activeTrades' || Boolean(lp);
+    return (
+      <ProfileContextPage
+        lang={lang}
+        onConnect={handleAuthAction}
+        address={address}
+        formatAddress={formatAddress}
+        isConnected={isConnected || labSession}
+        isAuthenticated={isAuthenticated || labSession}
+        authenticatedWallet={lp ? address : ctx.authenticatedWallet}
+        payoutProfileDraft={lp?.payoutProfileDraft || ctx.payoutProfileDraft}
+        setPayoutProfileDraft={ctx.setPayoutProfileDraft}
+        handleUpdatePII={ctx.handleUpdatePII}
+        userReputation={lp ? lp.userReputation : userReputation}
+        reputationPolicy={lp ? lp.reputationPolicy : ctx.reputationPolicy}
+        sybilStatus={lp ? lp.sybilStatus : sybilStatus}
+        walletAgeRemainingDays={lp ? lp.walletAgeRemainingDays : walletAgeRemainingDays}
+        isBanned={lp ? lp.isBanned : Boolean(ctx.isBanned)}
+        decayReputation={ctx.decayReputation}
+        myOrders={lp ? lp.myOrders : (ctx.myOrders || [])}
+        setConfirmDeleteId={ctx.setConfirmDeleteId || (() => {})}
+        confirmDeleteId={ctx.confirmDeleteId ?? null}
+        handleDeleteOrder={ctx.orderActions?.handleDeleteOrder}
+        initialActiveTab={ctx.profileContextTab}
+        setInitialActiveTab={ctx.setProfileContextTab}
+        activeTradesFilter={ctx.activeTradesFilter}
+        setActiveTradesFilter={ctx.setActiveTradesFilter}
+        activeEscrows={activeEscrows}
+        setActiveTrade={setActiveTrade}
+        setUserRole={setUserRole}
+        setTradeState={setTradeState}
+        setChargebackAccepted={setChargebackAccepted}
+        setCurrentView={setCurrentView}
+        setShowProfileModal={setShowProfileModal}
+        tradeHistory={lp ? lp.tradeHistory : (ctx.tradeHistory || [])}
+        historyLoading={lp ? false : Boolean(ctx.historyLoading)}
+        tradeHistoryPage={lp ? 1 : ctx.tradeHistoryPage}
+        setTradeHistoryPage={ctx.setTradeHistoryPage}
+        tradeHistoryTotal={lp ? (lp.tradeHistoryTotal ?? lp.tradeHistory.length) : ctx.tradeHistoryTotal}
+        tradeHistoryLimit={lp ? 6 : ctx.tradeHistoryLimit}
+        mapResolutionTypeLabel={mapResolutionTypeLabel}
+        handleLogoutAndDisconnect={ctx.handleLogoutAndDisconnect}
+        canonicalizePayoutProfileDraft={ctx.canonicalizePayoutProfileDraft}
+        SEPA_COUNTRIES={ctx.SEPA_COUNTRIES}
+        isContractLoading={isContractLoading}
+        setIsContractLoading={setIsContractLoading}
+        tokenDecimalsMap={tokenDecimalsMap}
+        showToast={showToast}
+      />
+    );
+  };
 
   const renderFooter = () => (
     <footer className="w-full max-w-[1200px] px-4 md:px-8 pb-6 md:pb-8 mt-2">

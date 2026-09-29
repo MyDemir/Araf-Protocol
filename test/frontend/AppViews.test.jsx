@@ -169,7 +169,7 @@ describe('AppViews market side-aware rendering', () => {
             available: true,
             band: 'YELLOW',
             label: 'Medium Signal',
-            chipClass: 'text-amber-400 border-amber-700/60 bg-amber-900/20',
+            chipClass: 'text-warning border-warning/40 bg-warning/10',
           },
           paymentRiskSignal: {
             riskLevel: 'MEDIUM',
@@ -201,7 +201,7 @@ describe('AppViews market side-aware rendering', () => {
             available: false,
             band: null,
             label: 'Signal unavailable',
-            chipClass: 'text-slate-400 border-slate-700/60 bg-slate-900/20',
+            chipClass: 'text-textSecondary border-borderSubtle bg-elevated',
           },
           paymentRiskSignal: null,
           tokenPolicy: { supported: true, allowSellOrders: true, allowBuyOrders: true },

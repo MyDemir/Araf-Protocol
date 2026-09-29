@@ -144,7 +144,7 @@ export function mapResolutionTypeLabel(resolutionType, lang = "EN") {
   const labels = {
     PARTIAL_SETTLEMENT: {
       EN: "Closed by agreed partial settlement",
-      TR: "Uzlaşmalı partial settlement ile kapandı",
+      TR: "Uzlaşmalı kısmi ödemeyle kapandı",
     },
     MANUAL_RELEASE: {
       EN: "Closed by manual release",
@@ -186,13 +186,10 @@ export function useAppSessionData({
   chainId,
   publicClient,
   currentView,
-  showProfileModal,
-  profileTab,
   lang,
   isContractLoading,
   connectedWallet,
   setShowMakerModal,
-  setShowProfileModal,
   setCurrentView,
   showToast,
   getTakerFeeBps,
@@ -264,6 +261,8 @@ export function useAppSessionData({
   const [takerFeeBps, setTakerFeeBps] = useState(15);
   // [TR] Kontrat getFeeConfig aynası (backend /orders/config): emir önizlemesinde ücret gösterimi için.
   const [protocolFeeConfig, setProtocolFeeConfig] = useState(null);
+  // [TR] Kontrat itibar politikası (tier eşikleri, temiz sayfa süresi); getter olmadığından backend event aynası.
+  const [reputationPolicy, setReputationPolicy] = useState(null);
   const [tokenDecimalsMap, setTokenDecimalsMap] = useState({ USDT: DEFAULT_TOKEN_DECIMALS, USDC: DEFAULT_TOKEN_DECIMALS });
   const [bleedingAmounts, setBleedingAmounts] = useState(null);
 
@@ -298,7 +297,6 @@ export function useAppSessionData({
     authenticatedWalletRef.current = null;
     if (closeModals) {
       setShowMakerModal(false);
-      setShowProfileModal(false);
     }
     if (navigateHome) {
       setCurrentView('home');
@@ -314,7 +312,7 @@ export function useAppSessionData({
     if (typeof window !== 'undefined') {
       localStorage.removeItem('araf_pending_tx');
     }
-  }, [setCurrentView, setShowMakerModal, setShowProfileModal]);
+  }, [setCurrentView, setShowMakerModal]);
 
   const bestEffortBackendLogout = React.useCallback(async () => {
     try {
@@ -561,6 +559,7 @@ export function useAppSessionData({
         if (data.bondMap) setOnchainBondMap(data.bondMap);
         if (data.tokenMap) setOnchainTokenMap(data.tokenMap);
         if (data.feeConfig) setProtocolFeeConfig(data.feeConfig);
+        if (data.reputationPolicy) setReputationPolicy(data.reputationPolicy);
         if (data.paymentRiskConfig) setPaymentRiskConfig(data.paymentRiskConfig);
       })
       .catch((err) => console.error('[ProtocolConfig] fetch failed:', err));
@@ -885,11 +884,10 @@ export function useAppSessionData({
     return () => document.removeEventListener('visibilitychange', onVisibilityChange);
   }, [isAuthenticated, currentView, fetchMyTrades]);
 
-  // [TR] Kayıtlı ödeme profili hem profil modalında hem de Profil Merkezi sayfasında yüklenir.
-  //      Önceden yalnız modalda yükleniyordu; sayfadaki form boş başlıyor ve kaydedilirse profili eziyordu.
-  // [EN] Load the saved payout profile for both the modal and the Profile Center page.
-  const wantsPayoutProfile = (showProfileModal && profileTab === 'ayarlar') || currentView === 'profile';
-  const wantsTradeHistory = (showProfileModal && profileTab === 'gecmis') || currentView === 'profile';
+  // [TR] Ödeme profili ve geçmiş, tek profil yüzeyi olan Profil Merkezi sayfasında yüklenir.
+  // [EN] Payout profile and history load on the Profile Center page (the only profile surface).
+  const wantsPayoutProfile = currentView === 'profile';
+  const wantsTradeHistory = currentView === 'profile';
 
   useEffect(() => {
     if (!wantsPayoutProfile || !isAuthenticated) return;
@@ -1137,6 +1135,7 @@ export function useAppSessionData({
     onchainBondMap,
     onchainTokenMap,
     protocolFeeConfig,
+    reputationPolicy,
     paymentRiskConfig,
     takerFeeBps,
     tokenDecimalsMap,

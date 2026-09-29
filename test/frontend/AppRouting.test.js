@@ -65,7 +65,7 @@ describe('App routing side-aware contract selection', () => {
     expect(appShellBlock).toContain('renderWalletModal()');
     expect(appShellBlock).toContain('renderFeedbackModal()');
     expect(appShellBlock).toContain('renderMakerModal()');
-    expect(appShellBlock).toContain('renderProfileModal()');
+    expect(appShellBlock).not.toContain('renderProfileModal()');
     expect(appShellBlock).toContain('renderTermsModal()');
   });
 

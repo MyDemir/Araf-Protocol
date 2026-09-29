@@ -179,6 +179,7 @@ router.get("/config", marketReadLimiter, async (_req, res, next) => {
       cooldownConfig: config.cooldownConfig,
       tokenMap: config.tokenMap || {},
       paymentRiskConfig: config.paymentRiskConfig || {},
+      reputationPolicy: config.reputationPolicy || null,
       selectedOrderRiskLevel: {
         source: "onchain_order_snapshot",
         nonAuthoritative: true,

@@ -2,8 +2,6 @@ import React from 'react';
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import fs from 'node:fs';
-import path from 'node:path';
 import { buildAppModals } from '../../frontend/src/app/AppModals';
 
 afterEach(() => {
@@ -239,131 +237,8 @@ describe('AppModals side-aware behaviors', () => {
     expect(screen.getAllByText(/BANK_TRANSFER_CONFIRMATION_REQUIRED/i).length).toBeGreaterThan(0);
   });
 
-  it('renders authoritative my orders fields', () => {
+  it('no longer ships a duplicate profile modal (Profile Center page is the only profile surface)', () => {
     const modals = buildAppModals(makeCtx({ showMakerModal: false }));
-    render(<div>{modals.renderProfileModal()}</div>);
-
-    expect(screen.getByText(/Buy Order · OPEN/)).toBeInTheDocument();
-    expect(screen.queryByText(/BUY_CRYPTO · OPEN/)).not.toBeInTheDocument();
-    expect(screen.getByText(/Remaining: 50 USDT/)).toBeInTheDocument();
-    expect(screen.getByText(/Min Fill: 10 USDT/)).toBeInTheDocument();
-  });
-
-  it('does not trigger profile modal setter during render when auth is missing', () => {
-    const setShowProfileModal = vi.fn();
-    const modals = buildAppModals(makeCtx({
-      showMakerModal: false,
-      showProfileModal: true,
-      isConnected: false,
-      isAuthenticated: false,
-      setShowProfileModal,
-    }));
-
-    render(<div>{modals.renderProfileModal()}</div>);
-    expect(setShowProfileModal).not.toHaveBeenCalled();
-  });
-
-  it('uses 90-day clean-slate copy and wires decayReputation handler from context', async () => {
-    const source = fs.readFileSync(path.resolve(process.cwd(), 'src/app/AppModals.jsx'), 'utf8');
-    expect(source).toContain('const cleanSlateTime = bannedUntil + (90 * 24 * 60 * 60);');
-    expect(source).toContain('90 days have passed');
-    expect(source).toContain('decayReputation,');
-  });
-
-  it('renders agreed settlement copy as event history (non-penal reputation semantics)', async () => {
-    const source = fs.readFileSync(path.resolve(process.cwd(), 'src/app/AppModals.jsx'), 'utf8');
-    expect(source).toContain('AGREED SETTLEMENT');
-    expect(source).toContain('event-history marker, not a risk penalty');
-    expect(source).toContain('Partial settlement');
-  });
-
-  it('renders Trust Visibility Layer in profile reputation tab with non-authoritative semantics', () => {
-    const modals = buildAppModals(makeCtx({
-      showMakerModal: false,
-      profileTab: 'itibar',
-      activeEscrows: [
-        {
-          onchainId: '321',
-          role: 'maker',
-          rawTrade: {
-            offchainHealthScoreInput: {
-              readOnly: true,
-              nonBlocking: true,
-              canBlockProtocolActions: false,
-              explainableReasons: ['maker_frequent_recent_bank_changes_at_lock'],
-            },
-          },
-        },
-      ],
-    }));
-
-    render(<div>{modals.renderProfileModal()}</div>);
-    expect(screen.getByText('Trust Visibility')).toBeInTheDocument();
-    expect(screen.getByText(/Informational only/i)).toBeInTheDocument();
-    // [TR] Geliştirici jargonu (readOnly/nonBlocking/canBlockProtocolActions) kullanıcıya gösterilmez.
-    // [EN] Developer jargon flags are no longer rendered to end users.
-    expect(screen.queryByText(/readOnly: true/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/canBlockProtocolActions/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/bank-change frequency/i)).toBeInTheDocument();
-  });
-
-  it('fails soft when trust payload is missing', () => {
-    const modals = buildAppModals(makeCtx({
-      showMakerModal: false,
-      profileTab: 'itibar',
-      activeEscrows: [{ onchainId: '111', role: 'maker', rawTrade: {} }],
-    }));
-
-    render(<div>{modals.renderProfileModal()}</div>);
-    expect(screen.getByText(/No signals to show/i)).toBeInTheDocument();
-  });
-
-  it('renders generic contact channel selector in settings form', () => {
-    const modals = buildAppModals(makeCtx({ showMakerModal: false, profileTab: 'ayarlar' }));
-    render(<div>{modals.renderProfileModal()}</div>);
-    expect(screen.getByText(/Payout Profile & Contact/i)).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'telegram' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'email' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'phone' })).toBeInTheDocument();
-  });
-
-  it('shows terminal outcome label copy from resolutionType on trade history cards', () => {
-    const modals = buildAppModals(makeCtx({
-      showMakerModal: false,
-      profileTab: 'gecmis',
-      tradeHistory: [
-        {
-          _id: 'trade-1',
-          status: 'RESOLVED',
-          resolutionType: 'PARTIAL_SETTLEMENT',
-          onchain_escrow_id: '101',
-          maker_address: '0xabc',
-          financials: { crypto_amount: '1000000', crypto_asset: 'USDT' },
-        },
-      ],
-    }));
-
-    render(<div>{modals.renderProfileModal()}</div>);
-    expect(screen.getByText('Closed by agreed partial settlement')).toBeInTheDocument();
-  });
-
-  it('applies rail-aware country options', () => {
-    const modals = buildAppModals(makeCtx({
-      showMakerModal: false,
-      profileTab: 'ayarlar',
-      payoutProfileDraft: {
-        rail: 'TR_IBAN',
-        country: 'TR',
-        contact: { channel: null, value: null },
-        fields: { account_holder_name: '', iban: null, routing_number: null, account_number: null, account_type: null, bic: null, bank_name: null },
-      },
-    }));
-    render(<div>{modals.renderProfileModal()}</div>);
-    expect(screen.getAllByRole('option', { name: 'TR' }).length).toBeGreaterThan(0);
-  });
-
-  it('canonicalizes draft when rail changes', () => {
-    const source = fs.readFileSync(path.resolve(process.cwd(), 'src/app/AppModals.jsx'), 'utf8');
-    expect(source).toContain("canonicalizePayoutProfileDraft({ ...prev, rail: nextRail })");
+    expect(modals.renderProfileModal).toBeUndefined();
   });
 });
