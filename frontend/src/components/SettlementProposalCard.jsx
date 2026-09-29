@@ -413,9 +413,12 @@ export default function SettlementProposalCard({
           ? settlementActions.accept
           : onConfirmCreate}
         confirmLabel={previewMode === 'accept'
-          ? (lang === 'TR' ? 'Kabul Et ve On-Chain Gönder' : 'Accept and Submit On-Chain')
-          : (lang === 'TR' ? 'Teklifi On-Chain Gönder' : 'Submit Proposal On-Chain')}
+          ? (lang === 'TR' ? 'Kabul et ve zincire gönder' : 'Accept and submit on-chain')
+          : (lang === 'TR' ? 'Teklifi zincire gönder' : 'Submit proposal on-chain')}
         disableConfirm={previewLoading || Boolean(previewError) || !hasOnchainTradeId}
+        userRole={userRole}
+        tokenSymbol={activeTrade?.crypto || 'USDT'}
+        decimals={activeTrade?.tokenDecimals ?? 6}
       />
     </div>
   );

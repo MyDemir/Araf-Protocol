@@ -19,7 +19,7 @@ import { labTokenSymbols } from './dev/fixtures/adminFixtures';
 import { LAB_TOKEN_ADDRESSES, LAB_BOND_MAP, LAB_FEE_CONFIG } from './dev/fixtures/makerOrderFixtures';
 import { isUiLabEnabled } from './dev/ui-lab/isUiLabEnabled';
 import { createMockAdminFetch } from './dev/mocks/mockAdminFetch';
-import { createSetterAction, createSettlementContractMocks, createTradeRoomHandlers } from './dev/mocks/mockActions';
+import { createSetterAction, createSettlementContractMocks, createTradeRoomFetch, createTradeRoomHandlers } from './dev/mocks/mockActions';
 import { getInitialLang, getInitialTermsAccepted, APP_LANG_STORAGE_KEY } from './app/bootstrapState';
 import { buildApiUrl, resolveApiPolicyDiagnostics } from './app/apiConfig';
 import { getSupportedChainsMap, isMintTokenEnabled, isSupportedChainId } from './app/chainPolicy';
@@ -32,6 +32,7 @@ import { buildNextActiveTrade, findEscrowByRouteTradeId, getEscrowRouteId, parse
 
 const createDevScenarioFetch = (categoryKey, scenario, fallbackFetch) => {
   if (categoryKey === 'admin') return createMockAdminFetch(scenario);
+  if (categoryKey === 'tradeRoom') return createTradeRoomFetch({ trade: scenario?.decisionInput?.trade, estimate: estimateBleeding, fallbackFetch });
   return fallbackFetch;
 };
 
@@ -1056,10 +1057,13 @@ function App() {
     try {
       setIsSubmittingFeedback(true);
       setFeedbackError('');
-      await authenticatedFetch(buildApiUrl('feedback'), {
+      const res = await authenticatedFetch(buildApiUrl('feedback'), {
         method: 'POST',
         body: JSON.stringify({ rating: feedbackRating, comment: trimmedFeedback, category: feedbackCategory }),
       });
+      // [TR] authenticatedFetch hata durumunda throw etmez; 400/429/500 önceden "teşekkürler" gösteriyordu.
+      // [EN] authenticatedFetch does not throw on HTTP errors; previously 400/429/500 showed "thank you".
+      if (!res?.ok) throw new Error(`HTTP ${res?.status ?? 'network'}${res?.status === 429 ? ' Too many' : ''}`);
 
       setShowFeedbackModal(false);
       setFeedbackText('');
@@ -1291,6 +1295,7 @@ function App() {
     renderTermsModal,
   } = buildAppModals({
     lang,
+    onRequestSignIn: handleAuthAction,
     sessionActions,
     orderForm,
     orderActions,

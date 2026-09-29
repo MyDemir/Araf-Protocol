@@ -64,3 +64,32 @@ export const createSettlementContractMocks = ({ scenarioId, appendLog } = {}) =>
     expireSettlement: fn('expire_settlement'),
   };
 };
+
+// [TR] Lab işlem odası: uzlaşma önizlemesi backend'in kontrat formülüyle aynı hesapla üretilir
+//      (acceptSettlement: havuz = güncel ana para + iki teminat, ücret brüt paylar üzerinden).
+// [EN] Lab trade room: settlement preview mirrors the backend/contract formula.
+export const createTradeRoomFetch = ({ trade, estimate, fallbackFetch }) => async (url, options = {}) => {
+  if (!String(url).includes('/settlement-proposal/preview')) return fallbackFetch(url, options);
+  const body = JSON.parse(options.body || '{}');
+  const makerShareBps = BigInt(Number(body.makerShareBps) || 0);
+  const cur = estimate(trade || {}) || {
+    currentCrypto: BigInt(trade?.cryptoAmountRaw || 0), currentMakerBond: BigInt(trade?.makerBondRaw || 0), currentTakerBond: BigInt(trade?.takerBondRaw || 0), totalDecayed: 0n,
+  };
+  const pool = cur.currentCrypto + cur.currentMakerBond + cur.currentTakerBond;
+  const grossMaker = (pool * makerShareBps) / 10000n;
+  const grossTaker = pool - grossMaker;
+  const makerFee = (grossMaker * BigInt(trade?.makerFeeBps ?? 10)) / 10000n;
+  const takerFee = (grossTaker * BigInt(trade?.takerFeeBps ?? 10)) / 10000n;
+  const json = {
+    informationalOnly: true,
+    makerShareBps: Number(makerShareBps),
+    takerShareBps: 10000 - Number(makerShareBps),
+    pool: pool.toString(),
+    makerFee: makerFee.toString(),
+    takerFee: takerFee.toString(),
+    makerPayout: (grossMaker - makerFee).toString(),
+    takerPayout: (grossTaker - takerFee).toString(),
+    decayedAmount: cur.totalDecayed.toString(),
+  };
+  return new Response(JSON.stringify(json), { status: 200, headers: { 'Content-Type': 'application/json' } });
+};

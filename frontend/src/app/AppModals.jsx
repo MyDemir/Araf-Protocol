@@ -1,4 +1,4 @@
-import { Star, Lock, ScrollText, TriangleAlert, X } from 'lucide-react';
+import { ChevronRight, Hourglass, Lock, ScrollText, ShieldCheck, Star, TriangleAlert, X } from 'lucide-react';
 import React from 'react';
 import { buildMakerPreview, getMakerModalCopy, getOrderSideCopy, resolveEffectiveBondBps } from './orderUiModel';
 import { resolveTierMaxAmounts } from './actions/orderCreationActions';
@@ -47,6 +47,7 @@ export const buildAppModals = (ctx) => {
     setFeedbackText,
     feedbackError,
     FEEDBACK_MIN_LENGTH,
+    onRequestSignIn,
     submitFeedback,
     isSubmittingFeedback,
     showMakerModal,
@@ -87,99 +88,115 @@ export const buildAppModals = (ctx) => {
   
   } = ctx;
 
+  const closeBtn = (onClick, label) => (
+    <button type="button" onClick={onClick} aria-label={label} className="p-1.5 -m-1.5 rounded-lg text-textMuted hover:text-textPrimary hover:bg-elevated transition">
+      <X className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" />
+    </button>
+  );
+
   const renderWalletModal = () => {
     if (!showWalletModal) return null;
     return (
-      <div className="fixed inset-0 max-w-full overflow-x-hidden bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 safe-area-x z-[100]">
-        <div className="bg-surface border border-borderSubtle rounded-2xl p-6 w-full max-w-sm shadow-2xl max-h-[calc(100dvh_-_2rem_-_env(safe-area-inset-top)_-_env(safe-area-inset-bottom))] overflow-x-hidden overflow-y-auto overscroll-contain">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-xl font-bold text-textPrimary">{lang === 'TR' ? 'Cüzdan Seçin' : 'Select Wallet'}</h2>
-            <button onClick={() => setShowWalletModal(false)} className="text-textMuted hover:text-textPrimary text-2xl leading-none">&times;</button>
+      <div className="fixed inset-0 max-w-full overflow-x-hidden bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center sm:p-4 safe-area-x z-[100]" role="dialog" aria-modal="true" aria-labelledby="wallet-modal-title">
+        <div className="bg-surface border border-borderSubtle rounded-t-2xl sm:rounded-2xl p-5 sm:p-6 w-full sm:max-w-sm shadow-2xl max-h-[calc(100dvh_-_2rem_-_env(safe-area-inset-top)_-_env(safe-area-inset-bottom))] overflow-x-hidden overflow-y-auto overscroll-contain pb-[calc(1.25rem_+_env(safe-area-inset-bottom))] sm:pb-6">
+          <div className="flex justify-between items-center mb-1">
+            <h2 id="wallet-modal-title" className="text-lg font-bold text-textPrimary">{lang === 'TR' ? 'Cüzdan bağla' : 'Connect wallet'}</h2>
+            {closeBtn(() => setShowWalletModal(false), lang === 'TR' ? 'Kapat' : 'Close')}
           </div>
-          <div className="space-y-3">
+          <p className="text-xs text-textMuted mb-4">{lang === 'TR' ? 'Bağlandıktan sonra oturumu cüzdan imzasıyla açarsınız.' : 'After connecting, you sign in with a wallet signature.'}</p>
+          <div className="space-y-2">
+            {connectors.length === 0 && (
+              <p className="text-sm text-textSecondary bg-elevated border border-borderSubtle rounded-xl p-4">{lang === 'TR' ? 'Tarayıcıda cüzdan bulunamadı. MetaMask, Coinbase Wallet veya Rabby kurun.' : 'No wallet found in this browser. Install MetaMask, Coinbase Wallet or Rabby.'}</p>
+            )}
             {connectors.map((connector) => (
               <button
                 key={connector.uid}
+                type="button"
                 onClick={() => { connect({ connector }); setShowWalletModal(false); }}
-                className="w-full flex items-center justify-between bg-elevated hover:bg-surface border border-borderStrong p-4 rounded-xl transition-all group"
+                className="w-full flex items-center justify-between bg-elevated hover:border-brand/50 border border-borderSubtle px-4 py-3 rounded-xl transition group"
               >
-                <div className="flex items-center space-x-3">
+                <span className="flex items-center gap-3">
                   <span className="w-8 h-8 flex items-center justify-center">{getWalletIcon(connector)}</span>
-                  <span className="font-bold text-textPrimary group-hover:text-brand">{connector.name}</span>
-                </div>
-                <span className="text-[10px] text-textMuted font-bold uppercase tracking-widest">Connect</span>
+                  <span className="font-semibold text-textPrimary">{connector.name}</span>
+                </span>
+                <ChevronRight className="w-4 h-4 text-textMuted group-hover:text-brand" strokeWidth={1.8} aria-hidden="true" />
               </button>
             ))}
           </div>
-          <p className="mt-6 text-xs text-center text-textMuted italic">
-            {lang === 'TR' ? '* Araf Protocol hiçbir zaman private key istemez.' : '* Araf Protocol never asks for private keys.'}
+          <p className="mt-4 text-xs text-textMuted flex items-center justify-center gap-1.5">
+            <ShieldCheck className="w-3.5 h-3.5 text-success" strokeWidth={1.8} aria-hidden="true" />
+            {lang === 'TR' ? 'Araf hiçbir zaman özel anahtar veya kurtarma ifadesi istemez.' : 'Araf never asks for private keys or seed phrases.'}
           </p>
         </div>
       </div>
     );
   };
 
-  // [TR] Geri bildirim modalı — kategori + yıldız puanı + metin girişi
-  // [EN] Feedback modal — category + star rating + text input
+  // [TR] Geri bildirim modalı — kategori + yıldız puanı + metin girişi. Backend: rating 1-5, kategori enum, ≤1000 karakter.
+  // [EN] Feedback modal; mirrors backend validation (rating 1-5, category enum, ≤1000 chars).
   const renderFeedbackModal = () => {
     if (!showFeedbackModal) return null;
+    const signedIn = isConnected && isAuthenticated;
+    const len = feedbackText.trim().length;
+    const categories = [
+      { v: 'bug', tr: 'Hata', en: 'Bug' },
+      { v: 'suggestion', tr: 'Öneri', en: 'Idea' },
+      { v: 'ui/ux', tr: 'Tasarım', en: 'Design' },
+      { v: 'other', tr: 'Diğer', en: 'Other' },
+    ];
     return (
-      <div className="fixed inset-0 max-w-full overflow-x-hidden bg-black/60 backdrop-blur-sm flex items-start justify-end p-4 md:p-6 safe-area-x z-[100]">
-        <div className="bg-surface border border-borderSubtle rounded-2xl p-5 md:p-6 w-full max-w-md shadow-2xl max-h-[calc(100dvh_-_2rem_-_env(safe-area-inset-top)_-_env(safe-area-inset-bottom))] overflow-x-hidden overflow-y-auto overscroll-contain animate-in slide-in-from-top-8 slide-in-from-right-8 duration-300">
-          <div className="flex justify-between items-center mb-3">
-            <h2 className="text-xl font-bold text-textPrimary">{lang === 'TR' ? 'Geri Bildirim' : 'Feedback'}</h2>
-            <button
-              onClick={() => setShowFeedbackModal(false)}
-              className="text-textMuted hover:text-textPrimary text-2xl"
-              aria-label={lang === 'TR' ? 'Geri bildirim penceresini kapat' : 'Close feedback panel'}
-            >
-              &times;
-            </button>
+      <div className="fixed inset-0 max-w-full overflow-x-hidden bg-black/60 backdrop-blur-sm flex items-end sm:items-start justify-center sm:justify-end sm:p-6 safe-area-x z-[100]" role="dialog" aria-modal="true" aria-labelledby="feedback-modal-title">
+        <div className="bg-surface border border-borderSubtle rounded-t-2xl sm:rounded-2xl p-5 sm:p-6 w-full sm:max-w-md shadow-2xl max-h-[calc(100dvh_-_2rem_-_env(safe-area-inset-top)_-_env(safe-area-inset-bottom))] overflow-x-hidden overflow-y-auto overscroll-contain pb-[calc(1.25rem_+_env(safe-area-inset-bottom))] sm:pb-6">
+          <div className="flex justify-between items-center mb-1">
+            <h2 id="feedback-modal-title" className="text-lg font-bold text-textPrimary">{lang === 'TR' ? 'Geri bildirim' : 'Feedback'}</h2>
+            {closeBtn(() => setShowFeedbackModal(false), lang === 'TR' ? 'Geri bildirim penceresini kapat' : 'Close feedback panel')}
           </div>
-          <p className="text-sm text-textSecondary mb-4">{lang === 'TR' ? 'Deneyiminizi paylaşın. Hedefimiz gereksiz tx/revert maliyetlerini düşürmek.' : 'Share your experience. Our goal is to reduce avoidable tx/revert costs.'}</p>
-          <div className="flex justify-center space-x-2 mb-4">
-            {[1, 2, 3, 4, 5].map((star) => (
-              <button key={star} onClick={() => setFeedbackRating(star)} aria-label={`${star}/5`} className={`transition ${feedbackRating >= star ? 'text-yellow-400 scale-110' : 'text-textMuted hover:text-yellow-400/50'}`}><Star className="w-8 h-8" strokeWidth={1.6} fill={feedbackRating >= star ? 'currentColor' : 'none'} aria-hidden="true" /></button>
-            ))}
-          </div>
-          <select
-            value={feedbackCategory}
-            onChange={(e) => { setFeedbackCategory(e.target.value); setFeedbackError(''); }}
-            className="w-full bg-elevated text-textPrimary px-3 py-2.5 rounded-xl border border-borderStrong outline-none text-sm mb-3"
-          >
-            <option value="" disabled>{lang === 'TR' ? 'Kategori Seçin...' : 'Select Category...'}</option>
-            <option value="bug">{lang === 'TR' ? 'Hata bildirimi' : 'Bug report'}</option>
-            <option value="suggestion">{lang === 'TR' ? 'Özellik isteği' : 'Feature suggestion'}</option>
-            <option value="ui/ux">{lang === 'TR' ? 'Tasarım / kullanıcı deneyimi' : 'Design / UX'}</option>
-            <option value="other">{lang === 'TR' ? 'Diğer' : 'Other'}</option>
-          </select>
+          <p className="text-sm text-textSecondary mb-4">{lang === 'TR' ? 'Nerede zorlandınız? Özellikle boşa giden işlem (revert) maliyetlerini azaltmak istiyoruz.' : 'Where did you struggle? We especially want to cut wasted transaction (revert) costs.'}</p>
 
-          <textarea
-            value={feedbackText}
-            onChange={(e) => { setFeedbackText(e.target.value); setFeedbackError(''); }}
-            placeholder={lang === 'TR' ? 'Nerede sorun yaşadınız? Hangi adımda tx/revert maliyeti oluştu? Kısaca anlatın...' : 'Where did it break? Which step caused tx/revert cost? Please describe briefly...'}
-            className="w-full bg-elevated text-textPrimary px-3 py-3 rounded-xl border border-borderStrong outline-none h-28 text-sm mb-2 resize-none"
-          />
-          <div className="flex items-center justify-between text-xs mb-3">
-            <span className="text-textMuted">
-              {lang === 'TR' ? `Minimum ${FEEDBACK_MIN_LENGTH} karakter` : `Minimum ${FEEDBACK_MIN_LENGTH} characters`}
-            </span>
-            <span className={`${feedbackText.trim().length >= FEEDBACK_MIN_LENGTH ? 'text-brand' : 'text-textMuted'}`}>
-              {feedbackText.trim().length}/{1000}
-            </span>
-          </div>
-
-          {feedbackError && (
-            <p className="text-red-400 text-xs mb-3 bg-red-950/30 border border-red-900/40 rounded-lg p-2">{feedbackError}</p>
+          {!signedIn ? (
+            <div className="bg-elevated border border-borderSubtle rounded-xl p-4 text-center" data-testid="feedback-signin-gate">
+              <p className="text-sm text-textSecondary">{lang === 'TR' ? 'Geri bildirim cüzdan oturumuyla gönderilir (spam koruması).' : 'Feedback is sent with a wallet session (spam protection).'}</p>
+              {typeof onRequestSignIn === 'function' && (
+                <button type="button" onClick={() => { setShowFeedbackModal(false); onRequestSignIn(); }} className="mt-3 w-full py-2.5 rounded-xl bg-brand text-black font-bold text-sm hover:opacity-90">
+                  {isConnected ? (lang === 'TR' ? 'İmzala ve giriş yap' : 'Sign in') : (lang === 'TR' ? 'Cüzdan bağla' : 'Connect wallet')}
+                </button>
+              )}
+            </div>
+          ) : (
+            <>
+              <div className="flex justify-center gap-1 mb-4">
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <button key={star} type="button" onClick={() => { setFeedbackRating(star); setFeedbackError(''); }} aria-label={`${star}/5`} aria-pressed={feedbackRating >= star} className={`p-1 transition ${feedbackRating >= star ? 'text-warning scale-110' : 'text-textMuted hover:text-warning/60'}`}><Star className="w-8 h-8" strokeWidth={1.6} fill={feedbackRating >= star ? 'currentColor' : 'none'} aria-hidden="true" /></button>
+                ))}
+              </div>
+              <div className="grid grid-cols-4 gap-1.5 mb-3" role="radiogroup" aria-label={lang === 'TR' ? 'Kategori' : 'Category'}>
+                {categories.map((c) => (
+                  <button key={c.v} type="button" role="radio" aria-checked={feedbackCategory === c.v} onClick={() => { setFeedbackCategory(c.v); setFeedbackError(''); }}
+                    className={`py-2 rounded-lg text-xs font-semibold border transition ${feedbackCategory === c.v ? 'bg-brand/10 text-brand border-brand/50' : 'bg-elevated text-textSecondary border-borderSubtle hover:text-textPrimary'}`}>
+                    {lang === 'TR' ? c.tr : c.en}
+                  </button>
+                ))}
+              </div>
+              <textarea
+                value={feedbackText}
+                maxLength={1000}
+                onChange={(e) => { setFeedbackText(e.target.value); setFeedbackError(''); }}
+                placeholder={lang === 'TR' ? 'Hangi ekranda, hangi adımda ne oldu?' : 'Which screen, which step, what happened?'}
+                className="w-full bg-elevated text-textPrimary px-3 py-3 rounded-xl border border-borderSubtle focus:border-brand/60 outline-none h-28 text-sm mb-1.5 resize-none"
+              />
+              <div className="flex items-center justify-between text-xs mb-3">
+                <span className="text-textMuted">{lang === 'TR' ? `En az ${FEEDBACK_MIN_LENGTH} karakter` : `At least ${FEEDBACK_MIN_LENGTH} characters`}</span>
+                <span className={`tabular-nums ${len >= FEEDBACK_MIN_LENGTH ? 'text-success' : 'text-textMuted'}`}>{len}/1000</span>
+              </div>
+              {feedbackError && (
+                <p className="text-danger text-xs mb-3 bg-danger/10 border border-danger/40 rounded-lg p-2" role="alert">{feedbackError}</p>
+              )}
+              <button type="button" onClick={submitFeedback} disabled={isSubmittingFeedback} className="w-full py-3 rounded-xl font-bold bg-brand text-black hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition">
+                {isSubmittingFeedback ? (lang === 'TR' ? 'Gönderiliyor…' : 'Submitting…') : (lang === 'TR' ? 'Gönder' : 'Submit')}
+              </button>
+              <p className="text-[11px] text-textMuted mt-3 flex items-start gap-1.5"><Lock className="w-3.5 h-3.5 shrink-0 mt-px" strokeWidth={1.8} aria-hidden="true" />{lang === 'TR' ? 'Özel anahtar, kurtarma ifadesi veya banka şifresi yazmayın.' : 'Never include private keys, seed phrases or bank passwords.'}</p>
+            </>
           )}
-
-          <p className="text-xs text-textMuted mb-3">
-            {lang === 'TR' ? 'Not: Private key, seed phrase veya kişisel bankacılık parolanızı asla paylaşmayın.' : 'Note: Never share private keys, seed phrase, or personal banking passwords.'}
-          </p>
-
-          <button onClick={submitFeedback} disabled={isSubmittingFeedback} className={`w-full py-3 rounded-xl font-bold transition ${isSubmittingFeedback ? 'bg-slate-700 text-textMuted cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500 text-textPrimary shadow-[0_0_20px_rgba(16,185,129,0.25)]'}`}>
-            {isSubmittingFeedback ? (lang === 'TR' ? 'Gönderiliyor...' : 'Submitting...') : (lang === 'TR' ? 'Gönder' : 'Submit')}
-          </button>
         </div>
       </div>
     );
@@ -372,16 +389,32 @@ export const buildAppModals = (ctx) => {
   // [EN] Terms of use modal — shown once on first connect, persisted to localStorage
   const renderTermsModal = () => {
     if (termsAccepted || (!isConnected && !isAuthenticated)) return null;
+    const points = lang === 'TR' ? [
+      { icon: ShieldCheck, tone: 'text-success', text: 'Araf merkeziyetsiz bir akıllı kontrattır. Aracı kurum veya hakem yoktur; son söz kontratındır.' },
+      { icon: Hourglass, tone: 'text-warning', text: 'İtiraz edilen işlemlerde "Eriyen Kasa" devreye girer: teminatlar ve süre uzarsa ana para zamanla erir, 10 günde yakılır.' },
+      { icon: TriangleAlert, tone: 'text-danger', text: 'Ters ibraz (chargeback) riski tamamen satıcıya aittir. Gelen ödemenin kaynağını doğrulamak sizin sorumluluğunuzdadır.' },
+      { icon: Lock, tone: 'text-textSecondary', text: 'Tüm işlemler kendi sorumluluğunuzdadır. Özel anahtarınızı kimseyle paylaşmayın.' },
+    ] : [
+      { icon: ShieldCheck, tone: 'text-success', text: 'Araf is a decentralized smart contract. There are no intermediaries or arbitrators; the contract has the final say.' },
+      { icon: Hourglass, tone: 'text-warning', text: 'Disputed trades enter the "Bleeding Escrow": bonds and, if it drags on, principal decay over time and burn after 10 days.' },
+      { icon: TriangleAlert, tone: 'text-danger', text: 'Chargeback risk belongs entirely to the seller. Verifying the source of incoming funds is your responsibility.' },
+      { icon: Lock, tone: 'text-textSecondary', text: 'All transactions are at your own risk. Never share your private key.' },
+    ];
     return (
-      <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-[200]">
-        <div className="bg-surface border border-borderSubtle rounded-2xl p-6 w-full max-w-lg shadow-2xl flex flex-col">
-          <h2 className="text-xl font-bold text-textPrimary mb-4 flex items-center gap-2"><ScrollText className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" />{lang === 'TR' ? 'Platform Kullanım Sözleşmesi ve Sorumluluk Reddi' : 'Terms of Use and Disclaimer'}</h2>
-          <div className="space-y-4 text-sm text-textSecondary mb-6 bg-app p-4 rounded-xl border border-borderSubtle overflow-y-auto max-h-64">
-            <p>{lang === 'TR' ? 'Araf Protokolü merkeziyetsiz bir akıllı kontrattır. Hiçbir aracı kurum veya hakem bulunmamaktadır.' : 'Araf Protocol is a decentralized smart contract. There are no intermediaries or arbitrators.'}</p>
-            <p>{lang === 'TR' ? 'Tüm işlemleriniz kendi sorumluluğunuzdadır. "Bleeding Escrow" (Eriyen Kasa) oyun teorisine dayalı çalışır ve itiraz durumlarında fonlarınız zamanla eriyebilir.' : 'All transactions are at your own risk. The system operates on the "Bleeding Escrow" game theory, and in case of disputes, your funds may decay over time.'}</p>
-            <p className="text-red-400 font-bold">{lang === 'TR' ? 'Chargeback (Ters İbraz) riski tamamen Maker tarafına aittir. Gelen fonların kaynağını doğrulamak sizin sorumluluğunuzdadır.' : 'The risk of Chargeback belongs entirely to the Maker side. It is your responsibility to verify the source of incoming funds.'}</p>
-          </div>
+      <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center sm:p-4 z-[200]" role="dialog" aria-modal="true" aria-labelledby="terms-modal-title">
+        <div className="bg-surface border border-borderSubtle rounded-t-2xl sm:rounded-2xl p-5 sm:p-6 w-full sm:max-w-lg shadow-2xl flex flex-col max-h-[calc(100dvh_-_2rem)] pb-[calc(1.25rem_+_env(safe-area-inset-bottom))] sm:pb-6">
+          <h2 id="terms-modal-title" className="text-lg font-bold text-textPrimary mb-1 flex items-center gap-2"><ScrollText className="w-5 h-5 text-brand" strokeWidth={1.8} aria-hidden="true" />{lang === 'TR' ? 'Kullanım koşulları' : 'Terms of use'}</h2>
+          <p className="text-xs text-textMuted mb-4">{lang === 'TR' ? 'Devam etmeden önce lütfen okuyun.' : 'Please read before continuing.'}</p>
+          <ul className="space-y-3 text-sm text-textSecondary mb-5 overflow-y-auto">
+            {points.map((p) => (
+              <li key={p.text} className="flex items-start gap-3 bg-elevated border border-borderSubtle rounded-xl p-3">
+                <p.icon className={`w-4 h-4 shrink-0 mt-0.5 ${p.tone}`} strokeWidth={1.8} aria-hidden="true" />
+                <span>{p.text}</span>
+              </li>
+            ))}
+          </ul>
           <button
+            type="button"
             onClick={() => {
               // [TR] Kullanım koşulları kabulü kalıcı tutulur; modal refresh sonrası tekrar açılmaz.
               // [EN] Persist terms acceptance so modal does not re-open after refresh.
@@ -390,9 +423,9 @@ export const buildAppModals = (ctx) => {
               }
               setTermsAccepted(true);
             }}
-            className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-textPrimary font-bold rounded-xl transition shadow-[0_0_15px_rgba(16,185,129,0.3)]"
+            className="w-full py-3 bg-brand text-black font-bold rounded-xl hover:opacity-90 transition"
           >
-            {lang === 'TR' ? 'Okudum, Kabul Ediyorum' : 'I Read and Accept'}
+            {lang === 'TR' ? 'Okudum, kabul ediyorum' : 'I have read and accept'}
           </button>
         </div>
       </div>
