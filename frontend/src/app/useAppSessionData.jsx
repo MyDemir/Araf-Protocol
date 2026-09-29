@@ -262,6 +262,8 @@ export function useAppSessionData({
   const [onchainTokenMap, setOnchainTokenMap] = useState({});
   const [paymentRiskConfig, setPaymentRiskConfig] = useState({});
   const [takerFeeBps, setTakerFeeBps] = useState(15);
+  // [TR] Kontrat getFeeConfig aynası (backend /orders/config): emir önizlemesinde ücret gösterimi için.
+  const [protocolFeeConfig, setProtocolFeeConfig] = useState(null);
   const [tokenDecimalsMap, setTokenDecimalsMap] = useState({ USDT: DEFAULT_TOKEN_DECIMALS, USDC: DEFAULT_TOKEN_DECIMALS });
   const [bleedingAmounts, setBleedingAmounts] = useState(null);
 
@@ -558,6 +560,7 @@ export function useAppSessionData({
       .then((data) => {
         if (data.bondMap) setOnchainBondMap(data.bondMap);
         if (data.tokenMap) setOnchainTokenMap(data.tokenMap);
+        if (data.feeConfig) setProtocolFeeConfig(data.feeConfig);
         if (data.paymentRiskConfig) setPaymentRiskConfig(data.paymentRiskConfig);
       })
       .catch((err) => console.error('[ProtocolConfig] fetch failed:', err));
@@ -1133,6 +1136,7 @@ export function useAppSessionData({
     statsError,
     onchainBondMap,
     onchainTokenMap,
+    protocolFeeConfig,
     paymentRiskConfig,
     takerFeeBps,
     tokenDecimalsMap,

@@ -16,6 +16,7 @@ import { deriveTradeTimeline, estimateBleeding } from './app/contexts/trade-room
 import { readProtocolConfig } from './app/contexts/admin/adminChainConfig';
 import { createMockProtocolConfigReader } from './dev/mocks/mockAdminFetch';
 import { labTokenSymbols } from './dev/fixtures/adminFixtures';
+import { LAB_TOKEN_ADDRESSES, LAB_BOND_MAP, LAB_FEE_CONFIG } from './dev/fixtures/makerOrderFixtures';
 import { isUiLabEnabled } from './dev/ui-lab/isUiLabEnabled';
 import { createMockAdminFetch } from './dev/mocks/mockAdminFetch';
 import { createSetterAction, createSettlementContractMocks, createTradeRoomHandlers } from './dev/mocks/mockActions';
@@ -286,6 +287,7 @@ function App() {
     statsError,
     onchainBondMap,
     onchainTokenMap,
+    protocolFeeConfig,
     paymentRiskConfig,
     takerFeeBps,
     tokenDecimalsMap,
@@ -622,10 +624,11 @@ function App() {
     if (showProfileModal && (!isConnected || !isAuthenticated)) {
       setShowProfileModal(false);
     }
-    if (showMakerModal && (!isConnected || !isAuthenticated)) {
+    // Lab order-creation scenarios preview the modal without a wallet session.
+    if (showMakerModal && (!isConnected || !isAuthenticated) && activeScenarioCategory !== 'makerOrder') {
       setShowMakerModal(false);
     }
-  }, [authChecked, showProfileModal, showMakerModal, isConnected, isAuthenticated]);
+  }, [authChecked, showProfileModal, showMakerModal, isConnected, isAuthenticated, activeScenarioCategory]);
 
 
   const {
@@ -665,6 +668,8 @@ function App() {
     hasSignedSessionForActiveWallet,
   }), [loginWithSIWE, handleAuthAction, handleLogoutAndDisconnect, requireSignedSessionForActiveWallet, hasSignedSessionForActiveWallet]);
 
+  const labMakerScenario = activeScenarioCategory === 'makerOrder' ? activeScenarioPayload : null;
+
   const {
     makerTier,
     setMakerTier,
@@ -692,7 +697,7 @@ function App() {
     requireSignedSessionForActiveWallet,
     setShowMakerModal,
     showToast,
-    supportedTokens: SUPPORTED_TOKENS,
+    supportedTokens: labMakerScenario ? { USDT: { address: LAB_TOKEN_ADDRESSES.USDT }, USDC: { address: LAB_TOKEN_ADDRESSES.USDC } } : SUPPORTED_TOKENS,
     address,
     lang,
     isContractLoading,
@@ -711,8 +716,17 @@ function App() {
     payoutProfileDraft,
     paymentRiskConfig,
     authenticatedFetch,
-    onchainTokenMap,
+    onchainTokenMap: labMakerScenario?.tokenMap || onchainTokenMap,
   });
+
+  // [TR] Lab "Emir oluşturma": formu senaryo değerleriyle doldurup modalı açar (kontrat çağrısı yapılmaz).
+  React.useEffect(() => {
+    if (!labMakerScenario) return;
+    const f = labMakerScenario.form || {};
+    setMakerSide(f.makerSide); setMakerToken(f.makerToken); setMakerAmount(f.makerAmount); setMakerRate(f.makerRate);
+    setMakerMinLimit(f.makerMinLimit); setMakerFiat(f.makerFiat); setMakerTier(f.makerTier);
+    setShowMakerModal(true);
+  }, [labMakerScenario]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const orderForm = React.useMemo(() => ({
     makerTier,
@@ -1101,7 +1115,7 @@ function App() {
     tableBond:       lang === 'TR' ? 'Bond' : 'Bond',
     tableAction:     lang === 'TR' ? 'İşlem' : 'Action',
     buyBtn:          lang === 'TR' ? 'Satın Al' : 'Buy',
-    createAd:        lang === 'TR' ? '+ Order Aç' : '+ Create Order',
+    createAd:        lang === 'TR' ? 'Emir oluştur' : 'Create order',
   };
 
   // ═══════════════════════════════════════════
@@ -1304,12 +1318,14 @@ function App() {
     setMakerMaxLimit,
     makerFiat,
     setMakerFiat,
-    onchainBondMap,
-    onchainTokenMap,
+    // [TR] Lab "Emir oluşturma" senaryosunda kontrat verileri senaryodan gelir; gönderim yalnız günlüğe yazılır.
+    onchainBondMap: labMakerScenario ? LAB_BOND_MAP : onchainBondMap,
+    onchainTokenMap: labMakerScenario ? labMakerScenario.tokenMap : onchainTokenMap,
+    protocolFeeConfig: labMakerScenario ? LAB_FEE_CONFIG : protocolFeeConfig,
     paymentRiskConfig,
-    userReputation,
-    SUPPORTED_TOKEN_ADDRESSES,
-    handleCreateOrder,
+    userReputation: labMakerScenario ? labMakerScenario.reputation : userReputation,
+    SUPPORTED_TOKEN_ADDRESSES: labMakerScenario ? LAB_TOKEN_ADDRESSES : SUPPORTED_TOKEN_ADDRESSES,
+    handleCreateOrder: labMakerScenario ? devScenarioActions?.setter('create_order') : handleCreateOrder,
     makerValidationError,
     makerPayoutRiskEntry,
     isCreateTemporarilyDisabledByRisk,

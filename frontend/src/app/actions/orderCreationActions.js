@@ -31,7 +31,10 @@ export const resolveTierMaxAmounts = (tokenPolicy) => {
   const out = {};
   for (let tier = 0; tier < 4; tier += 1) {
     const value = Number(limits[tier]) / 10 ** decimals;
-    out[tier] = Number.isFinite(value) && value > 0 ? value : MAKER_TIER_MAX_AMOUNTS[tier];
+    // [TR] Kontrat: tierMax == 0 → limit yok (_createOrder yalnız tierMax > 0 iken kontrol eder).
+    //      Eskiden 0 varsayılan küçük limite düşüyor ve geçerli emirleri engelliyordu.
+    // [EN] On-chain 0 means "no cap"; it used to fall back to the small default and block valid orders.
+    out[tier] = Number.isFinite(value) && value > 0 ? value : (Number(limits[tier]) === 0 ? Infinity : MAKER_TIER_MAX_AMOUNTS[tier]);
   }
   return out;
 };
@@ -43,6 +46,9 @@ export const getMakerOrderValidationError = ({
   makerMinLimit,
   makerMaxLimit,
   makerFiat,
+  makerSide = 'SELL_CRYPTO',
+  makerToken = 'USDT',
+  tokenPolicy = null,
   tierMaxAmounts = MAKER_TIER_MAX_AMOUNTS,
   lang = 'EN',
 }) => {
@@ -53,12 +59,17 @@ export const getMakerOrderValidationError = ({
   const totalFiatValue = cryptoAmtNum * rateNum;
   const tierMax = tierMaxAmounts?.[makerTier];
 
+  // [TR] Kontrat token yön politikası (getTokenConfig): kapalı yön TokenDirectionNotAllowed ile revert eder.
+  // [EN] Contract token direction policy; a closed direction reverts with TokenDirectionNotAllowed.
+  if (tokenPolicy && tokenPolicy.supported === false) return lang === 'TR' ? `${makerToken} şu an kontratta desteklenmiyor.` : `${makerToken} is not supported by the contract right now.`;
+  if (tokenPolicy && makerSide === 'SELL_CRYPTO' && tokenPolicy.allowSellOrders === false) return lang === 'TR' ? `${makerToken} için satış emri şu an kapalı.` : `Sell orders are closed for ${makerToken}.`;
+  if (tokenPolicy && makerSide === 'BUY_CRYPTO' && tokenPolicy.allowBuyOrders === false) return lang === 'TR' ? `${makerToken} için alış emri şu an kapalı.` : `Buy orders are closed for ${makerToken}.`;
   if (!makerAmount || cryptoAmtNum <= 0) return lang === 'TR' ? 'Order miktarını giriniz.' : 'Enter order amount.';
   if (makerTier < 4 && Number.isFinite(tierMax) && cryptoAmtNum > tierMax) {
     const formatted = tierMax.toLocaleString(lang === 'TR' ? 'tr-TR' : 'en-US', { maximumFractionDigits: 2 });
     return lang === 'TR'
-      ? `Tier ${makerTier} maksimum order limiti ${formatted} USDT/USDC.`
-      : `Tier ${makerTier} max order limit is ${tierMax} USDT/USDC.`;
+      ? `Tier ${makerTier} maksimum emir limiti ${formatted} ${makerToken}.`
+      : `Tier ${makerTier} max order limit is ${formatted} ${makerToken}.`;
   }
   if (!makerRate || rateNum <= 0) return lang === 'TR' ? 'Kur fiyatını giriniz.' : 'Enter exchange rate.';
   // [TR] Min limit opsiyoneldir (boşsa emir tek seferde dolar). Max limit kontratta karşılığı olmayan
@@ -109,6 +120,7 @@ export const buildCreateOrderAction = ({
   paymentRiskConfig,
   authenticatedFetch = null,
   tierMaxAmounts = MAKER_TIER_MAX_AMOUNTS,
+  tokenPolicy = null,
 }) => async () => {
   if (!requireSignedSessionForActiveWallet()) return;
 
@@ -123,7 +135,7 @@ export const buildCreateOrderAction = ({
     makerFiat,
   } = formState;
 
-  const validationError = getMakerOrderValidationError({ ...formState, tierMaxAmounts, lang });
+  const validationError = getMakerOrderValidationError({ ...formState, tierMaxAmounts, tokenPolicy, lang });
   if (validationError) {
     showToast(validationError, 'error');
     return;
