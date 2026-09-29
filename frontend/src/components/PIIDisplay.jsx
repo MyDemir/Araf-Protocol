@@ -129,16 +129,13 @@ export default function PIIDisplay({ tradeId, lang = 'tr', getSafeTelegramUrl, a
   if (!revealed) {
     return (
       <div className="bg-surface p-4 rounded-xl border border-borderStrong space-y-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-textMuted">
-            🛡️ {t.sectionTitle}
-          </p>
-          <h3 className="mt-1 text-base font-bold text-textPrimary leading-snug">{t.lockedTitle}</h3>
-        </div>
-
-        <div className="bg-elevated rounded-lg p-3 flex items-start gap-3 border border-borderSubtle">
+        {/* [TR] Kilitli görünüm tek başlık + tek satır; aynı mesajı veren kutu ve alt başlık birleştirildi. */}
+        <div className="flex items-start gap-3">
           <span className="text-2xl leading-none" aria-hidden="true">🔒</span>
-          <p className="text-sm text-textSecondary leading-relaxed">{t.lockedSub}</p>
+          <div className="min-w-0">
+            <h3 className="text-sm font-bold text-textPrimary leading-snug">{t.lockedTitle}</h3>
+            <p className="text-xs text-textMuted leading-relaxed">{t.lockedSub}</p>
+          </div>
         </div>
 
         {/* HTTP uyarısı — ORTA-15 */}
@@ -171,7 +168,7 @@ export default function PIIDisplay({ tradeId, lang = 'tr', getSafeTelegramUrl, a
           ) : t.revealBtn}
         </button>
 
-        <p className="text-center text-xs text-textMuted leading-relaxed">{t.disclaimer}</p>
+        <p className="text-center text-[11px] text-textMuted leading-relaxed">{t.disclaimer}</p>
       </div>
     );
   }

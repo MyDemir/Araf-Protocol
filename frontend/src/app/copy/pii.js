@@ -1,9 +1,9 @@
 export const piiCopy = {
   tr: {
     sectionTitle: 'Karşı taraf ödeme bilgileri',
-    lockedTitle: 'Ödeme profili ve iletişim güvenli şekilde kilitli',
-    lockedSub: 'Bilgileri yalnızca gerekli olduğunda doğrulayarak açın.',
-    revealBtn: '🔓 Secure payment details göster',
+    lockedTitle: 'Karşı tarafın ödeme bilgileri',
+    lockedSub: 'Ödemeyi bu hesaba yapın. Bilgiler şifreli.',
+    revealBtn: '🔓 Ödeme bilgilerini göster',
     revealBtnLoading: 'Doğrulanıyor...',
     copyIban: '📋 IBAN Kopyala',
     copyRouting: '📋 Routing Kopyala',
@@ -27,7 +27,7 @@ export const piiCopy = {
   en: {
     sectionTitle: 'Secure payment details',
     lockedTitle: 'Payment profile and contact are securely locked',
-    lockedSub: 'Reveal only when you need the details for this trade.',
+    lockedSub: 'Pay to this account. Details are encrypted.',
     revealBtn: '🔓 Reveal secure payment details',
     revealBtnLoading: 'Verifying...',
     copyIban: '📋 Copy IBAN',

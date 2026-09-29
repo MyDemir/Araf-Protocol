@@ -13,7 +13,7 @@ import { getOrderSideCopy } from './orderUiModel';
 import { mapResolutionTypeLabel } from './useAppSessionData';
 import TradeRoomPage from './contexts/trade-room/TradeRoomPage';
 import ThemeToggle from './shell/ThemeToggle';
-import { buildTradeRoomPanelCallbacks, getBurnExpiredDeadlinePassed, getPaymentWindowExpired } from './contexts/trade-room/tradeRoomPanelActions';
+import { buildTradeRoomPanelCallbacks, getBurnExpiredDeadlinePassed, getPaymentWindowExpired, PAYMENT_WINDOW_MS } from './contexts/trade-room/tradeRoomPanelActions';
 
 // [TR] App ana görünüm/render katmanı burada tutulur.
 // [EN] Main application view/render layer lives here.
@@ -648,9 +648,10 @@ export const buildAppViews = (ctx) => {
     const feeBreakdownText = lang === 'TR'
       ? `Kilitli ${fmt(rawCryptoAmt)} ${asset} · Ücret ${fmt(protocolFee, 4)} · Alıcıya net ${fmt(netAmount)} ${asset}`
       : `Locked ${fmt(rawCryptoAmt)} ${asset} · Fee ${fmt(protocolFee, 4)} · Net to taker ${fmt(netAmount)} ${asset}`;
-    const counterpartyDisplay = isMaker
-      ? (activeTrade?.takerFull ? formatAddress(activeTrade.takerFull) : '—')
-      : (activeTrade?.makerFull ? formatAddress(activeTrade.makerFull) : (activeTrade?.maker || '—'));
+    // [TR] Karşı taraf adresi her zaman kısaltılır; ham 42 karakterlik adres mobilde taşıyordu.
+    // [EN] Counterparty address is always shortened; the raw 42-char address overflowed on mobile.
+    const counterpartyRaw = isMaker ? activeTrade?.takerFull : (activeTrade?.makerFull || activeTrade?.maker);
+    const counterpartyDisplay = counterpartyRaw && String(counterpartyRaw).length > 14 ? formatAddress(counterpartyRaw) : (counterpartyRaw || '—');
     const fiatTotal = Number(activeTrade?.max) > 0 && activeTrade?.fiat ? `${fmt(activeTrade.max)} ${activeTrade.fiat}` : null;
     const hasOnchainTradeId = activeTrade?.onchainId !== null && activeTrade?.onchainId !== undefined && activeTrade?.onchainId !== '';
     const missingOnchainIdReason = lang === 'TR' ? 'On-chain trade ID bulunamadı.' : 'Missing on-chain trade ID.';
@@ -658,6 +659,14 @@ export const buildAppViews = (ctx) => {
     const handleBurnExpired = ctx.handleBurnExpired || ctx.tradeRoomActions?.handleBurnExpired;
     const paymentWindowExpired = getPaymentWindowExpired({ activeTrade, roomState });
     const handleExpirePaymentWindow = ctx.handleExpirePaymentWindow || ctx.tradeRoomActions?.handleExpirePaymentWindow;
+    const paymentWindowTimer = (() => {
+      if (!activeTrade?.lockedAt) return null;
+      const left = new Date(activeTrade.lockedAt).getTime() + PAYMENT_WINDOW_MS - Date.now();
+      if (!Number.isFinite(left)) return null;
+      if (left <= 0) return { isFinished: true };
+      const sec = Math.floor(left / 1000);
+      return { days: Math.floor(sec / 86400), hours: Math.floor((sec % 86400) / 3600), minutes: Math.floor((sec % 3600) / 60), seconds: sec % 60, isFinished: false };
+    })();
     const tradeActionCallbacks = ctx.devTradeActionCallbacks || buildTradeRoomPanelCallbacks({
       lang,
       activeTrade,
@@ -677,6 +686,8 @@ export const buildAppViews = (ctx) => {
       handleAutoRelease,
       handleProposeCancel,
       handleBurnExpired,
+      handleExpirePaymentWindow,
+      paymentWindowExpired,
     });
     const challengedDetails = isChallenged ? (() => {
       const riskLines = bleedingAmounts
@@ -707,6 +718,7 @@ export const buildAppViews = (ctx) => {
       chargebackAccepted,
       paymentIpfsHash,
       timers: {
+        paymentWindow: paymentWindowTimer,
         gracePeriod: gracePeriodTimer,
         makerPing: makerPingTimer,
         makerChallengePing: makerChallengePingTimer,
@@ -720,10 +732,11 @@ export const buildAppViews = (ctx) => {
       isPaused,
       lang,
       canBurnExpired: burnExpiredDeadlinePassed,
+      paymentWindowExpired,
       challengedDetails,
     };
     const tradeDecisionInput = ctx.devTradeDecisionInput
-      ? { ...ctx.devTradeDecisionInput, challengedDetails: ctx.devTradeDecisionInput.challengedDetails || challengedDetails }
+      ? { ...ctx.devTradeDecisionInput, lang, challengedDetails: ctx.devTradeDecisionInput.challengedDetails || challengedDetails }
       : defaultTradeDecisionInput;
 
     return (
@@ -734,24 +747,23 @@ export const buildAppViews = (ctx) => {
             [EN] Active trade room also shows the same informational-only reference widget. */}
         <ReferenceRateTicker lang={lang} />
 
-        <div className={`border rounded-2xl p-5 md:p-8 shadow-2xl transition-colors duration-700 ${isChallenged ? 'bg-surface border-danger/40' : 'bg-surface border-borderSubtle'}`}>
-          <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-8 border-b border-borderSubtle pb-6 gap-4 md:gap-0">
-            <div>
-              <p className="text-textMuted text-xs tracking-widest mb-1">{lang === 'TR' ? 'İŞLEM' : 'TRADE'} #{activeTrade?.onchainId ?? '—'}</p>
-              <h2 className="max-w-full min-w-0 text-2xl font-bold text-textPrimary flex flex-col sm:flex-row items-start sm:items-center gap-3">
-                <span>{fmt(rawCryptoAmt)} {asset}{fiatTotal && <span className="block text-sm font-medium text-textMuted">≈ {fiatTotal}</span>}</span>
-                <span className={`text-xs px-3 py-1 rounded-full border ${isChallenged ? 'bg-danger/10 text-danger border-danger/40' : 'bg-brand/10 text-brand border-brand/40'}`}>{getStateLabel(roomState, lang)}</span>
-              </h2>
+        <div className={`border rounded-2xl p-4 md:p-6 shadow-xl transition-colors duration-700 ${isChallenged ? 'bg-surface border-danger/40' : 'bg-surface border-borderSubtle'}`}>
+          <div className="flex items-start justify-between gap-3 mb-4 border-b border-borderSubtle pb-4">
+            <div className="min-w-0">
+              <p className="text-textMuted text-[11px] tracking-widest mb-1">{lang === 'TR' ? 'İŞLEM' : 'TRADE'} #{activeTrade?.onchainId ?? '—'}</p>
+              <h2 className="text-2xl font-bold text-textPrimary leading-tight">{fmt(rawCryptoAmt)} {asset}</h2>
+              {fiatTotal && <p className="text-sm font-medium text-textMuted">≈ {fiatTotal}</p>}
             </div>
-            <div className="text-left md:text-right w-full md:w-auto border-t border-borderSubtle md:border-none pt-4 md:pt-0">
-              <p className="text-textMuted text-xs">{lang === 'TR' ? 'KARŞI TARAF' : 'COUNTERPARTY'}</p>
-              <p className="text-textPrimary font-mono">{counterpartyDisplay}</p>
+            <div className="shrink-0 text-right">
+              <span className={`inline-block text-xs px-3 py-1 rounded-full border ${isChallenged ? 'bg-danger/10 text-danger border-danger/40' : 'bg-brand/10 text-brand border-brand/40'}`}>{getStateLabel(roomState, lang)}</span>
+              <p className="mt-1.5 text-[11px] text-textMuted">{lang === 'TR' ? 'Karşı taraf' : 'Counterparty'}</p>
+              <p className="text-xs text-textPrimary font-mono">{counterpartyDisplay}</p>
             </div>
           </div>
 
           {/* Eriyen emanet görsel barı — yalnızca CHALLENGED state'inde gösterilir */}
           {isChallenged && (
-            <div className="mb-8 md:mb-10 p-4 md:p-6 bg-surface border border-danger/40 rounded-xl relative overflow-hidden">
+            <div className="mb-4 p-4 bg-surface border border-danger/40 rounded-xl relative overflow-hidden">
               <div className="flex justify-between text-xs font-bold mb-3">
                 <span className="text-red-500">{lang === 'TR' ? 'İLAN SAHİBİ TEMİNATI' : 'MAKER BOND'}</span>
                 <span className="text-orange-500">{lang === 'TR' ? 'ALICI TEMİNATI' : 'TAKER BOND'}</span>
@@ -781,283 +793,107 @@ export const buildAppViews = (ctx) => {
                         <div className="absolute left-0 top-1/2 -translate-y-1/2 w-4 h-4 bg-orange-500 rounded-full blur-sm"></div>
                       </div>
                     </div>
-                    <div className="flex flex-col mt-4 space-y-2 relative">
-                      <div className="w-full flex justify-between">
-                        <span className="text-red-500/50 text-[10px] font-mono">{bleedingTimer.isFinished ? '00:00:00' : `${String(bleedingTimer.hours).padStart(2,'0')}:${String(bleedingTimer.minutes).padStart(2,'0')}:${String(bleedingTimer.seconds).padStart(2,'0')}`}</span>
-                        <span className="text-orange-500/50 text-[10px] font-mono">{bleedingTimer.isFinished ? '00:00:00' : `${String(bleedingTimer.hours).padStart(2,'0')}:${String(bleedingTimer.minutes).padStart(2,'0')}:${String(bleedingTimer.seconds).padStart(2,'0')}`}</span>
-                      </div>
-                      <div className="text-center w-full">
-                        <p className="text-red-400 font-bold text-sm drop-shadow-[0_0_5px_red]">{lang === 'TR' ? 'Yakılan Toplam:' : 'Total Burned:'} {formatTokenAmountFromRaw(decayedTotal, tradeTokenDecimals)} {asset} 🔥</p>
-                      </div>
-                    </div>
+                    {/* [TR] Süreler aşağıdaki "Süreler" kartında; burada yalnız eriyen toplam gösterilir. */}
+                    <p className="mt-3 text-center text-sm font-bold text-danger">🔥 {lang === 'TR' ? 'Eriyen toplam' : 'Total burned'}: {formatTokenAmountFromRaw(decayedTotal, tradeTokenDecimals)} {asset}</p>
                   </>
                 );
               })()}
-              <div className="mt-8 flex items-center justify-center gap-2 text-xs text-textMuted">
-                <span className="text-emerald-500">🔒</span> {lang === 'TR' ? 'Ana Para Güvende:' : 'Principal Safe:'} <span className="font-mono text-emerald-400">{principalProtectionTimer.isFinished ? 'Bitti' : `${principalProtectionTimer.days}g ${principalProtectionTimer.hours}s`}</span>
-              </div>
             </div>
           )}
 
-          <TradeRoomPage decisionInput={tradeDecisionInput} actionCallbacks={tradeActionCallbacks}>
-            <div className="space-y-6">
-              <SettlementProposalCard
-                activeTrade={activeTrade}
-                userRole={userRole}
-                address={address}
-                lang={lang}
-                authenticatedFetch={authenticatedFetch}
-                settlementContractFns={settlementContractFns}
-                fetchMyTrades={fetchMyTrades}
-                showToast={showToast}
-                isContractLoading={isContractLoading}
-                setIsContractLoading={setIsContractLoading}
-              />
-            {/* LOCKED state aksiyon paneli */}
-            {roomState === 'LOCKED' && (
-              <div className="text-center py-6">
-                <div className="w-14 h-14 bg-blue-500/10 text-blue-500 border border-blue-500/20 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl">🔒</div>
-                <h2 className="text-xl md:text-2xl font-bold text-textPrimary mb-2">{lang === 'TR' ? `${asset} kilitlendi` : `${asset} locked`}</h2>
-                {isTaker ? (
-                  <div className="w-full max-w-sm mt-4 space-y-3 mx-auto">
-                    <div className="relative">
-                      <input type="file" onChange={handleFileUpload} accept="image/*,.pdf" className="hidden" id="receipt-upload" />
-                      <label htmlFor="receipt-upload" className="w-full bg-surface text-textPrimary px-4 py-3 rounded-xl border border-borderStrong mb-4 text-sm flex items-center justify-center cursor-pointer hover:border-blue-500/50 transition">
-                        {paymentIpfsHash ? (lang === 'TR' ? '✅ Yüklendi (Hash: ' + paymentIpfsHash.slice(0,8) + '...)' : '✅ Uploaded') : (lang === 'TR' ? '📎 Dekont Yükle' : '📎 Upload Receipt')}
-                      </label>
-                      <p className="text-xs text-textMuted mt-1 mb-4 text-center">
-                        {lang === 'TR' ? '🔒 Şifrelenir, işlem bitince silinir.' : '🔒 Encrypted, deleted after the trade.'}
-                      </p>
-                    </div>
-                    <button onClick={handleReportPayment} disabled={isContractLoading || !paymentIpfsHash.trim()} className={`w-full py-3 rounded-xl font-bold transition ${isContractLoading || !paymentIpfsHash.trim() ? 'bg-elevated text-textMuted cursor-not-allowed border border-borderStrong' : 'bg-blue-600 hover:bg-blue-500 text-white shadow-[0_0_15px_rgba(37,99,235,0.2)]'}`}>
-                      {isContractLoading ? '⏳...' : (lang === 'TR' ? '✅ Ödemeyi Bildirdim' : '✅ Report Payment')}
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center">
-                    <p className="text-textMuted mb-6 text-sm animate-pulse">{lang === 'TR' ? 'Alıcının transferi bekleniyor...' : 'Waiting for buyer transfer...'}</p>
-                    {isMaker && (
-                      <div className="w-full max-w-md mt-2 mx-auto p-4 bg-surface border border-danger/30 rounded-xl text-left">
-                        <p className="text-xs text-red-400 font-bold mb-1">⚠️ {lang === 'TR' ? 'ÜÇGEN DOLANDIRICILIK ÖNLEMİ' : 'TRIANGULATION FRAUD PREVENTION'}</p>
-                        <p className="text-sm text-textSecondary mb-2">
-                          {lang === 'TR' ? 'Alıcının Doğrulanmış İsmi:' : "Buyer's Verified Name:"} <span className="font-bold text-textPrimary">{takerName || (lang === 'TR' ? 'Yükleniyor...' : 'Loading...')}</span>
-                        </p>
-                        <p className="text-xs text-textMuted leading-snug">
-                          {lang === 'TR' ? 'Gelen paranın gönderici ismi ile bu ismin KESİNLİKLE eşleştiğini teyit ediniz. Eşleşmiyorsa parayı iade edip işlemi iptal edin.' : 'Ensure the sender name on the payment EXACTLY matches this name. If not, refund and cancel.'}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                )}
+          {(() => {
+            // [TR] Önce görülmesi gereken: alıcı için satıcının ödeme bilgileri (nereye ödeyeceği).
+            // [EN] Must-see-first: for the taker, the maker's payment details (where to pay).
+            const showTakerPii = isTaker && ['LOCKED', 'PAID'].includes(roomState);
+            const beforeActions = showTakerPii ? (
+              <div className="mb-3 border border-borderSubtle rounded-xl overflow-hidden bg-surface p-1">
+                <PIIDisplay tradeId={activeTrade?.id} lang={lang} getSafeTelegramUrl={getSafeTelegramUrl} authenticatedFetch={authenticatedFetch} />
               </div>
-            )}
+            ) : null;
 
-            {/* PAID state aksiyon paneli */}
-            {roomState === 'PAID' && (
-              <div className="text-center py-4 flex flex-col items-center">
-                <h2 className="text-lg md:text-xl font-bold text-emerald-400 mb-2">{lang === 'TR' ? 'Ödeme Bildirildi' : 'Payment Reported'}</h2>
-                <div className="w-full max-w-sm bg-surface border border-borderSubtle rounded-2xl p-4 mb-6">
-                  <p className="text-xs text-textMuted mb-1 uppercase font-bold">Grace Period</p>
-                  <div className="text-4xl sm:text-5xl font-mono font-bold text-textPrimary tracking-wider">
-                    {gracePeriodTimer.isFinished ? '00:00:00' : `${String(gracePeriodTimer.hours + gracePeriodTimer.days * 24).padStart(2, '0')}:${String(gracePeriodTimer.minutes).padStart(2, '0')}:${String(gracePeriodTimer.seconds).padStart(2, '0')}`}
-                  </div>
-                </div>
-                {isTaker ? (
-                  <div className="w-full max-w-md flex flex-col items-center">
-                    <p className="text-textSecondary text-sm mb-4">{lang === 'TR' ? 'Satıcı onayı bekleniyor.' : 'Waiting for maker release.'}</p>
-                    {(() => {
-                      if (!activeTrade?.paidAt) return null;
-                      if (activeTrade.pingedAt) {
-                        const autoReleaseAt = new Date(new Date(activeTrade.pingedAt).getTime() + 24 * 3600 * 1000);
-                        const canAutoRelease = new Date() > autoReleaseAt;
-                        if (canAutoRelease) {
-                          return (
-                            <div className="w-full mt-2 flex flex-col items-center">
-                              <p className="text-xs text-red-400 font-bold mb-1 text-center leading-snug">
-                                {lang === 'TR' ? 'Dikkat: Satıcı pasif kaldığı için her iki tarafın teminatından %2 ihmal cezası kesilecektir (satıcı: %2, alıcı: %2).' : 'Warning: Due to maker inaction, a 2% negligence penalty will be deducted from both parties\' bonds (Maker: 2%, Taker: 2%).'}
-                              </p>
-                              <button onClick={() => handleAutoRelease(activeTrade.onchainId)} disabled={isContractLoading} className="w-full text-sm font-bold py-3 rounded-xl transition bg-emerald-600/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500 hover:text-white shadow-lg">
-                                {isContractLoading ? '...' : (lang === 'TR' ? '✅ Fonları Otomatik Serbest Bırak' : '✅ Auto-Release Funds')}
-                              </button>
-                            </div>
-                          );
-                        }
-                        return <div className="mt-2 text-center text-xs text-emerald-400 bg-emerald-900/20 p-3 rounded-lg border border-emerald-900/50 w-full"><p className="font-bold">✓ {lang === 'TR' ? 'Satıcı Uyarıldı' : 'Maker Pinged'}</p></div>;
-                      }
-                      const gracePeriodEnds = new Date(new Date(activeTrade.paidAt).getTime() + 48 * 3600 * 1000);
-                      const canPing = new Date() > gracePeriodEnds;
-                      if (activeTrade.challengePingedAt) {
-                        return (
-                          <div className="w-full mt-2 flex flex-col items-center">
-                            <button disabled className="w-full text-sm font-bold py-3 rounded-xl transition bg-elevated text-textMuted border border-borderStrong cursor-not-allowed">
-                              {lang === 'TR' ? '🔔 Satıcıyı Uyar' : '🔔 Ping Maker'}
-                            </button>
-                            <p className="text-xs text-red-400 mt-2 text-center leading-snug">
-                              ⚠️ {lang === 'TR' ? 'Satıcı itiraz uyarı sürecini başlattı. Artık otomatik serbest bırakma yolunu kullanamazsınız.' : 'Maker has initiated the challenge warning process. You can no longer use Auto-Release.'}
-                            </p>
-                          </div>
-                        );
-                      }
-                      return <button onClick={() => handlePingMaker(activeTrade.onchainId)} disabled={!canPing || isContractLoading} className={`w-full mt-2 text-sm font-bold py-3 rounded-xl transition ${!canPing || isContractLoading ? 'bg-elevated text-textMuted border border-borderStrong cursor-not-allowed' : 'bg-orange-600/20 text-orange-400 border border-orange-500/40 hover:bg-orange-500 hover:text-white'}`}>{isContractLoading ? '...' : canPing ? (lang === 'TR' ? '🔔 Satıcıyı Uyar' : '🔔 Ping Maker') : (lang === 'TR' ? '⏱️ Onay Bekleniyor' : '⏱️ Awaiting Confirmation')}</button>;
-                    })()}
-                  </div>
-                ) : (
-                  <div className="w-full max-w-md flex flex-col space-y-4">
-                    {!activeTrade?.challengePingedAt && (
-                      <button
-                        onClick={handleChallenge}
-                        disabled={!canMakerStartChallengeFlow || isContractLoading}
-                        className={`w-full py-3 rounded-xl font-bold transition ${!canMakerStartChallengeFlow || isContractLoading ? 'bg-elevated text-textMuted border border-borderStrong cursor-not-allowed' : 'bg-orange-600/20 text-orange-400 border border-orange-500/40 hover:bg-orange-500 hover:text-white'}`}
-                      >
-                        {isContractLoading ? '...' : (!canMakerStartChallengeFlow ? (lang === 'TR' ? '⏱️ Uyarı için 24 saat bekleyin' : '⏱️ Wait 24h to ping buyer') : (lang === 'TR' ? '🔔 Alıcıyı Uyar (Ödeme Gelmedi)' : '🔔 Ping Buyer (No Payment)'))}
-                      </button>
-                    )}
-                    {activeTrade?.challengePingedAt && (
-                      <button
-                        onClick={handleChallenge}
-                        disabled={!canMakerChallenge || isContractLoading}
-                        className={`w-full py-3 rounded-xl font-bold transition ${!canMakerChallenge || isContractLoading ? 'bg-elevated text-textMuted border border-borderStrong cursor-not-allowed' : 'bg-red-600/20 text-red-400 border border-red-500/40 hover:bg-red-500 hover:text-white'}`}
-                      >
-                        {isContractLoading ? '...' : (!canMakerChallenge ? (lang === 'TR' ? '⏱️ İtiraz için 24 saat bekleyin' : '⏱️ Wait 24h to challenge') : (lang === 'TR' ? '⚔️ Resmi İtiraz Başlat' : '⚔️ Open Formal Challenge'))}
-                      </button>
-                    )}
-                    <label className="flex items-start space-x-3 p-3 md:p-4 bg-surface border border-danger/30 rounded-xl cursor-pointer text-left">
-                      <input type="checkbox" checked={chargebackAccepted} onChange={(e) => handleChargebackAck(e.target.checked)} className="mt-1 w-4 h-4 accent-emerald-500 rounded bg-surface border-borderStrong" />
-                      <span className="text-xs text-textSecondary"><strong className="text-red-500">{lang === 'TR' ? 'UYARI:' : 'WARNING:'}</strong> {lang === 'TR' ? 'Paranın farklı isimli bir hesaptan gelmediğini ve Chargeback riskini anladığımı kabul ediyorum.' : 'I confirm the funds came from the correct name and understand the Chargeback risk.'}</span>
-                    </label>
-                    <div className="w-full flex flex-col gap-2">
-                      <div className="flex flex-col sm:flex-row justify-center gap-3">
-                        <button disabled={!chargebackAccepted || isContractLoading} onClick={handleRelease} className={`w-full sm:w-auto px-8 py-3 rounded-xl font-bold transition ${chargebackAccepted && !isContractLoading ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.2)]' : 'bg-elevated text-textMuted cursor-not-allowed border border-borderStrong'}`}>
-                          {isContractLoading ? (lang === 'TR' ? '⏳ İşleniyor...' : '⏳ Processing...') : (lang === 'TR' ? `Ödemeyi onayla, ${asset} gönder` : `Release ${asset}`)}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Ortak aksiyon paneli (iptal + serbest bırakma) — tüm aktif durumlarda gösterilir */}
-            {['LOCKED', 'PAID', 'CHALLENGED'].includes(roomState) && (
-              <div className="mt-6 bg-surface border border-borderSubtle rounded-xl p-4">
-                <div className="mb-3 text-center p-2 bg-elevated rounded-lg border border-borderStrong">
-                  <p className="text-[10px] text-textMuted font-mono">{feeBreakdownText}</p>
-                </div>
-                {cancelStatus === null && (
-                  <>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      {isChallenged && isMaker && (
-                        <button onClick={handleRelease} disabled={isContractLoading} className={`w-full bg-surface border border-emerald-500/30 text-emerald-500 p-3 rounded-xl font-bold text-sm transition ${isContractLoading ? 'opacity-50 cursor-not-allowed' : 'hover:bg-emerald-500 hover:text-white'}`}>
-                          🤝 {lang === 'TR' ? 'Ödemeyi Onayla' : 'Release'}
-                        </button>
-                      )}
-                      <button onClick={() => {
-                        const msg = roomState === 'LOCKED'
-                          ? (lang === 'TR' ? `${getStateLabel('LOCKED', lang)} aşamasında (henüz ödeme bildirilmeden) iptaller kesintisizdir. Onaylıyor musunuz?` : `Cancel in ${getStateLabel('LOCKED', lang)} state has zero fees. Confirm?`)
-                          : (lang === 'TR' ? 'Karşılıklı iptal durumunda standart protokol ücreti kesilecektir. Onaylıyor musunuz?' : 'Standard protocol fees will be deducted upon mutual cancellation. Confirm?');
-                        if (window.confirm(msg)) handleProposeCancel();
-                      }} className={`w-full bg-surface border border-orange-500/30 text-orange-500 p-3 rounded-xl font-bold text-sm hover:bg-orange-500 hover:text-white transition ${!(isChallenged && isMaker) ? 'sm:col-span-2' : ''}`}>
-                        ↩️ {lang === 'TR' ? 'İptal Teklif Et' : 'Propose Cancel'}
-                      </button>
-                    </div>
-                    <p className="text-xs text-textMuted text-center mt-3">
-                      {roomState === 'LOCKED'
-                        ? (lang === 'TR' ? 'Ödeme bildirilmeden iptal ücretsizdir.' : 'Cancelling before payment is free.')
-                        : (lang === 'TR' ? 'İptalde protokol ücreti kesilir.' : 'A protocol fee applies on cancel.')}
-                    </p>
-                  </>
-                )}
-                {cancelStatus === 'proposed_by_me' && (
-                  <div className="py-3 px-4 bg-orange-900/10 border border-orange-500/20 rounded-xl flex items-center justify-center gap-3">
-                    <div className="w-4 h-4 border-2 border-orange-400 border-t-transparent rounded-full animate-spin shrink-0"></div>
-                    <span className="text-orange-400 font-bold text-sm">
-                      {lang === 'TR' ? 'İptal teklifiniz gönderildi. Karşı tarafın onayı bekleniyor...' : 'Cancel proposal sent. Awaiting counterparty approval...'}
-                    </span>
-                  </div>
-                )}
-                {cancelStatus === 'proposed_by_other' && (
-                  <div>
-                    <p className="text-orange-400 font-bold text-sm mb-2">⚠️ {lang === 'TR' ? 'Karşı taraf iptal teklif etti.' : 'Opponent proposed cancellation.'}</p>
-                    <p className="text-xs text-textSecondary mb-3">
-                      {roomState === 'LOCKED'
-                        ? (lang === 'TR' ? `İşlem ${getStateLabel('LOCKED', lang)} aşamasında olduğu için herhangi bir kesinti yapılmayacaktır.` : `Since trade is in ${getStateLabel('LOCKED', lang)} state, no fees will be deducted.`)
-                        : (lang === 'TR' ? 'Onaylarsanız standart protokol ücreti kesilecek ve kalan fonlar iade edilecektir.' : 'If you approve, standard protocol fee will be deducted and remaining funds returned.')}
-                    </p>
-                    <div className="grid grid-cols-2 gap-3">
-                      <button onClick={handleProposeCancel} disabled={isContractLoading} className="w-full bg-orange-600 hover:bg-orange-500 text-white p-3 rounded-xl font-bold text-sm transition">
-                        {isContractLoading ? '...' : (lang === 'TR' ? 'Onayla ve İptal Et' : 'Approve Cancel')}
-                      </button>
-                      <button onClick={() => setCancelStatus(null)} className="w-full bg-elevated border border-borderStrong hover:bg-surface text-textPrimary p-3 rounded-xl font-bold text-sm transition">
-                        {lang === 'TR' ? 'Reddet' : 'Reject'}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* PII bölümü: taker şifreli banka bilgilerini görür, maker ödeme beklediğini bilir */}
-            {isTaker && !['RESOLVED', 'CANCELED', 'BURNED'].includes(roomState) && (
-              <div className="border border-borderSubtle rounded-xl overflow-hidden mt-6 bg-surface p-1">
-                <PIIDisplay
-                  tradeId={activeTrade?.id}
-                  lang={lang}
-                  getSafeTelegramUrl={getSafeTelegramUrl}
-                  authenticatedFetch={authenticatedFetch}
-                />
-              </div>
-            )}
-            {isMaker && !['RESOLVED', 'CANCELED', 'BURNED'].includes(roomState) && (
-              <div className="bg-surface p-6 rounded-xl border border-borderSubtle text-center mt-6">
-                <div className="text-3xl mb-2">🏦</div>
-                <p className="text-textSecondary font-medium text-sm">{getPiiCopy(lang).waitingTitle}</p>
-                <p className="text-xs text-textMuted mt-2">{getPiiCopy(lang).waitingSub}</p>
-              </div>
-            )}
-
-            {/* Ödeme penceresi doldu — LOCKED ve 48 saati geçmiş işlemler için (maker tam iade alır) */}
-            {paymentWindowExpired && typeof handleExpirePaymentWindow === 'function' && (
-              <div className="mt-6 bg-surface border border-warning/40 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center gap-3">
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold text-textPrimary">⏰ {lang === 'TR' ? 'Ödeme süresi doldu' : 'Payment window expired'}</p>
-                  <p className="text-xs text-textMuted">
-                    {lang === 'TR' ? '48 saatte ödeme bildirilmedi. Kilit çözülür, satıcı tam iade alır.' : 'No payment reported in 48h. The lock unwinds and the seller is refunded in full.'}
-                  </p>
-                </div>
-                <button
-                  onClick={handleExpirePaymentWindow}
-                  disabled={isContractLoading}
-                  className={`shrink-0 px-5 py-2.5 rounded-xl font-bold text-sm transition ${isContractLoading ? 'bg-elevated text-textMuted cursor-not-allowed border border-borderStrong' : 'bg-brand text-white hover:opacity-90'}`}>
-                  {isContractLoading ? '⏳...' : (lang === 'TR' ? 'Kilidi Çöz' : 'Unlock')}
-                </button>
-              </div>
-            )}
-
-            {/* burnExpired butonu — CHALLENGED ve 10 günü geçmiş işlemler için */}
-            {activeTrade?.onchainId && roomState === 'CHALLENGED' && (() => {
-              const burnDate = activeTrade.challengedAt;
-              if (!burnDate) return null;
-              const isExpired = new Date().getTime() - new Date(burnDate).getTime() > 10 * 24 * 3600 * 1000;
-              if (!isExpired) return null;
-              return (
-                <div className="mt-6 bg-surface border border-danger/40 rounded-xl p-4 text-center">
-                  <p className="text-red-500 text-xs font-bold mb-2">
-                    🔥 {lang === 'TR' ? '10 Gün Doldu — Süre Aşımı Yakımı Açık' : '10-Day Deadline Passed — Contract Can Now Be Burned'}
-                  </p>
-                  <p className="text-textMuted text-xs mb-3">
-                    {lang === 'TR' ? `Kilitli ${asset} ve iki tarafın teminatı hazineye aktarılır; iade yoktur. Bu çağrıyı herkes yapabilir.` : `Locked ${asset} and both bonds go to the treasury; no refunds. Anyone can call this.`}
-                  </p>
-                  <button
-                    onClick={handleBurnExpired}
-                    disabled={isContractLoading}
-                    className={`px-6 py-2.5 rounded-xl font-bold text-sm transition ${isContractLoading ? 'bg-elevated text-textMuted cursor-not-allowed border border-borderStrong' : 'bg-red-900/30 text-red-400 border border-red-800/50 hover:bg-red-600 hover:text-white'}`}>
-                    {isContractLoading ? '⏳...' : (lang === 'TR' ? '🔥 Süre Aşımı Yakımı' : '🔥 Burn Expired Trade')}
-                  </button>
+            // [TR] Birincil aksiyonun girdileri: yalnız o adımda gereken alanlar, butonun hemen üstünde.
+            // [EN] Primary action inputs: only what this step needs, right above the button.
+            let primaryInput = null;
+            if (roomState === 'LOCKED' && isTaker) {
+              primaryInput = (
+                <div>
+                  <input type="file" onChange={handleFileUpload} accept="image/*,.pdf" className="hidden" id="receipt-upload" />
+                  <label htmlFor="receipt-upload" className={`w-full px-4 py-3 rounded-lg border text-sm flex items-center justify-center gap-2 cursor-pointer transition ${paymentIpfsHash ? 'border-success/40 bg-success/10 text-success' : 'border-dashed border-borderStrong bg-elevated text-textPrimary hover:border-brand'}`}>
+                    {paymentIpfsHash ? (lang === 'TR' ? '✅ Dekont yüklendi' : '✅ Receipt uploaded') : (lang === 'TR' ? '📎 Dekont yükle' : '📎 Upload receipt')}
+                  </label>
+                  <p className="mt-1 text-[11px] text-textMuted text-center">{lang === 'TR' ? 'Şifrelenir, işlem bitince silinir.' : 'Encrypted, deleted after the trade.'}</p>
                 </div>
               );
-            })()}
-            </div>
-          </TradeRoomPage>
+            }
+            if (isMaker && ['LOCKED', 'PAID'].includes(roomState)) {
+              primaryInput = (
+                <>
+                  <div className="rounded-lg border border-warning/40 bg-warning/10 p-3">
+                    <p className="text-xs text-textMuted">{lang === 'TR' ? 'Gönderen adı bu olmalı' : 'Sender name must be'}</p>
+                    <p className="font-bold text-textPrimary">{takerName || (lang === 'TR' ? 'Yükleniyor…' : 'Loading…')}</p>
+                    <p className="mt-1 text-[11px] text-textMuted">{lang === 'TR' ? 'Eşleşmiyorsa onaylamayın; parayı iade edip iptal edin.' : 'If it does not match, do not release; refund and cancel.'}</p>
+                  </div>
+                  {roomState === 'PAID' && (
+                    <>
+                      <p className="text-[11px] font-mono text-textMuted text-center">{feeBreakdownText}</p>
+                      <label className="flex items-start gap-2 p-3 bg-elevated border border-borderSubtle rounded-lg cursor-pointer text-left">
+                        <input type="checkbox" checked={chargebackAccepted} onChange={(e) => handleChargebackAck(e.target.checked)} className="mt-0.5 w-4 h-4 accent-emerald-500" />
+                        <span className="text-xs text-textSecondary">{lang === 'TR' ? 'Parayı hesabımda gördüm, gönderen adı eşleşiyor. Ters ibraz riskini anlıyorum.' : 'I see the funds in my account and the sender name matches. I understand the chargeback risk.'}</span>
+                      </label>
+                    </>
+                  )}
+                </>
+              );
+            }
+
+            return (
+              <TradeRoomPage decisionInput={tradeDecisionInput} actionCallbacks={tradeActionCallbacks} beforeActions={beforeActions} primaryInput={primaryInput}>
+                {/* [TR] Uzlaşma kartı yalnız itiraz aşamasında anlamlı; diğer durumlarda "kullanılamaz" kutusu gürültüydü. */}
+                {roomState === 'CHALLENGED' && (
+                  <div className="mb-3">
+                    <SettlementProposalCard
+                      activeTrade={activeTrade}
+                      userRole={userRole}
+                      address={address}
+                      lang={lang}
+                      authenticatedFetch={authenticatedFetch}
+                      settlementContractFns={settlementContractFns}
+                      fetchMyTrades={fetchMyTrades}
+                      showToast={showToast}
+                      isContractLoading={isContractLoading}
+                      setIsContractLoading={setIsContractLoading}
+                    />
+                  </div>
+                )}
+
+                {/* [TR] İptal teklifi durumu: bekleyen teklif veya karşı tarafın teklifine yanıt. Teklif butonu "Diğer seçenekler"de. */}
+                {['LOCKED', 'PAID', 'CHALLENGED'].includes(roomState) && cancelStatus === 'proposed_by_me' && (
+                  <div className="mb-3 py-3 px-4 bg-warning/10 border border-warning/30 rounded-xl flex items-center gap-3">
+                    <div className="w-4 h-4 border-2 border-warning border-t-transparent rounded-full animate-spin shrink-0"></div>
+                    <span className="text-sm font-semibold text-textPrimary">{lang === 'TR' ? 'İptal teklifiniz gönderildi; karşı taraf bekleniyor.' : 'Cancel proposed; waiting for the counterparty.'}</span>
+                  </div>
+                )}
+                {['LOCKED', 'PAID', 'CHALLENGED'].includes(roomState) && cancelStatus === 'proposed_by_other' && (
+                  <div className="mb-3 p-4 bg-warning/10 border border-warning/30 rounded-xl">
+                    <p className="text-sm font-bold text-textPrimary">↩️ {lang === 'TR' ? 'Karşı taraf iptal teklif etti' : 'Counterparty proposed a cancel'}</p>
+                    <p className="text-xs text-textMuted mt-1">
+                      {roomState === 'LOCKED'
+                        ? (lang === 'TR' ? 'Ödeme bildirilmediği için kesinti yok.' : 'No fees before payment is reported.')
+                        : (lang === 'TR' ? 'Protokol ücreti kesilir, kalan iade edilir.' : 'Protocol fee applies; the rest is refunded.')}
+                    </p>
+                    <div className="grid grid-cols-2 gap-2 mt-3">
+                      <button onClick={handleProposeCancel} disabled={isContractLoading} className="w-full bg-warning text-white py-2.5 rounded-lg font-bold text-sm hover:opacity-90 transition disabled:opacity-50">
+                        {isContractLoading ? '…' : (lang === 'TR' ? 'Onayla' : 'Approve')}
+                      </button>
+                      <button onClick={() => setCancelStatus(null)} className="w-full bg-elevated border border-borderStrong text-textPrimary py-2.5 rounded-lg font-bold text-sm hover:bg-surface transition">
+                        {lang === 'TR' ? 'Yok say' : 'Dismiss'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </TradeRoomPage>
+            );
+          })()}
         </div>
       </div>
     );

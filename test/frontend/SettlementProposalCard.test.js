@@ -17,8 +17,8 @@ describe('SettlementProposalCard state normalization safety', () => {
   });
 
   it('exposes explicit non-authoritative settlement copy for TR and EN', () => {
-    expect(SETTLEMENT_NEUTRALITY_COPY.TR).toContain('kimin haklı olduğuna karar vermez');
-    expect(SETTLEMENT_NEUTRALITY_COPY.TR).toContain('CHALLENGED dispute fazında');
+    expect(SETTLEMENT_NEUTRALITY_COPY.TR).toContain('Araf karar vermez');
+    expect(SETTLEMENT_NEUTRALITY_COPY.TR).toContain('iki taraf onaylarsa');
     expect(SETTLEMENT_NEUTRALITY_COPY.EN).toContain('does not decide who is right');
     expect(SETTLEMENT_NEUTRALITY_COPY.EN).toContain('CHALLENGED dispute phase');
   });

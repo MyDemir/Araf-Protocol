@@ -22,7 +22,7 @@ describe('AppViews reference ticker placement', () => {
 
     const tradeRoomStart = source.indexOf('const renderTradeRoom = () => {');
     const tickerLine = source.indexOf('<ReferenceRateTicker lang={lang} />', tradeRoomStart);
-    const roomCardLine = source.indexOf('border rounded-2xl p-5 md:p-8 shadow-2xl', tradeRoomStart);
+    const roomCardLine = source.indexOf('border rounded-2xl p-4 md:p-6 shadow-xl', tradeRoomStart);
 
     expect(tradeRoomStart).toBeGreaterThan(-1);
     expect(tickerLine).toBeGreaterThan(tradeRoomStart);

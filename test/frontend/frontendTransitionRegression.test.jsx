@@ -323,7 +323,8 @@ describe('frontend transition regression invariants', () => {
     );
 
     expect(screen.getByText('Payment proof is needed')).toBeInTheDocument();
-    expect(screen.getByText('What to do now')).toBeInTheDocument();
+    // [TR] "What to do now" başlığı kaldırıldı; tek buton + tek satır gerekçe yeterli.
+    expect(screen.queryByText('What to do now')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Report guarded payment/i })).toBeDisabled();
     expect(screen.getAllByText(/Unsupported network\./i).length).toBeGreaterThan(0);
     expect(screen.getByTestId('trade-summary-card')).not.toHaveTextContent('tradeState');
