@@ -284,6 +284,7 @@ function App() {
     tokenDecimalsMap,
     bleedingAmounts,
     orders,
+    ordersFeedError,
     myOrders,
     setMyOrders,
     setOrders,
@@ -965,8 +966,9 @@ function App() {
     sybilStatus,
     walletAgeRemainingDays,
     activeTrade,
+    ordersFeedError,
     lang,
-  }), [isPaused, isConnected, isAuthenticated, authChecked, chainId, isSupportedChain, supportedChains, isWalletRegistered, isRegisteringWallet, handleRegisterWallet, sybilStatus, walletAgeRemainingDays, activeTrade, lang]);
+  }), [ordersFeedError, isPaused, isConnected, isAuthenticated, authChecked, chainId, isSupportedChain, supportedChains, isWalletRegistered, isRegisteringWallet, handleRegisterWallet, sybilStatus, walletAgeRemainingDays, activeTrade, lang]);
 
   const getSafeTelegramUrl = React.useCallback((handle) => {
     if (!handle) return '#';
@@ -1122,6 +1124,7 @@ function App() {
     setSearchAmount,
     filteredOrders,
     orders,
+    ordersFeedError,
     activeEscrows: effectiveActiveEscrows,
     setActiveEscrows,
     loading,

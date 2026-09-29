@@ -20,6 +20,7 @@ export const resolveSystemStatuses = ({
   sybilStatus = null,
   walletAgeRemainingDays = null,
   activeTrade = null,
+  ordersFeedError = false,
   lang = 'EN',
 }) => {
   const statuses = [];
@@ -101,6 +102,15 @@ export const resolveSystemStatuses = ({
     });
   }
 
+  if (ordersFeedError) {
+    statuses.push({
+      key: 'orders_feed_unavailable',
+      tone: 'warning',
+      title: t(lang, 'Pazar verisi alınamıyor', 'Market data unavailable'),
+      message: t(lang, 'Sunucuya ulaşılamadı; emir listesi güncel olmayabilir. Otomatik olarak yeniden denenecek.', 'The server could not be reached; the order list may be stale. Retrying automatically.'),
+    });
+  }
+
   return statuses;
 };
 
@@ -125,6 +135,7 @@ export const SystemStatusBar = ({
   sybilStatus = null,
   walletAgeRemainingDays = null,
   activeTrade = null,
+  ordersFeedError = false,
   lang = 'EN',
   children = null,
 }) => {
@@ -142,6 +153,7 @@ export const SystemStatusBar = ({
     sybilStatus,
     walletAgeRemainingDays,
     activeTrade,
+    ordersFeedError,
     lang,
   });
 

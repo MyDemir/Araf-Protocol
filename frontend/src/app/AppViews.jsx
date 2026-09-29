@@ -15,8 +15,8 @@ import TradeRoomPage from './contexts/trade-room/TradeRoomPage';
 import ThemeToggle from './shell/ThemeToggle';
 import {
   Banknote, Briefcase, CircleCheck, CirclePause, Clock, Compass, Droplets, Flame, Handshake, History, Hourglass, House,
-  Layers, LoaderCircle, Lock, Menu, Paperclip, Radar, Search, Settings, ShieldCheck, ShieldOff, Store, Swords,
-  TriangleAlert, Undo2, Unplug, UserRound, Wallet,
+  Layers, LoaderCircle, Lock, Menu, Paperclip, Plus, Radar, Search, Settings, ShieldCheck, ShieldOff, Store, Swords,
+  TriangleAlert, Undo2, Unplug, UserRound, Wallet, X,
 } from 'lucide-react';
 import { buildTradeRoomPanelCallbacks, getBurnExpiredDeadlinePassed, getPaymentWindowExpired, PAYMENT_WINDOW_MS } from './contexts/trade-room/tradeRoomPanelActions';
 
@@ -53,6 +53,7 @@ export const buildAppViews = (ctx) => {
     setSearchAmount,
     filteredOrders,
     orders,
+    ordersFeedError,
     activeEscrows,
     loading,
     SUPPORTED_TOKEN_ADDRESSES,
@@ -180,149 +181,139 @@ export const buildAppViews = (ctx) => {
   //      Filtreler, durum akordiyonu ve yeni order oluşturma butonu içerir.
   // [EN] Context sidebar — open/close state is controlled by explicit buttons and overlay.
   //      Contains filters, status accordion and create-order button.
-  const renderContextSidebar = () => (
-    <>
-      {sidebarOpen && <div className="md:hidden fixed inset-0 max-w-full overflow-x-hidden bg-black/60 z-[55] backdrop-blur-sm transition-opacity" onClick={() => setSidebarOpen(false)} />}
-      <div
-        className={`fixed md:relative inset-y-0 left-0 box-border h-dvh md:h-full max-w-full bg-shell border-r border-borderSubtle flex flex-col z-[60] md:z-40 shrink-0 overflow-x-hidden overflow-y-auto overscroll-contain transition-all duration-300 ease-in-out ${sidebarOpen ? 'w-[260px] max-w-[calc(100vw_-_env(safe-area-inset-left)_-_env(safe-area-inset-right))] pl-[calc(1.25rem_+_env(safe-area-inset-left))] pr-5 pt-[calc(1.25rem_+_env(safe-area-inset-top))] pb-[calc(1.25rem_+_env(safe-area-inset-bottom))] opacity-100' : 'w-0 p-0 opacity-0'}`}
+  const renderContextSidebar = () => {
+    const tr = lang === 'TR';
+    const settlementCounts = activeEscrowCounts?.settlement || {};
+    // [TR] Akış alınamadıysa sayaç "—": "0 emir" yanıltıcı olur.
+    const orderCount = (list) => (ordersFeedError ? '—' : list.length);
+    const proposedEscrows = activeEscrows.filter((escrow) => normalizeSettlementState(escrow?.rawTrade?.settlementProposal?.state) === 'PROPOSED');
+    const goToRoom = (escrow) => buildGoToTradeRoomAction({
+      escrow, setActiveTrade, setUserRole, setTradeState, setChargebackAccepted, setCurrentView, setSidebarOpen,
+    });
+    // [TR] Tek satır bileşeni: ikon + etiket + sayaç. Tüm drawer aynı ritimde görünür.
+    // [EN] One row primitive (icon + label + count) so every drawer row shares one rhythm.
+    const Row = ({ icon, label, count, active, tone = 'default', onClick, trailing }) => (
+      <button
+        type="button"
+        onClick={onClick}
+        aria-pressed={active ? 'true' : undefined}
+        className={`w-full h-10 flex items-center gap-3 px-3 rounded-lg text-sm font-medium transition ${active ? 'bg-elevated text-textPrimary' : 'text-textSecondary hover:text-textPrimary hover:bg-elevated/60'}`}
       >
-        <div className="relative mb-6">
-          <span className="absolute left-3 top-3 text-textMuted"><Search className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" /></span>
-          <input type="number" value={searchAmount} onChange={e => setSearchAmount(e.target.value)} placeholder={lang === 'TR' ? 'Tutar Ara...' : 'Search...'} className="w-full bg-surface text-textPrimary pl-9 pr-3 py-2.5 rounded-xl border border-borderStrong outline-none focus:border-brand/50 text-sm transition" />
-        </div>
+        <span className={`shrink-0 flex items-center justify-center w-5 ${tone === 'danger' ? 'text-danger' : active ? 'text-textPrimary' : 'text-textMuted'}`}>{icon}</span>
+        <span className="min-w-0 flex-1 truncate text-left">{label}</span>
+        {trailing}
+        {count != null && (
+          <span className={`min-w-[1.5rem] h-5 px-1.5 rounded-md text-[11px] font-semibold tabular-nums flex items-center justify-center ${typeof count === 'number' && count > 0 ? (tone === 'danger' ? 'bg-danger/15 text-danger' : 'bg-elevated text-textPrimary') : 'text-textMuted'}`}>{count}</span>
+        )}
+      </button>
+    );
+    const SectionLabel = ({ children }) => (
+      <p className="px-3 mb-1.5 text-[11px] font-semibold tracking-wider text-textMuted">{children}</p>
+    );
+    const tokenMark = (letter, cls) => (
+      <span className={`w-4 h-4 rounded-full text-[9px] font-bold text-white flex items-center justify-center ${cls}`} aria-hidden="true">{letter}</span>
+    );
+    const ico = (Icon) => <Icon className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />;
 
-        <div className="mb-8">
-          <p className="text-[10px] font-bold text-textMuted mb-3 tracking-widest">{lang === 'TR' ? 'PAZAR YERİ' : 'MARKETPLACE'}</p>
-          <div className="space-y-1">
-            <button onClick={() => { setFilterToken('ALL'); setCurrentView('market'); }} className={`w-full flex justify-between items-center px-3 py-2 rounded-lg text-sm transition ${filterToken === 'ALL' && currentView === 'market' ? 'bg-elevated text-textPrimary border border-borderStrong' : 'text-textSecondary hover:text-textPrimary hover:bg-elevated/50'}`}>
-              <div className="flex min-w-0 items-center gap-2"><span className="text-textMuted"><Layers className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" /></span> {lang === 'TR' ? 'TÜM EMİRLER' : 'ALL ORDERS'}</div>
-              <span className="bg-elevated text-[10px] px-2 py-0.5 rounded text-textSecondary">{orders.length}</span>
-            </button>
-            <button onClick={() => { setFilterToken('USDT'); setCurrentView('market'); }} className={`w-full flex justify-between items-center px-3 py-2 rounded-lg text-sm transition ${filterToken === 'USDT' && currentView === 'market' ? 'bg-elevated text-textPrimary border border-borderStrong' : 'text-textSecondary hover:text-textPrimary hover:bg-elevated/50'}`}>
-              <div className="flex min-w-0 items-center gap-2"><span className="text-emerald-500">₮</span> USDT</div>
-              <span className="bg-elevated text-[10px] px-2 py-0.5 rounded text-textSecondary">{orders.filter(o => o.crypto === 'USDT').length}</span>
-            </button>
-            <button onClick={() => { setFilterToken('USDC'); setCurrentView('market'); }} className={`w-full flex justify-between items-center px-3 py-2 rounded-lg text-sm transition ${filterToken === 'USDC' && currentView === 'market' ? 'bg-elevated text-textPrimary border border-borderStrong' : 'text-textSecondary hover:text-textPrimary hover:bg-elevated/50'}`}>
-              <div className="flex min-w-0 items-center gap-2"><span className="text-blue-500">$</span> USDC</div>
-              <span className="bg-elevated text-[10px] px-2 py-0.5 rounded text-textSecondary">{orders.filter(o => o.crypto === 'USDC').length}</span>
-            </button>
-            {/* [TR] Filtre yalnız Tier 0 (teminatsız) emirleri gösterir; etiket bunu doğru söyler. */}
-            <button onClick={() => setFilterTier1(!filterTier1)} className={`w-full flex justify-between items-center px-3 py-2 rounded-lg text-sm transition ${filterTier1 ? 'bg-elevated text-yellow-500 border border-yellow-500/20' : 'text-textSecondary hover:text-textPrimary hover:bg-elevated/50'}`}>
-              <div className="flex min-w-0 items-center gap-2"><span className="text-yellow-500/70"><ShieldOff className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" /></span> {lang === 'TR' ? 'Teminatsız (Tier 0)' : 'No bond (Tier 0)'}</div>
+    return (
+      <>
+        {sidebarOpen && <div className="md:hidden fixed inset-0 max-w-full overflow-x-hidden bg-black/60 z-[55] backdrop-blur-sm transition-opacity" onClick={() => setSidebarOpen(false)} />}
+        <aside
+          aria-label={tr ? 'Filtreler ve işlemler' : 'Filters and trades'}
+          className={`fixed md:relative inset-y-0 left-0 box-border h-dvh md:h-full max-w-full bg-shell border-r border-borderSubtle flex flex-col z-[60] md:z-40 shrink-0 overflow-x-hidden overflow-y-auto overscroll-contain transition-all duration-300 ease-in-out ${sidebarOpen ? 'w-[280px] max-w-[calc(100vw_-_3rem)] pl-[calc(0.75rem_+_env(safe-area-inset-left))] pr-3 pt-[calc(1rem_+_env(safe-area-inset-top))] pb-[calc(1rem_+_env(safe-area-inset-bottom))] opacity-100' : 'w-0 p-0 opacity-0'}`}
+        >
+          <div className="md:hidden flex items-center justify-between px-3 mb-4">
+            <span className="text-base font-bold tracking-tight text-textPrimary">Araf</span>
+            <button type="button" onClick={() => setSidebarOpen(false)} aria-label={tr ? 'Menüyü kapat' : 'Close menu'} className="w-9 h-9 -mr-2 flex items-center justify-center rounded-lg text-textMuted hover:text-textPrimary hover:bg-elevated">
+              <X className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" />
             </button>
           </div>
-        </div>
 
-        <div>
-          <p className="text-[10px] font-bold text-textMuted mb-3 tracking-widest">{lang === 'TR' ? 'DURUM' : 'STATUS'}</p>
-          <div className="space-y-2">
+          <div className="relative mb-5 px-1">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-textMuted" strokeWidth={1.8} aria-hidden="true" />
+            <input type="number" inputMode="decimal" value={searchAmount} onChange={e => setSearchAmount(e.target.value)} placeholder={tr ? 'Tutara göre ara' : 'Search by amount'} aria-label={tr ? 'Tutara göre ara' : 'Search by amount'} className="w-full h-10 bg-surface text-textPrimary pl-9 pr-3 rounded-lg border border-borderSubtle outline-none focus:border-brand/50 text-sm transition" />
+          </div>
+
+          <nav className="mb-5">
+            <SectionLabel>{tr ? 'PAZAR' : 'MARKET'}</SectionLabel>
+            <Row icon={ico(Layers)} label={tr ? 'Tüm emirler' : 'All orders'} count={orderCount(orders)} active={filterToken === 'ALL' && currentView === 'market'} onClick={() => { setFilterToken('ALL'); setCurrentView('market'); }} />
+            <Row icon={tokenMark('T', 'bg-emerald-600')} label="USDT" count={orderCount(orders.filter(o => o.crypto === 'USDT'))} active={filterToken === 'USDT' && currentView === 'market'} onClick={() => { setFilterToken('USDT'); setCurrentView('market'); }} />
+            <Row icon={tokenMark('C', 'bg-blue-600')} label="USDC" count={orderCount(orders.filter(o => o.crypto === 'USDC'))} active={filterToken === 'USDC' && currentView === 'market'} onClick={() => { setFilterToken('USDC'); setCurrentView('market'); }} />
+            {/* [TR] Filtre yalnız Tier 0 (teminatsız) emirleri gösterir; anahtar görünümü açık/kapalı durumu söyler. */}
+            <Row
+              icon={ico(ShieldOff)}
+              label={tr ? 'Teminatsız (Tier 0)' : 'No bond (Tier 0)'}
+              active={filterTier1}
+              onClick={() => setFilterTier1(!filterTier1)}
+              trailing={<span className={`shrink-0 w-8 h-[18px] rounded-full p-0.5 transition ${filterTier1 ? 'bg-brand' : 'bg-borderStrong'}`} aria-hidden="true"><span className={`block w-3.5 h-3.5 rounded-full bg-white transition ${filterTier1 ? 'translate-x-3.5' : ''}`} /></span>}
+            />
+          </nav>
+
+          <nav className="mb-5">
+            <SectionLabel>{tr ? 'İŞLEMLERİM' : 'MY TRADES'}</SectionLabel>
             {['LOCKED', 'PAID', 'CHALLENGED'].map(status => {
-              const count = activeEscrowCounts[status];
               const isExpanded = expandedStatus === status;
               const statusTrades = activeEscrows.filter(e => e.state === status);
+              const icon = status === 'LOCKED' ? Lock : status === 'PAID' ? Banknote : Swords;
               return (
-                <div key={status} className="flex flex-col">
-                  <button
+                <div key={status}>
+                  <Row
+                    icon={ico(icon)}
+                    label={getStateLabel(status, lang)}
+                    count={Number(activeEscrowCounts?.[status] || 0)}
+                    tone={status === 'CHALLENGED' ? 'danger' : 'default'}
+                    active={isExpanded}
                     onClick={() => setExpandedStatus(isExpanded ? null : status)}
-                    className={`w-full flex justify-between items-center px-3 py-2 rounded-lg text-sm transition ${isExpanded ? 'bg-elevated text-textPrimary border border-borderStrong' : 'text-textSecondary hover:text-textPrimary hover:bg-elevated/50 border border-transparent'}`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className={status === 'CHALLENGED' ? 'text-red-500' : 'text-textMuted'}>
-                        {status === 'LOCKED' ? <Lock className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" /> : status === 'PAID' ? <Banknote className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" /> : <Swords className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />}
-                      </span>
-                      {getStateLabel(status, lang)}
+                  />
+                  {isExpanded && (
+                    <div className="ml-5 pl-3 my-1 border-l border-borderSubtle space-y-2">
+                      {statusTrades.length > 0 ? statusTrades.map(escrow => (
+                        <OperationTradeCard key={escrow.id} escrow={escrow} lang={lang} onGoToRoom={goToRoom(escrow)} />
+                      )) : (
+                        <p className="py-2 text-xs text-textMuted">{tr ? 'Bu durumda işlem yok.' : 'No trades in this state.'}</p>
+                      )}
                     </div>
-                    {count > 0 && (
-                      <span className={status === 'CHALLENGED' ? 'bg-red-900/40 text-red-400 text-[10px] font-bold px-2 py-0.5 rounded border border-red-900/50' : 'bg-elevated text-[10px] px-2 py-0.5 rounded text-textSecondary'}>
-                        {count}
-                      </span>
-                    )}
-                  </button>
-                  <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isExpanded ? 'max-h-[500px] opacity-100 mt-2' : 'max-h-0 opacity-0'}`}>
-                    {statusTrades.length > 0 ? (
-                      <div className="pl-3 pr-1 py-1 space-y-2 border-l-2 border-borderSubtle ml-3">
-                        {statusTrades.map(escrow => (
-                          <OperationTradeCard
-                            key={escrow.id}
-                            escrow={escrow}
-                            lang={lang}
-                            onGoToRoom={buildGoToTradeRoomAction({
-                              escrow,
-                              setActiveTrade,
-                              setUserRole,
-                              setTradeState,
-                              setChargebackAccepted,
-                              setCurrentView,
-                              setSidebarOpen,
-                            })}
-                          />
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="pl-3 ml-3 border-l-2 border-borderSubtle py-2 text-xs text-textMuted italic">
-                        {lang === 'TR' ? 'Bu durumda aktif işlem yok.' : 'No active trades in this state.'}
-                      </div>
-                    )}
-                  </div>
+                  )}
                 </div>
               );
             })}
-          </div>
-        </div>
-        <div className="mt-6">
-          <p className="text-[10px] font-bold text-textMuted mb-3 tracking-widest">
-            {lang === 'TR' ? 'SETTLEMENT' : 'SETTLEMENT'}
-          </p>
-          <div className="space-y-1">
-            <div className="w-full min-w-0 flex justify-between items-center gap-2 px-3 py-2 rounded-lg text-sm text-textSecondary border border-borderStrong bg-surface">
-              <span className="flex min-w-0 items-center gap-2"><span className="text-emerald-400"><Handshake className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" /></span>{lang === 'TR' ? 'Aktif Teklif' : 'Active Proposals'}</span>
-              <span className="bg-elevated text-[10px] px-2 py-0.5 rounded text-textPrimary">{activeEscrowCounts?.settlement?.PROPOSED ?? 0}</span>
-            </div>
-            <div className="w-full min-w-0 flex justify-between items-center gap-2 px-3 py-2 rounded-lg text-sm text-textSecondary border border-borderStrong bg-surface">
-              <span className="flex min-w-0 items-center gap-2"><span className="text-yellow-400"><Hourglass className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" /></span>{lang === 'TR' ? 'Benden Aksiyon Bekliyor' : 'Action Required'}</span>
-              <span className="bg-elevated text-[10px] px-2 py-0.5 rounded text-textPrimary">{activeEscrowCounts?.settlement?.ACTION_REQUIRED ?? 0}</span>
-            </div>
-            <div className="w-full min-w-0 flex justify-between items-center gap-2 px-3 py-2 rounded-lg text-sm text-textSecondary border border-borderStrong bg-surface">
-              <span className="flex min-w-0 items-center gap-2"><span className="text-sky-400"><Clock className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" /></span>{lang === 'TR' ? 'Karşı Taraftan Yanıt Bekliyorum' : 'Waiting Counterparty'}</span>
-              <span className="bg-elevated text-[10px] px-2 py-0.5 rounded text-textPrimary">{activeEscrowCounts?.settlement?.WAITING ?? 0}</span>
-            </div>
-            {activeEscrows
-              .filter((escrow) => normalizeSettlementState(escrow?.rawTrade?.settlementProposal?.state) === 'PROPOSED')
-              .map((escrow) => {
-                const proposer = escrow?.rawTrade?.settlementProposal?.proposer?.toLowerCase?.() || null;
-                const viewer = address?.toLowerCase?.() || null;
-                return (
-                  <SettlementQueueCard
-                    key={`settle-${escrow.onchainId}`}
-                    escrow={{ ...escrow, viewerAddress: address }}
-                    lang={lang}
-                    onGoToRoom={buildGoToTradeRoomAction({
-                      escrow,
-                      setActiveTrade,
-                      setUserRole,
-                      setTradeState,
-                      setChargebackAccepted,
-                      setCurrentView,
-                      setSidebarOpen,
-                    })}
-                  />
-                );
-              })}
-          </div>
-        </div>
+          </nav>
 
-        <div className="mt-auto pt-6 border-t border-borderSubtle">
-          <div className="flex bg-surface rounded-lg p-1 border border-borderStrong mb-3">
-            <button onClick={() => setLang('TR')} className={`flex-1 py-1.5 rounded-md text-xs font-bold transition ${lang === 'TR' ? 'bg-elevated text-textPrimary' : 'text-textMuted hover:text-textPrimary'}`}>🇹🇷 TR</button>
-            <button onClick={() => setLang('EN')} className={`flex-1 py-1.5 rounded-md text-xs font-bold transition ${lang === 'EN' ? 'bg-elevated text-textPrimary' : 'text-textMuted hover:text-textPrimary'}`}>🇬🇧 EN</button>
+          <nav className="mb-5">
+            <SectionLabel>{tr ? 'UZLAŞMA' : 'SETTLEMENT'}</SectionLabel>
+            <Row icon={ico(Handshake)} label={tr ? 'Açık teklifler' : 'Open proposals'} count={Number(settlementCounts.PROPOSED || 0)} onClick={() => setCurrentView('operations')} />
+            {Number(settlementCounts.ACTION_REQUIRED || 0) > 0 && (
+              <Row icon={ico(Hourglass)} label={tr ? 'Yanıtını bekliyor' : 'Needs your reply'} count={Number(settlementCounts.ACTION_REQUIRED)} tone="danger" onClick={() => setCurrentView('operations')} />
+            )}
+            {Number(settlementCounts.WAITING || 0) > 0 && (
+              <Row icon={ico(Clock)} label={tr ? 'Karşı taraf yanıtlıyor' : 'Awaiting counterparty'} count={Number(settlementCounts.WAITING)} onClick={() => setCurrentView('operations')} />
+            )}
+            {proposedEscrows.length > 0 && (
+              <div className="mt-2 space-y-2 px-1">
+                {proposedEscrows.map((escrow) => (
+                  <SettlementQueueCard key={`settle-${escrow.onchainId}`} escrow={{ ...escrow, viewerAddress: address }} lang={lang} onGoToRoom={goToRoom(escrow)} />
+                ))}
+              </div>
+            )}
+          </nav>
+
+          <div className="mt-auto pt-4 border-t border-borderSubtle px-1 space-y-3">
+            <div className="flex items-center gap-2">
+              <div className="flex flex-1 bg-surface rounded-lg p-1 border border-borderSubtle" role="group" aria-label={tr ? 'Dil' : 'Language'}>
+                {['TR', 'EN'].map((code) => (
+                  <button key={code} type="button" onClick={() => setLang(code)} aria-pressed={lang === code} className={`flex-1 h-8 rounded-md text-xs font-semibold transition ${lang === code ? 'bg-elevated text-textPrimary shadow-sm' : 'text-textMuted hover:text-textPrimary'}`}>{code}</button>
+                ))}
+              </div>
+              <ThemeToggle />
+            </div>
+            <button onClick={handleOpenMakerModal} disabled={isPaused} className={`w-full h-11 rounded-lg text-sm font-semibold transition flex items-center justify-center gap-2 ${isPaused ? 'bg-elevated text-textMuted cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm'}`}>
+              <Plus className="w-4 h-4" strokeWidth={2} aria-hidden="true" /> {tr ? 'Yeni emir oluştur' : 'Create order'}
+            </button>
           </div>
-          <button onClick={handleOpenMakerModal} disabled={isPaused} className={`w-full py-3 bg-gradient-to-r ${isPaused ? 'from-elevated to-surface cursor-not-allowed text-textMuted' : 'from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.3)] hover:shadow-[0_0_20px_rgba(16,185,129,0.5)] text-white'} rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2`}>
-            <span className="text-lg leading-none">+</span> {lang === 'TR' ? 'YENİ EMİR AÇ' : 'CREATE ORDER'}
-          </button>
-        </div>
-      </div>
-    </>
-  );
+        </aside>
+      </>
+    );
+  };
 
   // ═══════════════════════════════════════════
   // 12. SAYFA RENDER FONKSİYONLARI
