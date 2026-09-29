@@ -140,6 +140,8 @@ export const buildAppViews = (ctx) => {
   //      gösterilmez (App.jsx de bu görünümlerden ana sayfaya yönlendirir). UI Lab senaryoları istisnadır.
   // [EN] Trade room, tracking, profile and history need a signed session; hidden from navigation otherwise.
   const navUnlocked = Boolean((isConnected && isAuthenticated) || ctx.devScenarioCategory);
+  // [TR] Oturum yokken "Emir oluştur" hata bildirimi yerine cüzdan bağlama/imza akışını başlatır.
+  const openCreateOrder = () => ((isConnected && isAuthenticated) || ctx.devScenarioCategory ? handleOpenMakerModal() : handleAuthAction());
 
   const renderSlimRail = () => (
     <div className="hidden md:flex w-16 bg-shell border-r border-borderSubtle flex-col items-center py-6 justify-between z-50 shrink-0 shadow-2xl">
@@ -324,14 +326,17 @@ export const buildAppViews = (ctx) => {
           )}
 
           <div className="mt-auto pt-4 border-t border-borderSubtle px-1 space-y-3">
-            {/* [TR] Mobilde tarayıcı çubuklarını gizleme: önce kurulum (PWA), yoksa Fullscreen API, iOS'ta yönerge. */}
+            {/* [TR] Mobilde tarayıcı çubuklarını gizleme: Fullscreen API varsa tam ekran düğmesi her zaman görünür;
+                kurulum teklifi (PWA) varsa ek satır olarak gelir, tam ekranın yerini almaz. iOS'ta yönerge. */}
             {!fullscreen.isStandalone && (
-              <div className="md:hidden -mx-1">
-                {fullscreen.canInstall ? (
-                  <Row icon={ico(Download)} label={tr ? 'Uygulamayı yükle' : 'Install app'} onClick={fullscreen.install} />
-                ) : fullscreen.supported ? (
+              <div className="md:hidden -mx-1" data-testid="drawer-fullscreen">
+                {fullscreen.supported && (
                   <Row icon={ico(fullscreen.isFullscreen ? Minimize2 : Maximize2)} label={fullscreen.isFullscreen ? (tr ? 'Tam ekrandan çık' : 'Exit full screen') : (tr ? 'Tam ekran' : 'Full screen')} onClick={fullscreen.toggle} />
-                ) : (
+                )}
+                {fullscreen.canInstall && (
+                  <Row icon={ico(Download)} label={tr ? 'Uygulamayı yükle' : 'Install app'} onClick={fullscreen.install} />
+                )}
+                {!fullscreen.supported && !fullscreen.canInstall && (
                   <p className="flex items-start gap-2 px-3 py-2 text-xs text-textMuted">
                     <Share className="w-4 h-4 shrink-0" strokeWidth={1.8} aria-hidden="true" />
                     {tr ? 'Tam ekran için: Paylaş → Ana Ekrana Ekle' : 'For full screen: Share → Add to Home Screen'}
@@ -347,9 +352,12 @@ export const buildAppViews = (ctx) => {
               </div>
               <ThemeToggle />
             </div>
-            <button onClick={handleOpenMakerModal} disabled={isPaused} className={`w-full h-11 rounded-lg text-sm font-semibold transition flex items-center justify-center gap-2 ${isPaused ? 'bg-elevated text-textMuted cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm'}`}>
-              <Plus className="w-4 h-4" strokeWidth={2} aria-hidden="true" /> {tr ? 'Yeni emir oluştur' : 'Create order'}
-            </button>
+            {/* [TR] Oturum yokken emir oluşturma düğmesi işlevsizdir; yerine üstteki "Cüzdan bağla" kartı var. */}
+            {navUnlocked && (
+              <button onClick={handleOpenMakerModal} disabled={isPaused} className={`w-full h-11 rounded-lg text-sm font-semibold transition flex items-center justify-center gap-2 ${isPaused ? 'bg-elevated text-textMuted cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm'}`}>
+                <Plus className="w-4 h-4" strokeWidth={2} aria-hidden="true" /> {tr ? 'Yeni emir oluştur' : 'Create order'}
+              </button>
+            )}
           </div>
         </aside>
       </>
@@ -378,7 +386,7 @@ export const buildAppViews = (ctx) => {
           <button onClick={() => setCurrentView('market')} className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-brand text-black text-sm font-bold hover:opacity-90 transition">
             <Store className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />{lang === 'TR' ? 'Pazara git' : 'Open market'}
           </button>
-          <button onClick={handleOpenMakerModal} disabled={isPaused} className="px-6 py-3 rounded-xl bg-surface border border-borderStrong text-textPrimary text-sm font-bold hover:bg-elevated transition disabled:opacity-50 disabled:cursor-not-allowed">
+          <button onClick={openCreateOrder} disabled={isPaused} className="px-6 py-3 rounded-xl bg-surface border border-borderStrong text-textPrimary text-sm font-bold hover:bg-elevated transition disabled:opacity-50 disabled:cursor-not-allowed">
             {lang === 'TR' ? '+ Emir oluştur' : '+ Create order'}
           </button>
         </div>
@@ -508,7 +516,7 @@ export const buildAppViews = (ctx) => {
       <div className="w-full max-w-[1200px] min-w-0 p-4 md:p-8">
         <div className="mb-4 flex items-center justify-between gap-3">
           <h2 className="text-xl font-bold text-textPrimary">{tr ? 'Pazar' : 'Market'}</h2>
-          <button onClick={handleOpenMakerModal} disabled={isPaused} className="inline-flex items-center gap-1.5 h-9 px-3 md:px-4 rounded-lg bg-brand text-black text-sm font-semibold hover:opacity-90 disabled:opacity-50">
+          <button onClick={openCreateOrder} disabled={isPaused} className="inline-flex items-center gap-1.5 h-9 px-3 md:px-4 rounded-lg bg-brand text-black text-sm font-semibold hover:opacity-90 disabled:opacity-50">
             <Plus className="w-4 h-4" strokeWidth={2} aria-hidden="true" />{tr ? 'Emir oluştur' : 'Create order'}
           </button>
         </div>
@@ -665,7 +673,7 @@ export const buildAppViews = (ctx) => {
                     : (tr ? 'Henüz açık emir yok.' : 'No open orders yet.')}
               </p>
               {!isPaused && !ordersFeedError && (
-                <button onClick={handleOpenMakerModal} className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-brand text-black text-sm font-semibold hover:opacity-90">
+                <button onClick={openCreateOrder} className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-brand text-black text-sm font-semibold hover:opacity-90">
                   <Plus className="w-4 h-4" strokeWidth={2} aria-hidden="true" />{tr ? 'İlk emri oluştur' : 'Create the first order'}
                 </button>
               )}

@@ -1,6 +1,6 @@
 import React from 'react';
 import { afterEach, describe, it, expect, vi } from 'vitest';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { buildAppViews } from '../../frontend/src/app/AppViews';
 
@@ -620,5 +620,16 @@ describe('AppViews market side-aware rendering', () => {
     render(<div>{views.renderContextSidebar()}</div>);
     expect(screen.getByTestId('drawer-signin-card')).toBeInTheDocument();
     expect(screen.queryByText('MY TRADES')).not.toBeInTheDocument();
+    // Create order does nothing without a session, so it is not offered in the drawer.
+    expect(screen.queryByRole('button', { name: /Create order/ })).not.toBeInTheDocument();
+  });
+
+  it('drawer keeps the full screen toggle even when an install prompt is available', () => {
+    const toggle = vi.fn();
+    const views = buildAppViews({ ...baseCtx, sidebarOpen: true, fullscreen: { isStandalone: false, supported: true, isFullscreen: true, canInstall: true, toggle, install: vi.fn() } });
+    render(<div>{views.renderContextSidebar()}</div>);
+    fireEvent.click(screen.getByRole('button', { name: 'Exit full screen' }));
+    expect(toggle).toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Install app' })).toBeInTheDocument();
   });
 });

@@ -6,10 +6,15 @@ import React from 'react';
 // [EN] Two ways to drop browser chrome on mobile: the Fullscreen API, or installing as a PWA.
 const getFsElement = () => (typeof document === 'undefined' ? null : (document.fullscreenElement || document.webkitFullscreenElement || null));
 
+// [TR] Chrome, Fullscreen API ile tam ekrana geçilince de `display-mode: fullscreen` eşleştirir. Önceden bu
+//      durum "kurulu uygulama" sanılıyor, menüdeki tam ekran bölümü gizleniyor ve çıkış butonu kayboluyordu.
+//      Artık yalnız gerçek kurulum (standalone / iOS ana ekran) sayılır; API ile tam ekran hariç tutulur.
+// [EN] Chrome matches `display-mode: fullscreen` during Fullscreen API mode too; that hid the toggle.
 export const isStandaloneDisplay = () => {
   if (typeof window === 'undefined') return false;
+  const apiFullscreen = Boolean(getFsElement());
   return Boolean(window.matchMedia?.('(display-mode: standalone)').matches
-    || window.matchMedia?.('(display-mode: fullscreen)').matches
+    || (!apiFullscreen && window.matchMedia?.('(display-mode: fullscreen)').matches)
     || window.navigator?.standalone);
 };
 

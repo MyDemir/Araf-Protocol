@@ -23,6 +23,7 @@ const fmtPct = (bps, lang) => {
   return lang === 'TR' ? `%${s}` : `${s}%`;
 };
 const fmtDate = (sec, lang) => new Date(Number(sec) * 1000).toLocaleDateString(lang === 'TR' ? 'tr-TR' : 'en-US', { day: 'numeric', month: 'short' });
+const durDays = (sec, lang) => { const d = Number(sec) / 86400; return d >= 1 ? tx(lang, `${d} gün`, `${d} days`) : tx(lang, `${Number(sec) / 3600} saat`, `${Number(sec) / 3600} hours`); };
 const fmtDateTime = (sec, lang) => new Date(Number(sec) * 1000).toLocaleString(lang === 'TR' ? 'tr-TR' : 'en-US', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
 const STATUS_META = {
@@ -130,7 +131,14 @@ export const RewardsPanel = ({ lang = 'EN', address, showToast, tokenDecimalsMap
   const pastEpochs = [...new Set(pastRows.map((r) => r.epoch.toString()))];
   const epochRowsAll = (e) => pastRows.filter((r) => r.epoch.toString() === e);
   // [TR] Havuzu boş ve alınmamış token satırı ("≥ 0 USDC · havuz 0") bilgi taşımaz; gizlenir.
-  const epochRows = (e) => epochRowsAll(e).filter((r) => r.pool > 0n || r.status === REWARD_STATUS.CLAIMED);
+  const visible = (r) => r.pool > 0n || r.status === REWARD_STATUS.CLAIMED;
+  // [TR] Talep kalemleri ayrı listelenir; geçmiş yalnız bilgi amaçlıdır (alındı / süresi doldu / pay yok).
+  const nowSec = nowOverride ?? Math.floor(Date.now() / 1000);
+  const claimableRows = pastRows.filter((r) => r.status === REWARD_STATUS.CLAIMABLE && r.amount > 0n);
+  const recordingRows = pastRows.filter((r) => r.status === REWARD_STATUS.RECORDING && visible(r));
+  const HISTORY_STATES = new Set([REWARD_STATUS.CLAIMED, REWARD_STATUS.EXPIRED, REWARD_STATUS.NONE]);
+  const historyEpochs = pastEpochs.filter((e) => epochRowsAll(e).some((r) => HISTORY_STATES.has(r.status)));
+  const historyRowsOf = (e) => epochRowsAll(e).filter((r) => (r.status === REWARD_STATUS.CLAIMED || r.status === REWARD_STATUS.EXPIRED) && visible(r));
   const sumLine = (field) => tokens.map(([sym]) => `${fmtAmount(summary.byToken[sym]?.[field] ?? 0n, decimalsOf(sym))} ${sym}`).join(' · ');
   const current = currentRows[0];
 
@@ -198,55 +206,84 @@ export const RewardsPanel = ({ lang = 'EN', address, showToast, tokenDecimalsMap
         </section>
       )}
 
-      {state.timing && pastEpochs.length > 0 && (
-        <section className="bg-surface border border-borderSubtle rounded-xl p-4" data-testid="rewards-epochs">
-          <h3 className="text-sm font-bold text-textPrimary mb-2">{tx(lang, 'Geçmiş dönemler', 'Past epochs')}</h3>
+      {state.timing && claimableRows.length > 0 && (
+        <section className="bg-surface border border-success/40 rounded-xl p-4" data-testid="rewards-claimable">
+          <h3 className="text-sm font-bold text-textPrimary">{tx(lang, 'Talep edilebilir ödüllerin', 'Rewards ready to claim')}</h3>
+          <p className="text-xs text-textMuted mt-0.5 mb-2">
+            {tx(lang,
+              `Kontrat, biten dönemin ödülünü ${durDays(state.timing.claimDelay, lang)} sonra açar ve ${durDays(state.timing.claimWindow, lang)} talep edilebilir tutar. Süresi dolan pay sonraki döneme devredilir.`,
+              `The contract opens a finished epoch's reward after ${durDays(state.timing.claimDelay, lang)} and keeps it claimable for ${durDays(state.timing.claimWindow, lang)}. Expired shares roll into a later epoch.`)}
+          </p>
           <div className="divide-y divide-borderSubtle">
-            {pastEpochs.map((e) => {
-              const rows = epochRows(e);
-              const head = epochRowsAll(e)[0];
-              if (head.status === REWARD_STATUS.NONE) {
-                return (
-                  <div key={e} className="flex items-center justify-between py-2.5 text-sm">
-                    <span className="text-textSecondary">{tx(lang, 'Dönem', 'Epoch')} {e} <span className="text-textMuted text-xs">· {fmtDate(head.epochStart, lang)}–{fmtDate(head.epochEnd, lang)}</span></span>
-                    <span className="text-xs text-textMuted">{tx(lang, 'Pay yok', 'No share')}</span>
-                  </div>
-                );
-              }
+            {claimableRows.map((r) => {
+              const busy = busyKey === `${r.epoch}-${r.symbol}`;
+              const daysLeft = Math.max(0, Math.ceil((Number(r.claimCloseAt) - nowSec) / 86400));
               return (
-                <div key={e} className="py-2.5">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-textPrimary font-semibold">{tx(lang, 'Dönem', 'Epoch')} {e} <span className="text-textMuted text-xs font-normal">· {fmtDate(head.epochStart, lang)}–{fmtDate(head.epochEnd, lang)}</span></span>
-                    <span className="text-xs text-textSecondary tabular-nums">{tx(lang, 'Pay', 'Share')} {fmtPct(head.shareBps, lang)}</span>
+                <div key={`${r.epoch}-${r.symbol}`} className="flex items-center justify-between gap-3 py-2.5" data-testid={`reward-row-${r.epoch}-${r.symbol}`}>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-textPrimary tabular-nums">{r.isEstimate ? '≥ ' : ''}{fmtAmount(r.amount, decimalsOf(r.symbol))} {r.symbol}</p>
+                    <p className="text-[11px] text-textMuted">
+                      {fmtDate(r.epochStart, lang)}–{fmtDate(r.epochEnd, lang)} · {tx(lang, 'pay', 'share')} {fmtPct(r.shareBps, lang)} ·{' '}
+                      <span className={daysLeft <= 3 ? 'text-warning font-semibold' : ''}>{tx(lang, `son ${daysLeft} gün`, `${daysLeft} days left`)}</span>
+                    </p>
                   </div>
-                  <div className="mt-1.5 space-y-1.5">
-                    {rows.length === 0 && <p className="text-xs text-textMuted">{tx(lang, 'Bu dönem için havuz henüz ayrılmadı.', 'No pool has been allocated for this epoch yet.')}</p>}
-                    {rows.map((r) => {
+                  <button type="button" onClick={() => handleClaim(r)} disabled={Boolean(busyKey)} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand text-black text-xs font-bold hover:opacity-90 disabled:opacity-50">
+                    {busy ? <LoaderCircle className="w-3.5 h-3.5 animate-spin" strokeWidth={1.8} aria-hidden="true" /> : null}
+                    {tx(lang, 'Talep et', 'Claim')}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {state.timing && recordingRows.length > 0 && (
+        <section className="bg-surface border border-borderSubtle rounded-xl p-4" data-testid="rewards-recording">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-sm font-bold text-textPrimary">{tx(lang, 'Kesinleşen dönem', 'Epoch being finalized')}</h3>
+            <span className="text-xs text-textMuted whitespace-nowrap">{tx(lang, 'Talep', 'Claims')} {fmtDateTime(recordingRows[0].claimOpenAt, lang)}</span>
+          </div>
+          <p className="text-xs text-textMuted mt-0.5">{tx(lang, 'Dönem bitti; kalan işlem sonuçları kaydediliyor. Tutar talep açılınca kesinleşir.', 'The epoch has ended; remaining outcomes are being recorded. The amount is final when claims open.')}</p>
+          <div className="mt-2 divide-y divide-borderSubtle text-sm">
+            {recordingRows.map((r) => (
+              <div key={`${r.epoch}-${r.symbol}`} className="flex items-center justify-between py-2">
+                <span className="text-textSecondary">{r.symbol} · {tx(lang, 'pay', 'share')} {fmtPct(r.shareBps, lang)}</span>
+                <span className="font-semibold tabular-nums text-textPrimary">≥ {fmtAmount(r.amount, decimalsOf(r.symbol))} {r.symbol}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {state.timing && historyEpochs.length > 0 && (
+        <section className="bg-surface border border-borderSubtle rounded-xl p-4" data-testid="rewards-epochs">
+          <h3 className="text-sm font-bold text-textPrimary mb-2">{tx(lang, 'Dönem geçmişi', 'Epoch history')}</h3>
+          <div className="divide-y divide-borderSubtle">
+            {historyEpochs.map((e) => {
+              const rows = historyRowsOf(e);
+              const head = epochRowsAll(e)[0];
+              return (
+                <div key={e} className="flex items-start justify-between gap-3 py-2.5 text-sm">
+                  <div className="min-w-0">
+                    <p className="text-textSecondary">{fmtDate(head.epochStart, lang)}–{fmtDate(head.epochEnd, lang)} <span className="text-textMuted text-xs">#{e}</span></p>
+                    {head.status !== REWARD_STATUS.NONE && <p className="text-[11px] text-textMuted">{tx(lang, 'Pay', 'Share')} {fmtPct(head.shareBps, lang)}</p>}
+                  </div>
+                  <div className="text-right space-y-1">
+                    {head.status === REWARD_STATUS.NONE || rows.length === 0 ? (
+                      <span className="text-xs text-textMuted">{tx(lang, 'Pay yok', 'No share')}</span>
+                    ) : rows.map((r) => {
                       const meta = STATUS_META[r.status];
-                      const busy = busyKey === `${r.epoch}-${r.symbol}`;
                       return (
-                        <div key={r.symbol} className="flex items-center justify-between gap-2 text-sm" data-testid={`reward-row-${e}-${r.symbol}`}>
-                          <span className="min-w-0 flex items-center gap-2">
-                            <Coins className="w-3.5 h-3.5 text-textMuted shrink-0" strokeWidth={1.8} aria-hidden="true" />
-                            <span className="tabular-nums text-textPrimary font-medium">{r.isEstimate && r.status !== REWARD_STATUS.EXPIRED ? '≥ ' : ''}{fmtAmount(r.amount, decimalsOf(r.symbol))} {r.symbol}</span>
-                            <span className="text-[11px] text-textMuted truncate">{tx(lang, 'havuz', 'pool')} {fmtAmount(r.pool, decimalsOf(r.symbol))}</span>
+                        <div key={r.symbol} className="flex items-center justify-end gap-2">
+                          <span className={`tabular-nums ${r.status === REWARD_STATUS.EXPIRED ? 'text-textMuted line-through' : 'text-textPrimary'}`}>{fmtAmount(r.amount, decimalsOf(r.symbol))} {r.symbol}</span>
+                          <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-md border ${meta.tone}`}>
+                            <meta.icon className="w-3 h-3" strokeWidth={1.8} aria-hidden="true" />{meta[lang === 'TR' ? 'TR' : 'EN']}
                           </span>
-                          {r.status === REWARD_STATUS.CLAIMABLE && r.amount > 0n ? (
-                            <button type="button" onClick={() => handleClaim(r)} disabled={Boolean(busyKey)} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand text-black text-xs font-bold hover:opacity-90 disabled:opacity-50">
-                              {busy ? <LoaderCircle className="w-3.5 h-3.5 animate-spin" strokeWidth={1.8} aria-hidden="true" /> : null}
-                              {tx(lang, 'Talep et', 'Claim')}
-                            </button>
-                          ) : (
-                            <span className={`shrink-0 inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-md border ${meta.tone}`}>
-                              <meta.icon className="w-3 h-3" strokeWidth={1.8} aria-hidden="true" />{meta[lang === 'TR' ? 'TR' : 'EN']}
-                            </span>
-                          )}
                         </div>
                       );
                     })}
                   </div>
-                  {head.status === REWARD_STATUS.RECORDING && <p className="text-[11px] text-textMuted mt-1">{tx(lang, `Talep ${fmtDateTime(head.claimOpenAt, lang)} tarihinde açılır.`, `Claims open ${fmtDateTime(head.claimOpenAt, lang)}.`)}</p>}
-                  {head.status === REWARD_STATUS.CLAIMABLE && <p className="text-[11px] text-textMuted mt-1">{tx(lang, `Son talep: ${fmtDateTime(head.claimCloseAt, lang)}. Talep edilmeyen pay sonraki döneme devredilir.`, `Claim by ${fmtDateTime(head.claimCloseAt, lang)}. Unclaimed rewards roll into a later epoch.`)}</p>}
                 </div>
               );
             })}
