@@ -41,29 +41,6 @@ describe("ArafEscrow rewardable trade view", function () {
     throw new Error(`event ${eventName} not found`);
   }
 
-  async function cancelSig({ escrow, signer, tradeId, deadline }) {
-    const domain = {
-      name: "ArafEscrow",
-      version: "1",
-      chainId: (await ethers.provider.getNetwork()).chainId,
-      verifyingContract: await escrow.getAddress(),
-    };
-    const types = {
-      CancelProposal: [
-        { name: "tradeId", type: "uint256" },
-        { name: "proposer", type: "address" },
-        { name: "nonce", type: "uint256" },
-        { name: "deadline", type: "uint256" },
-      ],
-    };
-    const nonce = await escrow.sigNonces(signer.address, tradeId);
-    return signer.signTypedData(domain, types, {
-      tradeId,
-      proposer: signer.address,
-      nonce,
-      deadline,
-    });
-  }
 
   async function deployFixture() {
     const [owner, treasury, maker, taker] = await ethers.getSigners();
@@ -100,7 +77,7 @@ describe("ArafEscrow rewardable trade view", function () {
           TRADE_AMOUNT,
           MIN_FILL,
           tier,
-          makeRef(`${label}-order`)
+          makeRef(`${label}-order`), 1
         )
       : await escrow.connect(maker)["createSellOrder(address,uint256,uint256,uint8,bytes32,uint8)"](
           await token.getAddress(),
@@ -201,10 +178,8 @@ describe("ArafEscrow rewardable trade view", function () {
     await escrow.connect(taker).reportPayment(tradeId, "Qm-cancel");
 
     const deadline = (await time.latest()) + 3600;
-    const makerSig = await cancelSig({ escrow, signer: maker, tradeId, deadline });
-    const takerSig = await cancelSig({ escrow, signer: taker, tradeId, deadline });
-    await escrow.connect(maker).proposeOrApproveCancel(tradeId, deadline, makerSig);
-    await escrow.connect(taker).proposeOrApproveCancel(tradeId, deadline, takerSig);
+    await escrow.connect(maker).proposeOrApproveCancel(tradeId);
+    await escrow.connect(taker).proposeOrApproveCancel(tradeId);
 
     const view = await escrow.getRewardableTrade(tradeId);
     const trade = await escrow.getTrade(tradeId);

@@ -11,7 +11,7 @@ const contractMocks = vi.hoisted(() => ({
   reportPayment: vi.fn(),
   burnExpired: vi.fn(),
   proposeOrApproveCancel: vi.fn(),
-  signCancelProposal: vi.fn(),
+  expirePaymentWindow: vi.fn(),
 }));
 
 vi.mock('wagmi', () => ({
@@ -33,7 +33,7 @@ vi.mock('../../frontend/src/hooks/useArafContract', () => ({
     reportPayment: contractMocks.reportPayment,
     burnExpired: contractMocks.burnExpired,
     proposeOrApproveCancel: contractMocks.proposeOrApproveCancel,
-    signCancelProposal: contractMocks.signCancelProposal,
+    expirePaymentWindow: contractMocks.expirePaymentWindow,
     fillSellOrder: vi.fn(),
     fillBuyOrder: vi.fn(),
     cancelSellOrder: vi.fn(),

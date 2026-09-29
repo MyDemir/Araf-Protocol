@@ -162,6 +162,14 @@ export function mapResolutionTypeLabel(resolutionType, lang = "EN") {
       EN: "Closed by burn",
       TR: "Yakım ile kapandı",
     },
+    DISPUTED_RESOLUTION: {
+      EN: "Released after a dispute",
+      TR: "İtiraz sonrası serbest bırakıldı",
+    },
+    PAYMENT_WINDOW_EXPIRED: {
+      EN: "Unlocked: payment not reported in 48h",
+      TR: "Kilit çözüldü: 48 saatte ödeme bildirilmedi",
+    },
     UNKNOWN: {
       EN: "Closed; outcome type unavailable",
       TR: "Kapandı; sonuç tipi bilinmiyor",
@@ -253,7 +261,7 @@ export function useAppSessionData({
   const [onchainBondMap, setOnchainBondMap] = useState(null);
   const [onchainTokenMap, setOnchainTokenMap] = useState({});
   const [paymentRiskConfig, setPaymentRiskConfig] = useState({});
-  const [takerFeeBps, setTakerFeeBps] = useState(10);
+  const [takerFeeBps, setTakerFeeBps] = useState(15);
   const [tokenDecimalsMap, setTokenDecimalsMap] = useState({ USDT: DEFAULT_TOKEN_DECIMALS, USDC: DEFAULT_TOKEN_DECIMALS });
   const [bleedingAmounts, setBleedingAmounts] = useState(null);
 
@@ -319,13 +327,18 @@ export function useAppSessionData({
       ...requestOptions
     } = options || {};
     const walletHeader = connectedWallet ? { 'x-wallet-address': connectedWallet } : {};
+    // [TR] FormData (dekont yükleme) için Content-Type tarayıcıya bırakılır; aksi halde multipart
+    //      boundary kaybolur. JSON istekleri için varsayılan application/json korunur.
+    // [EN] Let the browser set multipart Content-Type for FormData uploads (boundary).
+    const isFormData = typeof FormData !== 'undefined' && requestOptions.body instanceof FormData;
+    const buildHeaders = () => ({
+      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+      ...requestOptions.headers,
+      ...walletHeader,
+    });
     const res = await fetch(url, {
       ...requestOptions,
-      headers: {
-        'Content-Type': 'application/json',
-        ...requestOptions.headers,
-        ...walletHeader,
-      },
+      headers: buildHeaders(),
       credentials: 'include',
     });
 
@@ -381,11 +394,7 @@ export function useAppSessionData({
 
       return fetch(url, {
         ...requestOptions,
-        headers: {
-          'Content-Type': 'application/json',
-          ...requestOptions.headers,
-          ...walletHeader,
-        },
+        headers: buildHeaders(),
         credentials: 'include',
       });
     } catch (_) {
@@ -433,13 +442,13 @@ export function useAppSessionData({
         endpointLabel: 'trades/my',
       });
 
-      setActiveEscrows(trades.map((t) => {
+      const mappedEscrows = trades.map((t) => {
         const cryptoAmtRaw = t.financials?.crypto_amount || '0';
         const cryptoAsset = t.financials?.crypto_asset || 'USDT';
         const tokenDecimals = tokenDecimalsMap[cryptoAsset] ?? DEFAULT_TOKEN_DECIMALS;
         const cryptoAmtNum = rawTokenToDisplayNumber(cryptoAmtRaw, tokenDecimals);
-        const rate = t.financials?.exchange_rate || 1;
-        const fiatAmt = cryptoAmtNum * rate;
+        const rate = Number(t.financials?.exchange_rate) > 0 ? Number(t.financials.exchange_rate) : null;
+        const fiatAmt = rate ? cryptoAmtNum * rate : null;
 
         return {
           id: `#${t.onchain_escrow_id}`,
@@ -467,10 +476,16 @@ export function useAppSessionData({
             crypto: cryptoAsset,
             cryptoAmountRaw: cryptoAmtRaw,
             cryptoAmountUi: cryptoAmtNum,
-            fiat: t.financials?.fiat_currency || 'TRY',
+            fiat: t.financials?.fiat_currency || null,
             rate,
             max: fiatAmt,
             tokenDecimals,
+            // [TR] Bleeding barı için lock anındaki orijinal teminatlar ve trade'e özgü fee snapshot.
+            // [EN] Original lock-time bonds for the bleeding bar and the trade's own fee snapshot.
+            makerBondRaw: t.financials?.maker_bond || '0',
+            takerBondRaw: t.financials?.taker_bond || '0',
+            takerFeeBps: Number.isFinite(Number(t.fee_snapshot?.taker_fee_bps)) ? Number(t.fee_snapshot.taker_fee_bps) : null,
+            makerFeeBps: Number.isFinite(Number(t.fee_snapshot?.maker_fee_bps)) ? Number(t.fee_snapshot.maker_fee_bps) : null,
             paidAt: t.timers?.paid_at,
             lockedAt: t.timers?.locked_at,
             pingedAt: t.timers?.pinged_at,
@@ -486,13 +501,19 @@ export function useAppSessionData({
             bankProfileRisk: t.bank_profile_risk || null,
           },
         };
-      }));
+      });
+      setActiveEscrows(mappedEscrows);
 
       setActiveTrade((prev) => {
         if (!prev) return prev;
         const prevOnchainId = String(prev.onchainId ?? '');
         const updated = trades.find((t) => String(t.onchain_escrow_id ?? '') === prevOnchainId);
         if (!updated) return prev;
+        // [TR] Pazar yerinden açılan odada activeTrade yalnız order kartı alanlarını taşır; ham tutar,
+        //      teminat, karşı taraf ve fee snapshot backend kaydından birleştirilir.
+        // [EN] A room opened from the marketplace only carries order-card fields; merge the trade's
+        //      raw amount, bonds, counterparty and fee snapshot from the backend record.
+        const mappedRaw = mappedEscrows.find((e) => String(e.onchainId ?? '') === prevOnchainId)?.rawTrade || {};
 
         const wasPendingSync = prev._pendingBackendSync && !prev.id;
         if (wasPendingSync && updated._id) {
@@ -504,7 +525,9 @@ export function useAppSessionData({
 
         return {
           ...prev,
+          ...mappedRaw,
           id: prev.id || updated._id,
+          onchainId: prev.onchainId,
           _pendingBackendSync: false,
           state: updated.status,
           paidAt: updated.timers?.paid_at ?? prev.paidAt,
@@ -669,10 +692,14 @@ export function useAppSessionData({
       formatAddress,
     }));
 
+    // [TR] Pazar yeri yalnız fill edilebilir (OPEN + PARTIALLY_FILLED) emirleri gösterir ve periyodik
+    //      yenilenir. Önceki çağrı filtresizdi (iptal/dolu emirler başta) ve yalnız bir kez çalışıyordu.
+    // [EN] Marketplace shows only fillable orders and refreshes periodically.
+    let initialLoad = true;
     const fetchOrders = async () => {
       try {
-        setLoading(true);
-        const res = await fetch(buildApiUrl('orders'), { credentials: 'include' });
+        if (initialLoad) setLoading(true);
+        const res = await fetch(buildApiUrl('orders?status=ACTIVE&limit=50'), { credentials: 'include' });
         const data = await res.json();
         if (data.orders) {
           setOrders(mapOrders(data.orders));
@@ -680,10 +707,15 @@ export function useAppSessionData({
       } catch (err) {
         console.error('Order fetch error:', err);
       } finally {
-        setLoading(false);
+        if (initialLoad) setLoading(false);
+        initialLoad = false;
       }
     };
     fetchOrders();
+    const interval = setInterval(() => {
+      if (typeof document === 'undefined' || !document.hidden) fetchOrders();
+    }, 30000);
+    return () => clearInterval(interval);
   }, [lang, onchainBondMap, onchainTokenMap, paymentRiskConfig]);
 
   useEffect(() => {
@@ -845,8 +877,14 @@ export function useAppSessionData({
     return () => document.removeEventListener('visibilitychange', onVisibilityChange);
   }, [isAuthenticated, currentView, fetchMyTrades]);
 
+  // [TR] Kayıtlı ödeme profili hem profil modalında hem de Profil Merkezi sayfasında yüklenir.
+  //      Önceden yalnız modalda yükleniyordu; sayfadaki form boş başlıyor ve kaydedilirse profili eziyordu.
+  // [EN] Load the saved payout profile for both the modal and the Profile Center page.
+  const wantsPayoutProfile = (showProfileModal && profileTab === 'ayarlar') || currentView === 'profile';
+  const wantsTradeHistory = (showProfileModal && profileTab === 'gecmis') || currentView === 'profile';
+
   useEffect(() => {
-    if (!showProfileModal || !isAuthenticated) return;
+    if (!wantsPayoutProfile || !isAuthenticated) return;
     const fetchMyPII = async () => {
       try {
         const res = await authenticatedFetch(buildApiUrl('pii/my'));
@@ -875,11 +913,11 @@ export function useAppSessionData({
         console.error('Mevcut PII verisi çekilemedi:', err);
       }
     };
-    if (profileTab === 'ayarlar') fetchMyPII();
-  }, [showProfileModal, profileTab, isAuthenticated, authenticatedFetch]);
+    fetchMyPII();
+  }, [wantsPayoutProfile, isAuthenticated, authenticatedFetch]);
 
   useEffect(() => {
-    if (profileTab !== 'gecmis' || !isAuthenticated) return;
+    if (!wantsTradeHistory || !isAuthenticated) return;
     const fetchHistory = async (page) => {
       try {
         setHistoryLoading(true);
@@ -906,7 +944,7 @@ export function useAppSessionData({
       }
     };
     fetchHistory(tradeHistoryPage);
-  }, [showProfileModal, profileTab, isAuthenticated, tradeHistoryPage, authenticatedFetch]);
+  }, [wantsTradeHistory, isAuthenticated, tradeHistoryPage, authenticatedFetch]);
 
   useEffect(() => {
     if (!isConnected) clearLocalSessionState({ navigateHome: true, closeModals: true });

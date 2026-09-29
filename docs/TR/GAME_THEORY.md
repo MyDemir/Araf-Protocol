@@ -75,6 +75,7 @@ flowchart TD
 | Disputed release | Maker challenge sonrası release eder | `CHALLENGED` durumundan `releaseFunds` | `RESOLVED` | Çatışma sonrası geç düzeltme | MVP'de zero weight |
 | Partial settlement | Taraflar dispute içinde split üzerinde anlaşır | `proposeSettlement` -> `acceptSettlement` | `RESOLVED` | Hakemsiz pazarlıklı çıkış | Düşük pozitif weight |
 | Mutual cancel | Her iki taraf unwind konusunda uzlaşır | iki taraf da `proposeOrApproveCancel` çağırır | `CANCELED` | Oracle yargısı olmadan çift taraflı çıkış | Zero weight |
+| Ödeme penceresi aşımı | `LOCKED` sonrası 48 saatte ödeme bildirilmez | taraflardan biri `expirePaymentWindow` çağırır | `CANCELED` | Bond'suz taker'ın maker fonunu rehin tutmasını zamanla bitirmek | Zero weight + taker negatif sinyal |
 | Terminal burn | Challenge ufku sonunda uzlaşma yok | `burnExpired` | `BURNED` | Permissionless deadlock kapanışı | Zero weight |
 
 ---

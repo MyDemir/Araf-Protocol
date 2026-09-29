@@ -127,7 +127,7 @@ describe("eventListener OrderFilled mirror hardening", () => {
     });
 
     const tradeSetPayload = mockFindOneAndUpdateTrade.mock.calls[0][1].$set;
-    expect(tradeSetPayload.canonical_refs.listing_ref).toBe("0x" + "ab".repeat(32));
+    expect(tradeSetPayload["canonical_refs.listing_ref"]).toBe("0x" + "ab".repeat(32));
     expect(tradeSetPayload.payment_risk_level_snapshot).toBe("HIGH");
 
     const orderSetPayload = mockFindOneAndUpdateOrder.mock.calls[0][1].$set;
@@ -269,7 +269,7 @@ describe("eventListener OrderFilled mirror hardening", () => {
     const firstPayload = mockFindOneAndUpdateTrade.mock.calls[0][1].$set;
     const secondPayload = mockFindOneAndUpdateTrade.mock.calls[1][1].$set;
 
-    expect(firstPayload.financials.crypto_amount).toBe("123456789");
-    expect(secondPayload.financials.crypto_amount).toBe("123456789000000000000");
+    expect(firstPayload["financials.crypto_amount"]).toBe("123456789");
+    expect(secondPayload["financials.crypto_amount"]).toBe("123456789000000000000");
   });
 });

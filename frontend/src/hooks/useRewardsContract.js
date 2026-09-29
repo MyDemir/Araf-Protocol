@@ -1,7 +1,8 @@
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { usePublicClient, useWalletClient, useChainId } from 'wagmi';
 import { parseAbi, getAddress } from 'viem';
 import { getSupportedChainsMap } from '../app/chainPolicy';
+import { decorateContractError } from '../app/contractErrors';
 
 const REWARDS_ADDRESS = import.meta.env.VITE_REWARDS_ADDRESS;
 const VAULT_ADDRESS = import.meta.env.VITE_REVENUE_VAULT_ADDRESS;
@@ -9,12 +10,30 @@ const VAULT_ADDRESS = import.meta.env.VITE_REVENUE_VAULT_ADDRESS;
 const REWARDS_ABI = parseAbi([
   'function epochDuration() view returns (uint256)',
   'function claimDelay() view returns (uint256)',
+  'function claimWindow() view returns (uint256)',
+  'function currentEpoch() view returns (uint256)',
   'function totalWeight(uint256) view returns (uint256)',
   'function userWeight(uint256,address) view returns (uint256)',
   'function epochRewardPool(uint256,address) view returns (uint256)',
+  'function epochTokenFinalized(uint256,address) view returns (bool)',
+  'function claimed(uint256,address,address) view returns (bool)',
   'function claimable(uint256,address,address) view returns (uint256)',
   'function claim(uint256,address)',
   'function recordTradeOutcome(uint256)',
+  'function recordTradeOutcomes(uint256[])',
+  'function recordedTrade(uint256) view returns (bool)',
+  'function finalizeEpochToken(uint256,address)',
+  'error EpochTokenNotFinalized()',
+  'error EpochNotEnded()',
+  'error ClaimDelayActive()',
+  'error ClaimWindowClosed()',
+  'error ZeroTotalWeight()',
+  'error ZeroUserWeight()',
+  'error AlreadyClaimed()',
+  'error ZeroAmount()',
+  'error RecordingWindowClosed()',
+  'error RecordingWindowOpen()',
+  'error EnforcedPause()',
 ]);
 
 const VAULT_ABI = parseAbi([
@@ -28,13 +47,25 @@ const VAULT_ABI = parseAbi([
   'function fundProductRewards(bytes32,address,uint256,uint256,bytes32)',
 ]);
 
-const _isValid = (addr) => addr && addr !== '0x0000000000000000000000000000000000000000';
+const _isValid = (addr) => Boolean(addr) && addr !== '0x0000000000000000000000000000000000000000';
+
+const _assertSuccess = (receipt, label) => {
+  // [TR] viem revert olmuş tx için de receipt döndürür; status kontrol edilmeli.
+  // [EN] viem returns receipts for reverted txs too; check status.
+  if (receipt?.status && receipt.status !== 'success') {
+    const err = new Error(`${label} reverted`);
+    err.shortMessage = err.message;
+    throw err;
+  }
+  return receipt;
+};
 
 export function useRewardsContract() {
   const publicClient = usePublicClient();
   const { data: walletClient } = useWalletClient();
   const chainId = useChainId();
   const isSupportedChain = Boolean(getSupportedChainsMap()[chainId]);
+  const isConfigured = _isValid(REWARDS_ADDRESS);
 
   const readRewards = useCallback(async (functionName, args = []) => {
     if (!isSupportedChain) throw new Error('Wrong chain: rewards unavailable');
@@ -51,15 +82,23 @@ export function useRewardsContract() {
   const writeVault = useCallback(async (functionName, args = []) => {
     if (!isSupportedChain) throw new Error('Wrong chain: vault unavailable');
     if (!_isValid(VAULT_ADDRESS) || !walletClient) throw new Error('Vault unavailable');
-    const hash = await walletClient.writeContract({ address: getAddress(VAULT_ADDRESS), abi: VAULT_ABI, functionName, args });
-    return publicClient.waitForTransactionReceipt({ hash });
+    try {
+      const hash = await walletClient.writeContract({ address: getAddress(VAULT_ADDRESS), abi: VAULT_ABI, functionName, args });
+      return _assertSuccess(await publicClient.waitForTransactionReceipt({ hash }), functionName);
+    } catch (error) {
+      throw decorateContractError(error);
+    }
   }, [walletClient, publicClient, isSupportedChain]);
 
   const writeRewards = useCallback(async (functionName, args = []) => {
     if (!isSupportedChain) throw new Error('Wrong chain: rewards unavailable');
     if (!_isValid(REWARDS_ADDRESS) || !walletClient) throw new Error('Rewards unavailable');
-    const hash = await walletClient.writeContract({ address: getAddress(REWARDS_ADDRESS), abi: REWARDS_ABI, functionName, args });
-    return publicClient.waitForTransactionReceipt({ hash });
+    try {
+      const hash = await walletClient.writeContract({ address: getAddress(REWARDS_ADDRESS), abi: REWARDS_ABI, functionName, args });
+      return _assertSuccess(await publicClient.waitForTransactionReceipt({ hash }), functionName);
+    } catch (error) {
+      throw decorateContractError(error);
+    }
   }, [walletClient, publicClient, isSupportedChain]);
 
   const getClaimableState = useCallback(async (epoch, user, token) => {
@@ -72,13 +111,25 @@ export function useRewardsContract() {
     }
   }, [isSupportedChain, readRewards]);
 
-  return {
+  // [TR] Dönen nesne memoize edilir; aksi halde tüketen useEffect'ler her render'da yeniden tetiklenir.
+  // [EN] Memoized so consuming effects do not re-run on every render.
+  return useMemo(() => ({
+    isConfigured,
+    isSupportedChain,
     claimable: (epoch, user, token) => readRewards('claimable', [BigInt(epoch), getAddress(user), getAddress(token)]),
     getClaimableState,
     claim: (epoch, token) => writeRewards('claim', [BigInt(epoch), getAddress(token)]),
     recordTradeOutcome: (tradeId) => writeRewards('recordTradeOutcome', [BigInt(tradeId)]),
+    recordTradeOutcomes: (tradeIds) => writeRewards('recordTradeOutcomes', [tradeIds.map((id) => BigInt(id))]),
+    isTradeRecorded: (tradeId) => readRewards('recordedTrade', [BigInt(tradeId)]),
+    // [TR] Kayıt penceresi kapandıktan sonra herkes çağırabilir; claim bundan önce açılmaz.
+    // [EN] Callable by anyone once the recording window closes; claims do not open before it.
+    finalizeEpochToken: (epoch, token) => writeRewards('finalizeEpochToken', [BigInt(epoch), getAddress(token)]),
     epochDuration: () => readRewards('epochDuration'),
     claimDelay: () => readRewards('claimDelay'),
+    currentEpoch: () => readRewards('currentEpoch'),
+    epochTokenFinalized: (epoch, token) => readRewards('epochTokenFinalized', [BigInt(epoch), getAddress(token)]),
+    hasClaimed: (epoch, user, token) => readRewards('claimed', [BigInt(epoch), getAddress(user), getAddress(token)]),
     userWeight: (epoch, user) => readRewards('userWeight', [BigInt(epoch), getAddress(user)]),
     totalWeight: (epoch) => readRewards('totalWeight', [BigInt(epoch)]),
     epochRewardPool: (epoch, token) => readRewards('epochRewardPool', [BigInt(epoch), getAddress(token)]),
@@ -89,5 +140,5 @@ export function useRewardsContract() {
     totalExternalFunding: (token) => readVault('totalExternalFunding', [getAddress(token)]),
     fundGlobalRewards: (token, amount, targetEpoch, fundingRef) => writeVault('fundGlobalRewards', [getAddress(token), BigInt(amount), BigInt(targetEpoch), fundingRef]),
     fundProductRewards: (productId, token, amount, targetEpoch, fundingRef) => writeVault('fundProductRewards', [productId, getAddress(token), BigInt(amount), BigInt(targetEpoch), fundingRef]),
-  };
+  }), [isConfigured, isSupportedChain, readRewards, readVault, writeRewards, writeVault, getClaimableState]);
 }

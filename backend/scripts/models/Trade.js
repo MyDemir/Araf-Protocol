@@ -157,6 +157,11 @@ const tradeSchema = new mongoose.Schema(
       // [EN] Decay tx hash list for idempotency and audit.
       decay_tx_hashes: { type: [String], default: [] },
       decayed_amounts: { type: [String], default: [] },
+
+      // [TR] burnExpired ile treasury'ye aktarılan toplam (EscrowBurned.burnedAmount aynası).
+      // [EN] Total moved to treasury by burnExpired (mirror of EscrowBurned.burnedAmount).
+      burned_amount: { type: String, default: "0" },
+      burned_amount_num: { type: Number, default: 0 },
     },
 
     status: {
@@ -188,6 +193,7 @@ const tradeSchema = new mongoose.Schema(
         "MUTUAL_CANCEL",
         "BURNED",
         "DISPUTED_RESOLUTION",
+        "PAYMENT_WINDOW_EXPIRED",
         "UNKNOWN",
         null,
       ],
@@ -308,9 +314,6 @@ const tradeSchema = new mongoose.Schema(
       approved_by:     { type: String, lowercase: true, default: null },
       maker_signed:    { type: Boolean, default: false },
       taker_signed:    { type: Boolean, default: false },
-      maker_signature: { type: String, default: null },
-      taker_signature: { type: String, default: null },
-      deadline:        { type: Date,   default: null },
     },
 
     // [TR] Faz-2 partial settlement mirror alanı.

@@ -301,13 +301,25 @@ export const mapApiOrderToUi = ({ order, lang = 'TR', bondMap = {}, tokenMap = {
   const statusMeta = STATUS_META[status] || STATUS_META.UNKNOWN;
 
   const crypto = order?.market?.crypto_asset || 'USDT';
-  const fiat = order?.market?.fiat_currency || 'TRY';
+  const fiat = order?.market?.fiat_currency || null;
   const rate = Number(order?.market?.exchange_rate || 0);
 
+  // [TR] Backend *_num alanları token base-unit'tir (1 USDT = 1_000_000). Gösterim için authoritative
+  //      raw string token decimals ile ölçeklenir; aksi halde pazar yeri 10^6 kat büyük tutar gösterir.
+  // [EN] Backend *_num fields are raw base units; scale the raw strings by token decimals for display.
+  const orderTokenAddress = String(order?.token_address || '').toLowerCase();
+  const configuredDecimals = Number(tokenMap?.[orderTokenAddress]?.decimals);
+  const tokenDecimals = Number.isInteger(configuredDecimals) && configuredDecimals > 0 && configuredDecimals <= 18
+    ? configuredDecimals
+    : DEFAULT_TOKEN_DECIMALS;
   const minFillAmountRaw = order?.amounts?.min_fill_amount;
   const remainingAmountRaw = order?.amounts?.remaining_amount;
-  const minFillAmount = Number(order?.amounts?.min_fill_amount_num ?? rawToNumber(minFillAmountRaw));
-  const remainingAmount = Number(order?.amounts?.remaining_amount_num ?? rawToNumber(remainingAmountRaw));
+  const minFillAmount = minFillAmountRaw != null
+    ? rawToNumber(minFillAmountRaw, tokenDecimals)
+    : Number(order?.amounts?.min_fill_amount_num ?? 0);
+  const remainingAmount = remainingAmountRaw != null
+    ? rawToNumber(remainingAmountRaw, tokenDecimals)
+    : Number(order?.amounts?.remaining_amount_num ?? 0);
 
   const tier = order?.tier ?? 0;
   const makerBondPct = Number(bondMap?.[tier]?.maker ?? 0);
@@ -330,7 +342,12 @@ export const mapApiOrderToUi = ({ order, lang = 'TR', bondMap = {}, tokenMap = {
     : side === 'BUY_CRYPTO'
       ? (lang === 'TR' ? `Order sahibi: ${getOrderSideCopy('BUY_CRYPTO', 'display', 'TR')}` : `Order owner: ${getOrderSideCopy('BUY_CRYPTO', 'display', 'EN')}`)
       : (lang === 'TR' ? 'Order sahibi rolü doğrulanamadı' : 'Order owner side could not be verified');
-  const fillsCount = Number(order?.stats?.fills_count ?? 0);
+  // [TR] Backend Order.stats alanı child_trade_count/resolved_child_trade_count taşır.
+  // [EN] Backend Order.stats carries child_trade_count / resolved_child_trade_count.
+  const fillsCount = Number(order?.stats?.child_trade_count ?? order?.stats?.fills_count ?? 0);
+  const resolvedCount = Number(order?.stats?.resolved_child_trade_count ?? 0);
+  const burnedCount = Number(order?.stats?.burned_child_trade_count ?? 0);
+  const closedCount = resolvedCount + burnedCount + Number(order?.stats?.canceled_child_trade_count ?? 0);
   const trustSummary = mapCompactTrustSummary({
     compactSummary: order?.trust_visibility_summary || null,
     signal: order?.offchain_health_score_input || null,
@@ -354,6 +371,8 @@ export const mapApiOrderToUi = ({ order, lang = 'TR', bondMap = {}, tokenMap = {
     crypto,
     fiat,
     rate,
+    hasPrice: rate > 0 && Boolean(fiat),
+    tokenDecimals,
     minFillAmount,
     remainingAmount,
     limitLabel,
@@ -365,8 +384,9 @@ export const mapApiOrderToUi = ({ order, lang = 'TR', bondMap = {}, tokenMap = {
     ownerSideHint,
     trustSummary,
     paymentRiskSignal,
-    // legacy ui analytics fields
-    successRate: Number(order?.stats?.fill_rate_pct ?? 100),
+    // [TR] Başarı oranı yalnız kapanmış child trade varsa hesaplanır; sahte %100 gösterilmez.
+    // [EN] Success rate only when closed child trades exist; never a fabricated 100%.
+    successRate: closedCount > 0 ? Math.round((resolvedCount / closedCount) * 100) : null,
     txCount: fillsCount,
     totalTrades: fillsCount,
   };

@@ -29,6 +29,7 @@ const { processDLQ } = require("./services/dlqProcessor");
 // [TR] 90 günlük temiz sayfa kuralını on-chain'de tetikleyen periyodik görev
 // [EN] Periodic job that triggers the 90-day clean slate rule on-chain
 const { runReputationDecay } = require("./jobs/reputationDecay");
+const { runRewardOutcomeRecorder } = require("./jobs/rewardOutcomeRecorder");
 
 // [TR] Günlük V3 order + child-trade istatistik snapshot görevi
 // [EN] Daily V3 order + child-trade snapshot job
@@ -68,6 +69,7 @@ const app = express();
 // [EN] Shared scheduler runtime state for admin read-only observability endpoints.
 app.locals.schedulerState = {
   reputationDecayLastRunAt: null,
+  rewardRecorderLastRunAt: null,
   statsSnapshotLastRunAt: null,
   sensitiveCleanupLastRunAt: null,
   userBankRiskCleanupLastRunAt: null,
@@ -189,6 +191,7 @@ async function bootstrap() {
   let dlqInterval = null;
   let reputationDecayDelay = null;
   let reputationDecayInterval = null;
+  let rewardRecorderInterval = null;
   let statsSnapshotDelay = null;
   let statsSnapshotInterval = null;
   let sensitiveCleanupDelay = null;
@@ -203,6 +206,7 @@ async function bootstrap() {
   const jobLocks = {
     dlq: false,
     reputationDecay: false,
+    rewardRecorder: false,
     statsSnapshot: false,
     sensitiveCleanup: false,
     userBankRiskCleanup: false,
@@ -214,6 +218,7 @@ async function bootstrap() {
     if (dlqInterval) clearInterval(dlqInterval);
     if (reputationDecayDelay) clearTimeout(reputationDecayDelay);
     if (reputationDecayInterval) clearInterval(reputationDecayInterval);
+    if (rewardRecorderInterval) clearInterval(rewardRecorderInterval);
     if (statsSnapshotDelay) clearTimeout(statsSnapshotDelay);
     if (statsSnapshotInterval) clearInterval(statsSnapshotInterval);
     if (sensitiveCleanupDelay) clearTimeout(sensitiveCleanupDelay);
@@ -382,6 +387,7 @@ async function bootstrap() {
     const DLQ_INTERVAL_MS = _envMs("JOB_DLQ_INTERVAL_MS", 60_000);
     const REPUTATION_DECAY_DELAY_MS = _envMs("JOB_REPUTATION_DECAY_DELAY_MS", 30_000);
     const REPUTATION_DECAY_INTERVAL_MS = _envMs("JOB_REPUTATION_DECAY_INTERVAL_MS", 24 * 60 * 60 * 1000);
+    const REWARD_RECORDER_INTERVAL_MS = _envMs("JOB_REWARD_RECORDER_INTERVAL_MS", 60 * 60 * 1000);
     const STATS_SNAPSHOT_DELAY_MS = _envMs("JOB_STATS_SNAPSHOT_DELAY_MS", 60_000);
     const STATS_SNAPSHOT_INTERVAL_MS = _envMs("JOB_STATS_SNAPSHOT_INTERVAL_MS", 24 * 60 * 60 * 1000);
     const SENSITIVE_CLEANUP_DELAY_MS = _envMs("JOB_SENSITIVE_CLEANUP_DELAY_MS", 120_000);
@@ -410,6 +416,14 @@ async function bootstrap() {
         app.locals.schedulerState.reputationDecayLastRunAt = new Date().toISOString();
       });
     }, REPUTATION_DECAY_INTERVAL_MS);
+
+    // [TR] Proof of Peace kaydı saatlik tetiklenir; kayıt penceresi (epoch sonu + claimDelay) kaçırılmaz.
+    // [EN] Proof of Peace recording is triggered hourly so the recording window is never missed.
+    rewardRecorderInterval = setInterval(() => {
+      runScheduledJob("rewardRecorder", runRewardOutcomeRecorder, () => {
+        app.locals.schedulerState.rewardRecorderLastRunAt = new Date().toISOString();
+      });
+    }, REWARD_RECORDER_INTERVAL_MS);
 
     statsSnapshotDelay = setTimeout(() => {
       runScheduledJob("statsSnapshot", runStatsSnapshot, () => {

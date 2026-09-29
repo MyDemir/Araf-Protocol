@@ -89,7 +89,7 @@ describe("ArafEscrow V3", function () {
       amount,
       minFill,
       tier,
-      orderRef
+      orderRef, 1
     );
     const receipt = await tx.wait();
     const args = await firstEventArgs(receipt, escrow.interface, "OrderCreated");
@@ -108,7 +108,7 @@ describe("ArafEscrow V3", function () {
       amount,
       minFill,
       tier,
-      orderRef
+      orderRef, 1
     );
     const receipt = await tx.wait();
     const args = await firstEventArgs(receipt, escrow.interface, "OrderCreated");
@@ -233,15 +233,15 @@ describe("ArafEscrow V3", function () {
       const tier0Max = TIER_MAX_AMOUNTS_BASE_UNIT[0];
 
       await expect(
-        escrow.connect(maker).createSellOrder(await token.getAddress(), tier0Max + 1n, tier0Max, 0, makeRef("sell-over"))
+        escrow.connect(maker).createSellOrder(await token.getAddress(), tier0Max + 1n, tier0Max, 0, makeRef("sell-over"), 1)
       ).to.be.revertedWithCustomError(escrow, "AmountExceedsTierLimit");
 
       await expect(
-        escrow.connect(taker).createBuyOrder(await token.getAddress(), tier0Max + 1n, tier0Max, 0, makeRef("buy-over"))
+        escrow.connect(taker).createBuyOrder(await token.getAddress(), tier0Max + 1n, tier0Max, 0, makeRef("buy-over"), 1)
       ).to.be.revertedWithCustomError(escrow, "AmountExceedsTierLimit");
 
       await expect(
-        escrow.connect(maker).createSellOrder(await token.getAddress(), tier0Max, tier0Max, 0, makeRef("sell-at"))
+        escrow.connect(maker).createSellOrder(await token.getAddress(), tier0Max, tier0Max, 0, makeRef("sell-at"), 1)
       ).to.not.be.reverted;
     });
 
@@ -329,32 +329,32 @@ describe("ArafEscrow V3", function () {
       const { escrow, token, owner, maker, taker } = ctx;
       const tokenAddress = await token.getAddress();
 
-      await expect(escrow.connect(maker).createSellOrder(tokenAddress, 0, MIN_FILL, 0, makeRef("sell-zero")))
+      await expect(escrow.connect(maker).createSellOrder(tokenAddress, 0, MIN_FILL, 0, makeRef("sell-zero"), 1))
         .to.be.revertedWithCustomError(escrow, "ZeroAmount");
-      await expect(escrow.connect(maker).createSellOrder(tokenAddress, TRADE_AMOUNT, 0, 0, makeRef("sell-min-zero")))
+      await expect(escrow.connect(maker).createSellOrder(tokenAddress, TRADE_AMOUNT, 0, 0, makeRef("sell-min-zero"), 1))
         .to.be.revertedWithCustomError(escrow, "InvalidMinFill");
-      await expect(escrow.connect(maker).createSellOrder(tokenAddress, TRADE_AMOUNT, TRADE_AMOUNT + 1n, 0, makeRef("sell-min-high")))
+      await expect(escrow.connect(maker).createSellOrder(tokenAddress, TRADE_AMOUNT, TRADE_AMOUNT + 1n, 0, makeRef("sell-min-high"), 1))
         .to.be.revertedWithCustomError(escrow, "InvalidMinFill");
-      await expect(escrow.connect(maker).createSellOrder(tokenAddress, TRADE_AMOUNT, MIN_FILL, 9, makeRef("sell-tier")))
+      await expect(escrow.connect(maker).createSellOrder(tokenAddress, TRADE_AMOUNT, MIN_FILL, 9, makeRef("sell-tier"), 1))
         .to.be.revertedWithCustomError(escrow, "InvalidTier");
-      await expect(escrow.connect(maker).createSellOrder(tokenAddress, TRADE_AMOUNT, MIN_FILL, 0, ethers.ZeroHash))
+      await expect(escrow.connect(maker).createSellOrder(tokenAddress, TRADE_AMOUNT, MIN_FILL, 0, ethers.ZeroHash, 1))
         .to.be.revertedWithCustomError(escrow, "InvalidOrderRef");
 
-      await expect(escrow.connect(taker).createBuyOrder(tokenAddress, 0, MIN_FILL, 0, makeRef("buy-zero")))
+      await expect(escrow.connect(taker).createBuyOrder(tokenAddress, 0, MIN_FILL, 0, makeRef("buy-zero"), 1))
         .to.be.revertedWithCustomError(escrow, "ZeroAmount");
-      await expect(escrow.connect(taker).createBuyOrder(tokenAddress, TRADE_AMOUNT, 0, 0, makeRef("buy-min-zero")))
+      await expect(escrow.connect(taker).createBuyOrder(tokenAddress, TRADE_AMOUNT, 0, 0, makeRef("buy-min-zero"), 1))
         .to.be.revertedWithCustomError(escrow, "InvalidMinFill");
-      await expect(escrow.connect(taker).createBuyOrder(tokenAddress, TRADE_AMOUNT, MIN_FILL, 0, ethers.ZeroHash))
+      await expect(escrow.connect(taker).createBuyOrder(tokenAddress, TRADE_AMOUNT, MIN_FILL, 0, ethers.ZeroHash, 1))
         .to.be.revertedWithCustomError(escrow, "InvalidOrderRef");
 
       await escrow.connect(owner).setTokenConfig(tokenAddress, true, false, true, USDT_DECIMALS, TIER_MAX_AMOUNTS_BASE_UNIT);
-      await expect(escrow.connect(maker).createSellOrder(tokenAddress, TRADE_AMOUNT, MIN_FILL, 0, makeRef("sell-off")))
+      await expect(escrow.connect(maker).createSellOrder(tokenAddress, TRADE_AMOUNT, MIN_FILL, 0, makeRef("sell-off"), 1))
         .to.be.revertedWithCustomError(escrow, "TokenDirectionNotAllowed");
-      await expect(escrow.connect(taker).createBuyOrder(tokenAddress, TRADE_AMOUNT, MIN_FILL, 0, makeRef("buy-on")))
+      await expect(escrow.connect(taker).createBuyOrder(tokenAddress, TRADE_AMOUNT, MIN_FILL, 0, makeRef("buy-on"), 1))
         .to.not.be.reverted;
 
       await escrow.connect(owner).setTokenConfig(tokenAddress, true, true, false, USDT_DECIMALS, TIER_MAX_AMOUNTS_BASE_UNIT);
-      await expect(escrow.connect(taker).createBuyOrder(tokenAddress, TRADE_AMOUNT, MIN_FILL, 0, makeRef("buy-off")))
+      await expect(escrow.connect(taker).createBuyOrder(tokenAddress, TRADE_AMOUNT, MIN_FILL, 0, makeRef("buy-off"), 1))
         .to.be.revertedWithCustomError(escrow, "TokenDirectionNotAllowed");
     });
 
@@ -541,7 +541,7 @@ describe("ArafEscrow V3", function () {
     });
 
 
-    it("view helpers expose cooldown, anti-sybil, fee, tier, and EIP-712 domain state", async () => {
+    it("view helpers expose cooldown, anti-sybil, fee and tier state", async () => {
       const ctx = await loadFixture(deployFixture);
       const { escrow, token, owner, maker, taker } = ctx;
       await escrow.connect(owner).setCooldownConfig(8 * 3600, 6 * 3600);
@@ -550,8 +550,8 @@ describe("ArafEscrow V3", function () {
       const [takerFee, makerFee] = await escrow.getFeeConfig();
       expect(takerFee).to.equal(101n);
       expect(makerFee).to.equal(202n);
-      expect(await escrow.getTierMaxAmount(await token.getAddress(), 0)).to.equal(TIER_MAX_AMOUNTS_BASE_UNIT[0]);
-      expect(await escrow.domainSeparator()).to.not.equal(ethers.ZeroHash);
+      const [, , , , tierMaxAmounts] = await escrow.getTokenConfig(await token.getAddress());
+      expect(tierMaxAmounts[0]).to.equal(TIER_MAX_AMOUNTS_BASE_UNIT[0]);
 
       const { tradeId } = await openSellTrade(ctx, { amount: TRADE_AMOUNT, label: "view-cooldown" });
       expect((await escrow.getTrade(tradeId)).id).to.equal(tradeId);
@@ -570,15 +570,15 @@ describe("ArafEscrow V3", function () {
       const tokenAddress = await token.getAddress();
 
       await escrow.connect(owner).setTokenConfig(tokenAddress, true, false, true, USDT_DECIMALS, TIER_MAX_AMOUNTS_BASE_UNIT);
-      await expect(escrow.connect(maker).createSellOrder(tokenAddress, TRADE_AMOUNT, MIN_FILL, 0, makeRef("direction-sell-off")))
+      await expect(escrow.connect(maker).createSellOrder(tokenAddress, TRADE_AMOUNT, MIN_FILL, 0, makeRef("direction-sell-off"), 1))
         .to.be.revertedWithCustomError(escrow, "TokenDirectionNotAllowed");
-      await expect(escrow.connect(taker).createBuyOrder(tokenAddress, TRADE_AMOUNT, MIN_FILL, 0, makeRef("direction-buy-on")))
+      await expect(escrow.connect(taker).createBuyOrder(tokenAddress, TRADE_AMOUNT, MIN_FILL, 0, makeRef("direction-buy-on"), 1))
         .to.not.be.reverted;
 
       await escrow.connect(owner).setTokenConfig(tokenAddress, true, true, false, USDT_DECIMALS, TIER_MAX_AMOUNTS_BASE_UNIT);
-      await expect(escrow.connect(taker).createBuyOrder(tokenAddress, TRADE_AMOUNT, MIN_FILL, 0, makeRef("direction-buy-off")))
+      await expect(escrow.connect(taker).createBuyOrder(tokenAddress, TRADE_AMOUNT, MIN_FILL, 0, makeRef("direction-buy-off"), 1))
         .to.be.revertedWithCustomError(escrow, "TokenDirectionNotAllowed");
-      await expect(escrow.connect(maker).createSellOrder(tokenAddress, TRADE_AMOUNT, MIN_FILL, 0, makeRef("direction-sell-on")))
+      await expect(escrow.connect(maker).createSellOrder(tokenAddress, TRADE_AMOUNT, MIN_FILL, 0, makeRef("direction-sell-on"), 1))
         .to.not.be.reverted;
     });
 
@@ -590,10 +590,10 @@ describe("ArafEscrow V3", function () {
       await escrow.connect(owner).pause();
 
       await expect(
-        escrow.connect(maker).createSellOrder(await token.getAddress(), TRADE_AMOUNT, MIN_FILL, 0, makeRef("paused-sell"))
+        escrow.connect(maker).createSellOrder(await token.getAddress(), TRADE_AMOUNT, MIN_FILL, 0, makeRef("paused-sell"), 1)
       ).to.be.revertedWithCustomError(escrow, "EnforcedPause");
       await expect(
-        escrow.connect(taker).createBuyOrder(await token.getAddress(), TRADE_AMOUNT, MIN_FILL, 0, makeRef("paused-buy"))
+        escrow.connect(taker).createBuyOrder(await token.getAddress(), TRADE_AMOUNT, MIN_FILL, 0, makeRef("paused-buy"), 1)
       ).to.be.revertedWithCustomError(escrow, "EnforcedPause");
       await expect(
         escrow.connect(taker).fillSellOrder(orderId, TRADE_AMOUNT, makeRef("paused-fill"))

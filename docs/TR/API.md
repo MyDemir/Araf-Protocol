@@ -190,17 +190,9 @@ On-chain child-trade kimliği (`onchain_escrow_id`) ile trade döner.
 ### `GET /api/trades/:id`
 Mongo `_id` ile trade döner (party-restricted).
 
-### `POST /api/trades/propose-cancel`
-On-chain submit öncesi EIP-712 cancel imza koordinasyonunu tutar.
-
-İstek:
-```json
-{
-  "tradeId": "mongodb_object_id",
-  "signature": "0x...",
-  "deadline": 1735000000
-}
-```
+### İptal koordinasyonu (backend route'u yok)
+Karşılıklı iptal tamamen on-chain yürür: her taraf kendi `proposeOrApproveCancel(tradeId)` işlemini gönderir, ikinci onay iptali yürütür.
+Worker `CancelProposed` event'ini `cancel_proposal` alanına mirror'lar. Backend imza saklamaz; eski `POST /api/trades/propose-cancel` kaldırıldı.
 
 ### `POST /api/trades/:id/chargeback-ack`
 Maker’ın `PAID/CHALLENGED` durumlarında risk/yasal acknowledgement kaydı.

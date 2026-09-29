@@ -35,7 +35,9 @@ describe('shared active trade cards', () => {
     expect(screen.getByText(getStateLabel(state, 'EN'))).toBeInTheDocument();
     expect(screen.getByText('Counterparty')).toBeInTheDocument();
     expect(screen.getByText('0xcafe...babe')).toBeInTheDocument();
-    expect(screen.getByText('Role')).toBeInTheDocument();
+    // [TR] Rol yalnız başlık çipinde gösterilir (tekrarlanan satır kaldırıldı).
+    // [EN] Role is shown once in the header chip (duplicate row removed).
+    expect(screen.queryByText('Role')).not.toBeInTheDocument();
     expect(screen.getByText('Amount')).toBeInTheDocument();
     expect(screen.queryByText(state)).not.toBeInTheDocument();
     expect(screen.getByText(/12.5 USDT/)).toBeInTheDocument();
@@ -52,7 +54,7 @@ describe('shared active trade cards', () => {
           id: '#TR-1',
           role: 'taker',
           state: 'CHALLENGED',
-          rawTrade: {},
+          rawTrade: { max: null, fiat: null },
         }}
         lang="TR"
         onGoToRoom={vi.fn()}

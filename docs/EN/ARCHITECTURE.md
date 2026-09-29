@@ -148,7 +148,7 @@ The contract is the single authoritative V3 state machine surface. The following
 | Surface | Functions | Architectural meaning |
 |---|---|---|
 | Parent-order write surface | `createSellOrder`, `fillSellOrder`, `cancelSellOrder`, `createBuyOrder`, `fillBuyOrder`, `cancelBuyOrder` | Public market and fill primitive |
-| Child-trade lifecycle write surface | `reportPayment`, `releaseFunds`, `challengeTrade`, `autoRelease`, `burnExpired`, `proposeOrApproveCancel` | Real escrow lifecycle and economic state transitions |
+| Child-trade lifecycle write surface | `reportPayment`, `releaseFunds`, `challengeTrade`, `autoRelease`, `burnExpired`, `proposeOrApproveCancel`, `expirePaymentWindow` | Real escrow lifecycle and economic state transitions |
 | Liveness / auxiliary write surface | `registerWallet`, `pingMaker`, `pingTakerForChallenge`, `decayReputation` | Entry gate, liveness, and clean-slate maintenance |
 | Governance / mutable admin surface | `setTreasury`, `setFeeConfig`, `setCooldownConfig`, `setTokenConfig`, `pause`, `unpause` | Runtime policy and governance control surface |
 | Read surface | `getOrder`, `getTrade`, `getReputation`, `getFeeConfig`, `getCooldownConfig`, `getCurrentAmounts`, `antiSybilCheck`, `getCooldownRemaining`, `getFirstSuccessfulTradeAt` | Verification, observability, and runtime read surface |
@@ -334,7 +334,8 @@ stateDiagram-v2
 - **Normal close:** maker `releaseFunds`
 - **Dispute path:** maker `pingTakerForChallenge` → wait window → `challengeTrade`
 - **Liveness path:** taker `pingMaker` → wait window → `autoRelease`
-- **Mutual cancel:** dual-signature `proposeOrApproveCancel`
+- **Mutual cancel:** each party sends its own `proposeOrApproveCancel(tradeId)` tx (no separate signature)
+- **Payment window expiry:** if no payment is reported within 48h of LOCKED, either party calls `expirePaymentWindow`; the maker is refunded in full, the taker bond pays a 2% liveness penalty and the taker gets a negative reputation signal
 - **Terminal burn:** `burnExpired` after challenge timeout
 
 ### 7.2 Bleeding components
@@ -353,7 +354,7 @@ stateDiagram-v2
 - Remaining value is routed to treasury according to contract rules.
 
 ### 7.5 Cancel semantics
-- `proposeOrApproveCancel` validates EIP-712 signature + nonce + deadline on-chain.
+- `proposeOrApproveCancel` consent is proven by msg.sender; consents are valid only for the state they were given in (`reportPayment` / `challengeTrade` reset them).
 - Cancel finalization requires both party approvals.
 
 <details>
@@ -367,7 +368,7 @@ stateDiagram-v2
 - Required wait windows are enforced by state guards.  
 - `burnExpired` finalizes stale challenged trades once max window elapses.  
 - Remaining value is routed to treasury according to contract rules.  
-- `proposeOrApproveCancel` validates EIP-712 signature + nonce + deadline on-chain.  
+- `proposeOrApproveCancel` consent is proven by msg.sender; consents are valid only for the state they were given in (`reportPayment` / `challengeTrade` reset them).  
 - Cancel finalization requires both party approvals.
 
 </details>

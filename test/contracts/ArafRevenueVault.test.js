@@ -58,16 +58,21 @@ describe("ArafRevenueVault", function () {
     ).to.be.revertedWithCustomError(vault, "OnlyEscrow");
   });
 
-  it("test_onArafRevenue_reverts_unsupported_token", async function () {
+  it("test_onArafRevenue_unsupported_token_does_not_revert_and_keeps_split", async function () {
     const { vault, owner, escrow } = await loadFixture(deployFixture);
     const MockERC20 = await ethers.getContractFactory("MockERC20");
     const other = await MockERC20.deploy("Mock USDC", "USDC", DECIMALS);
-    await other.mint(await vault.getAddress(), AMOUNT);
-    await vault.connect(owner).setSupportedToken(await other.getAddress(), false);
+    const otherAddr = await other.getAddress();
+    await vault.connect(owner).setSupportedToken(otherAddr, false);
 
-    await expect(
-      vault.connect(escrow).onArafRevenue(await other.getAddress(), AMOUNT, 0, 12)
-    ).to.be.revertedWithCustomError(vault, "UnsupportedRewardToken");
+    await vault.connect(escrow).noteEscrowRevenueIntent(otherAddr, AMOUNT, 0, 12);
+    await other.mint(await vault.getAddress(), AMOUNT);
+    await expect(vault.connect(escrow).onArafRevenue(otherAddr, AMOUNT, 0, 12))
+      .to.emit(vault, "EscrowRevenueReceived")
+      .withArgs(otherAddr, AMOUNT, AMOUNT * 4000n / 10000n, AMOUNT * 6000n / 10000n, 0, 12);
+
+    expect(await vault.rewardReserve(otherAddr)).to.equal(AMOUNT * 4000n / 10000n);
+    expect(await vault.treasuryReserve(otherAddr)).to.equal(AMOUNT * 6000n / 10000n);
   });
 
   it("test_onArafRevenue_splits_40_60_initially", async function () {
@@ -139,13 +144,19 @@ describe("ArafRevenueVault", function () {
     ).to.be.revertedWithCustomError(vault, "InvalidRecipient");
   });
 
-  it("test_pause_blocks_onArafRevenue", async function () {
+  it("test_pause_does_not_block_escrow_revenue_or_divert_reward_share", async function () {
     const { vault, token, owner, escrow } = await loadFixture(deployFixture);
+    const tokenAddr = await token.getAddress();
     await vault.connect(owner).pause();
+
+    await vault.connect(escrow).noteEscrowRevenueIntent(tokenAddr, AMOUNT, 0, 103);
     await token.mint(await vault.getAddress(), AMOUNT);
-    await expect(
-      vault.connect(escrow).onArafRevenue(await token.getAddress(), AMOUNT, 0, 103)
-    ).to.be.revertedWithCustomError(vault, "EnforcedPause");
+    await expect(vault.connect(escrow).onArafRevenue(tokenAddr, AMOUNT, 0, 103))
+      .to.emit(vault, "EscrowRevenueReceived")
+      .withArgs(tokenAddr, AMOUNT, AMOUNT * 4000n / 10000n, AMOUNT * 6000n / 10000n, 0, 103);
+
+    expect(await vault.rewardReserve(tokenAddr)).to.equal(AMOUNT * 4000n / 10000n);
+    expect(await vault.treasuryReserve(tokenAddr)).to.equal(AMOUNT * 6000n / 10000n);
   });
 
   it("test_onArafRevenue_reverts_without_fresh_transfer_when_prefunded_surplus_exists", async function () {

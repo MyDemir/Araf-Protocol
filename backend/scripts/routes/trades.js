@@ -14,51 +14,44 @@ const logger = require("../utils/logger");
 const { buildBankProfileRisk, buildTradeHealthSignals } = require("./tradeRisk");
 const { assertProviderExpectedChainOrThrow } = require("../services/expectedChain");
 
-const CANCEL_VERIFY_ABI = [
-  "function sigNonces(address,uint256) view returns (uint256)",
-  "function domainSeparator() view returns (bytes32)",
+// [TR] Yalnız settlement preview için okunan on-chain yüzey. İptal koordinasyonu artık tamamen on-chain:
+//      her taraf proposeOrApproveCancel(tradeId) çağırır, worker CancelProposed event'ini mirror'lar.
+// [EN] On-chain surface read only for settlement preview. Cancel coordination is fully on-chain now:
+//      each party calls proposeOrApproveCancel(tradeId) and the worker mirrors CancelProposed.
+const PREVIEW_READ_ABI = [
   "function getCurrentAmounts(uint256) view returns (uint256 currentCrypto, uint256 currentMakerBond, uint256 currentTakerBond, uint256 totalDecayed)",
 ];
-const CANCEL_TYPES = {
-  CancelProposal: [
-    { name: "tradeId", type: "uint256" },
-    { name: "proposer", type: "address" },
-    { name: "nonce", type: "uint256" },
-    { name: "deadline", type: "uint256" },
-  ],
-};
-const CONTRACT_CANCEL_ALLOWED_STATUSES = new Set(["LOCKED", "PAID", "CHALLENGED"]);
 
-let cancelVerifyProvider = null;
-let cancelVerifyContract = null;
-let cancelVerifyCacheKey = null;
+let previewReadProvider = null;
+let previewReadContract = null;
+let previewReadCacheKey = null;
 
-async function _getCancelVerifyContract() {
+async function _getPreviewReadContract() {
   const rpcUrl = process.env.BASE_RPC_URL;
   const contractAddress = process.env.ARAF_ESCROW_ADDRESS;
   const expectedChainId = process.env.EXPECTED_CHAIN_ID || "";
   const cacheKey = `${rpcUrl || ""}|${contractAddress || ""}|${expectedChainId}`;
 
-  if (cancelVerifyContract && cancelVerifyProvider && cancelVerifyCacheKey === cacheKey) {
-    return { provider: cancelVerifyProvider, contract: cancelVerifyContract };
+  if (previewReadContract && previewReadProvider && previewReadCacheKey === cacheKey) {
+    return { provider: previewReadProvider, contract: previewReadContract };
   }
 
   if (!rpcUrl || !contractAddress || contractAddress === "0x0000000000000000000000000000000000000000") {
-    cancelVerifyProvider = null;
-    cancelVerifyContract = null;
-    cancelVerifyCacheKey = null;
+    previewReadProvider = null;
+    previewReadContract = null;
+    previewReadCacheKey = null;
     return null;
   }
 
-  cancelVerifyProvider = new ethers.JsonRpcProvider(rpcUrl);
-  await assertProviderExpectedChainOrThrow(cancelVerifyProvider, {
+  previewReadProvider = new ethers.JsonRpcProvider(rpcUrl);
+  await assertProviderExpectedChainOrThrow(previewReadProvider, {
     rpcUrl,
     rpcEnvName: "BASE_RPC_URL",
-    surface: "TradesCancelVerify",
+    surface: "TradesSettlementPreview",
   });
-  cancelVerifyContract = new ethers.Contract(contractAddress, CANCEL_VERIFY_ABI, cancelVerifyProvider);
-  cancelVerifyCacheKey = cacheKey;
-  return { provider: cancelVerifyProvider, contract: cancelVerifyContract };
+  previewReadContract = new ethers.Contract(contractAddress, PREVIEW_READ_ABI, previewReadProvider);
+  previewReadCacheKey = cacheKey;
+  return { provider: previewReadProvider, contract: previewReadContract };
 }
 
 function _buildPreviewUnavailableError(message, rootCause = null) {
@@ -70,7 +63,7 @@ function _buildPreviewUnavailableError(message, rootCause = null) {
 }
 
 async function _getOnchainCurrentAmountsForPreview(onchainEscrowId) {
-  const verifier = await _getCancelVerifyContract();
+  const verifier = await _getPreviewReadContract();
   if (!verifier) {
     throw _buildPreviewUnavailableError("Settlement preview unavailable: RPC/contract config missing.");
   }
@@ -88,65 +81,12 @@ async function _getOnchainCurrentAmountsForPreview(onchainEscrowId) {
   }
 }
 
-async function _verifyCancelSignatureOrThrow({
-  wallet,
-  signature,
-  tradeOnchainId,
-  deadline,
-}) {
-  if (!/^0x[a-fA-F0-9]{130}$/.test(signature)) {
-    const err = new Error("İmza formatı geçersiz.");
-    err.statusCode = 400;
-    throw err;
-  }
-
-  const verifier = await _getCancelVerifyContract();
-  if (!verifier) {
-    const err = new Error("Cancel signature doğrulaması için RPC/contract yapılandırması eksik.");
-    err.statusCode = 503;
-    throw err;
-  }
-
-  const { provider, contract } = verifier;
-  const network = await provider.getNetwork();
-  const nonce = await contract.sigNonces(wallet, tradeOnchainId);
-
-  const domain = {
-    name: "ArafEscrow",
-    version: "1",
-    chainId: Number(network.chainId),
-    verifyingContract: process.env.ARAF_ESCROW_ADDRESS,
-  };
-
-  const onchainDomainSeparator = await contract.domainSeparator();
-  const computedDomainSeparator = ethers.TypedDataEncoder.hashDomain(domain);
-  if (onchainDomainSeparator !== computedDomainSeparator) {
-    const err = new Error("EIP-712 domain uyuşmazlığı. Cancel signature doğrulaması güvenli değil.");
-    err.statusCode = 503;
-    throw err;
-  }
-
-  const value = {
-    tradeId: BigInt(tradeOnchainId),
-    proposer: wallet,
-    nonce: BigInt(nonce),
-    deadline: BigInt(deadline),
-  };
-
-  const recovered = ethers.verifyTypedData(domain, CANCEL_TYPES, value, signature);
-  if (recovered.toLowerCase() !== wallet.toLowerCase()) {
-    const err = new Error("İmza doğrulaması başarısız. İmza oturum cüzdanıyla eşleşmiyor.");
-    err.statusCode = 400;
-    throw err;
-  }
-}
-
 /**
  * Trades Route — V3 Child Trade Read Layer
  *
  * V3'te bu route parent order değil, gerçek escrow lifecycle'ı taşıyan child trade'leri döndürür.
  * State-changing aksiyonlar yine kontrat üstünde gerçekleşir; backend burada yalnız
- * PII coordination, cancel signature coordination ve audit destek yüzeyi sağlar.
+ * PII coordination ve audit destek yüzeyi sağlar.
  *
  * Önemli kavramsal ayrım:
  *   - orderId  = parent order kimliği
@@ -228,7 +168,6 @@ const SAFE_TRADE_PROJECTION = [
   "cancel_proposal.proposed_by",
   "cancel_proposal.proposed_at",
   "cancel_proposal.approved_by",
-  "cancel_proposal.deadline",
   "cancel_proposal.maker_signed",
   "cancel_proposal.taker_signed",
   "settlement_proposal.proposal_id",
@@ -597,108 +536,6 @@ router.get("/:id", requireAuth, requireSessionWalletMatch, roomReadLimiter, asyn
 });
 
 // ─── POST /api/trades/propose-cancel ─────────────────────────────────────────
-/**
- * propose-cancel backend'in kontrat adına iptal YAPTIĞI bir yüzey değildir.
- * Bu route yalnız iki tarafın imza koordinasyonunu ve audit izini tutar.
- *
- * Kontrat authoritative kalır; backend burada yalnız off-chain coordination sağlar.
- */
-router.post("/propose-cancel", requireAuth, requireSessionWalletMatch, coordinationWriteLimiter, async (req, res, next) => {
-  try {
-    const schema = Joi.object({
-      tradeId: Joi.string().length(24).hex().required(),
-      signature: Joi.string().pattern(/^0x[a-fA-F0-9]+$/).required(),
-      deadline: Joi.number().integer().required(),
-    });
-    const { error, value } = schema.validate(req.body);
-    if (error) return res.status(400).json({ error: error.message });
-
-    const now = Math.floor(Date.now() / 1000);
-    const MAX_DEADLINE_SECONDS = 7 * 24 * 60 * 60;
-    if (value.deadline <= now) {
-      return res.status(400).json({ error: "Deadline geçmiş bir zamana ayarlanamaz." });
-    }
-    if (value.deadline > now + MAX_DEADLINE_SECONDS) {
-      return res.status(400).json({ error: "Deadline çok uzak. Maksimum 7 gün sonrası kabul edilir." });
-    }
-
-    const trade = await Trade.findById(value.tradeId);
-    if (!trade) return res.status(404).json({ error: "İşlem bulunamadı." });
-    // [TR] Kontrat authority'si ile birebir hizalama:
-    //      proposeOrApproveCancel() yalnız LOCKED/PAID/CHALLENGED kabul eder.
-    //      Backend'in bu kapıyı genişletmesi false-success üretir.
-    // [EN] Keep backend precheck aligned with on-chain authority.
-    if (!CONTRACT_CANCEL_ALLOWED_STATUSES.has(trade.status)) {
-      return res.status(409).json({
-        error: `İptal imzası bu trade durumunda kabul edilmez (mevcut: ${trade.status}).`,
-        code: "CANCEL_STATE_NOT_ALLOWED",
-      });
-    }
-    const normalizedEscrowId = _parsePositiveOnchainId(trade.onchain_escrow_id);
-    if (!normalizedEscrowId) {
-      return res.status(409).json({ error: "Trade on-chain kimliği bulunamadı. İptal imzası doğrulanamaz." });
-    }
-
-    const isMaker = trade.maker_address === req.wallet;
-    const isTaker = trade.taker_address === req.wallet;
-    if (!isMaker && !isTaker) {
-      return res.status(403).json({ error: "Bu işlemin tarafı değilsin." });
-    }
-
-    await _verifyCancelSignatureOrThrow({
-      wallet: req.wallet,
-      signature: value.signature,
-      tradeOnchainId: normalizedEscrowId,
-      deadline: value.deadline,
-    });
-
-    // [TR] İlk teklif deadline'ı sabitler; ikinci taraf aynı deadline ile gelmelidir.
-    const existingDeadline = trade.cancel_proposal.deadline;
-    if (existingDeadline) {
-      const existingTs = Math.floor(new Date(existingDeadline).getTime() / 1000);
-      if (existingTs !== value.deadline) {
-        logger.warn(
-          `[Trades] Deadline manipülasyon denemesi: mevcut=${existingTs} gelen=${value.deadline} wallet=${req.wallet}`
-        );
-        return res.status(400).json({
-          error: "Deadline mevcut teklifle uyuşmuyor. Manipülasyon girişimi tespit edildi.",
-          code: "CANCEL_DEADLINE_MISMATCH",
-        });
-      }
-    } else {
-      trade.cancel_proposal.deadline = new Date(value.deadline * 1000);
-    }
-
-    if (!trade.cancel_proposal.proposed_by) {
-      trade.cancel_proposal.proposed_by = req.wallet;
-    }
-    if (!trade.cancel_proposal.approved_by && trade.cancel_proposal.proposed_by !== req.wallet) {
-      trade.cancel_proposal.approved_by = req.wallet;
-    }
-
-    if (isMaker) {
-      trade.cancel_proposal.maker_signed = true;
-      trade.cancel_proposal.maker_signature = value.signature;
-    } else {
-      trade.cancel_proposal.taker_signed = true;
-      trade.cancel_proposal.taker_signature = value.signature;
-    }
-
-    await trade.save();
-
-    const bothSigned = trade.cancel_proposal.maker_signed && trade.cancel_proposal.taker_signed;
-    return res.json({
-      success: true,
-      bothSigned,
-      message: bothSigned
-        ? "Her iki taraf imzaladı. Kontrat precheck koşulları sağlandı."
-        : "Teklifin kaydedildi. Karşı tarafın imzası bekleniyor.",
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
 // ─── POST /api/trades/:id/chargeback-ack ─────────────────────────────────────
 // [TR] Bu endpoint yalnızca audit/log içindir. On-chain release akışına veto uygulamaz.
 //      Başarısızlığı kontrat çağrısını engelleyecek bir protocol gate olarak kullanılmamalıdır.

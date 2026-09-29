@@ -146,7 +146,7 @@ describe('frontend migration scaffold baseline', () => {
       'fillBuyOrder',
       'cancelSellOrder',
       'cancelBuyOrder',
-      'signCancelProposal',
+      'expirePaymentWindow',
       'proposeOrApproveCancel',
       'registerWallet',
       'reportPayment',

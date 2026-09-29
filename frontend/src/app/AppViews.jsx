@@ -13,7 +13,7 @@ import { getOrderSideCopy } from './orderUiModel';
 import { mapResolutionTypeLabel } from './useAppSessionData';
 import TradeRoomPage from './contexts/trade-room/TradeRoomPage';
 import ThemeToggle from './shell/ThemeToggle';
-import { buildTradeRoomPanelCallbacks, getBurnExpiredDeadlinePassed } from './contexts/trade-room/tradeRoomPanelActions';
+import { buildTradeRoomPanelCallbacks, getBurnExpiredDeadlinePassed, getPaymentWindowExpired } from './contexts/trade-room/tradeRoomPanelActions';
 
 // [TR] App ana görünüm/render katmanı burada tutulur.
 // [EN] Main application view/render layer lives here.
@@ -197,8 +197,13 @@ export const buildAppViews = (ctx) => {
               <div className="flex min-w-0 items-center gap-2"><span className="text-emerald-500">₮</span> USDT</div>
               <span className="bg-elevated text-[10px] px-2 py-0.5 rounded text-textSecondary">{orders.filter(o => o.crypto === 'USDT').length}</span>
             </button>
+            <button onClick={() => { setFilterToken('USDC'); setCurrentView('market'); }} className={`w-full flex justify-between items-center px-3 py-2 rounded-lg text-sm transition ${filterToken === 'USDC' && currentView === 'market' ? 'bg-elevated text-textPrimary border border-borderStrong' : 'text-textSecondary hover:text-textPrimary hover:bg-elevated/50'}`}>
+              <div className="flex min-w-0 items-center gap-2"><span className="text-blue-500">$</span> USDC</div>
+              <span className="bg-elevated text-[10px] px-2 py-0.5 rounded text-textSecondary">{orders.filter(o => o.crypto === 'USDC').length}</span>
+            </button>
+            {/* [TR] Filtre yalnız Tier 0 (teminatsız) emirleri gösterir; etiket bunu doğru söyler. */}
             <button onClick={() => setFilterTier1(!filterTier1)} className={`w-full flex justify-between items-center px-3 py-2 rounded-lg text-sm transition ${filterTier1 ? 'bg-elevated text-yellow-500 border border-yellow-500/20' : 'text-textSecondary hover:text-textPrimary hover:bg-elevated/50'}`}>
-              <div className="flex min-w-0 items-center gap-2"><span className="text-yellow-500/70">🛡️</span> {lang === 'TR' ? 'Tier 0-1 Düşük Risk Filtresi' : 'Tier 0-1 Low-Risk Filter'}</div>
+              <div className="flex min-w-0 items-center gap-2"><span className="text-yellow-500/70">🛡️</span> {lang === 'TR' ? 'Teminatsız (Tier 0)' : 'No bond (Tier 0)'}</div>
             </button>
           </div>
         </div>
@@ -334,7 +339,7 @@ export const buildAppViews = (ctx) => {
         <div className="min-w-0 overflow-hidden bg-surface border border-borderSubtle p-4 md:p-5 rounded-2xl">
           <p className="text-textMuted text-[10px] font-bold tracking-widest uppercase mb-2">{lang === 'TR' ? 'TOPLAM HACİM' : 'TOTAL VOL'}</p>
           <div className="flex min-w-0 flex-wrap items-baseline">
-            <span className="max-w-full truncate text-2xl font-bold text-textPrimary">${((protocolStats?.total_volume_usdt ?? 0) / 1000).toFixed(1)}K</span>
+            <span className="max-w-full truncate text-2xl font-bold text-textPrimary">${Number(protocolStats?.total_volume_usdt ?? 0).toLocaleString('en-US', { notation: 'compact', maximumFractionDigits: 1 })}</span>
             <StatChange value={protocolStats?.changes_30d?.total_volume_usdt_pct} />
           </div>
         </div>
@@ -351,13 +356,13 @@ export const buildAppViews = (ctx) => {
         </div>
         <div className="min-w-0 overflow-hidden bg-surface border border-borderSubtle p-4 md:p-5 rounded-2xl">
           <p className="text-textMuted text-[10px] font-bold tracking-widest uppercase mb-2">{lang === 'TR' ? 'ORT. SÜRE' : 'AVG TIME'}</p>
-          <span className="max-w-full truncate text-2xl font-bold text-yellow-500">{protocolStats?.avg_trade_hours ?? '—'}h</span>
+          <span className="max-w-full truncate text-2xl font-bold text-yellow-500">{protocolStats?.avg_trade_hours != null ? `${protocolStats.avg_trade_hours}h` : '—'}</span>
         </div>
-        <div className="min-w-0 bg-[#1a0a0a] border border-[#4a1010] p-4 md:p-5 rounded-2xl relative overflow-hidden group">
-          <div className="absolute -right-4 -bottom-4 text-red-500/10 text-6xl group-hover:scale-110 transition-transform">🔥</div>
-          <p className="text-red-500 text-[10px] font-bold tracking-widest uppercase mb-2">{lang === 'TR' ? 'ERİYEN HAZİNE' : 'BURNED BONDS'}</p>
+        <div className="min-w-0 bg-surface border border-danger/30 p-4 md:p-5 rounded-2xl relative overflow-hidden group">
+          <div className="absolute -right-4 -bottom-4 text-danger/10 text-6xl group-hover:scale-110 transition-transform" aria-hidden="true">🔥</div>
+          <p className="text-danger text-[10px] font-bold tracking-widest uppercase mb-2">{lang === 'TR' ? 'ERİYEN HAZİNE' : 'BURNED BONDS'}</p>
           <div className="flex min-w-0 flex-wrap items-baseline relative z-10">
-            <span className="max-w-full truncate text-2xl font-bold text-red-400 drop-shadow-[0_0_8px_rgba(248,113,113,0.5)]">${(protocolStats?.burned_bonds_usdt ?? 0).toFixed(0)}</span>
+            <span className="max-w-full truncate text-2xl font-bold text-danger">${Number(protocolStats?.burned_bonds_usdt ?? 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>
           </div>
         </div>
       </div>
@@ -424,14 +429,6 @@ export const buildAppViews = (ctx) => {
 
       <ReferenceRateTicker lang={lang} />
 
-      <div className="mb-4 p-3 rounded-xl border border-warning/40 bg-warning/10">
-        <p className="text-xs text-warning leading-relaxed">
-          {lang === 'TR'
-            ? `Bilgi: ${getStateLabel('CHALLENGED', lang)} durumunda 10 gün dolunca burnExpired fonksiyonu kontratta herkese açıktır; üçüncü taraflar da çağırabilir.`
-            : `Info: In ${getStateLabel('CHALLENGED', lang)}, once 10 days pass, burnExpired is permissionless on-chain and can be called by third parties.`}
-        </p>
-      </div>
-
       <div className="space-y-3">
         {loading ? (
           <div className="p-8 text-center text-textMuted animate-pulse">{lang === 'TR' ? 'Yükleniyor...' : 'Loading...'}</div>
@@ -453,11 +450,19 @@ export const buildAppViews = (ctx) => {
             return (
               <div key={order.id} className="min-w-0 overflow-visible bg-surface hover:bg-elevated border border-borderSubtle p-4 rounded-xl flex flex-col md:flex-row items-start md:items-center justify-between transition-colors group relative gap-4 md:gap-0">
                 <div className="flex min-w-0 items-center gap-4 w-full md:w-1/3">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-500/20 to-emerald-900/20 border border-emerald-500/30 flex items-center justify-center text-emerald-500 shrink-0">₮</div>
+                  <div className={`w-10 h-10 rounded-full border flex items-center justify-center shrink-0 font-bold ${order.crypto === 'USDC' ? 'bg-blue-500/10 border-blue-500/30 text-blue-500' : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'}`}>{order.crypto === 'USDC' ? '$' : '₮'}</div>
                   <div className="relative min-w-0 max-w-full group/tooltip">
                     <p className="max-w-full truncate text-textPrimary font-medium text-sm cursor-help">{order.maker}</p>
-                    <p className="text-xs text-textMuted">{order.rate} {order.fiat} / 1 {order.crypto}</p>
-                    <span className={`inline-flex mt-1 text-[10px] px-2 py-0.5 rounded border ${sideBadgeClass}`}>{order.sideLabel || getOrderSideCopy(order.side, 'order', lang) || order.side}</span>
+                    <p className="text-sm font-semibold text-textPrimary">
+                      {order.hasPrice
+                        ? `${Number(order.rate).toLocaleString(lang === 'TR' ? 'tr-TR' : 'en-US', { maximumFractionDigits: 4 })} ${order.fiat}`
+                        : <span className="text-textMuted font-normal">{lang === 'TR' ? 'Kur belirtilmedi' : 'No rate set'}</span>}
+                      <span className="text-xs font-normal text-textMuted"> / 1 {order.crypto}</span>
+                    </p>
+                    <div className="flex flex-wrap items-center gap-1 mt-1">
+                      <span className={`inline-flex text-[10px] px-2 py-0.5 rounded border ${sideBadgeClass}`}>{order.sideLabel || getOrderSideCopy(order.side, 'order', lang) || order.side}</span>
+                      <span className="inline-flex text-[10px] px-2 py-0.5 rounded border border-borderSubtle text-textMuted">{order.statusLabel || order.status}</span>
+                    </div>
                     <div className="absolute left-0 sm:-left-4 md:left-1/2 md:-translate-x-1/2 bottom-full mb-2 hidden group-hover/tooltip:block z-50">
                       {/* [TR] V3 compact hover özeti: taraf-bağımlı ama seller-only terminoloji içermez.
                           [EN] V3 compact hover summary: side-aware, without seller-only terminology. */}
@@ -471,7 +476,7 @@ export const buildAppViews = (ctx) => {
                         <div className="grid grid-cols-2 gap-2 text-xs">
                           <div className="rounded-lg border border-borderSubtle bg-elevated px-2.5 py-2">
                             <p className="text-[10px] text-textMuted uppercase">{lang === 'TR' ? 'Başarı' : 'Success'}</p>
-                            <p className="text-emerald-400 font-bold">{order.successRate}%</p>
+                            <p className="text-emerald-400 font-bold">{order.successRate != null ? `${order.successRate}%` : '—'}</p>
                           </div>
                           <div className="rounded-lg border border-borderSubtle bg-elevated px-2.5 py-2">
                             <p className="text-[10px] text-textMuted uppercase">{lang === 'TR' ? 'Toplam İşlem' : 'Total Trades'}</p>
@@ -496,55 +501,48 @@ export const buildAppViews = (ctx) => {
                             </span>
                           </div>
                           <p className="text-[10px] text-textMuted mt-1">
-                            {lang === 'TR'
-                              ? 'Bilgilendirme amaçlı kısa özet; nihai hüküm değildir.'
-                              : 'Informational quick summary; not a final verdict.'}
+                            {lang === 'TR' ? 'Bilgilendirme amaçlıdır.' : 'Informational only.'}
                           </p>
                         </div>
-                        <p className="text-xs text-textMuted mt-3 leading-relaxed">
-                          {lang === 'TR'
-                            ? 'Not: Bu kart hızlı bir özet gösterir; nihai güven/hüküm değerlendirmesi değildir.'
-                            : 'Note: This card is a quick summary, not a final trust verdict.'}
-                        </p>
                       </div>
                     </div>
                   </div>
                 </div>
 
                 <div className="w-full md:w-1/3 text-left md:text-center border-t border-borderSubtle md:border-none pt-3 md:pt-0">
-                  <p className="text-sm font-bold text-textSecondary">{order.limitLabel}</p>
-                  <p className="text-[10px] text-textMuted mt-1">
-                    {lang === 'TR' ? 'Minimum Fill:' : 'Min Fill:'} {order.minFillAmount ?? 0} {order.crypto}
+                  <p className="text-sm font-bold text-textPrimary">
+                    {Number(order.remainingAmount || 0).toLocaleString(lang === 'TR' ? 'tr-TR' : 'en-US', { maximumFractionDigits: 2 })} {order.crypto}
                   </p>
-                  <p className="text-[10px] text-textMuted mt-0.5 uppercase tracking-wider">
-                    {order.statusLabel || order.status}
-                  </p>
-                  <p className="text-[10px] text-emerald-500/80 mt-0.5 uppercase tracking-wider">
-                    {order.bondLabel} {lang === 'TR' ? 'Teminat' : 'Bond'}
+                  <p className="text-[11px] text-textMuted mt-0.5">
+                    {lang === 'TR' ? 'Min' : 'Min'} {Number(order.minFillAmount || 0).toLocaleString(lang === 'TR' ? 'tr-TR' : 'en-US', { maximumFractionDigits: 2 })} · T{order.tier} · {order.bondLabel === '—' ? (lang === 'TR' ? 'teminatsız' : 'no bond') : `${order.bondLabel} ${lang === 'TR' ? 'teminat' : 'bond'}`}
                   </p>
                   {order.paymentRiskSignal && <PaymentRiskBadge lang={lang} riskEntry={order.paymentRiskSignal} compact />}
                 </div>
 
                 <div className="w-full md:w-1/3 flex flex-col items-start md:items-end justify-center relative">
-                  <button onClick={() => handleStartTrade(order)} disabled={!finalCanTakeOrder || isContractLoading} className={`w-full md:w-auto px-6 py-2.5 rounded-xl font-bold text-sm transition flex items-center justify-center gap-2 ${!finalCanTakeOrder ? 'bg-elevated text-textMuted border border-borderStrong cursor-not-allowed' : 'bg-brand text-black hover:opacity-90 shadow-[0_0_15px_rgba(16,185,129,0.12)]'}`}>
-                    {isPaused            ? <><span>⏸️</span> {lang === 'TR' ? 'Bakımda' : 'Paused'}</> :
+                  {(() => {
+                    // [TR] Oturum yoksa buton pasif "Kilitli" yerine giriş akışını başlatır.
+                    // [EN] Without a session the CTA starts sign-in instead of a dead "Locked" state.
+                    const needsSignIn = !isConnected || !isAuthenticated;
+                    const isDisabled = needsSignIn ? false : (!finalCanTakeOrder || isContractLoading);
+                    return (
+                  <button onClick={() => (needsSignIn ? handleAuthAction() : handleStartTrade(order))} disabled={isDisabled} className={`w-full md:w-auto px-6 py-2.5 rounded-xl font-bold text-sm transition flex items-center justify-center gap-2 ${isDisabled ? 'bg-elevated text-textMuted border border-borderStrong cursor-not-allowed' : 'bg-brand text-black hover:opacity-90'}`}>
+                    {needsSignIn         ? <><span>👛</span> {lang === 'TR' ? 'Giriş yap' : 'Sign in'}</> :
+                     isPaused            ? <><span>⏸️</span> {lang === 'TR' ? 'Bakımda' : 'Paused'}</> :
                      !isCorrectChain     ? <><span>⛓️</span> {lang === 'TR' ? 'Yanlış Ağ' : 'Wrong Network'}</> :
                      !isTokenConfigured  ? <><span>⚙️</span> {lang === 'TR' ? 'Token Ayarlanmadı' : 'Token Not Set'}</> :
+                     isMyOwnAd           ? <>{lang === 'TR' ? 'Sizin emriniz' : 'Your order'}</> :
+                     isTierLocked        ? <><span>🔒</span> {lang === 'TR' ? `Tier ${order.tier} gerekli` : `Tier ${order.tier} required`}</> :
                      !canTakeOrder       ? <><span>🔒</span> {lang === 'TR' ? 'Kilitli' : 'Locked'}</> :
                      !isFunded           ? <><span>⚠️</span> {lang === 'TR' ? 'Bakiye Yetersiz' : 'Low Balance'}</> :
                      !isCooldownOk       ? <><span>⏳</span> {lang === 'TR' ? `Cooldown: ${Math.ceil((sybilStatus?.cooldownRemaining || 0) / 60)} dk` : `Cooldown: ${Math.ceil((sybilStatus?.cooldownRemaining || 0) / 60)} min`}</> :
                      (isContractLoading  ? (loadingText || (lang === 'TR' ? '⏳ İşleniyor...' : '⏳ Processing...')) : (order.ctaLabel || (lang === 'TR' ? 'İşlem Yap' : 'Trade')))}
                   </button>
+                    );
+                  })()}
                   {!isFunded && isConnected && canTakeOrder && !isPaused && (
-                    <p className="text-xs text-red-500 mt-2 text-center md:text-right w-full leading-snug">
-                      ⚠️ Anti-Spam: {lang === 'TR' ? 'İşlem yapabilmek için cüzdanınızda en az 0.001 ETH bulunmalıdır.' : 'You must have at least 0.001 ETH in your wallet to trade.'}
-                    </p>
-                  )}
-                  {!isCooldownOk && isConnected && (
-                    <p className="text-xs text-amber-400 mt-2 text-center md:text-right w-full leading-snug">
-                      {lang === 'TR'
-                        ? 'Not: 4 saatlik cooldown Tier 0 ve Tier 1 için geçerlidir.'
-                        : 'Note: the 4-hour cooldown applies to both Tier 0 and Tier 1.'}
+                    <p className="text-xs text-danger mt-2 text-center md:text-right w-full leading-snug">
+                      {lang === 'TR' ? 'En az 0.001 ETH gerekli.' : 'Needs at least 0.001 ETH.'}
                     </p>
                   )}
                 </div>
@@ -552,7 +550,14 @@ export const buildAppViews = (ctx) => {
             );
           })
         ) : (
-          <div className="p-8 text-center text-textMuted">{lang === 'TR' ? 'Emir bulunamadı.' : 'No orders found.'}</div>
+          <div className="p-8 text-center border border-dashed border-borderSubtle rounded-2xl">
+            <p className="text-textMuted mb-4">{lang === 'TR' ? 'Emir bulunamadı.' : 'No orders found.'}</p>
+            {!isPaused && (
+              <button onClick={handleOpenMakerModal} className="px-5 py-2.5 rounded-xl bg-brand text-black text-sm font-bold hover:opacity-90">
+                + {lang === 'TR' ? 'İlk emri oluştur' : 'Create the first order'}
+              </button>
+            )}
+          </div>
         )}
       </div>
     </div>
@@ -630,17 +635,29 @@ export const buildAppViews = (ctx) => {
     const tradeTokenDecimals = activeTrade?.tokenDecimals ?? (tokenDecimalsMap[activeTrade?.crypto || 'USDT'] ?? DEFAULT_TOKEN_DECIMALS);
     const rawCryptoAmt = activeTrade?.cryptoAmountRaw
       ? rawTokenToDisplayNumber(activeTrade.cryptoAmountRaw, tradeTokenDecimals)
-      : ((activeTrade?.max || 0) / (activeTrade?.rate || 1));
-    const protocolFee  = rawCryptoAmt * ((takerFeeBps || 10) / 10000);
+      : (Number(activeTrade?.max) > 0 && Number(activeTrade?.rate) > 0 ? Number(activeTrade.max) / Number(activeTrade.rate) : 0);
+    // [TR] Ücret, global config değil trade'in kilitlendiği andaki fee snapshot'ından hesaplanır.
+    // [EN] Fee uses the trade's lock-time fee snapshot, not the current global config.
+    const effectiveTakerFeeBps = Number.isFinite(Number(activeTrade?.takerFeeBps)) && activeTrade?.takerFeeBps !== null
+      ? Number(activeTrade.takerFeeBps)
+      : Number(takerFeeBps || 0);
+    const protocolFee  = rawCryptoAmt * (effectiveTakerFeeBps / 10000);
     const netAmount    = rawCryptoAmt - protocolFee;
     const asset        = activeTrade?.crypto || 'USDT';
+    const fmt = (value, digits = 2) => Number(value || 0).toLocaleString(lang === 'TR' ? 'tr-TR' : 'en-US', { maximumFractionDigits: digits });
     const feeBreakdownText = lang === 'TR'
-      ? `Kilitli: ${rawCryptoAmt.toFixed(2)} ${asset} | Protokol Kesintisi: ${protocolFee.toFixed(4)} ${asset} | Net Alınacak: ${netAmount.toFixed(2)} ${asset}`
-      : `Locked: ${rawCryptoAmt.toFixed(2)} ${asset} | Protocol Fee: ${protocolFee.toFixed(4)} ${asset} | Net to Receive: ${netAmount.toFixed(2)} ${asset}`;
+      ? `Kilitli ${fmt(rawCryptoAmt)} ${asset} · Ücret ${fmt(protocolFee, 4)} · Alıcıya net ${fmt(netAmount)} ${asset}`
+      : `Locked ${fmt(rawCryptoAmt)} ${asset} · Fee ${fmt(protocolFee, 4)} · Net to taker ${fmt(netAmount)} ${asset}`;
+    const counterpartyDisplay = isMaker
+      ? (activeTrade?.takerFull ? formatAddress(activeTrade.takerFull) : '—')
+      : (activeTrade?.makerFull ? formatAddress(activeTrade.makerFull) : (activeTrade?.maker || '—'));
+    const fiatTotal = Number(activeTrade?.max) > 0 && activeTrade?.fiat ? `${fmt(activeTrade.max)} ${activeTrade.fiat}` : null;
     const hasOnchainTradeId = activeTrade?.onchainId !== null && activeTrade?.onchainId !== undefined && activeTrade?.onchainId !== '';
     const missingOnchainIdReason = lang === 'TR' ? 'On-chain trade ID bulunamadı.' : 'Missing on-chain trade ID.';
     const burnExpiredDeadlinePassed = getBurnExpiredDeadlinePassed({ activeTrade, roomState });
     const handleBurnExpired = ctx.handleBurnExpired || ctx.tradeRoomActions?.handleBurnExpired;
+    const paymentWindowExpired = getPaymentWindowExpired({ activeTrade, roomState });
+    const handleExpirePaymentWindow = ctx.handleExpirePaymentWindow || ctx.tradeRoomActions?.handleExpirePaymentWindow;
     const tradeActionCallbacks = ctx.devTradeActionCallbacks || buildTradeRoomPanelCallbacks({
       lang,
       activeTrade,
@@ -720,15 +737,15 @@ export const buildAppViews = (ctx) => {
         <div className={`border rounded-2xl p-5 md:p-8 shadow-2xl transition-colors duration-700 ${isChallenged ? 'bg-surface border-danger/40' : 'bg-surface border-borderSubtle'}`}>
           <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-8 border-b border-borderSubtle pb-6 gap-4 md:gap-0">
             <div>
-              <p className="text-textMuted text-xs tracking-widest mb-1">{lang === 'TR' ? 'İŞLEM ODASI' : 'TRADE ROOM'}: {activeTrade?.id}</p>
+              <p className="text-textMuted text-xs tracking-widest mb-1">{lang === 'TR' ? 'İŞLEM' : 'TRADE'} #{activeTrade?.onchainId ?? '—'}</p>
               <h2 className="max-w-full min-w-0 text-2xl font-bold text-textPrimary flex flex-col sm:flex-row items-start sm:items-center gap-3">
-                {activeTrade?.max || '0.00'} {activeTrade?.fiat}
-                <span className={`text-xs px-3 py-1 rounded-full border ${isChallenged ? 'bg-red-900/20 text-red-500 border-red-900' : 'bg-emerald-900/20 text-emerald-500 border-emerald-900'}`}>{isChallenged ? (lang === 'TR' ? 'İtiraz Süreci' : 'Purgatory') : roomState}</span>
+                <span>{fmt(rawCryptoAmt)} {asset}{fiatTotal && <span className="block text-sm font-medium text-textMuted">≈ {fiatTotal}</span>}</span>
+                <span className={`text-xs px-3 py-1 rounded-full border ${isChallenged ? 'bg-danger/10 text-danger border-danger/40' : 'bg-brand/10 text-brand border-brand/40'}`}>{getStateLabel(roomState, lang)}</span>
               </h2>
             </div>
             <div className="text-left md:text-right w-full md:w-auto border-t border-borderSubtle md:border-none pt-4 md:pt-0">
               <p className="text-textMuted text-xs">{lang === 'TR' ? 'KARŞI TARAF' : 'COUNTERPARTY'}</p>
-              <p className="text-textPrimary font-mono">{activeTrade?.maker || '0x...'}</p>
+              <p className="text-textPrimary font-mono">{counterpartyDisplay}</p>
             </div>
           </div>
 
@@ -740,12 +757,16 @@ export const buildAppViews = (ctx) => {
                 <span className="text-orange-500">{lang === 'TR' ? 'ALICI TEMİNATI' : 'TAKER BOND'}</span>
               </div>
               {(() => {
-                const myBond       = bleedingAmounts ? (isTaker ? Number(bleedingAmounts.takerBondRemaining) : Number(bleedingAmounts.makerBondRemaining)) : null;
-                const opponentBond = bleedingAmounts ? (isTaker ? Number(bleedingAmounts.makerBondRemaining) : Number(bleedingAmounts.takerBondRemaining)) : null;
-                const myBondOrig   = myBond       !== null ? Math.max(myBond, 1)       : 1;
-                const oppBondOrig  = opponentBond !== null ? Math.max(opponentBond, 1)  : 1;
-                const myPct        = myBond       !== null ? Math.round((myBond       / myBondOrig)  * 100) : 40;
-                const opponentPct  = opponentBond !== null ? Math.round((opponentBond / oppBondOrig)  * 100) : 35;
+                // [TR] Kalan teminat, lock anındaki orijinal teminata oranlanır (önceki hesap her zaman %100'dü).
+                // [EN] Remaining bond is compared with the original lock-time bond (old math was always 100%).
+                const toNum = (v) => { try { return Number(BigInt(v ?? 0)); } catch { return 0; } };
+                const makerOrig = toNum(activeTrade?.makerBondRaw);
+                const takerOrig = toNum(activeTrade?.takerBondRaw);
+                const pctOf = (remaining, original) => (original > 0 ? Math.max(0, Math.min(100, Math.round((remaining / original) * 100))) : 0);
+                const makerPct = bleedingAmounts ? pctOf(toNum(bleedingAmounts.makerBondRemaining), makerOrig) : 100;
+                const takerPct = bleedingAmounts ? pctOf(toNum(bleedingAmounts.takerBondRemaining), takerOrig) : 100;
+                const myPct = isTaker ? takerPct : makerPct;
+                const opponentPct = isTaker ? makerPct : takerPct;
                 const decayedTotal = bleedingAmounts ? (bleedingAmounts.totalDecayed ?? 0n) : 0n;
                 return (
                   <>
@@ -796,7 +817,7 @@ export const buildAppViews = (ctx) => {
             {roomState === 'LOCKED' && (
               <div className="text-center py-6">
                 <div className="w-14 h-14 bg-blue-500/10 text-blue-500 border border-blue-500/20 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl">🔒</div>
-                <h2 className="text-xl md:text-2xl font-bold text-textPrimary mb-2">{lang === 'TR' ? 'USDT Kilitlendi' : 'USDT Locked'}</h2>
+                <h2 className="text-xl md:text-2xl font-bold text-textPrimary mb-2">{lang === 'TR' ? `${asset} kilitlendi` : `${asset} locked`}</h2>
                 {isTaker ? (
                   <div className="w-full max-w-sm mt-4 space-y-3 mx-auto">
                     <div className="relative">
@@ -805,7 +826,7 @@ export const buildAppViews = (ctx) => {
                         {paymentIpfsHash ? (lang === 'TR' ? '✅ Yüklendi (Hash: ' + paymentIpfsHash.slice(0,8) + '...)' : '✅ Uploaded') : (lang === 'TR' ? '📎 Dekont Yükle' : '📎 Upload Receipt')}
                       </label>
                       <p className="text-xs text-textMuted mt-1 mb-4 text-center">
-                        {lang === 'TR' ? 'Dekontunuz AES-256 ile şifrelenir ve işlem bitince kalıcı olarak silinir.' : 'Receipt is AES-256 encrypted and permanently deleted after trade.'}
+                        {lang === 'TR' ? '🔒 Şifrelenir, işlem bitince silinir.' : '🔒 Encrypted, deleted after the trade.'}
                       </p>
                     </div>
                     <button onClick={handleReportPayment} disabled={isContractLoading || !paymentIpfsHash.trim()} className={`w-full py-3 rounded-xl font-bold transition ${isContractLoading || !paymentIpfsHash.trim() ? 'bg-elevated text-textMuted cursor-not-allowed border border-borderStrong' : 'bg-blue-600 hover:bg-blue-500 text-white shadow-[0_0_15px_rgba(37,99,235,0.2)]'}`}>
@@ -905,12 +926,9 @@ export const buildAppViews = (ctx) => {
                       <span className="text-xs text-textSecondary"><strong className="text-red-500">{lang === 'TR' ? 'UYARI:' : 'WARNING:'}</strong> {lang === 'TR' ? 'Paranın farklı isimli bir hesaptan gelmediğini ve Chargeback riskini anladığımı kabul ediyorum.' : 'I confirm the funds came from the correct name and understand the Chargeback risk.'}</span>
                     </label>
                     <div className="w-full flex flex-col gap-2">
-                      <div className="text-center p-2 bg-surface rounded-xl border border-borderSubtle">
-                        <p className="text-[10px] text-textMuted font-mono">{feeBreakdownText}</p>
-                      </div>
                       <div className="flex flex-col sm:flex-row justify-center gap-3">
                         <button disabled={!chargebackAccepted || isContractLoading} onClick={handleRelease} className={`w-full sm:w-auto px-8 py-3 rounded-xl font-bold transition ${chargebackAccepted && !isContractLoading ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.2)]' : 'bg-elevated text-textMuted cursor-not-allowed border border-borderStrong'}`}>
-                          {isContractLoading ? (lang === 'TR' ? '⏳ İşleniyor...' : '⏳ Processing...') : (lang === 'TR' ? 'Ödemeyi Onayla' : 'Release USDT')}
+                          {isContractLoading ? (lang === 'TR' ? '⏳ İşleniyor...' : '⏳ Processing...') : (lang === 'TR' ? `Ödemeyi onayla, ${asset} gönder` : `Release ${asset}`)}
                         </button>
                       </div>
                     </div>
@@ -943,7 +961,9 @@ export const buildAppViews = (ctx) => {
                       </button>
                     </div>
                     <p className="text-xs text-textMuted text-center mt-3">
-                      {lang === 'TR' ? 'Not: İptal onaylandığında her iki taraftan protokol ücreti kesilir.' : 'Note: Protocol fee is deducted from both parties upon cancel.'}
+                      {roomState === 'LOCKED'
+                        ? (lang === 'TR' ? 'Ödeme bildirilmeden iptal ücretsizdir.' : 'Cancelling before payment is free.')
+                        : (lang === 'TR' ? 'İptalde protokol ücreti kesilir.' : 'A protocol fee applies on cancel.')}
                     </p>
                   </>
                 )}
@@ -995,6 +1015,24 @@ export const buildAppViews = (ctx) => {
               </div>
             )}
 
+            {/* Ödeme penceresi doldu — LOCKED ve 48 saati geçmiş işlemler için (maker tam iade alır) */}
+            {paymentWindowExpired && typeof handleExpirePaymentWindow === 'function' && (
+              <div className="mt-6 bg-surface border border-warning/40 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-textPrimary">⏰ {lang === 'TR' ? 'Ödeme süresi doldu' : 'Payment window expired'}</p>
+                  <p className="text-xs text-textMuted">
+                    {lang === 'TR' ? '48 saatte ödeme bildirilmedi. Kilit çözülür, satıcı tam iade alır.' : 'No payment reported in 48h. The lock unwinds and the seller is refunded in full.'}
+                  </p>
+                </div>
+                <button
+                  onClick={handleExpirePaymentWindow}
+                  disabled={isContractLoading}
+                  className={`shrink-0 px-5 py-2.5 rounded-xl font-bold text-sm transition ${isContractLoading ? 'bg-elevated text-textMuted cursor-not-allowed border border-borderStrong' : 'bg-brand text-white hover:opacity-90'}`}>
+                  {isContractLoading ? '⏳...' : (lang === 'TR' ? 'Kilidi Çöz' : 'Unlock')}
+                </button>
+              </div>
+            )}
+
             {/* burnExpired butonu — CHALLENGED ve 10 günü geçmiş işlemler için */}
             {activeTrade?.onchainId && roomState === 'CHALLENGED' && (() => {
               const burnDate = activeTrade.challengedAt;
@@ -1007,12 +1045,7 @@ export const buildAppViews = (ctx) => {
                     🔥 {lang === 'TR' ? '10 Gün Doldu — Süre Aşımı Yakımı Açık' : '10-Day Deadline Passed — Contract Can Now Be Burned'}
                   </p>
                   <p className="text-textMuted text-xs mb-3">
-                    {lang === 'TR' ? 'Uyarı: Süre aşımı yakımı yapılırsa içerideki kilitli tüm USDT ve her iki tarafın teminatları kalıcı olarak Protokol Hazinesine aktarılır. İade yapılmaz.' : 'Warning: When burned, all locked USDT and bonds from both parties are permanently transferred to the Treasury. No refunds.'}
-                  </p>
-                  <p className="text-xs text-orange-300 mb-3">
-                    {lang === 'TR'
-                      ? 'Not: burnExpired fonksiyonu kontratta herkese açıktır; 10 gün dolduktan sonra üçüncü kişiler de bu çağrıyı yapabilir.'
-                      : 'Note: burnExpired is permissionless on-chain; after 10 days, third parties can also execute it.'}
+                    {lang === 'TR' ? `Kilitli ${asset} ve iki tarafın teminatı hazineye aktarılır; iade yoktur. Bu çağrıyı herkes yapabilir.` : `Locked ${asset} and both bonds go to the treasury; no refunds. Anyone can call this.`}
                   </p>
                   <button
                     onClick={handleBurnExpired}
@@ -1067,6 +1100,8 @@ export const buildAppViews = (ctx) => {
       userReputation={userReputation}
       myOrders={ctx.myOrders || []}
       setConfirmDeleteId={ctx.setConfirmDeleteId || (() => {})}
+      confirmDeleteId={ctx.confirmDeleteId ?? null}
+      handleDeleteOrder={ctx.orderActions?.handleDeleteOrder}
       initialActiveTab={ctx.profileContextTab}
       setInitialActiveTab={ctx.setProfileContextTab}
       activeTradesFilter={ctx.activeTradesFilter}
@@ -1081,6 +1116,11 @@ export const buildAppViews = (ctx) => {
       tradeHistory={ctx.tradeHistory || []}
       mapResolutionTypeLabel={mapResolutionTypeLabel}
       handleLogoutAndDisconnect={ctx.handleLogoutAndDisconnect}
+      canonicalizePayoutProfileDraft={ctx.canonicalizePayoutProfileDraft}
+      SEPA_COUNTRIES={ctx.SEPA_COUNTRIES}
+      isContractLoading={isContractLoading}
+      tokenDecimalsMap={tokenDecimalsMap}
+      showToast={showToast}
     />
   );
 

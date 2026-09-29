@@ -24,7 +24,7 @@ vi.mock('../../frontend/src/hooks/useArafContract', () => ({
     fillBuyOrder: vi.fn(),
     cancelSellOrder: vi.fn(),
     cancelBuyOrder: vi.fn(),
-    signCancelProposal: vi.fn(),
+    expirePaymentWindow: vi.fn(),
     proposeOrApproveCancel: vi.fn(),
     getReputation: vi.fn(),
     getCurrentAmounts: vi.fn(),

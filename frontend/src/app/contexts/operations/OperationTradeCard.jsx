@@ -37,8 +37,9 @@ const normalizeSettlementState = (state) => {
 };
 
 const safeFiatEstimate = (rawTrade) => {
-  const max = Number(rawTrade?.max);
-  if (!Number.isFinite(max)) return null;
+  if (rawTrade?.max === null || rawTrade?.max === undefined) return null;
+  const max = Number(rawTrade.max);
+  if (!Number.isFinite(max) || max <= 0) return null;
   const fiat = rawTrade?.fiat || rawTrade?.financials?.fiat_currency || null;
   return `${max.toFixed(0)}${fiat ? ` ${fiat}` : ''}`;
 };
@@ -126,10 +127,6 @@ export const OperationTradeCard = ({ escrow, lang = 'EN', onGoToRoom }) => {
         <div className="flex items-center justify-between gap-2">
           <dt className="text-textMuted">{t('counterparty', lang)}</dt>
           <dd className="font-mono text-textPrimary text-right truncate">{model.counterparty}</dd>
-        </div>
-        <div className="flex items-center justify-between gap-2">
-          <dt className="text-textMuted">{t('role', lang)}</dt>
-          <dd className="text-textPrimary text-right">{model.roleLabel}</dd>
         </div>
         {model.amount && (
           <div className="flex items-center justify-between gap-2">

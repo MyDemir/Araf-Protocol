@@ -168,6 +168,9 @@ describe('useAppSessionData paginated backend reads', () => {
       const parsed = new URL(url, 'http://localhost');
       return parsed.pathname.endsWith('/api/orders');
     });
-    expect(publicOrderUrls.every((url) => !url.includes('page=') && !url.includes('limit='))).toBe(true);
+    // [TR] Pazar yeri yalnız fill edilebilir emirleri tek sayfada ister; sayfa-sayfa genişletilmez.
+    // [EN] Marketplace requests fillable orders only, in a single page (never expanded page by page).
+    expect(publicOrderUrls.length).toBeGreaterThan(0);
+    expect(publicOrderUrls.every((url) => url.includes('status=ACTIVE') && !url.includes('page='))).toBe(true);
   });
 });

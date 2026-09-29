@@ -283,8 +283,9 @@ export const buildTradeRoomActions = ({
   canMakerStartChallengeFlow,
   canMakerChallenge,
   reportPayment,
-  signCancelProposal,
   proposeOrApproveCancel,
+  expirePaymentWindow,
+  cancelStatus = null,
   releaseFunds,
   pingTakerForChallenge,
   challengeTrade,
@@ -333,22 +334,28 @@ export const buildTradeRoomActions = ({
       const formData = new FormData();
       formData.append('receipt', file);
       formData.append('onchainEscrowId', String(activeTrade.onchainId));
-      const res = await fetchFn(buildApiUrl('receipts/upload'), {
+      // [TR] Backend requireSessionWalletMatch x-wallet-address başlığı ister; düz fetch ile her
+      //      yükleme 401 dönüyordu. authenticatedFetch başlığı ekler ve oturumu yeniler.
+      // [EN] Backend requires the x-wallet-address header; a plain fetch always got 401.
+      const doFetch = authenticatedFetch || fetchFn;
+      const res = await doFetch(buildApiUrl('receipts/upload'), {
         method: 'POST',
         body: formData,
         credentials: 'include',
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (res.ok && data.hash) {
         setPaymentIpfsHash(data.hash);
-        showToast(lang === 'TR' ? 'Dekont şifrelendi ve yüklendi.' : 'Receipt encrypted and uploaded.', 'success');
+        showToast(lang === 'TR' ? 'Dekont yüklendi.' : 'Receipt uploaded.', 'success');
       } else {
         throw new Error(data.error || 'Upload failed');
       }
     } catch (err) {
       console.error('Dekont yükleme hatası:', err);
-      showToast(lang === 'TR' ? 'Dekont yüklenemedi.' : 'Failed to upload receipt.', 'error');
+      const detail = err?.message && err.message !== 'Upload failed' ? ` ${err.message}` : '';
+      showToast((lang === 'TR' ? 'Dekont yüklenemedi.' : 'Failed to upload receipt.') + detail, 'error');
     } finally {
+      if (e?.target) e.target.value = '';
       setIsContractLoading(false);
     }
   };
@@ -381,36 +388,45 @@ export const buildTradeRoomActions = ({
     if (isContractLoading) return;
     try {
       setIsContractLoading(true);
-      showToast(lang === 'TR' ? 'İptal imzası oluşturuluyor...' : 'Creating cancel signature...', 'info');
-      const { signature, deadline } = await signCancelProposal(activeTrade.onchainId);
-      try {
-        const relayRes = await authenticatedFetch(buildApiUrl('trades/propose-cancel'), {
-          method: 'POST',
-          body: JSON.stringify({ tradeId: activeTrade.id, signature, deadline }),
-        });
-        const relayData = await relayRes.json();
-        if (relayData.bothSigned) {
-          showToast(lang === 'TR' ? 'Her iki taraf imzaladı. Kontrata gönderiliyor...' : 'Both signed. Sending to contract...', 'info');
-          await proposeOrApproveCancel(BigInt(activeTrade.onchainId), deadline, signature);
-          setCancelStatus(null);
-          setTradeState('CANCELED');
-          setCurrentView('home');
-          showToast(lang === 'TR' ? '✅ İşlem iptal edildi.' : '✅ Trade cancelled.', 'success');
-        } else {
-          setCancelStatus('proposed_by_me');
-          showToast(lang === 'TR' ? '✅ İptal teklifi gönderildi. Karşı tarafın onayı bekleniyor.' : '✅ Cancel proposal sent. Awaiting counterparty.', 'success');
-        }
-      } catch (relayErr) {
-        console.warn('[Cancel] Backend relay başarısız, direkt on-chain fallback:', relayErr.message);
-        showToast(lang === 'TR' ? 'Backend erişilemez. Kontrata direkt gönderiliyor...' : 'Backend unreachable. Sending directly to contract...', 'info');
-        await proposeOrApproveCancel(BigInt(activeTrade.onchainId), deadline, signature);
+      showToast(lang === 'TR' ? 'İptal onayı gönderiliyor... Cüzdanınızdan onaylayın.' : 'Sending cancel consent... Confirm in wallet.', 'info');
+      // [TR] İptal tamamen on-chain: her taraf kendi tx'ini gönderir, ikinci onay iptali yürütür.
+      //      Ayrı imza/backend rölesi yok; karşı tarafın onayı mirror'daki CancelProposed'dan bilinir.
+      // [EN] Cancel is fully on-chain: each party sends its own tx and the second consent executes it.
+      //      No separate signature or backend relay; counterparty consent comes from the mirrored CancelProposed.
+      const counterpartyAlreadyConsented = cancelStatus === 'proposed_by_other';
+      await proposeOrApproveCancel(activeTrade.onchainId);
+
+      if (counterpartyAlreadyConsented) {
+        finishTrade('CANCELED');
+        showToast(lang === 'TR' ? '✅ İşlem iptal edildi.' : '✅ Trade cancelled.', 'success');
+      } else {
         setCancelStatus('proposed_by_me');
-        showToast(lang === 'TR' ? '✅ İptal teklifi kontrata gönderildi (direkt).' : '✅ Cancel proposal sent directly to contract.', 'success');
+        showToast(lang === 'TR' ? '✅ İptal teklifi gönderildi. Karşı taraf onaylayınca işlem kapanır.' : '✅ Cancel proposed. It completes when the counterparty approves.', 'success');
       }
+      if (typeof fetchMyTrades === 'function') fetchMyTrades();
     } catch (err) {
       console.error('handleProposeCancel error:', err);
       const errorMessage = getTxErrorMessage(err, lang === 'TR' ? 'İptal teklifi başarısız.' : 'Cancel proposal failed.');
       showToast(isUserRejected(errorMessage) ? (lang === 'TR' ? 'İşlem iptal edildi.' : 'Transaction cancelled.') : errorMessage, 'error');
+    } finally {
+      setIsContractLoading(false);
+    }
+  };
+
+  // [TR] LOCKED trade'de 48 saatlik ödeme penceresi dolduysa kilit zamanla çözülür (maker tam iade alır).
+  // [EN] Once the 48h payment window on a LOCKED trade has passed, the lock unwinds by time (maker refunded in full).
+  const handleExpirePaymentWindow = async () => {
+    if (isContractLoading || !requireActiveOnchainId()) return;
+    try {
+      setIsContractLoading(true);
+      showToast(lang === 'TR' ? 'Kilit çözülüyor... Cüzdanınızdan onaylayın.' : 'Unlocking... Confirm in wallet.', 'info');
+      await expirePaymentWindow(activeTrade.onchainId);
+      finishTrade('CANCELED');
+      showToast(lang === 'TR' ? '✅ Ödeme süresi doldu; fonlar satıcıya iade edildi.' : '✅ Payment window expired; funds returned to the seller.', 'success');
+      if (typeof fetchMyTrades === 'function') fetchMyTrades();
+    } catch (err) {
+      console.error('expirePaymentWindow error:', err);
+      showToast(getTxErrorMessage(err, lang === 'TR' ? 'Kilit çözülemedi.' : 'Unlock failed.'), 'error');
     } finally {
       setIsContractLoading(false);
     }
@@ -536,10 +552,10 @@ export const buildTradeRoomActions = ({
       showToast(lang === 'TR' ? 'Yakma işlemi gönderiliyor... Cüzdanınızdan onaylayın.' : 'Burn transaction sent... Confirm in wallet.', 'info');
       await burnExpired(BigInt(activeTrade.onchainId));
       finishTrade('BURNED');
-      showToast(lang === 'TR' ? '🔥 İşlem yakıldı. Maker bond protokole aktarıldı.' : '🔥 Trade burned. Maker bond transferred to protocol.', 'success');
+      showToast(lang === 'TR' ? '🔥 Süre doldu: kilitli tutar ve teminatlar hazineye aktarıldı.' : '🔥 Expired: locked amount and bonds moved to treasury.', 'success');
     } catch (err) {
       console.error('burnExpired error:', err);
-      const reason = err.reason || err.message || (lang === 'TR' ? 'Yakma işlemi başarısız.' : 'Burn failed.');
+      const reason = getTxErrorMessage(err, lang === 'TR' ? 'Yakma işlemi başarısız.' : 'Burn failed.');
       showToast(reason, 'error');
     } finally {
       setIsContractLoading(false);
@@ -556,6 +572,7 @@ export const buildTradeRoomActions = ({
     handlePingMaker,
     handleAutoRelease,
     handleBurnExpired,
+    handleExpirePaymentWindow,
   };
 };
 
@@ -609,7 +626,7 @@ export const buildProfileActions = ({
     } catch (err) {
       console.error('handleRegisterWallet error:', err);
       const errorMessage = getTxErrorMessage(err, lang === 'TR' ? 'Kayıt başarısız.' : 'Registration failed.');
-      if (errorMessage.includes('AlreadyRegistered')) {
+      if (err?.arafErrorName === 'AlreadyRegistered' || errorMessage.includes('AlreadyRegistered')) {
         setIsWalletRegistered(true);
         showToast(lang === 'TR' ? 'Cüzdan zaten kayıtlı.' : 'Wallet already registered.', 'info');
       } else if (isUserRejected(errorMessage)) {

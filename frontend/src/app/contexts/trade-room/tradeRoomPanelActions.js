@@ -14,6 +14,16 @@ export const getBurnExpiredDeadlinePassed = ({ activeTrade, roomState, now = new
   && (now.getTime() - new Date(activeTrade.challengedAt).getTime() > 10 * 24 * 3600 * 1000)
 );
 
+// [TR] Kontrat PAYMENT_WINDOW = 48 saat: LOCKED trade'de taker bu sürede ödeme bildirmezse kilit çözülebilir.
+// [EN] Contract PAYMENT_WINDOW = 48h: a LOCKED trade can be unwound if the taker has not reported payment by then.
+export const PAYMENT_WINDOW_MS = 48 * 3600 * 1000;
+export const getPaymentWindowExpired = ({ activeTrade, roomState, now = new Date() }) => Boolean(
+  activeTrade?.onchainId
+  && roomState === 'LOCKED'
+  && activeTrade.lockedAt
+  && (now.getTime() - new Date(activeTrade.lockedAt).getTime() > PAYMENT_WINDOW_MS)
+);
+
 export const buildTradeRoomPanelCallbacks = ({
   lang = 'EN',
   activeTrade,
