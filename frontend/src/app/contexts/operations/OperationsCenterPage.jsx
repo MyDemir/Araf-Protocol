@@ -54,7 +54,7 @@ export const OperationsCenterPage = ({
         <h1 className="text-2xl font-bold text-textPrimary">{lang === 'TR' ? 'İşlem Takip Merkezi' : 'Operations Center'}</h1>
         <p className="mt-1 max-w-3xl text-sm text-textSecondary leading-relaxed">
           {lang === 'TR'
-            ? 'Önce settlement veya kullanıcı aksiyonu isteyen işlemleri, ardından ödeme bildirilenleri ve en son kilitli bekleyen işlemleri takip edin.'
+            ? 'Aksiyon bekleyen işlemler önce gösterilir.'
             : 'Work the command queue by priority: settlement/action required first, payment reported next, and locked waiting trades after that.'}
         </p>
       </div>
@@ -65,7 +65,7 @@ export const OperationsCenterPage = ({
       ) : (
         <div className="bg-surface border border-borderSubtle rounded-xl p-5 text-sm text-textSecondary">
           <p className="font-semibold text-textPrimary">{lang === 'TR' ? 'Şu anda takip edilecek aktif işlem yok.' : 'No active trades need attention right now.'}</p>
-          <p className="mt-1 text-sm text-textMuted">{lang === 'TR' ? 'Yeni kilit, ödeme bildirimi veya settlement aksiyonu oluştuğunda burada öncelik sırasıyla görünecek.' : 'New locks, payment reports, and settlement actions will appear here in priority order.'}</p>
+          <p className="mt-1 text-sm text-textMuted">{lang === 'TR' ? 'Yeni işlemler burada öncelik sırasıyla görünür.' : 'New locks, payment reports, and settlement actions will appear here in priority order.'}</p>
         </div>
       )}
     </div>

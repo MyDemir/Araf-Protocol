@@ -11,12 +11,14 @@ const resolveActionConfig = (action, actionCallbacks) => {
   return config;
 };
 
-export const ActionGuidanceButton = ({ action, actionCallbacks, disabledReasons = [], variant = 'primary' }) => {
+export const ActionGuidanceButton = ({ action, actionCallbacks, disabledReasons = [], variant = 'primary', compact = false }) => {
   const config = resolveActionConfig(action, actionCallbacks);
   if (!action || !config || !EXECUTABLE_ACTION_TYPES.has(action.type)) return null;
 
   const actionDisabledReasons = config.disabledReasons || [];
-  const allDisabledReasons = [...disabledReasons, ...actionDisabledReasons].filter(Boolean);
+  // [TR] Aynı gerekçe hem global hem aksiyon listesinden gelebilir; tek kez gösterilir.
+  // [EN] The same reason can come from both lists; it is shown once.
+  const allDisabledReasons = [...new Set([...disabledReasons, ...actionDisabledReasons].filter(Boolean))];
   const isDisabled = Boolean(config.disabled || allDisabledReasons.length);
   const label = config.label || action.label || action.key;
 
@@ -25,43 +27,40 @@ export const ActionGuidanceButton = ({ action, actionCallbacks, disabledReasons 
     : 'bg-emerald-600 hover:bg-emerald-500 text-white';
 
   return (
-    <div className="mt-3">
+    <div className={compact ? '' : 'mt-3'}>
       <button
         type="button"
         onClick={config.onClick}
         disabled={isDisabled}
-        className={`w-full px-4 py-2.5 rounded-lg font-bold transition ${isDisabled ? 'bg-elevated text-textMuted border border-borderStrong cursor-not-allowed' : enabledClass}`}
+        className={`w-full px-4 ${variant === 'secondary' ? 'py-2 text-sm' : 'py-3'} rounded-lg font-bold transition ${isDisabled ? 'bg-elevated text-textMuted border border-borderStrong cursor-not-allowed' : enabledClass}`}
       >
         {label}
       </button>
       {allDisabledReasons.length > 0 && (
-        <ul className="mt-2 list-disc pl-4 text-xs text-amber-300 space-y-0.5">
-          {allDisabledReasons.map((reason) => <li key={reason}>{reason}</li>)}
-        </ul>
+        <p className="mt-1.5 text-xs text-warning">{allDisabledReasons.join(' · ')}</p>
       )}
     </div>
   );
 };
 
-export const PrimaryActionPanel = ({ primaryAction, disabledReasons = [], actionCallbacks, lang = 'EN' }) => {
-  if (!primaryAction && !disabledReasons.length) return null;
+// [TR] Tek birincil aksiyon kartı: (varsa) kısa açıklama, gerekli girdiler (dekont, isim kontrolü, onay) ve tek buton.
+//      "Şimdi yapılacak" / "Önce gerekli" kutuları aynı bilgiyi tekrar ettiği için kaldırıldı.
+// [EN] Single primary action card: optional one-liner, required inputs (receipt, name check, acknowledgement) and one button.
+export const PrimaryActionPanel = ({ primaryAction, disabledReasons = [], actionCallbacks, lang = 'EN', children = null }) => {
+  if (!primaryAction && !disabledReasons.length && !children) return null;
+  const isExecutable = EXECUTABLE_ACTION_TYPES.has(primaryAction?.type) && Boolean(resolveActionConfig(primaryAction, actionCallbacks));
   return (
     <div className="mb-3 bg-surface border border-borderSubtle rounded-xl p-4 text-sm text-textSecondary" data-testid="trade-primary-guidance">
-      {primaryAction?.description && (
-        <div>
-          <p className="text-xs font-bold uppercase tracking-wide text-brand">{t(lang, 'Şimdi yapılacak işlem', 'What to do now')}</p>
-          <p className="mt-1 text-sm leading-relaxed text-textPrimary">{primaryAction.description}</p>
-        </div>
+      {!isExecutable && primaryAction?.label && (
+        <p className="flex items-center gap-2 font-semibold text-textPrimary">
+          <span className="inline-block w-2 h-2 rounded-full bg-info animate-pulse" aria-hidden="true" />
+          {primaryAction.label}
+        </p>
       )}
-      {disabledReasons.length > 0 && (
-        <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-950/10 p-3 text-amber-300">
-          <p className="font-bold uppercase tracking-wide text-xs">{t(lang, 'Önce bunlar gerekli', 'Required first')}</p>
-          <ul className="mt-1 list-disc pl-4 space-y-0.5 text-xs">
-            {disabledReasons.map((reason) => <li key={reason}>{reason}</li>)}
-          </ul>
-        </div>
-      )}
+      {primaryAction?.description && <p className="mt-1 text-sm leading-relaxed text-textSecondary">{primaryAction.description}</p>}
+      {children && <div className="mt-3 space-y-3">{children}</div>}
       <ActionGuidanceButton action={primaryAction} actionCallbacks={actionCallbacks} disabledReasons={disabledReasons} />
+      {!isExecutable && disabledReasons.length > 0 && <p className="mt-2 text-xs text-warning">{disabledReasons.join(' · ')}</p>}
     </div>
   );
 };

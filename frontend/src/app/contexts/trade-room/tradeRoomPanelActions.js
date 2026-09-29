@@ -43,6 +43,8 @@ export const buildTradeRoomPanelCallbacks = ({
   handleAutoRelease,
   handleProposeCancel,
   handleBurnExpired,
+  handleExpirePaymentWindow,
+  paymentWindowExpired = false,
   confirmFn = typeof window !== 'undefined' ? window.confirm.bind(window) : () => false,
 }) => {
   const makerChallengeBlocked = activeTrade?.challengePingedAt ? !canMakerChallenge : !canMakerStartChallengeFlow;
@@ -81,6 +83,12 @@ export const buildTradeRoomPanelCallbacks = ({
         : (lang === 'TR' ? 'Karşılıklı iptal durumunda standart protokol ücreti kesilecektir. Onaylıyor musunuz?' : 'Standard protocol fees will be deducted upon mutual cancellation. Confirm?');
       if (confirmFn(msg)) handleProposeCancel();
     }, { disabled: isContractLoading }),
+    ...(typeof handleExpirePaymentWindow === 'function' ? {
+      expire_payment_window: withGuard(handleExpirePaymentWindow, {
+        disabled: isContractLoading || !paymentWindowExpired,
+        disabledReasons: !paymentWindowExpired ? [lang === 'TR' ? '48 saatlik ödeme süresi dolmadı.' : 'The 48h payment window has not passed.'] : [],
+      }),
+    } : {}),
     burn_expired: withGuard(handleBurnExpired, {
       disabled: isContractLoading || !burnExpiredDeadlinePassed,
       disabledReasons: !burnExpiredDeadlinePassed ? [lang === 'TR' ? '10 günlük yakma süresi henüz dolmadı.' : '10-day burn deadline has not passed.'] : [],

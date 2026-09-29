@@ -60,7 +60,7 @@ export const createSessionActions = ({
     if (!address) return;
     try {
       setIsLoggingIn(true);
-      showToast(lang === 'TR' ? 'Lütfen cüzdanınızdan imza isteğini onaylayın 🦊' : 'Please approve the signature request in your wallet 🦊', 'info');
+      showToast(lang === 'TR' ? 'Lütfen cüzdanınızdan imza isteğini onaylayın' : 'Please approve the signature request in your wallet', 'info');
 
       const nonceRes = await fetch(buildApiUrl(`auth/nonce?wallet=${address}`), { credentials: 'include' });
       if (!nonceRes.ok) {
@@ -101,7 +101,7 @@ export const createSessionActions = ({
         }
         setIsAuthenticated(true);
         setAuthenticatedWallet(verifiedWallet);
-        showToast(lang === 'TR' ? 'Sisteme başarıyla giriş yapıldı! 🚀' : 'Successfully signed in! 🚀', 'success');
+        showToast(lang === 'TR' ? 'Sisteme başarıyla giriş yapıldı!' : 'Successfully signed in!', 'success');
       } else {
         const data = await verifyRes.json().catch(() => ({}));
         throw new Error(data.error || 'Doğrulama başarısız');

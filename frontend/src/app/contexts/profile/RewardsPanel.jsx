@@ -62,7 +62,7 @@ export const RewardsPanel = ({ lang = 'EN', address, showToast, tokenDecimalsMap
         await rewards.finalizeEpochToken(targetEpoch, tokenAddress);
       }
       await rewards.claim(targetEpoch, tokenAddress);
-      showToast?.(lang === 'TR' ? '✅ Ödül cüzdanınıza gönderildi.' : '✅ Reward sent to your wallet.', 'success');
+      showToast?.(lang === 'TR' ? 'Ödül cüzdanınıza gönderildi.' : 'Reward sent to your wallet.', 'success');
       setRefreshKey((k) => k + 1);
     } catch (err) {
       showToast?.(err?.shortMessage || err?.message || (lang === 'TR' ? 'Talep başarısız.' : 'Claim failed.'), 'error');

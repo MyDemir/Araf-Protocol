@@ -517,7 +517,7 @@ export function useAppSessionData({
 
         const wasPendingSync = prev._pendingBackendSync && !prev.id;
         if (wasPendingSync && updated._id) {
-          showToast(lang === 'TR' ? '✅ İşlem odası hazır!' : '✅ Trade room ready!', 'success');
+          showToast(lang === 'TR' ? 'İşlem odası hazır!' : 'Trade room ready!', 'success');
         }
 
         if (updated.status !== prev.state) setTradeState(updated.status);

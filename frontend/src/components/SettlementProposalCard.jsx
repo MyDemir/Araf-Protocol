@@ -1,3 +1,4 @@
+import { Handshake } from 'lucide-react';
 import React from 'react';
 import { buildSettlementPreviewUrl } from '../app/apiConfig';
 import SettlementPreviewModal from './SettlementPreviewModal';
@@ -9,7 +10,7 @@ const MIN_CUSTOM_EXPIRY_MINUTES = 10;
 const MAX_CUSTOM_EXPIRY_MINUTES = 7 * 24 * 60;
 const SETTLEMENT_STATE_BY_INDEX = ['NONE', 'PROPOSED', 'REJECTED', 'WITHDRAWN', 'EXPIRED', 'FINALIZED'];
 export const SETTLEMENT_NEUTRALITY_COPY = {
-  TR: 'Araf kimin haklı olduğuna karar vermez; settlement yalnız CHALLENGED dispute fazında iki taraf imzasıyla mümkündür.',
+  TR: 'Araf karar vermez; teklif ancak iki taraf onaylarsa geçerli olur.',
   EN: 'Araf does not decide who is right; settlement is available only in the CHALLENGED dispute phase with both parties’ signatures.',
 };
 
@@ -204,64 +205,71 @@ export default function SettlementProposalCard({
 
   if (!activeTrade) return null;
 
+  // [TR] Kontrat maker payını (bps) ister; kullanıcı ise "bana / karşı tarafa yüzde kaç" diye düşünür.
+  // [EN] The contract takes the maker share (bps); users think in "me / counterparty percent".
+  const isMakerView = String(userRole || '').toLowerCase() === 'maker';
+  const myShareBps = Number.isFinite(normalizedMakerShareBps) ? (isMakerView ? normalizedMakerShareBps : 10000 - normalizedMakerShareBps) : 5000;
+  const setMyShareBps = (bps) => setMakerShareBps(String(isMakerView ? bps : 10000 - Number(bps)));
+  const pct = (bps) => `%${(Number(bps) / 100).toLocaleString(lang === 'TR' ? 'tr-TR' : 'en-US', { maximumFractionDigits: 2 })}`;
+  const inputClass = 'mt-1 w-full bg-elevated border border-borderStrong rounded-lg px-3 py-2 text-sm text-textPrimary';
+
   return (
-    <div className="mt-2 mb-2 bg-[#0c0c0e] border border-[#222] rounded-xl p-4">
+    <div className="mt-2 mb-2 bg-surface border border-borderStrong rounded-xl p-4" data-testid="settlement-proposal-card">
       <div className="mb-3">
-        <h3 className="text-sm font-bold text-white">{lang === 'TR' ? 'On-Chain Settlement' : 'On-Chain Settlement'}</h3>
-        <p className="text-[11px] text-slate-400">
-          {lang === 'TR'
-            ? SETTLEMENT_NEUTRALITY_COPY.TR
-            : SETTLEMENT_NEUTRALITY_COPY.EN}
-        </p>
+        {/* [TR] Tarafsızlık notu işlem özetinde zaten var; kartta tekrar edilmez. */}
+        <h3 className="text-sm font-bold text-textPrimary flex items-center gap-2" title={lang === 'TR' ? SETTLEMENT_NEUTRALITY_COPY.TR : SETTLEMENT_NEUTRALITY_COPY.EN}><Handshake className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />{lang === 'TR' ? 'Uzlaşma teklifi' : 'Settlement offer'}</h3>
       </div>
 
       {!isActionableRoom && !isTerminalRoom && (
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-textMuted">
           {lang === 'TR'
-            ? 'Settlement yalnız CHALLENGED dispute safhasında kullanılabilir (LOCKED/PAID durumlarında kapalıdır).'
-            : 'Settlement is available only during CHALLENGED disputes (disabled in LOCKED/PAID states).'}
+            ? 'Uzlaşma yalnız itiraz sürecinde kullanılabilir.'
+            : 'Settlement is available only during CHALLENGED disputes.'}
         </p>
       )}
 
       {isTerminalRoom && !proposalIsRenderable && (
-        <p className="text-xs text-slate-500">{lang === 'TR' ? 'İşlem sonlandı. Settlement yalnız geçmiş bilgi olarak gösterilir.' : 'Trade is terminal. Settlement is shown only as history.'}</p>
+        <p className="text-xs text-textMuted">{lang === 'TR' ? 'İşlem sonlandı. Uzlaşma yalnız geçmiş bilgi olarak gösterilir.' : 'Trade is terminal. Settlement is shown only as history.'}</p>
       )}
 
       {isActionableRoom && !proposalIsRenderable && (
         <div className="space-y-3">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <label className="text-xs text-slate-300">
-              makerShareBps
-              <input
-                type="number"
-                min="0"
-                max="10000"
-                value={makerShareBps}
-                onChange={(e) => setMakerShareBps(e.target.value)}
-                className="mt-1 w-full bg-[#111113] border border-[#2a2a2e] rounded-lg px-3 py-2 text-sm text-white"
-              />
-            </label>
-            <label className="text-xs text-slate-300">
-              takerShareBps
-              <input disabled value={Number.isFinite(normalizedTakerShareBps) ? normalizedTakerShareBps : '—'} className="mt-1 w-full bg-[#0f0f12] border border-[#2a2a2e] rounded-lg px-3 py-2 text-sm text-slate-400" />
-            </label>
+          <div>
+            <div className="flex items-end justify-between text-sm">
+              <span className="text-textSecondary">{lang === 'TR' ? 'Size' : 'You'} <strong className="text-textPrimary text-lg">{pct(myShareBps)}</strong></span>
+              <span className="text-textSecondary">{lang === 'TR' ? 'Karşı tarafa' : 'Counterparty'} <strong className="text-textPrimary text-lg">{pct(10000 - myShareBps)}</strong></span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="10000"
+              step="100"
+              value={myShareBps}
+              onChange={(e) => setMyShareBps(e.target.value)}
+              aria-label={lang === 'TR' ? 'Sizin payınız' : 'Your share'}
+              className="mt-2 w-full accent-emerald-500"
+            />
+            <div className="mt-2 flex gap-2">
+              {[2500, 5000, 7500].map((bps) => (
+                <button
+                  key={bps}
+                  type="button"
+                  onClick={() => setMyShareBps(bps)}
+                  className={`flex-1 py-1.5 rounded-lg text-xs font-bold border transition ${myShareBps === bps ? 'bg-brand/10 border-brand text-brand' : 'bg-elevated border-borderSubtle text-textSecondary hover:text-textPrimary'}`}
+                >
+                  {pct(bps)}
+                </button>
+              ))}
+            </div>
           </div>
-          <input
-            type="range"
-            min="0"
-            max="10000"
-            value={Number.isFinite(normalizedMakerShareBps) ? normalizedMakerShareBps : 0}
-            onChange={(e) => setMakerShareBps(e.target.value)}
-            className="w-full"
-          />
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <label className="text-xs text-slate-300">
-              {lang === 'TR' ? 'Süre' : 'Expiry'}
+            <label className="text-xs text-textSecondary">
+              {lang === 'TR' ? 'Teklif geçerliliği' : 'Offer valid for'}
               <select
                 value={expiryPreset}
                 onChange={(e) => setExpiryPreset(e.target.value)}
-                className="mt-1 w-full bg-[#111113] border border-[#2a2a2e] rounded-lg px-3 py-2 text-sm text-white"
+                className={inputClass}
               >
                 <option value="30m">{lang === 'TR' ? '30 dakika' : '30 minutes'}</option>
                 <option value="2h">{lang === 'TR' ? '2 saat' : '2 hours'}</option>
@@ -270,7 +278,7 @@ export default function SettlementProposalCard({
               </select>
             </label>
             {expiryPreset === 'custom' && (
-              <label className="text-xs text-slate-300">
+              <label className="text-xs text-textSecondary">
                 {lang === 'TR' ? 'Özel dakika' : 'Custom minutes'}
                 <input
                   type="number"
@@ -278,49 +286,50 @@ export default function SettlementProposalCard({
                   max={String(MAX_CUSTOM_EXPIRY_MINUTES)}
                   value={customMinutes}
                   onChange={(e) => setCustomMinutes(e.target.value)}
-                  className="mt-1 w-full bg-[#111113] border border-[#2a2a2e] rounded-lg px-3 py-2 text-sm text-white"
+                  className={inputClass}
                 />
               </label>
             )}
           </div>
 
-          {validationError && <p className="text-xs text-red-400">{validationError}</p>}
-          {!hasBackendTradeId && <p className="text-xs text-amber-300">{previewUnavailableMessage}</p>}
-          {!hasOnchainTradeId && <p className="text-xs text-amber-300">{missingOnchainIdMessage}</p>}
+          {validationError && <p className="text-xs text-danger">{validationError}</p>}
+          {!hasBackendTradeId && <p className="text-xs text-warning">{previewUnavailableMessage}</p>}
+          {!hasOnchainTradeId && <p className="text-xs text-warning">{missingOnchainIdMessage}</p>}
 
-          <div className="flex gap-2">
-            <button
-              onClick={onPreviewCreate}
-              disabled={isContractLoading || !hasBackendTradeId || !hasOnchainTradeId}
-              className={`px-4 py-2 rounded-lg text-sm font-bold transition ${isContractLoading ? 'bg-[#1a1a1f] text-slate-500 border border-[#2a2a2e] cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500 text-white'}`}
-            >
-              {lang === 'TR' ? 'Önizleme' : 'Preview'}
-            </button>
-            <div className="text-[11px] text-slate-500 self-center">
-              {lang === 'TR'
-                ? 'Kararı sen ve karşı taraf verirsiniz.'
-                : 'You and the counterparty decide the split.'}
-            </div>
-          </div>
+          <button
+            onClick={onPreviewCreate}
+            disabled={isContractLoading || !hasBackendTradeId || !hasOnchainTradeId}
+            className={`w-full py-2.5 rounded-lg text-sm font-bold transition ${isContractLoading ? 'bg-elevated text-textMuted border border-borderStrong cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50'}`}
+          >
+            {lang === 'TR' ? 'Teklifi önizle' : 'Preview offer'}
+          </button>
         </div>
       )}
 
       {proposalIsRenderable && proposalState === 'PROPOSED' && (
         <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            <p className="text-slate-400">{lang === 'TR' ? 'Proposer' : 'Proposer'}: <span className="text-white font-mono">{proposal?.proposer ?? proposal?.proposed_by ?? '—'}</span></p>
-            <p className="text-slate-400">makerShareBps: <span className="text-white font-mono">{proposal?.makerShareBps ?? proposal?.maker_share_bps ?? '—'}</span></p>
-            <p className="text-slate-400">takerShareBps: <span className="text-white font-mono">{proposal?.takerShareBps ?? proposal?.taker_share_bps ?? '—'}</span></p>
-            <p className="text-slate-400">{lang === 'TR' ? 'Sona erme' : 'Expires'}: <span className="text-white font-mono">{safeDate(expiresAt)}</span></p>
-          </div>
-          <p className={`text-xs ${isExpired ? 'text-red-400' : 'text-slate-400'}`}>
-            {isExpired
-              ? (lang === 'TR' ? 'Teklif süresi doldu.' : 'Proposal is expired.')
-              : (lang === 'TR' ? `Kalan süre: ${Math.max(0, expiresAt - nowTs)} sn` : `Time left: ${Math.max(0, expiresAt - nowTs)} sec`)}
-          </p>
+          {(() => {
+            const offerMakerBps = Number(proposal?.makerShareBps ?? proposal?.maker_share_bps);
+            const offerMine = Number.isFinite(offerMakerBps) ? (isMakerView ? offerMakerBps : 10000 - offerMakerBps) : null;
+            return (
+              <div className="rounded-lg bg-elevated border border-borderSubtle p-3">
+                <p className="text-xs text-textMuted">{isProposer ? (lang === 'TR' ? 'Gönderdiğiniz teklif' : 'Your offer') : (lang === 'TR' ? 'Karşı tarafın teklifi' : 'Counterparty offer')}</p>
+                <p className="mt-1 text-sm text-textPrimary">
+                  {lang === 'TR' ? 'Size' : 'You'} <strong>{offerMine == null ? '—' : pct(offerMine)}</strong>
+                  <span className="text-textMuted"> · </span>
+                  {lang === 'TR' ? 'Karşı tarafa' : 'Counterparty'} <strong>{offerMine == null ? '—' : pct(10000 - offerMine)}</strong>
+                </p>
+                <p className={`mt-1 text-xs ${isExpired ? 'text-danger' : 'text-textMuted'}`}>
+                  {isExpired
+                    ? (lang === 'TR' ? 'Teklif süresi doldu.' : 'Proposal is expired.')
+                    : `${lang === 'TR' ? 'Kalan' : 'Time left'}: ${Math.floor(Math.max(0, expiresAt - nowTs) / 60)} ${lang === 'TR' ? 'dk' : 'min'} · ${safeDate(expiresAt)}`}
+                </p>
+              </div>
+            );
+          })()}
 
           {showTerminalProposedHistory && (
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-textMuted">
               {lang === 'TR'
                 ? 'Bu işlem terminal duruma ulaştı. Bu settlement teklifi artık işleme alınamaz.'
                 : 'This trade already reached a terminal state. This settlement proposal can no longer be acted on.'}
@@ -330,7 +339,7 @@ export default function SettlementProposalCard({
           {showActionableProposedControls && (
             <div className="flex flex-wrap gap-2">
               {!hasOnchainTradeId && (
-                <p className="text-xs text-amber-300">{missingOnchainIdMessage}</p>
+                <p className="text-xs text-warning">{missingOnchainIdMessage}</p>
               )}
               {!isExpired && isProposer && (
                 <button
@@ -375,16 +384,16 @@ export default function SettlementProposalCard({
 
       {proposalIsRenderable && proposalState === 'FINALIZED' && (
         <div className="space-y-2 text-xs">
-          <p className="text-emerald-400 font-bold">{lang === 'TR' ? 'Settlement Finalized' : 'Settlement Finalized'}</p>
-          <p className="text-slate-300">{lang === 'TR' ? 'Maker payout' : 'Maker payout'}: <span className="font-mono">{proposal?.makerPayout ?? proposal?.maker_payout ?? '—'}</span></p>
-          <p className="text-slate-300">{lang === 'TR' ? 'Taker payout' : 'Taker payout'}: <span className="font-mono">{proposal?.takerPayout ?? proposal?.taker_payout ?? '—'}</span></p>
-          <p className="text-slate-400">{lang === 'TR' ? 'Finalized at' : 'Finalized at'}: {safeDate(proposal?.finalizedAt ?? proposal?.finalized_at)}</p>
-          <p className="text-slate-400">txHash: <span className="font-mono text-white">{shortHash(proposal?.txHash ?? proposal?.tx_hash)}</span></p>
+          <p className="text-emerald-400 font-bold">{lang === 'TR' ? 'Uzlaşma tamamlandı' : 'Settlement finalized'}</p>
+          <p className="text-textSecondary">{lang === 'TR' ? 'Satıcıya' : 'Maker payout'}: <span className="font-mono">{proposal?.makerPayout ?? proposal?.maker_payout ?? '—'}</span></p>
+          <p className="text-textSecondary">{lang === 'TR' ? 'Alıcıya' : 'Taker payout'}: <span className="font-mono">{proposal?.takerPayout ?? proposal?.taker_payout ?? '—'}</span></p>
+          <p className="text-textMuted">{lang === 'TR' ? 'Tarih' : 'Finalized at'}: {safeDate(proposal?.finalizedAt ?? proposal?.finalized_at)}</p>
+          <p className="text-textMuted">txHash: <span className="font-mono text-white">{shortHash(proposal?.txHash ?? proposal?.tx_hash)}</span></p>
         </div>
       )}
 
       {proposalIsRenderable && !['PROPOSED', 'FINALIZED'].includes(proposalState) && (
-        <p className="text-xs text-slate-400">
+        <p className="text-xs text-textMuted">
           {lang === 'TR'
             ? `Settlement geçmiş durumu: ${proposalState}`
             : `Settlement historical state: ${proposalState}`}

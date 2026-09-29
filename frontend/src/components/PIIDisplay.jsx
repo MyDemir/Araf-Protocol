@@ -19,6 +19,7 @@
  *               authenticatedFetch={authenticatedFetch} />
  */
 
+import { Lock, LockOpen, MessageCircle, ShieldCheck, TriangleAlert } from 'lucide-react';
 import React, { useState } from 'react';
 import { usePII } from '../hooks/usePII';
 import { getPiiCopy } from '../app/copy';
@@ -129,16 +130,13 @@ export default function PIIDisplay({ tradeId, lang = 'tr', getSafeTelegramUrl, a
   if (!revealed) {
     return (
       <div className="bg-surface p-4 rounded-xl border border-borderStrong space-y-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-textMuted">
-            🛡️ {t.sectionTitle}
-          </p>
-          <h3 className="mt-1 text-base font-bold text-textPrimary leading-snug">{t.lockedTitle}</h3>
-        </div>
-
-        <div className="bg-elevated rounded-lg p-3 flex items-start gap-3 border border-borderSubtle">
-          <span className="text-2xl leading-none" aria-hidden="true">🔒</span>
-          <p className="text-sm text-textSecondary leading-relaxed">{t.lockedSub}</p>
+        {/* [TR] Kilitli görünüm tek başlık + tek satır; aynı mesajı veren kutu ve alt başlık birleştirildi. */}
+        <div className="flex items-start gap-3">
+          <span className="text-textMuted shrink-0" aria-hidden="true"><Lock className="w-6 h-6" strokeWidth={1.8} aria-hidden="true" /></span>
+          <div className="min-w-0">
+            <h3 className="text-sm font-bold text-textPrimary leading-snug">{t.lockedTitle}</h3>
+            <p className="text-xs text-textMuted leading-relaxed">{t.lockedSub}</p>
+          </div>
         </div>
 
         {/* HTTP uyarısı — ORTA-15 */}
@@ -150,7 +148,7 @@ export default function PIIDisplay({ tradeId, lang = 'tr', getSafeTelegramUrl, a
 
         {error && (
           <div className="p-3 bg-red-950/40 border border-red-800/60 rounded-lg">
-            <p className="text-red-300 text-sm leading-relaxed">⚠ {error}</p>
+            <p className="text-red-300 text-sm leading-relaxed flex items-start gap-1.5"><TriangleAlert className="w-4 h-4 mt-0.5 shrink-0" strokeWidth={1.8} aria-hidden="true" />{error}</p>
           </div>
         )}
 
@@ -168,10 +166,10 @@ export default function PIIDisplay({ tradeId, lang = 'tr', getSafeTelegramUrl, a
               <span className="w-4 h-4 border-2 border-blue-300 border-t-transparent rounded-full animate-spin" />
               <span>{t.revealBtnLoading}</span>
             </span>
-          ) : t.revealBtn}
+          ) : <span className="inline-flex items-center justify-center gap-2"><LockOpen className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />{t.revealBtn}</span>}
         </button>
 
-        <p className="text-center text-xs text-textMuted leading-relaxed">{t.disclaimer}</p>
+        <p className="text-center text-[11px] text-textMuted leading-relaxed">{t.disclaimer}</p>
       </div>
     );
   }
@@ -183,8 +181,8 @@ export default function PIIDisplay({ tradeId, lang = 'tr', getSafeTelegramUrl, a
         {t.encryptedBadge}
       </div>
 
-      <p className="text-textMuted text-xs mb-3 font-semibold uppercase tracking-wider pr-32">
-        🛡️ {t.sectionTitle}
+      <p className="text-textMuted text-xs mb-3 font-semibold uppercase tracking-wider pr-32 flex items-center gap-1.5">
+        <ShieldCheck className="w-3.5 h-3.5" strokeWidth={1.8} aria-hidden="true" />{t.sectionTitle}
       </p>
 
       {pii ? (
@@ -270,24 +268,24 @@ export default function PIIDisplay({ tradeId, lang = 'tr', getSafeTelegramUrl, a
               rel={pii?.payoutProfile?.contact?.channel === 'telegram' ? "noopener noreferrer" : undefined}
               className="flex items-center justify-center space-x-2 w-full py-2.5 rounded-xl bg-[#24A1DE]/10 border border-[#24A1DE]/30 text-[#24A1DE] hover:bg-[#24A1DE]/20 text-sm font-bold transition-all mb-3"
             >
-              <span>💬</span>
+              <MessageCircle className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />
               <span>{getContactCtaLabel(pii?.payoutProfile?.contact?.channel)}</span>
             </a>
           ) : (
             <div className="flex items-center justify-center space-x-2 w-full py-2 rounded-xl bg-elevated border border-borderSubtle text-textMuted text-xs mb-3">
-              <span>💬</span>
+              <MessageCircle className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />
               <span>{t.noContact}</span>
             </div>
           )}
 
           <div className="p-3 bg-elevated rounded-lg flex items-start space-x-2 border border-borderSubtle">
-            <span className="text-sm shrink-0" aria-hidden="true">🛡️</span>
+            <span className="shrink-0 text-textMuted mt-0.5"><ShieldCheck className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" /></span>
             <p className="text-sm text-textSecondary leading-relaxed">{t.notice}</p>
           </div>
         </>
       ) : error ? (
         <div className="text-center py-4">
-          <p className="text-red-400 text-sm mb-2">⚠ {error}</p>
+          <p className="text-red-400 text-sm mb-2 inline-flex items-center gap-1.5"><TriangleAlert className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />{error}</p>
           <button
             onClick={handleHide}
             className="px-4 bg-elevated hover:bg-surface text-textSecondary text-xs py-2 rounded-lg transition border border-borderStrong"

@@ -13,6 +13,7 @@ const labels = {
 };
 
 const timerLabels = {
+  paymentWindow: { TR: 'Ödeme süresi', EN: 'Payment window' },
   gracePeriod: { TR: getTradeTerm('gracePeriod', 'TR'), EN: getTradeTerm('gracePeriod', 'EN') },
   makerPing: { TR: 'Satıcı uyarı penceresi', EN: 'Maker ping window' },
   makerChallengePing: { TR: 'Alıcı uyarı penceresi', EN: 'Buyer ping window' },
@@ -37,9 +38,19 @@ const formatTimerValue = (timer, lang) => {
   return parts.length ? parts.join(' ') : null;
 };
 
-const buildTimerCards = (timers = {}, lang = 'EN') => {
+// [TR] Her durumda yalnız o anda karar etkileyen sayaçlar gösterilir; diğerleri gürültüdür.
+// [EN] Only timers that affect a decision in the current state/role are shown; the rest is noise.
+const RELEVANT_TIMERS = {
+  LOCKED: { taker: ['paymentWindow'], maker: ['paymentWindow'] },
+  PAID: { taker: ['gracePeriod', 'makerPing'], maker: ['gracePeriod', 'makerChallengePing', 'makerChallenge'] },
+  CHALLENGED: { taker: ['bleeding', 'principalProtection'], maker: ['bleeding', 'principalProtection'] },
+};
+
+const buildTimerCards = (timers = {}, lang = 'EN', state = null, role = 'taker') => {
   if (!timers || typeof timers !== 'object') return [];
+  const allowed = RELEVANT_TIMERS[state]?.[role] || null;
   return Object.entries(timers)
+    .filter(([key]) => !allowed || allowed.includes(key))
     .map(([key, timer]) => {
       const summary = formatTimerValue(timer, lang);
       if (!summary) return null;
@@ -58,7 +69,7 @@ const decisionCopy = {
   LOCKED: {
     taker: {
       headline: { TR: 'Ödeme kanıtı bekleniyor', EN: 'Payment proof is needed' },
-      subheadline: { TR: 'İşlem kilitli. Ödemeyi yaptıysanız kanıtı yükleyip ödeme bildirimini gönderin.', EN: 'The trade is locked. If you paid, upload proof and report the payment.' },
+      subheadline: { TR: 'Ödemeyi yapın, dekontu yükleyin ve bildirin.', EN: 'Pay, upload the receipt and report it.' },
       nowLabel: { TR: 'Şimdi', EN: 'Now' },
       nowDescription: { TR: 'Dekontu yükleyin ve ödeme bildirimi aksiyonunu kullanın. Frontend sizi yönlendirir; kontrat durumu belirler.', EN: 'Upload payment proof and use the report payment action. The frontend guides you; the contract state remains authoritative.' },
       nextLabel: { TR: 'Süre devam ederse', EN: 'If time continues' },
@@ -66,7 +77,7 @@ const decisionCopy = {
     },
     maker: {
       headline: { TR: 'Alıcının ödeme bildirimi bekleniyor', EN: 'Waiting for the buyer to report payment' },
-      subheadline: { TR: 'Fonlar kilitli. Alıcı ödeme bildirimi yapana kadar ana göreviniz beklemek ve bilgileri izlemek.', EN: 'Funds are locked. Until the buyer reports payment, your main task is to wait and monitor the details.' },
+      subheadline: { TR: 'Fonlar kilitli; alıcının ödemesini bekleyin.', EN: 'Funds are locked; wait for the buyer to pay.' },
       nowLabel: { TR: 'Şimdi', EN: 'Now' },
       nowDescription: { TR: 'Ödeme bildirimi gelene kadar kontrat aksiyonu bekleme durumundadır.', EN: 'Contract actions remain in a waiting state until payment is reported.' },
       nextLabel: { TR: 'Süre devam ederse', EN: 'If time continues' },
@@ -76,7 +87,7 @@ const decisionCopy = {
   PAID: {
     maker: {
       headline: { TR: 'Ödeme bildirildi; kontrol sizde', EN: 'Payment was reported; review it now' },
-      subheadline: { TR: 'Alıcı ödeme yaptığını bildirdi. Banka hesabınızı ve isim eşleşmesini siz kontrol edersiniz.', EN: 'The buyer reported payment. You review your bank account and sender-name match.' },
+      subheadline: { TR: 'Hesabınızda tutarı ve gönderen adını kontrol edin.', EN: 'Check the amount and sender name in your account.' },
       nowLabel: { TR: 'Şimdi', EN: 'Now' },
       nowDescription: { TR: 'Ödemeyi doğruladıysanız fonları serbest bırakın. Ödeme yoksa mevcut itiraz akışını başlatabilirsiniz.', EN: 'If payment checks out, release the funds. If it did not arrive, you can start the existing challenge flow.' },
       nextLabel: { TR: 'Risk sürerse', EN: 'If risk continues' },
@@ -84,7 +95,7 @@ const decisionCopy = {
     },
     taker: {
       headline: { TR: 'Ödeme bildirildi; satıcı onayı bekleniyor', EN: 'Payment reported; waiting for maker review' },
-      subheadline: { TR: 'Ödeme bildiriminiz gönderildi. Satıcının ödemeyi doğrulayıp fonları serbest bırakması beklenir.', EN: 'Your payment report was sent. The maker is expected to verify payment and release funds.' },
+      subheadline: { TR: 'Satıcı ödemeyi doğrulayıp fonları gönderecek.', EN: 'The maker will verify and release the funds.' },
       nowLabel: { TR: 'Şimdi', EN: 'Now' },
       nowDescription: { TR: 'Kanıt ve işlem detaylarını hazır tutun. Gerekli süreler dolunca mevcut uyarı veya otomatik serbest bırakma seçenekleri kullanılabilir.', EN: 'Keep proof and trade details ready. When required timers expire, existing ping or auto-release options may become available.' },
       nextLabel: { TR: 'Süre devam ederse', EN: 'If time continues' },
@@ -94,7 +105,7 @@ const decisionCopy = {
   CHALLENGED: {
     maker: {
       headline: { TR: 'İtiraz süreci başladı', EN: 'Challenge phase is active' },
-      subheadline: { TR: 'Bu aşamada settlement yalnızca tarafların aksiyonlarıyla ilerler. Araf karar vermez.', EN: 'In this phase, settlement moves only through party actions. Araf does not decide the outcome.' },
+      subheadline: { TR: 'Araf karar vermez; süre uzadıkça teminatlar erir. Uzlaşın veya onaylayın.', EN: 'Araf does not decide; bonds bleed over time. Settle or release.' },
       nowLabel: { TR: 'Şimdi', EN: 'Now' },
       nowDescription: { TR: 'Mevcut settlement kartındaki taraf aksiyonlarını takip edin. Kontrat ve taraf imzaları otoritedir.', EN: 'Follow party actions in the existing settlement card. The contract and party signatures remain authoritative.' },
       nextLabel: { TR: 'Süre / risk devam ederse', EN: 'If time or risk continues' },
@@ -102,7 +113,7 @@ const decisionCopy = {
     },
     taker: {
       headline: { TR: 'İtiraz süreci başladı', EN: 'Challenge phase is active' },
-      subheadline: { TR: 'Bu aşamada settlement yalnızca tarafların aksiyonlarıyla ilerler. Araf karar vermez.', EN: 'In this phase, settlement moves only through party actions. Araf does not decide the outcome.' },
+      subheadline: { TR: 'Araf karar vermez; süre uzadıkça teminatlar erir. Uzlaşın veya onaylayın.', EN: 'Araf does not decide; bonds bleed over time. Settle or release.' },
       nowLabel: { TR: 'Şimdi', EN: 'Now' },
       nowDescription: { TR: 'Mevcut settlement kartındaki taraf aksiyonlarını takip edin. Kontrat ve taraf imzaları otoritedir.', EN: 'Follow party actions in the existing settlement card. The contract and party signatures remain authoritative.' },
       nextLabel: { TR: 'Süre / risk devam ederse', EN: 'If time or risk continues' },
@@ -134,6 +145,7 @@ export function buildTradeDecisionModel({
   isPaused,
   lang = 'EN',
   canBurnExpired = false,
+  paymentWindowExpired = false,
 }) {
   const normalizedState = String(tradeState || trade?.state || 'LOCKED').toUpperCase();
   const normalizedRole = String(userRole || 'taker').toLowerCase();
@@ -155,42 +167,41 @@ export function buildTradeDecisionModel({
       'contract',
       'report_payment',
       t(lang, 'Ödemeyi Bildir', 'Report Payment'),
-      t(lang, 'Dekont yükledikten sonra mevcut ödeme bildirimi formunu kullanın.', 'Upload payment proof, then use the existing payment report form.'),
+      null,
       {
         requiresPaymentProof: !paymentIpfsHash,
       },
     );
-    guidance.push(t(lang, 'Ödeme kanıtı yüklenmeden pasif rehberlik işlemi hazır saymaz.', 'Passive guidance does not consider the payment path ready until proof is uploaded.'));
     if (!paymentIpfsHash) primaryDisabledReasons.push(t(lang, 'Dekont gerekli.', 'Payment proof is required.'));
   }
 
   if (normalizedState === 'LOCKED' && normalizedRole === 'maker') {
-    primaryAction = action('waiting', 'waiting_payment_notification', t(lang, 'Ödeme bekleniyor', 'Waiting for payment'), t(lang, 'Alıcının ödeme bildirimini bekleyin.', 'Wait for the buyer payment notification.'));
-    guidance.push(t(lang, 'Ödeme bildirimi bekleniyor.', 'Payment notification is expected.'));
+    primaryAction = action('waiting', 'waiting_payment_notification', t(lang, 'Ödeme bekleniyor', 'Waiting for payment'), null);
   }
 
   if (normalizedState === 'PAID' && normalizedRole === 'maker') {
-    primaryAction = action('contract', 'release_funds', t(lang, 'Ödemeyi Onayla', 'Release Funds'), t(lang, 'Ödemeyi doğruladıysanız mevcut serbest bırakma panelini kullanın.', 'If payment checks out, use the existing release panel.'));
-    secondaryActions = [action('contract', 'start_challenge', t(lang, 'İtiraz Akışını Başlat', 'Start Challenge Flow'), t(lang, 'Ödeme gelmediyse mevcut itiraz uyarı akışını takip edin.', 'If payment did not arrive, follow the existing challenge warning flow.'))];
-    guidance.push(t(lang, 'Ödemeyi banka hesabınızda ve isim eşleşmesiyle doğrulayın.', 'Verify the payment in your bank account and confirm the sender-name match.'));
+    primaryAction = action('contract', 'release_funds', t(lang, 'Ödemeyi Onayla', 'Release Funds'), null);
+    secondaryActions = [action('contract', 'start_challenge', t(lang, 'Ödeme Gelmedi', 'Payment Not Received'), null)];
   }
 
   if (normalizedState === 'PAID' && normalizedRole === 'taker') {
-    primaryAction = action('waiting', 'waiting_for_maker', t(lang, 'Satıcı Bekleniyor', 'Waiting for Maker'), t(lang, 'Satıcının ödemeyi onaylamasını bekleyin.', 'Wait for maker release.'));
+    primaryAction = action('waiting', 'waiting_for_maker', t(lang, 'Satıcı Bekleniyor', 'Waiting for Maker'), null);
     secondaryActions = [
-      action('conditional', 'ping_maker', t(lang, 'Maker’ı Uyar', 'Ping Maker'), t(lang, 'Onay süresi dolduğunda mevcut satıcı uyarı akışı kullanılabilir.', 'When the grace period expires, the existing maker ping flow may be available.')),
-      action('conditional', 'auto_release', t(lang, 'Otomatik Serbest Bırak', 'Auto-Release Funds'), t(lang, 'Satıcı uyarısı sonrası süre dolarsa mevcut otomatik serbest bırakma akışı kullanılabilir.', 'After maker ping expires, the existing auto-release flow may be available.')),
+      action('conditional', 'ping_maker', t(lang, 'Satıcıyı Uyar', 'Ping Maker'), null),
+      action('conditional', 'auto_release', t(lang, 'Otomatik Serbest Bırak', 'Auto-Release Funds'), null),
     ];
-    guidance.push(t(lang, 'Satıcı pasif kalırsa zamanlayıcılar uyarı ve otomatik serbest bırakma yolunu belirler.', 'If maker is inactive, timers determine the ping and auto-release path.'));
   }
 
   if (normalizedState === 'CHALLENGED') {
-    primaryAction = action('settlement', 'settlement_guidance', t(lang, 'Uzlaşma Rehberi', 'Settlement Guidance'), t(lang, 'Uzlaşma adımlarını mevcut uzlaşma kartından takip edin.', 'Follow settlement steps from the existing settlement card.'));
-    secondaryActions = [
-      action('settlement', 'counterparty_response', t(lang, 'Karşı taraf yanıtı', 'Counterparty response'), t(lang, 'Karşı taraf yanıtları uzlaşma kartında gösterilir.', 'Counterparty responses are shown in the settlement card.')),
-      action('settlement', 'expiry_or_burn_guidance', t(lang, 'Süre / yakım bilgisi', 'Expiry / burn guidance'), t(lang, 'Süre dolumu ve yakım bilgileri mevcut işlem odası panellerinde kalır.', 'Expiry and burn information remains in the existing trade-room panels.')),
-    ];
-    guidance.push(t(lang, 'Araf hakem değildir; uzlaşma taraf aksiyonu gerektirir.', 'Araf is not an arbitrator; settlement requires party action.'));
+    // [TR] Maker itiraz sonrası da her an serbest bırakabilir; taker'ın yolu uzlaşma kartıdır.
+    // [EN] The maker can still release at any time; the taker's path is the settlement card.
+    primaryAction = normalizedRole === 'maker'
+      ? action('contract', 'release_funds', t(lang, 'Ödemeyi Onayla', 'Release Funds'), null)
+      : action('settlement', 'settlement_guidance', t(lang, 'Uzlaşma teklifi', 'Settlement offer'), t(lang, 'Aşağıdaki uzlaşma kartından teklif verin veya yanıtlayın.', 'Propose or answer in the settlement card below.'));
+  }
+
+  if (normalizedState === 'LOCKED' && paymentWindowExpired) {
+    secondaryActions.push(action('contract', 'expire_payment_window', t(lang, 'Kilidi Çöz (48 saat doldu)', 'Unlock (48h passed)'), null));
   }
 
 
@@ -213,7 +224,7 @@ export function buildTradeDecisionModel({
     secondaryActions,
     disabledReasons: primaryDisabledReasons,
     globalDisabledReasons,
-    timerCards: buildTimerCards(timers, lang),
+    timerCards: buildTimerCards(timers, lang, normalizedState, normalizedRole),
     guidance,
     riskCopy: {
       chargeback: t(lang, 'Chargeback riski kullanıcı sorumluluğundadır.', 'Chargeback risk remains user responsibility.'),

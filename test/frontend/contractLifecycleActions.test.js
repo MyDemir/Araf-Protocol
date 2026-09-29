@@ -58,7 +58,7 @@ describe('contract lifecycle action builders', () => {
 
     expect(deps.setIsContractLoading).toHaveBeenNthCalledWith(1, true);
     expect(deps.mintToken).toHaveBeenCalledWith('0xtoken');
-    expect(deps.showToast).toHaveBeenCalledWith('✅ Test USDT minted successfully!', 'success');
+    expect(deps.showToast).toHaveBeenCalledWith('Test USDT minted successfully!', 'success');
     expect(deps.setLoadingText).toHaveBeenLastCalledWith('');
   });
 

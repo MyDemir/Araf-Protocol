@@ -47,11 +47,12 @@ describe('buildTradeDecisionModel', () => {
     expect(model.nextDescription).toContain('frontend only presents those paths');
   });
 
-  it('CHALLENGED produces settlement family and party-driven settlement copy', () => {
+  it('CHALLENGED: maker can still release; taker is pointed to the settlement card; no info-only buttons', () => {
     const model = buildTradeDecisionModel({ ...base, tradeState: 'CHALLENGED', userRole: 'maker' });
-    expect(model.primaryAction.type).toBe('settlement');
-    expect(model.primaryAction.key).toBe('settlement_guidance');
-    expect(model.secondaryActions.filter((a) => a.type === 'settlement')).toHaveLength(2);
+    const takerModel = buildTradeDecisionModel({ ...base, tradeState: 'CHALLENGED', userRole: 'taker' });
+    expect(model.primaryAction).toMatchObject({ type: 'contract', key: 'release_funds' });
+    expect(takerModel.primaryAction).toMatchObject({ type: 'settlement', key: 'settlement_guidance' });
+    expect(model.secondaryActions.filter((a) => a.type === 'settlement')).toHaveLength(0);
     expect(model.secondaryActions.map((a) => a.key)).toContain('propose_cancel');
     expect(model.secondaryActions.map((a) => a.key)).not.toEqual(expect.arrayContaining(['propose_settlement', 'accept_settlement', 'reject_settlement', 'withdraw_settlement', 'expire_settlement']));
     expect(model.headline).toBe('Challenge phase is active');
@@ -70,7 +71,7 @@ describe('buildTradeDecisionModel', () => {
     expect(paidMaker.primaryAction.key).toBe('release_funds');
     expect(paidMaker.secondaryActions.map((a) => a.key)).toEqual(['start_challenge', 'propose_cancel']);
     expect(paidTaker.secondaryActions.map((a) => a.key)).toEqual(['ping_maker', 'auto_release', 'propose_cancel']);
-    expect(challenged.primaryAction.key).toBe('settlement_guidance');
+    expect(challenged.primaryAction.key).toBe('release_funds');
     expect(challenged.secondaryActions.map((a) => a.key)).toContain('propose_cancel');
   });
 
@@ -117,8 +118,6 @@ describe('buildTradeDecisionModel', () => {
     expect(paidMaker.primaryAction).toMatchObject({ key: 'release_funds', label: 'Release Funds' });
     expect(paidTaker.secondaryActions.map((a) => a.key)).toEqual(['ping_maker', 'auto_release', 'propose_cancel']);
     expect(challenged.secondaryActions.map((a) => a.key)).toEqual([
-      'counterparty_response',
-      'expiry_or_burn_guidance',
       'propose_cancel',
       'burn_expired',
     ]);
@@ -168,10 +167,32 @@ describe('buildTradeDecisionModel', () => {
   it('turns supplied timers into passive timer summaries', () => {
     const model = buildTradeDecisionModel({
       ...base,
+      tradeState: 'PAID',
       timers: { gracePeriod: { isFinished: false, hours: 1, minutes: 2, seconds: 3 } },
     });
     expect(model.timerCards).toEqual([
       { key: 'gracePeriod', label: 'Grace period', summary: '01h 02m 03s' },
     ]);
+  });
+
+  it('shows only timers that matter for the current state and role', () => {
+    const timers = {
+      paymentWindow: { isFinished: false, hours: 5, minutes: 0, seconds: 0 },
+      gracePeriod: { isFinished: false, hours: 1, minutes: 0, seconds: 0 },
+      bleeding: { isFinished: false, days: 8, hours: 0, minutes: 0, seconds: 0 },
+    };
+    const locked = buildTradeDecisionModel({ ...base, timers });
+    const challenged = buildTradeDecisionModel({ ...base, tradeState: 'CHALLENGED', timers });
+    expect(locked.timerCards.map((c) => c.key)).toEqual(['paymentWindow']);
+    expect(challenged.timerCards.map((c) => c.key)).toEqual(['bleeding']);
+  });
+
+  it('offers the payment-window unlock only for LOCKED trades whose 48h window passed', () => {
+    const open = buildTradeDecisionModel({ ...base, userRole: 'maker', paymentWindowExpired: false });
+    const expired = buildTradeDecisionModel({ ...base, userRole: 'maker', paymentWindowExpired: true });
+    const paid = buildTradeDecisionModel({ ...base, tradeState: 'PAID', paymentWindowExpired: true });
+    expect(open.secondaryActions.map((a) => a.key)).not.toContain('expire_payment_window');
+    expect(expired.secondaryActions.map((a) => a.key)).toContain('expire_payment_window');
+    expect(paid.secondaryActions.map((a) => a.key)).not.toContain('expire_payment_window');
   });
 });

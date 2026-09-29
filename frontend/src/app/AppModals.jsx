@@ -1,3 +1,4 @@
+import { Ban, LogOut, Star, Lock, ScrollText, ShieldCheck, TriangleAlert, X } from 'lucide-react';
 import React from 'react';
 import { buildMakerPreview, getMakerModalCopy, getOrderSideCopy, mapOffchainHealthToUi } from './orderUiModel';
 import { TERMS_ACCEPTED_STORAGE_KEY } from './bootstrapState';
@@ -21,14 +22,14 @@ export const EnvWarningBanner = ({ envErrors }) => {
   return (
     <div className="fixed top-0 left-0 right-0 z-50 bg-red-950/95 border-b border-red-800/60 backdrop-blur-sm flex items-center justify-between px-4 py-1.5 shadow-lg">
       <span className="text-red-400 text-xs font-mono flex items-center gap-2">
-        <span className="text-red-500">⚠</span>
+        <span className="text-red-500"><TriangleAlert className="w-3.5 h-3.5" strokeWidth={1.8} aria-hidden="true" /></span>
         {envErrors.join(' · ')}
       </span>
       <button
         onClick={() => setVisible(false)}
         className="ml-4 text-red-500 hover:text-textPrimary transition text-sm leading-none shrink-0"
         aria-label="Kapat"
-      >✕</button>
+      ><X className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" /></button>
     </div>
   );
 };
@@ -152,7 +153,7 @@ export const buildAppModals = (ctx) => {
                 className="w-full flex items-center justify-between bg-elevated hover:bg-surface border border-borderStrong p-4 rounded-xl transition-all group"
               >
                 <div className="flex items-center space-x-3">
-                  <span className="text-2xl">{getWalletIcon(connector.name)}</span>
+                  <span className="w-8 h-8 flex items-center justify-center">{getWalletIcon(connector)}</span>
                   <span className="font-bold text-textPrimary group-hover:text-brand">{connector.name}</span>
                 </div>
                 <span className="text-[10px] text-textMuted font-bold uppercase tracking-widest">Connect</span>
@@ -187,7 +188,7 @@ export const buildAppModals = (ctx) => {
           <p className="text-sm text-textSecondary mb-4">{lang === 'TR' ? 'Deneyiminizi paylaşın. Hedefimiz gereksiz tx/revert maliyetlerini düşürmek.' : 'Share your experience. Our goal is to reduce avoidable tx/revert costs.'}</p>
           <div className="flex justify-center space-x-2 mb-4">
             {[1, 2, 3, 4, 5].map((star) => (
-              <button key={star} onClick={() => setFeedbackRating(star)} className={`text-3xl transition ${feedbackRating >= star ? 'text-yellow-400 scale-110' : 'text-textMuted hover:text-yellow-400/50'}`}>★</button>
+              <button key={star} onClick={() => setFeedbackRating(star)} aria-label={`${star}/5`} className={`transition ${feedbackRating >= star ? 'text-yellow-400 scale-110' : 'text-textMuted hover:text-yellow-400/50'}`}><Star className="w-8 h-8" strokeWidth={1.6} fill={feedbackRating >= star ? 'currentColor' : 'none'} aria-hidden="true" /></button>
             ))}
           </div>
           <select
@@ -196,10 +197,10 @@ export const buildAppModals = (ctx) => {
             className="w-full bg-elevated text-textPrimary px-3 py-2.5 rounded-xl border border-borderStrong outline-none text-sm mb-3"
           >
             <option value="" disabled>{lang === 'TR' ? 'Kategori Seçin...' : 'Select Category...'}</option>
-            <option value="bug">{lang === 'TR' ? '🐞 Hata Bildirimi' : '🐞 Bug Report'}</option>
-            <option value="suggestion">{lang === 'TR' ? '💡 Özellik İsteği' : '💡 Feature Suggestion'}</option>
-            <option value="ui/ux">{lang === 'TR' ? '🎨 Tasarım/Kullanıcı Deneyimi' : '🎨 Design/UX'}</option>
-            <option value="other">{lang === 'TR' ? '🧩 Diğer' : '🧩 Other'}</option>
+            <option value="bug">{lang === 'TR' ? 'Hata bildirimi' : 'Bug report'}</option>
+            <option value="suggestion">{lang === 'TR' ? 'Özellik isteği' : 'Feature suggestion'}</option>
+            <option value="ui/ux">{lang === 'TR' ? 'Tasarım / kullanıcı deneyimi' : 'Design / UX'}</option>
+            <option value="other">{lang === 'TR' ? 'Diğer' : 'Other'}</option>
           </select>
 
           <textarea
@@ -311,7 +312,7 @@ export const buildAppModals = (ctx) => {
                 <select id="maker-tier" value={makerTier} onChange={e => setMakerTier(Number(e.target.value))} className={makerFieldClass}>
                   {[0, 1, 2, 3, 4].map(tier => (
                     <option key={tier} value={tier} disabled={tier > effectiveUserTier}>
-                      {tierLabel(tier)}{tier > effectiveUserTier ? ' 🔒' : ''}
+                      {tierLabel(tier)}{tier > effectiveUserTier ? (lang === 'TR' ? ' (kilitli)' : ' (locked)') : ''}
                     </option>
                   ))}
                 </select>
@@ -360,7 +361,7 @@ export const buildAppModals = (ctx) => {
                   ? 'bg-elevated text-textMuted border border-borderStrong cursor-not-allowed'
                   : 'bg-brand hover:opacity-90 text-black'
               }`}>
-              {isContractLoading ? (loadingText || (lang === 'TR' ? '⏳ İşleniyor...' : '⏳ Processing...')) : modalCopy.submitLabel}
+              {isContractLoading ? (loadingText || (lang === 'TR' ? 'İşleniyor...' : 'Processing...')) : modalCopy.submitLabel}
             </button>
           </div>
         </div>
@@ -401,7 +402,7 @@ export const buildAppModals = (ctx) => {
               <div className="space-y-4 text-sm">
                 {isBanned && (
                   <div className="bg-red-950/40 border border-red-900/50 p-4 rounded-xl flex items-start space-x-3">
-                    <span className="text-2xl">🚫</span>
+                    <span className="text-red-400 shrink-0"><Ban className="w-6 h-6" strokeWidth={1.8} aria-hidden="true" /></span>
                     <div>
                       <p className="font-bold text-red-400">{lang === 'TR' ? 'Taker Kısıtlaması Aktif' : 'Taker Restriction Active'}</p>
                       <p className="text-red-300/80 text-xs mt-1">{lang === 'TR' ? 'Sadece maker olarak order açabilirsiniz.' : 'You can only open orders as Maker.'}</p>
@@ -513,13 +514,13 @@ export const buildAppModals = (ctx) => {
                     {isContractLoading ? (lang === 'TR' ? 'Kaydediliyor...' : 'Saving...') : (lang === 'TR' ? 'Profili Kaydet' : 'Save Profile')}
                   </button>
                   <p className="text-xs text-textMuted text-center pt-3 border-t border-borderStrong">
-                    🔒 {lang === 'TR' ? 'Payout profile bilgileriniz AES-256 ile şifrelenir ve asla on-chain kaydedilmez.' : 'Your payout profile is AES-256 encrypted and never saved on-chain.'}
+                    <span className="inline-flex items-center gap-1.5"><Lock className="w-3.5 h-3.5" strokeWidth={1.8} aria-hidden="true" />{lang === 'TR' ? 'Payout profile bilgileriniz AES-256 ile şifrelenir ve asla on-chain kaydedilmez.' : 'Your payout profile is AES-256 encrypted and never saved on-chain.'}</span>
                   </p>
                 </form>
                 <button
                   onClick={handleLogoutAndDisconnect}
                   className="w-full mt-4 py-2.5 rounded-xl font-bold text-sm bg-red-950/40 text-red-500 border border-red-900/50 hover:bg-red-900/80 hover:text-textPrimary transition">
-                  {lang === 'TR' ? '🚪 Çıkış Yap / Cüzdanı Ayır' : '🚪 Disconnect / Logout'}
+                  <span className="inline-flex items-center justify-center gap-2"><LogOut className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />{lang === 'TR' ? 'Çıkış yap / cüzdanı ayır' : 'Disconnect / Logout'}</span>
                 </button>
               </div>
             )}
@@ -620,7 +621,7 @@ export const buildAppModals = (ctx) => {
                         const isBanActive = now < bannedUntil;
                         return (
                           <div className="bg-blue-950/20 p-4 rounded-xl border border-blue-900/40 text-center mt-4">
-                            <p className="text-blue-400 text-xs font-bold mb-2">🛡️ {lang === 'TR' ? 'Temiz Sayfa Hakkı' : 'Clean Slate Right'}</p>
+                            <p className="text-blue-400 text-xs font-bold mb-2 flex items-center gap-1.5"><ShieldCheck className="w-3.5 h-3.5" strokeWidth={1.8} aria-hidden="true" />{lang === 'TR' ? 'Temiz Sayfa Hakkı' : 'Clean Slate Right'}</p>
                             {isBanActive ? (
                               <p className="text-textSecondary text-xs">
                                 {lang === 'TR' ? 'Cezanız devam ediyor. Ardışık yasak sayacınızı sıfırlamak için cezanız bittikten sonra 90 gün beklemelisiniz.' : 'Your ban is active. You must wait 90 days after your ban expires to reset your consecutive bans counter.'}
@@ -637,7 +638,7 @@ export const buildAppModals = (ctx) => {
                                       setIsContractLoading(true);
                                       showToast(lang === 'TR' ? 'Sicil temizleme işlemi gönderiliyor...' : 'Sending record clear transaction...', 'info');
                                       await decayReputation(address);
-                                      showToast(lang === 'TR' ? '✨ Siciliniz başarıyla temizlendi!' : '✨ Record successfully cleared!', 'success');
+                                      showToast(lang === 'TR' ? 'Siciliniz başarıyla temizlendi.' : 'Record successfully cleared.', 'success');
                                     } catch (err) {
                                       console.error('decayReputation error:', err);
                                       showToast(err?.shortMessage || (lang === 'TR' ? 'İşlem başarısız oldu.' : 'Transaction failed.'), 'error');
@@ -648,7 +649,7 @@ export const buildAppModals = (ctx) => {
                                   disabled={isContractLoading}
                                   className={`w-full py-2.5 rounded-lg font-bold text-xs transition ${isContractLoading ? 'bg-elevated text-textMuted cursor-not-allowed border border-borderStrong' : 'bg-blue-600 hover:bg-blue-500 text-textPrimary shadow-[0_0_10px_rgba(37,99,235,0.3)]'}`}
                                 >
-                                  {isContractLoading ? (lang === 'TR' ? '⏳ İşlem Onaylanıyor...' : '⏳ Confirming...') : (lang === 'TR' ? '✨ Sicilimi Temizle' : '✨ Clear My Record')}
+                                  {isContractLoading ? (lang === 'TR' ? 'İşlem onaylanıyor...' : 'Confirming...') : (lang === 'TR' ? 'Sicilimi temizle' : 'Clear my record')}
                                 </button>
                               </>
                             ) : (
@@ -872,7 +873,7 @@ export const buildAppModals = (ctx) => {
     return (
       <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-[200]">
         <div className="bg-surface border border-borderSubtle rounded-2xl p-6 w-full max-w-lg shadow-2xl flex flex-col">
-          <h2 className="text-xl font-bold text-textPrimary mb-4">📜 {lang === 'TR' ? 'Platform Kullanım Sözleşmesi ve Sorumluluk Reddi' : 'Terms of Use and Disclaimer'}</h2>
+          <h2 className="text-xl font-bold text-textPrimary mb-4 flex items-center gap-2"><ScrollText className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" />{lang === 'TR' ? 'Platform Kullanım Sözleşmesi ve Sorumluluk Reddi' : 'Terms of Use and Disclaimer'}</h2>
           <div className="space-y-4 text-sm text-textSecondary mb-6 bg-app p-4 rounded-xl border border-borderSubtle overflow-y-auto max-h-64">
             <p>{lang === 'TR' ? 'Araf Protokolü merkeziyetsiz bir akıllı kontrattır. Hiçbir aracı kurum veya hakem bulunmamaktadır.' : 'Araf Protocol is a decentralized smart contract. There are no intermediaries or arbitrators.'}</p>
             <p>{lang === 'TR' ? 'Tüm işlemleriniz kendi sorumluluğunuzdadır. "Bleeding Escrow" (Eriyen Kasa) oyun teorisine dayalı çalışır ve itiraz durumlarında fonlarınız zamanla eriyebilir.' : 'All transactions are at your own risk. The system operates on the "Bleeding Escrow" game theory, and in case of disputes, your funds may decay over time.'}</p>

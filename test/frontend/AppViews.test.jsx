@@ -416,13 +416,14 @@ describe('AppViews market side-aware rendering', () => {
     render(<div>{views.renderTradeRoom()}</div>);
 
     expect(screen.getAllByText('Unsupported network.').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Payment proof is required.').length).toBeGreaterThan(0);
-    expect(screen.queryByText('Chargeback acknowledgement is required.')).not.toBeInTheDocument();
-    expect(screen.getByText('Timers')).toBeInTheDocument();
-    expect(screen.getByText('01h 02m 03s')).toBeInTheDocument();
+    expect(screen.getAllByText(/Payment proof is required\./).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Chargeback acknowledgement is required/)).not.toBeInTheDocument();
+    // [TR] LOCKED'da onay (grace) sayacı karar etkilemez; gösterilmez.
+    expect(screen.queryByText('01h 02m 03s')).not.toBeInTheDocument();
     const primaryGuidance = screen.getByTestId('trade-primary-guidance');
     expect(within(primaryGuidance).getByRole('button', { name: /Report Payment/i })).toBeDisabled();
-    expect(screen.getAllByRole('button', { name: /Report Payment/i })).toHaveLength(2);
+    // [TR] Regresyon: aynı aksiyon yalnız bir kez gösterilir (eski panel kopya butonu kaldırıldı).
+    expect(screen.getAllByRole('button', { name: /Report Payment/i })).toHaveLength(1);
   });
 
 
@@ -549,8 +550,7 @@ describe('AppViews market side-aware rendering', () => {
 
     render(<div>{views.renderTradeRoom()}</div>);
 
-    expect(screen.getByText(/Araf is not an arbitrator/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/Follow settlement steps from the existing settlement card/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Araf does not decide/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /settlement guidance/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /propose settlement|accept settlement|reject settlement|withdraw settlement|expire settlement/i })).not.toBeInTheDocument();
     expect(proposeSettlement).not.toHaveBeenCalled();

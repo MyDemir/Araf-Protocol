@@ -1,3 +1,4 @@
+import { CircleCheck, Info, MessageSquare, TriangleAlert, Wallet } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 import { useAccount, useConnect, useDisconnect, useSignMessage, useChainId, usePublicClient } from 'wagmi';
 import { formatUnits } from 'viem';
@@ -716,12 +717,12 @@ function App() {
     handleOpenMakerModal,
   ]);
 
-  const getWalletIcon = (name) => {
-    const n = name.toLowerCase();
-    if (n.includes('metamask')) return '🦊';
-    if (n.includes('okx')) return '🖤';
-    if (n.includes('coinbase')) return '🔵';
-    return '👛';
+  // [TR] Cüzdanın kendi logosu (EIP-6963 connector.icon) kullanılır; yoksa nötr cüzdan ikonu.
+  // [EN] Use the wallet's own logo (EIP-6963 connector.icon); fall back to a neutral wallet icon.
+  const getWalletIcon = (connectorOrName) => {
+    const icon = typeof connectorOrName === 'object' ? connectorOrName?.icon : null;
+    if (icon) return <img src={icon} alt="" className="w-7 h-7 rounded-md" />;
+    return <Wallet className="w-6 h-6 text-textSecondary" strokeWidth={1.8} aria-hidden="true" />;
   };
 
   // ═══════════════════════════════════════════
@@ -1386,7 +1387,7 @@ function App() {
         aria-label={lang === 'TR' ? 'Geri Bildirim' : 'Feedback'}
         className="fixed top-[calc(0.75rem_+_env(safe-area-inset-top))] right-[calc(0.75rem_+_env(safe-area-inset-right))] md:top-6 md:right-6 z-40 h-10 w-10 md:w-auto md:px-4 bg-surface/90 hover:bg-elevated border border-borderSubtle rounded-full md:rounded-2xl flex items-center justify-center gap-2 text-sm font-semibold text-textPrimary shadow-sm backdrop-blur transition hover:border-borderStrong"
       >
-        <span aria-hidden="true">💬</span>
+        <MessageSquare className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />
         <span className="hidden md:inline">{lang === 'TR' ? 'Geri Bildirim' : 'Feedback'}</span>
       </button>
 
@@ -1398,7 +1399,7 @@ function App() {
         >
           <div className={`flex items-start gap-3 px-4 py-3 rounded-xl shadow-2xl border bg-surface text-sm font-semibold text-textPrimary ${toast.type === 'error' ? 'border-danger/60' : toast.type === 'info' ? 'border-info/60' : 'border-brand/60'}`}>
             <span aria-hidden="true" className={toast.type === 'error' ? 'text-danger' : toast.type === 'info' ? 'text-info' : 'text-brand'}>
-              {toast.type === 'error' ? '⚠' : toast.type === 'info' ? 'ℹ' : '✓'}
+              {toast.type === 'error' ? <TriangleAlert className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" /> : toast.type === 'info' ? <Info className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" /> : <CircleCheck className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />}
             </span>
             <span className="flex-1 leading-snug">{toast.message}</span>
             <button type="button" onClick={() => setToast(null)} aria-label={lang === 'TR' ? 'Kapat' : 'Close'} className="text-textMuted hover:text-textPrimary leading-none">×</button>

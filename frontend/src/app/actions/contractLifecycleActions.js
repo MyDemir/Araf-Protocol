@@ -64,8 +64,8 @@ export const buildStartTradeAction = ({
   if (isBanned) {
     showToast(
       lang === 'TR'
-        ? '🚫 Taker kısıtlamanız aktif. Süre için on-chain kaydınızı kontrol edin.'
-        : '🚫 Taker restriction active. Check on-chain record for duration.',
+        ? 'Taker kısıtlamanız aktif. Süre için on-chain kaydınızı kontrol edin.'
+        : 'Taker restriction active. Check on-chain record for duration.',
       'error'
     );
     return;
@@ -192,8 +192,8 @@ export const buildStartTradeAction = ({
     if (!realTradeId) {
       showToast(
         lang === 'TR'
-          ? '⚠️ İşlem zincire yazıldı ancak backend kaydı henüz oluşmadı. Birkaç saniye sonra "Aktif İşlemler" ekranını kontrol edin.'
-          : '⚠️ Trade was written on-chain but backend record is not ready yet. Check "Active Trades" in a few seconds.',
+          ? 'İşlem zincire yazıldı ancak backend kaydı henüz oluşmadı. Birkaç saniye sonra "Aktif İşlemler" ekranını kontrol edin.'
+          : 'Trade was written on-chain but backend record is not ready yet. Check "Active Trades" in a few seconds.',
         'info'
       );
 
@@ -215,7 +215,7 @@ export const buildStartTradeAction = ({
     setCancelStatus(null);
     setChargebackAccepted(false);
     setCurrentView('tradeRoom');
-    showToast(lang === 'TR' ? '🔒 İşlem başarıyla kilitlendi!' : '🔒 Trade locked successfully!', 'success');
+    showToast(lang === 'TR' ? 'İşlem başarıyla kilitlendi!' : 'Trade locked successfully!', 'success');
   } catch (err) {
     console.error('handleStartTrade error:', err);
 
@@ -263,7 +263,7 @@ export const buildMintAction = ({
     const tokenAddr = supportedTokenAddresses[tokenName];
     if (!tokenAddr) throw new Error(lang === 'TR' ? `Test ${tokenName} adresi tanımlı değil.` : `Test ${tokenName} address not defined.`);
     await mintToken(tokenAddr);
-    showToast(lang === 'TR' ? `✅ Test ${tokenName} başarıyla alındı!` : `✅ Test ${tokenName} minted successfully!`, 'success');
+    showToast(lang === 'TR' ? `Test ${tokenName} başarıyla alındı!` : `Test ${tokenName} minted successfully!`, 'success');
   } catch (err) {
     showToast(getTxErrorMessage(err, lang === 'TR' ? 'İşlem başarısız.' : 'Transaction failed.'), 'error');
   } finally {
@@ -373,7 +373,7 @@ export const buildTradeRoomActions = ({
       await reportPayment(BigInt(activeTrade.onchainId), paymentIpfsHash.trim());
       setTradeState('PAID');
       setPaymentIpfsHash('');
-      showToast(lang === 'TR' ? '✅ Ödeme bildirildi! 48 saatlik grace period başladı.' : '✅ Payment reported! 48h grace period started.', 'success');
+      showToast(lang === 'TR' ? 'Ödeme bildirildi! 48 saatlik grace period başladı.' : 'Payment reported! 48h grace period started.', 'success');
     } catch (err) {
       console.error('handleReportPayment error:', err);
       const errorMessage = getTxErrorMessage(err, lang === 'TR' ? 'Ödeme bildirimi başarısız.' : 'Payment report failed.');
@@ -398,10 +398,10 @@ export const buildTradeRoomActions = ({
 
       if (counterpartyAlreadyConsented) {
         finishTrade('CANCELED');
-        showToast(lang === 'TR' ? '✅ İşlem iptal edildi.' : '✅ Trade cancelled.', 'success');
+        showToast(lang === 'TR' ? 'İşlem iptal edildi.' : 'Trade cancelled.', 'success');
       } else {
         setCancelStatus('proposed_by_me');
-        showToast(lang === 'TR' ? '✅ İptal teklifi gönderildi. Karşı taraf onaylayınca işlem kapanır.' : '✅ Cancel proposed. It completes when the counterparty approves.', 'success');
+        showToast(lang === 'TR' ? 'İptal teklifi gönderildi. Karşı taraf onaylayınca işlem kapanır.' : 'Cancel proposed. It completes when the counterparty approves.', 'success');
       }
       if (typeof fetchMyTrades === 'function') fetchMyTrades();
     } catch (err) {
@@ -422,7 +422,7 @@ export const buildTradeRoomActions = ({
       showToast(lang === 'TR' ? 'Kilit çözülüyor... Cüzdanınızdan onaylayın.' : 'Unlocking... Confirm in wallet.', 'info');
       await expirePaymentWindow(activeTrade.onchainId);
       finishTrade('CANCELED');
-      showToast(lang === 'TR' ? '✅ Ödeme süresi doldu; fonlar satıcıya iade edildi.' : '✅ Payment window expired; funds returned to the seller.', 'success');
+      showToast(lang === 'TR' ? 'Ödeme süresi doldu; fonlar satıcıya iade edildi.' : 'Payment window expired; funds returned to the seller.', 'success');
       if (typeof fetchMyTrades === 'function') fetchMyTrades();
     } catch (err) {
       console.error('expirePaymentWindow error:', err);
@@ -451,7 +451,7 @@ export const buildTradeRoomActions = ({
       showToast(lang === 'TR' ? 'İşlem cüzdanınıza gönderildi, onaylayın...' : 'Transaction sent to wallet, please confirm...', 'info');
       await releaseFunds(BigInt(activeTrade.onchainId));
       finishTrade('RESOLVED');
-      showToast(lang === 'TR' ? 'USDT başarıyla serbest bırakıldı! ✅' : 'USDT successfully released! ✅', 'success');
+      showToast(lang === 'TR' ? 'USDT başarıyla serbest bırakıldı!' : 'USDT successfully released!', 'success');
     } catch (err) {
       console.error('releaseFunds error:', err);
       const errorMessage = getTxErrorMessage(err, lang === 'TR' ? 'Kontrat işlemi başarısız oldu.' : 'Contract transaction failed.');
@@ -552,7 +552,7 @@ export const buildTradeRoomActions = ({
       showToast(lang === 'TR' ? 'Yakma işlemi gönderiliyor... Cüzdanınızdan onaylayın.' : 'Burn transaction sent... Confirm in wallet.', 'info');
       await burnExpired(BigInt(activeTrade.onchainId));
       finishTrade('BURNED');
-      showToast(lang === 'TR' ? '🔥 Süre doldu: kilitli tutar ve teminatlar hazineye aktarıldı.' : '🔥 Expired: locked amount and bonds moved to treasury.', 'success');
+      showToast(lang === 'TR' ? 'Süre doldu: kilitli tutar ve teminatlar hazineye aktarıldı.' : 'Expired: locked amount and bonds moved to treasury.', 'success');
     } catch (err) {
       console.error('burnExpired error:', err);
       const reason = getTxErrorMessage(err, lang === 'TR' ? 'Yakma işlemi başarısız.' : 'Burn failed.');
@@ -622,7 +622,7 @@ export const buildProfileActions = ({
       showToast(lang === 'TR' ? 'Cüzdan kaydediliyor... Cüzdanınızdan onaylayın.' : 'Registering wallet... Confirm in wallet.', 'info');
       await registerWallet();
       setIsWalletRegistered(true);
-      showToast(lang === 'TR' ? '✅ Cüzdan kaydedildi! 7 gün sonra Taker olarak işlem başlatabilirsiniz.' : '✅ Wallet registered! You can start as Taker after 7 days.', 'success');
+      showToast(lang === 'TR' ? 'Cüzdan kaydedildi! 7 gün sonra Taker olarak işlem başlatabilirsiniz.' : 'Wallet registered! You can start as Taker after 7 days.', 'success');
     } catch (err) {
       console.error('handleRegisterWallet error:', err);
       const errorMessage = getTxErrorMessage(err, lang === 'TR' ? 'Kayıt başarısız.' : 'Registration failed.');
@@ -673,7 +673,7 @@ export const buildOrderActions = ({
       setOrders((prev) => removeOrderByOnchainId(prev, order.onchainId));
       setMyOrders((prev) => removeOrderByOnchainId(prev, order.onchainId));
       setConfirmDeleteId(null);
-      showToast(lang === 'TR' ? '✅ Order iptal edildi.' : '✅ Order canceled.', 'success');
+      showToast(lang === 'TR' ? 'Order iptal edildi.' : 'Order canceled.', 'success');
     } catch (err) {
       console.error('handleDeleteOrder error:', err);
       const errorMessage = getTxErrorMessage(err, lang === 'TR' ? 'Order iptal edilemedi.' : 'Failed to cancel order.');
