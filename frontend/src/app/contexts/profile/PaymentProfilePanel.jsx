@@ -1,3 +1,4 @@
+import { Lock } from 'lucide-react';
 import React from 'react';
 
 const DEFAULT_SEPA_COUNTRIES = ['DE', 'FR', 'NL', 'BE', 'ES', 'IT', 'AT', 'PT', 'IE', 'LU', 'FI', 'GR'];
@@ -111,7 +112,7 @@ export const PaymentProfilePanel = ({
       <button type="submit" disabled={isContractLoading} className="w-full bg-brand hover:opacity-90 disabled:opacity-50 text-black text-sm font-bold px-4 py-2.5 rounded-lg">
         {isContractLoading ? (isTR ? 'Kaydediliyor…' : 'Saving…') : (isTR ? 'Kaydet' : 'Save')}
       </button>
-      <p className="text-xs text-textMuted text-center">🔒 {isTR ? 'Şifreli saklanır, zincire yazılmaz.' : 'Stored encrypted, never on-chain.'}</p>
+      <p className="text-xs text-textMuted flex items-center justify-center gap-1.5"><Lock className="w-3.5 h-3.5" strokeWidth={1.8} aria-hidden="true" />{isTR ? 'Şifreli saklanır, zincire yazılmaz.' : 'Stored encrypted, never on-chain.'}</p>
     </form>
   );
 };

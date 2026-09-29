@@ -1,3 +1,4 @@
+import { Wallet } from 'lucide-react';
 import React from 'react';
 import { ProfileNav } from './ProfilePanels';
 import ProfileContextPanel from './ProfileContextPanel';
@@ -20,7 +21,7 @@ export const ProfileContextPage = (props) => {
       <div className="w-full max-w-[1200px] px-4 md:px-8">
         <h1 className="text-2xl font-bold text-textPrimary mb-4">{lang === 'TR' ? 'Profil Merkezi' : 'Profile Center'}</h1>
         <div className="bg-surface border border-borderSubtle rounded-2xl p-8 text-center max-w-md" data-testid="profile-connect-gate">
-          <div className="text-4xl mb-3" aria-hidden="true">👛</div>
+          <div className="mb-3 flex justify-center text-textMuted"><Wallet className="w-10 h-10" strokeWidth={1.8} aria-hidden="true" /></div>
           <p className="font-bold text-textPrimary">{lang === 'TR' ? 'Cüzdanınızı bağlayın' : 'Connect your wallet'}</p>
           <p className="text-sm text-textMuted mt-1">{lang === 'TR' ? 'Emirleriniz, işlemleriniz ve ödülleriniz burada görünür.' : 'Your orders, trades and rewards appear here.'}</p>
           {typeof props.onConnect === 'function' && (

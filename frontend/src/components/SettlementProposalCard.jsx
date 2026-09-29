@@ -1,3 +1,4 @@
+import { Handshake } from 'lucide-react';
 import React from 'react';
 import { buildSettlementPreviewUrl } from '../app/apiConfig';
 import SettlementPreviewModal from './SettlementPreviewModal';
@@ -216,7 +217,7 @@ export default function SettlementProposalCard({
     <div className="mt-2 mb-2 bg-surface border border-borderStrong rounded-xl p-4" data-testid="settlement-proposal-card">
       <div className="mb-3">
         {/* [TR] Tarafsızlık notu işlem özetinde zaten var; kartta tekrar edilmez. */}
-        <h3 className="text-sm font-bold text-textPrimary" title={lang === 'TR' ? SETTLEMENT_NEUTRALITY_COPY.TR : SETTLEMENT_NEUTRALITY_COPY.EN}>{lang === 'TR' ? '🤝 Uzlaşma teklifi' : '🤝 Settlement offer'}</h3>
+        <h3 className="text-sm font-bold text-textPrimary flex items-center gap-2" title={lang === 'TR' ? SETTLEMENT_NEUTRALITY_COPY.TR : SETTLEMENT_NEUTRALITY_COPY.EN}><Handshake className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />{lang === 'TR' ? 'Uzlaşma teklifi' : 'Settlement offer'}</h3>
       </div>
 
       {!isActionableRoom && !isTerminalRoom && (

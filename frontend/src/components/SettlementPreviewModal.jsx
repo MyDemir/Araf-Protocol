@@ -102,7 +102,7 @@ export default function SettlementPreviewModal({
             disabled={disableConfirm || isLoading}
             className={`w-full sm:flex-1 px-4 py-2 rounded-lg font-bold transition ${disableConfirm || isLoading ? 'bg-[#1a1a1f] text-slate-500 border border-[#2a2a2e] cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500 text-white'}`}
           >
-            {isLoading ? (lang === 'TR' ? '⏳ İşleniyor...' : '⏳ Processing...') : confirmLabel}
+            {isLoading ? (lang === 'TR' ? 'İşleniyor...' : 'Processing...') : confirmLabel}
           </button>
         </div>
       </div>

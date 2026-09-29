@@ -1,3 +1,4 @@
+import { LoaderCircle } from 'lucide-react';
 import React from 'react';
 
 const t = (lang, tr, en) => (lang === 'TR' ? tr : en);
@@ -171,7 +172,7 @@ export const SystemStatusBar = ({
                   disabled={isRegisteringWallet}
                   className="bg-orange-500 text-black px-4 py-1.5 rounded-lg text-xs font-bold hover:bg-orange-400 disabled:opacity-50 transition shrink-0"
                 >
-                  {isRegisteringWallet ? '⏳' : (lang === 'TR' ? '📝 Kaydet' : '📝 Register')}
+                  {isRegisteringWallet ? <LoaderCircle className="w-4 h-4 animate-spin" strokeWidth={1.8} aria-hidden="true" /> : (lang === 'TR' ? 'Kaydet' : 'Register')}
                 </button>
               )}
             </div>

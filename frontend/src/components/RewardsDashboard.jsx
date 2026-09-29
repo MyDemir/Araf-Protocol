@@ -1,3 +1,4 @@
+import { LoaderCircle } from 'lucide-react';
 import React from 'react';
 
 const COPY = {
@@ -76,7 +77,7 @@ export default function RewardsDashboard({
             disabled={claimDisabled}
             onClick={onClaim}
           >
-            {isClaiming ? '⏳' : pick('claim', lang)}
+            {isClaiming ? <LoaderCircle className="w-4 h-4 animate-spin mx-auto" strokeWidth={1.8} aria-hidden="true" /> : pick('claim', lang)}
           </button>
         </div>
       )}

@@ -244,8 +244,8 @@ export const buildCreateOrderAction = ({
 
     showToast(
       marketMetaSaved
-        ? (lang === 'TR' ? `✅ ${createLabel} order oluşturuldu.` : `✅ ${createLabel} order created.`)
-        : (lang === 'TR' ? `✅ Order oluşturuldu, ancak kur bilgisi kaydedilemedi.` : `✅ Order created, but the rate could not be saved.`),
+        ? (lang === 'TR' ? `${createLabel} order oluşturuldu.` : `${createLabel} order created.`)
+        : (lang === 'TR' ? `Order oluşturuldu, ancak kur bilgisi kaydedilemedi.` : `Order created, but the rate could not be saved.`),
       marketMetaSaved ? 'success' : 'info'
     );
 

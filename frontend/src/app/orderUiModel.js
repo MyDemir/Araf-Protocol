@@ -85,7 +85,7 @@ const rawToNumber = (raw, decimals = DEFAULT_TOKEN_DECIMALS) => {
 export const getMakerModalCopy = (side, lang = 'TR') => {
   if (side === 'BUY_CRYPTO') {
     return {
-      submitLabel: lang === 'TR' ? `🧾 Onayla ve ${getOrderSideCopy('BUY_CRYPTO', 'order', 'TR')} Aç` : `🧾 Approve & Open ${getOrderSideCopy('BUY_CRYPTO', 'order', 'EN')}`,
+      submitLabel: lang === 'TR' ? `Onayla ve ${getOrderSideCopy('BUY_CRYPTO', 'order', 'TR')} Aç` : `Approve & Open ${getOrderSideCopy('BUY_CRYPTO', 'order', 'EN')}`,
       previewTitle: lang === 'TR' ? `${getOrderSideCopy('BUY_CRYPTO', 'order', 'TR')} Reserve Özeti` : `${getOrderSideCopy('BUY_CRYPTO', 'order', 'EN')} Reserve Summary`,
       bondRoleLabel: lang === 'TR' ? 'Taker Reserve' : 'Taker Reserve',
       totalLabel: lang === 'TR' ? 'Toplam Reserve' : 'Total Reserve',
@@ -93,7 +93,7 @@ export const getMakerModalCopy = (side, lang = 'TR') => {
     };
   }
   return {
-    submitLabel: lang === 'TR' ? `🧾 Onayla ve ${getOrderSideCopy('SELL_CRYPTO', 'order', 'TR')} Aç` : `🧾 Approve & Open ${getOrderSideCopy('SELL_CRYPTO', 'order', 'EN')}`,
+    submitLabel: lang === 'TR' ? `Onayla ve ${getOrderSideCopy('SELL_CRYPTO', 'order', 'TR')} Aç` : `Approve & Open ${getOrderSideCopy('SELL_CRYPTO', 'order', 'EN')}`,
     previewTitle: lang === 'TR' ? `${getOrderSideCopy('SELL_CRYPTO', 'order', 'TR')} Kilit Özeti` : `${getOrderSideCopy('SELL_CRYPTO', 'order', 'EN')} Lock Summary`,
     bondRoleLabel: lang === 'TR' ? 'Maker Reserve' : 'Maker Reserve',
     totalLabel: lang === 'TR' ? 'Toplam Kilitlenecek' : 'Total Locked',

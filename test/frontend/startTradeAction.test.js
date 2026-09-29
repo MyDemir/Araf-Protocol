@@ -77,7 +77,7 @@ describe('start trade action', () => {
     await runAction(deps);
 
     expect(deps.getOrder).not.toHaveBeenCalled();
-    expect(deps.showToast).toHaveBeenCalledWith('🚫 Taker restriction active. Check on-chain record for duration.', 'error');
+    expect(deps.showToast).toHaveBeenCalledWith('Taker restriction active. Check on-chain record for duration.', 'error');
   });
 
   it('respects an active contract loading guard before chain reads', async () => {
@@ -146,7 +146,7 @@ describe('start trade action', () => {
     expect(deps.setCancelStatus).toHaveBeenCalledWith(null);
     expect(deps.setChargebackAccepted).toHaveBeenCalledWith(false);
     expect(deps.setCurrentView).toHaveBeenCalledWith('tradeRoom');
-    expect(deps.showToast).toHaveBeenCalledWith('🔒 Trade locked successfully!', 'success');
+    expect(deps.showToast).toHaveBeenCalledWith('Trade locked successfully!', 'success');
   });
 
   it('keeps env token when chain token is the zero address and reads order before fill', async () => {

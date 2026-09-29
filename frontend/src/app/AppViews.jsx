@@ -13,6 +13,11 @@ import { getOrderSideCopy } from './orderUiModel';
 import { mapResolutionTypeLabel } from './useAppSessionData';
 import TradeRoomPage from './contexts/trade-room/TradeRoomPage';
 import ThemeToggle from './shell/ThemeToggle';
+import {
+  Banknote, Briefcase, CircleCheck, CirclePause, Clock, Compass, Droplets, Flame, Handshake, History, Hourglass, House,
+  Layers, LoaderCircle, Lock, Menu, Paperclip, Radar, Search, Settings, ShieldCheck, ShieldOff, Store, Swords,
+  TriangleAlert, Undo2, Unplug, UserRound, Wallet,
+} from 'lucide-react';
 import { buildTradeRoomPanelCallbacks, getBurnExpiredDeadlinePassed, getPaymentWindowExpired, PAYMENT_WINDOW_MS } from './contexts/trade-room/tradeRoomPanelActions';
 
 // [TR] App ana görünüm/render katmanı burada tutulur.
@@ -134,10 +139,10 @@ export const buildAppViews = (ctx) => {
         <div className="w-8 h-8 rounded bg-gradient-to-br from-white to-slate-400 flex items-center justify-center font-bold text-black mb-4 cursor-pointer" onClick={() => setCurrentView('home')}>
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="square" strokeLinejoin="miter" strokeWidth="3" d="M4 4h4v4H4zm12 0h4v4h-4zM4 16h4v4H4zm12 0h4v4h-4zM10 10h4v4h-4z" /></svg>
         </div>
-        <button onClick={toggleSidebar} title={lang === 'TR' ? 'Filtreler' : 'Filters'} className={`w-10 h-10 flex items-center justify-center rounded-xl transition ${sidebarOpen ? 'bg-elevated text-textPrimary border border-borderStrong' : 'text-textMuted hover:text-textPrimary hover:bg-elevated'}`}>☰</button>
-        <button onClick={() => setCurrentView('home')} title={lang === 'TR' ? 'Ana Sayfa' : 'Home'} className={`w-10 h-10 flex items-center justify-center rounded-xl transition ${currentView === 'home' ? 'bg-elevated text-textPrimary border border-borderStrong' : 'text-textMuted hover:text-textPrimary hover:bg-elevated'}`}>🏠</button>
-        <button onClick={() => setCurrentView('market')} title={lang === 'TR' ? 'Pazar Yeri' : 'Marketplace'} className={`w-10 h-10 flex items-center justify-center rounded-xl transition ${currentView === 'market' ? 'bg-elevated text-textPrimary border border-borderStrong' : 'text-textMuted hover:text-textPrimary hover:bg-elevated'}`}>🛒</button>
-        <button onClick={() => setCurrentView('operations')} title={lang === 'TR' ? 'İşlem Takip Merkezi' : 'Operations Center'} className={`w-10 h-10 flex items-center justify-center rounded-xl transition ${currentView === 'operations' ? 'bg-elevated text-info border border-borderStrong' : 'text-textMuted hover:text-textPrimary hover:bg-elevated'}`}>📍</button>
+        <button onClick={toggleSidebar} title={lang === 'TR' ? 'Filtreler' : 'Filters'} className={`w-10 h-10 flex items-center justify-center rounded-xl transition ${sidebarOpen ? 'bg-elevated text-textPrimary border border-borderStrong' : 'text-textMuted hover:text-textPrimary hover:bg-elevated'}`}><Menu className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" /></button>
+        <button onClick={() => setCurrentView('home')} title={lang === 'TR' ? 'Ana Sayfa' : 'Home'} className={`w-10 h-10 flex items-center justify-center rounded-xl transition ${currentView === 'home' ? 'bg-elevated text-textPrimary border border-borderStrong' : 'text-textMuted hover:text-textPrimary hover:bg-elevated'}`}><House className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" /></button>
+        <button onClick={() => setCurrentView('market')} title={lang === 'TR' ? 'Pazar Yeri' : 'Marketplace'} className={`w-10 h-10 flex items-center justify-center rounded-xl transition ${currentView === 'market' ? 'bg-elevated text-textPrimary border border-borderStrong' : 'text-textMuted hover:text-textPrimary hover:bg-elevated'}`}><Store className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" /></button>
+        <button onClick={() => setCurrentView('operations')} title={lang === 'TR' ? 'İşlem Takip Merkezi' : 'Operations Center'} className={`w-10 h-10 flex items-center justify-center rounded-xl transition ${currentView === 'operations' ? 'bg-elevated text-info border border-borderStrong' : 'text-textMuted hover:text-textPrimary hover:bg-elevated'}`}><Radar className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" /></button>
         {/* [TR] Admin girişi authenticated kullanıcıya her zaman görünür;
             VITE_ADMIN_WALLETS yalnızca UX ipucu amaçlıdır.
             [EN] Admin entry is always visible for authenticated users;
@@ -150,14 +155,14 @@ export const buildAppViews = (ctx) => {
               : (lang === 'TR' ? 'Admin Gözlem (sunucu yetkisine bağlı, read-only)' : 'Admin Observability (server-authorized, read-only)')}
             className={`w-10 h-10 flex items-center justify-center rounded-xl transition ${currentView === 'admin' ? 'bg-elevated text-success border border-borderStrong' : 'text-textMuted hover:text-textPrimary hover:bg-elevated'}`}
           >
-            🧭
+            <Compass className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" />
           </button>
         )}
         <button onClick={() => setCurrentView('tradeRoom')} title={lang === 'TR' ? 'İşlem Odası' : 'Trade Room'} className={`w-10 h-10 flex items-center justify-center rounded-xl transition relative ${currentView === 'tradeRoom' ? 'bg-elevated text-warning border border-borderStrong' : 'text-textMuted hover:text-textPrimary hover:bg-elevated'}`}>
-          💼 {activeEscrows.length > 0 && <span className="absolute top-2 right-2 w-2 h-2 bg-orange-500 rounded-full animate-pulse"></span>}
+          <Briefcase className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" /> {activeEscrows.length > 0 && <span className="absolute top-2 right-2 w-2 h-2 bg-orange-500 rounded-full animate-pulse"></span>}
         </button>
-        <button onClick={() => setCurrentView('profile')} title={lang === 'TR' ? 'Profil Merkezi' : 'Profile Center'} className={`w-10 h-10 flex items-center justify-center rounded-xl transition ${currentView === 'profile' ? 'bg-elevated text-success border border-borderStrong' : 'text-textMuted hover:text-textPrimary hover:bg-elevated'}`}>👤</button>
-        <button onClick={() => { if (!isConnected || !isAuthenticated) { handleAuthAction(); return; } setProfileTab('gecmis'); setShowProfileModal(true); }} title={lang === 'TR' ? 'İşlem Geçmişi' : 'Trade History'} className="w-10 h-10 flex items-center justify-center rounded-xl text-textMuted hover:text-textPrimary hover:bg-elevated transition">🗂️</button>
+        <button onClick={() => setCurrentView('profile')} title={lang === 'TR' ? 'Profil Merkezi' : 'Profile Center'} className={`w-10 h-10 flex items-center justify-center rounded-xl transition ${currentView === 'profile' ? 'bg-elevated text-success border border-borderStrong' : 'text-textMuted hover:text-textPrimary hover:bg-elevated'}`}><UserRound className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" /></button>
+        <button onClick={() => { if (!isConnected || !isAuthenticated) { handleAuthAction(); return; } setProfileTab('gecmis'); setShowProfileModal(true); }} title={lang === 'TR' ? 'İşlem Geçmişi' : 'Trade History'} className="w-10 h-10 flex items-center justify-center rounded-xl text-textMuted hover:text-textPrimary hover:bg-elevated transition"><History className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" /></button>
       </div>
       <div className="space-y-3 flex flex-col items-center w-full px-2">
         <div className="w-full flex justify-center">
@@ -165,7 +170,7 @@ export const buildAppViews = (ctx) => {
         </div>
         <button onClick={() => setLang(lang === 'TR' ? 'EN' : 'TR')} title={lang === 'TR' ? 'Dili Değiştir' : 'Change Language'} className="text-xs font-bold text-textMuted hover:text-textPrimary mb-1">{lang}</button>
         <button onClick={handleAuthAction} title={isConnected && isAuthenticated ? (lang === 'TR' ? 'Profil Merkezi' : 'Profile Center') : (lang === 'TR' ? 'Cüzdan Bağla' : 'Connect Wallet')} className={`w-10 h-10 rounded-full border-2 flex items-center justify-center transition-all shadow-lg mx-auto ${isConnected && isAuthenticated ? 'border-emerald-500 bg-emerald-900/20 text-emerald-400 hover:bg-emerald-900/40 shadow-[0_0_10px_rgba(16,185,129,0.2)]' : 'border-borderStrong bg-surface text-textMuted hover:text-textPrimary hover:border-brand/50 hover:bg-elevated'}`}>
-          {isLoggingIn || !authChecked ? <span className="text-xs animate-spin">⚙️</span> : <span className="text-base">👛</span>}
+          {isLoggingIn || !authChecked ? <LoaderCircle className="w-4 h-4 animate-spin" strokeWidth={1.8} aria-hidden="true" /> : <Wallet className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" />}
         </button>
       </div>
     </div>
@@ -182,7 +187,7 @@ export const buildAppViews = (ctx) => {
         className={`fixed md:relative inset-y-0 left-0 box-border h-dvh md:h-full max-w-full bg-shell border-r border-borderSubtle flex flex-col z-[60] md:z-40 shrink-0 overflow-x-hidden overflow-y-auto overscroll-contain transition-all duration-300 ease-in-out ${sidebarOpen ? 'w-[260px] max-w-[calc(100vw_-_env(safe-area-inset-left)_-_env(safe-area-inset-right))] pl-[calc(1.25rem_+_env(safe-area-inset-left))] pr-5 pt-[calc(1.25rem_+_env(safe-area-inset-top))] pb-[calc(1.25rem_+_env(safe-area-inset-bottom))] opacity-100' : 'w-0 p-0 opacity-0'}`}
       >
         <div className="relative mb-6">
-          <span className="absolute left-3 top-2.5 text-textMuted text-sm">🔍</span>
+          <span className="absolute left-3 top-3 text-textMuted"><Search className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" /></span>
           <input type="number" value={searchAmount} onChange={e => setSearchAmount(e.target.value)} placeholder={lang === 'TR' ? 'Tutar Ara...' : 'Search...'} className="w-full bg-surface text-textPrimary pl-9 pr-3 py-2.5 rounded-xl border border-borderStrong outline-none focus:border-brand/50 text-sm transition" />
         </div>
 
@@ -190,7 +195,7 @@ export const buildAppViews = (ctx) => {
           <p className="text-[10px] font-bold text-textMuted mb-3 tracking-widest">{lang === 'TR' ? 'PAZAR YERİ' : 'MARKETPLACE'}</p>
           <div className="space-y-1">
             <button onClick={() => { setFilterToken('ALL'); setCurrentView('market'); }} className={`w-full flex justify-between items-center px-3 py-2 rounded-lg text-sm transition ${filterToken === 'ALL' && currentView === 'market' ? 'bg-elevated text-textPrimary border border-borderStrong' : 'text-textSecondary hover:text-textPrimary hover:bg-elevated/50'}`}>
-              <div className="flex min-w-0 items-center gap-2"><span className="text-textMuted">⛓️</span> {lang === 'TR' ? 'TÜM EMİRLER' : 'ALL ORDERS'}</div>
+              <div className="flex min-w-0 items-center gap-2"><span className="text-textMuted"><Layers className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" /></span> {lang === 'TR' ? 'TÜM EMİRLER' : 'ALL ORDERS'}</div>
               <span className="bg-elevated text-[10px] px-2 py-0.5 rounded text-textSecondary">{orders.length}</span>
             </button>
             <button onClick={() => { setFilterToken('USDT'); setCurrentView('market'); }} className={`w-full flex justify-between items-center px-3 py-2 rounded-lg text-sm transition ${filterToken === 'USDT' && currentView === 'market' ? 'bg-elevated text-textPrimary border border-borderStrong' : 'text-textSecondary hover:text-textPrimary hover:bg-elevated/50'}`}>
@@ -203,7 +208,7 @@ export const buildAppViews = (ctx) => {
             </button>
             {/* [TR] Filtre yalnız Tier 0 (teminatsız) emirleri gösterir; etiket bunu doğru söyler. */}
             <button onClick={() => setFilterTier1(!filterTier1)} className={`w-full flex justify-between items-center px-3 py-2 rounded-lg text-sm transition ${filterTier1 ? 'bg-elevated text-yellow-500 border border-yellow-500/20' : 'text-textSecondary hover:text-textPrimary hover:bg-elevated/50'}`}>
-              <div className="flex min-w-0 items-center gap-2"><span className="text-yellow-500/70">🛡️</span> {lang === 'TR' ? 'Teminatsız (Tier 0)' : 'No bond (Tier 0)'}</div>
+              <div className="flex min-w-0 items-center gap-2"><span className="text-yellow-500/70"><ShieldOff className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" /></span> {lang === 'TR' ? 'Teminatsız (Tier 0)' : 'No bond (Tier 0)'}</div>
             </button>
           </div>
         </div>
@@ -223,7 +228,7 @@ export const buildAppViews = (ctx) => {
                   >
                     <div className="flex items-center gap-2">
                       <span className={status === 'CHALLENGED' ? 'text-red-500' : 'text-textMuted'}>
-                        {status === 'LOCKED' ? '🔒' : status === 'PAID' ? '%' : '⚔️'}
+                        {status === 'LOCKED' ? <Lock className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" /> : status === 'PAID' ? <Banknote className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" /> : <Swords className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />}
                       </span>
                       {getStateLabel(status, lang)}
                     </div>
@@ -270,15 +275,15 @@ export const buildAppViews = (ctx) => {
           </p>
           <div className="space-y-1">
             <div className="w-full min-w-0 flex justify-between items-center gap-2 px-3 py-2 rounded-lg text-sm text-textSecondary border border-borderStrong bg-surface">
-              <span className="flex min-w-0 items-center gap-2"><span className="text-emerald-400">🧩</span>{lang === 'TR' ? 'Aktif Teklif' : 'Active Proposals'}</span>
+              <span className="flex min-w-0 items-center gap-2"><span className="text-emerald-400"><Handshake className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" /></span>{lang === 'TR' ? 'Aktif Teklif' : 'Active Proposals'}</span>
               <span className="bg-elevated text-[10px] px-2 py-0.5 rounded text-textPrimary">{activeEscrowCounts?.settlement?.PROPOSED ?? 0}</span>
             </div>
             <div className="w-full min-w-0 flex justify-between items-center gap-2 px-3 py-2 rounded-lg text-sm text-textSecondary border border-borderStrong bg-surface">
-              <span className="flex min-w-0 items-center gap-2"><span className="text-yellow-400">⏳</span>{lang === 'TR' ? 'Benden Aksiyon Bekliyor' : 'Action Required'}</span>
+              <span className="flex min-w-0 items-center gap-2"><span className="text-yellow-400"><Hourglass className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" /></span>{lang === 'TR' ? 'Benden Aksiyon Bekliyor' : 'Action Required'}</span>
               <span className="bg-elevated text-[10px] px-2 py-0.5 rounded text-textPrimary">{activeEscrowCounts?.settlement?.ACTION_REQUIRED ?? 0}</span>
             </div>
             <div className="w-full min-w-0 flex justify-between items-center gap-2 px-3 py-2 rounded-lg text-sm text-textSecondary border border-borderStrong bg-surface">
-              <span className="flex min-w-0 items-center gap-2"><span className="text-sky-400">🕒</span>{lang === 'TR' ? 'Karşı Taraftan Yanıt Bekliyorum' : 'Waiting Counterparty'}</span>
+              <span className="flex min-w-0 items-center gap-2"><span className="text-sky-400"><Clock className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" /></span>{lang === 'TR' ? 'Karşı Taraftan Yanıt Bekliyorum' : 'Waiting Counterparty'}</span>
               <span className="bg-elevated text-[10px] px-2 py-0.5 rounded text-textPrimary">{activeEscrowCounts?.settlement?.WAITING ?? 0}</span>
             </div>
             {activeEscrows
@@ -338,8 +343,8 @@ export const buildAppViews = (ctx) => {
         </h1>
         <p className="text-textMuted text-sm max-w-lg">{lang === 'TR' ? 'Emanet tutmayan, hakemsiz eşten eşe USDT/USDC takası. Kurallar kontratta.' : 'Non-custodial, arbitrator-free P2P USDT/USDC trading. The rules live in the contract.'}</p>
         <div className="mt-5 flex flex-col sm:flex-row gap-3">
-          <button onClick={() => setCurrentView('market')} className="px-6 py-3 rounded-xl bg-brand text-black text-sm font-bold hover:opacity-90 transition">
-            {lang === 'TR' ? '🛒 Pazara git' : '🛒 Open market'}
+          <button onClick={() => setCurrentView('market')} className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-brand text-black text-sm font-bold hover:opacity-90 transition">
+            <Store className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />{lang === 'TR' ? 'Pazara git' : 'Open market'}
           </button>
           <button onClick={handleOpenMakerModal} disabled={isPaused} className="px-6 py-3 rounded-xl bg-surface border border-borderStrong text-textPrimary text-sm font-bold hover:bg-elevated transition disabled:opacity-50 disabled:cursor-not-allowed">
             {lang === 'TR' ? '+ Emir oluştur' : '+ Create order'}
@@ -371,7 +376,7 @@ export const buildAppViews = (ctx) => {
           <span className="max-w-full truncate text-2xl font-bold text-yellow-500">{protocolStats?.avg_trade_hours != null ? `${protocolStats.avg_trade_hours}h` : '—'}</span>
         </div>
         <div className="col-span-2 md:col-span-1 min-w-0 bg-surface border border-danger/30 p-4 md:p-5 rounded-2xl relative overflow-hidden group">
-          <div className="absolute -right-4 -bottom-4 text-danger/10 text-6xl group-hover:scale-110 transition-transform" aria-hidden="true">🔥</div>
+          <div className="absolute -right-3 -bottom-3 text-danger/10 group-hover:scale-110 transition-transform" aria-hidden="true"><Flame className="w-16 h-16" strokeWidth={1.8} aria-hidden="true" /></div>
           <p className="text-danger text-[10px] font-bold tracking-widest uppercase mb-2">{lang === 'TR' ? 'ERİYEN HAZİNE' : 'BURNED BONDS'}</p>
           <div className="flex min-w-0 flex-wrap items-baseline relative z-10">
             <span className="max-w-full truncate text-2xl font-bold text-danger">{statValue(protocolStats?.burned_bonds_usdt, (v) => `$${Number(v).toLocaleString('en-US', { maximumFractionDigits: 0 })}`)}</span>
@@ -443,10 +448,10 @@ export const buildAppViews = (ctx) => {
         {isFaucetEnabled && (
           <div className="flex min-w-0 flex-wrap gap-3 w-full md:w-auto">
             <button onClick={() => handleMint('USDT')} disabled={isContractLoading} className="flex-1 md:flex-none px-4 py-2 bg-surface border border-borderSubtle hover:bg-elevated rounded-xl text-xs sm:text-sm font-bold text-emerald-400 transition shadow-lg flex items-center justify-center gap-2">
-              {isContractLoading && loadingText.includes('USDT') ? '⏳' : '🚰'} {lang === 'TR' ? 'Test USDT Al' : 'Get Test USDT'}
+              {isContractLoading && loadingText.includes('USDT') ? <LoaderCircle className="w-4 h-4 animate-spin" strokeWidth={1.8} aria-hidden="true" /> : <Droplets className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />} {lang === 'TR' ? 'Test USDT Al' : 'Get Test USDT'}
             </button>
             <button onClick={() => handleMint('USDC')} disabled={isContractLoading} className="flex-1 md:flex-none px-4 py-2 bg-surface border border-borderSubtle hover:bg-elevated rounded-xl text-xs sm:text-sm font-bold text-blue-400 transition shadow-lg flex items-center justify-center gap-2">
-              {isContractLoading && loadingText.includes('USDC') ? '⏳' : '🚰'} {lang === 'TR' ? 'Test USDC Al' : 'Get Test USDC'}
+              {isContractLoading && loadingText.includes('USDC') ? <LoaderCircle className="w-4 h-4 animate-spin" strokeWidth={1.8} aria-hidden="true" /> : <Droplets className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />} {lang === 'TR' ? 'Test USDC Al' : 'Get Test USDC'}
             </button>
           </div>
         )}
@@ -514,7 +519,7 @@ export const buildAppViews = (ctx) => {
                           </div>
                           <div className="rounded-lg border border-borderSubtle bg-elevated px-2.5 py-2">
                             <p className="text-[10px] text-textMuted uppercase">Tier</p>
-                            <p className="text-yellow-500 font-bold">T{order.tier} 🛡️</p>
+                            <p className="text-yellow-500 font-bold inline-flex items-center gap-1">T{order.tier} <ShieldCheck className="w-3.5 h-3.5" strokeWidth={1.8} aria-hidden="true" /></p>
                           </div>
                         </div>
                         <div className="mt-3 rounded-lg border border-borderSubtle bg-elevated px-2.5 py-2">
@@ -553,16 +558,16 @@ export const buildAppViews = (ctx) => {
                     const isDisabled = needsSignIn ? false : (!finalCanTakeOrder || isContractLoading);
                     return (
                   <button onClick={() => (needsSignIn ? handleAuthAction() : handleStartTrade(order))} disabled={isDisabled} className={`w-full md:w-auto px-6 py-2.5 rounded-xl font-bold text-sm transition flex items-center justify-center gap-2 ${isDisabled ? 'bg-elevated text-textMuted border border-borderStrong cursor-not-allowed' : 'bg-brand text-black hover:opacity-90'}`}>
-                    {needsSignIn         ? <><span>👛</span> {lang === 'TR' ? 'Giriş yap' : 'Sign in'}</> :
-                     isPaused            ? <><span>⏸️</span> {lang === 'TR' ? 'Bakımda' : 'Paused'}</> :
-                     !isCorrectChain     ? <><span>⛓️</span> {lang === 'TR' ? 'Yanlış Ağ' : 'Wrong Network'}</> :
-                     !isTokenConfigured  ? <><span>⚙️</span> {lang === 'TR' ? 'Token Ayarlanmadı' : 'Token Not Set'}</> :
+                    {needsSignIn         ? <><Wallet className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" /> {lang === 'TR' ? 'Giriş yap' : 'Sign in'}</> :
+                     isPaused            ? <><CirclePause className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" /> {lang === 'TR' ? 'Bakımda' : 'Paused'}</> :
+                     !isCorrectChain     ? <><Unplug className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" /> {lang === 'TR' ? 'Yanlış Ağ' : 'Wrong Network'}</> :
+                     !isTokenConfigured  ? <><Settings className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" /> {lang === 'TR' ? 'Token Ayarlanmadı' : 'Token Not Set'}</> :
                      isMyOwnAd           ? <>{lang === 'TR' ? 'Sizin emriniz' : 'Your order'}</> :
-                     isTierLocked        ? <><span>🔒</span> {lang === 'TR' ? `Tier ${order.tier} gerekli` : `Tier ${order.tier} required`}</> :
-                     !canTakeOrder       ? <><span>🔒</span> {lang === 'TR' ? 'Kilitli' : 'Locked'}</> :
-                     !isFunded           ? <><span>⚠️</span> {lang === 'TR' ? 'Bakiye Yetersiz' : 'Low Balance'}</> :
-                     !isCooldownOk       ? <><span>⏳</span> {lang === 'TR' ? `Cooldown: ${Math.ceil((sybilStatus?.cooldownRemaining || 0) / 60)} dk` : `Cooldown: ${Math.ceil((sybilStatus?.cooldownRemaining || 0) / 60)} min`}</> :
-                     (isContractLoading  ? (loadingText || (lang === 'TR' ? '⏳ İşleniyor...' : '⏳ Processing...')) : (order.ctaLabel || (lang === 'TR' ? 'İşlem Yap' : 'Trade')))}
+                     isTierLocked        ? <><Lock className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" /> {lang === 'TR' ? `Tier ${order.tier} gerekli` : `Tier ${order.tier} required`}</> :
+                     !canTakeOrder       ? <><Lock className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" /> {lang === 'TR' ? 'Kilitli' : 'Locked'}</> :
+                     !isFunded           ? <><TriangleAlert className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" /> {lang === 'TR' ? 'Bakiye Yetersiz' : 'Low Balance'}</> :
+                     !isCooldownOk       ? <><Hourglass className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" /> {lang === 'TR' ? `Cooldown: ${Math.ceil((sybilStatus?.cooldownRemaining || 0) / 60)} dk` : `Cooldown: ${Math.ceil((sybilStatus?.cooldownRemaining || 0) / 60)} min`}</> :
+                     (isContractLoading  ? <><LoaderCircle className="w-4 h-4 animate-spin" strokeWidth={1.8} aria-hidden="true" />{loadingText || (lang === 'TR' ? 'İşleniyor...' : 'Processing...')}</> : (order.ctaLabel || (lang === 'TR' ? 'İşlem Yap' : 'Trade')))}
                   </button>
                     );
                   })()}
@@ -604,7 +609,7 @@ export const buildAppViews = (ctx) => {
       return (
         <div className="p-4 md:p-8 max-w-[900px] w-full mx-auto mt-6 md:mt-0">
           <div className="bg-surface border border-borderSubtle rounded-2xl p-6 md:p-8 text-center">
-            <div className="w-14 h-14 bg-elevated border border-borderStrong rounded-full flex items-center justify-center mx-auto mb-4 text-2xl">⚠️</div>
+            <div className="w-14 h-14 bg-elevated border border-borderStrong rounded-full flex items-center justify-center mx-auto mb-4 text-warning"><TriangleAlert className="w-6 h-6" strokeWidth={1.8} aria-hidden="true" /></div>
             <h2 className="text-xl font-bold text-textPrimary mb-2">
               {lang === 'TR' ? 'Aktif işlem bulunamadı' : 'No active trade found'}
             </h2>
@@ -820,7 +825,7 @@ export const buildAppViews = (ctx) => {
                       </div>
                     </div>
                     {/* [TR] Süreler aşağıdaki "Süreler" kartında; burada yalnız eriyen toplam gösterilir. */}
-                    <p className="mt-3 text-center text-sm font-bold text-danger">🔥 {lang === 'TR' ? 'Eriyen toplam' : 'Total burned'}: {formatTokenAmountFromRaw(decayedTotal, tradeTokenDecimals)} {asset}</p>
+                    <p className="mt-3 flex items-center justify-center gap-1.5 text-sm font-bold text-danger"><Flame className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />{lang === 'TR' ? 'Eriyen toplam' : 'Total burned'}: {formatTokenAmountFromRaw(decayedTotal, tradeTokenDecimals)} {asset}</p>
                   </>
                 );
               })()}
@@ -845,7 +850,7 @@ export const buildAppViews = (ctx) => {
                 <div>
                   <input type="file" onChange={handleFileUpload} accept="image/*,.pdf" className="hidden" id="receipt-upload" />
                   <label htmlFor="receipt-upload" className={`w-full px-4 py-3 rounded-lg border text-sm flex items-center justify-center gap-2 cursor-pointer transition ${paymentIpfsHash ? 'border-success/40 bg-success/10 text-success' : 'border-dashed border-borderStrong bg-elevated text-textPrimary hover:border-brand'}`}>
-                    {paymentIpfsHash ? (lang === 'TR' ? '✅ Dekont yüklendi' : '✅ Receipt uploaded') : (lang === 'TR' ? '📎 Dekont yükle' : '📎 Upload receipt')}
+                    {paymentIpfsHash ? <><CircleCheck className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />{lang === 'TR' ? 'Dekont yüklendi' : 'Receipt uploaded'}</> : <><Paperclip className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />{lang === 'TR' ? 'Dekont yükle' : 'Upload receipt'}</>}
                   </label>
                   <p className="mt-1 text-[11px] text-textMuted text-center">{lang === 'TR' ? 'Şifrelenir, işlem bitince silinir.' : 'Encrypted, deleted after the trade.'}</p>
                 </div>
@@ -901,7 +906,7 @@ export const buildAppViews = (ctx) => {
                 )}
                 {['LOCKED', 'PAID', 'CHALLENGED'].includes(roomState) && cancelStatus === 'proposed_by_other' && (
                   <div className="mb-3 p-4 bg-warning/10 border border-warning/30 rounded-xl">
-                    <p className="text-sm font-bold text-textPrimary">↩️ {lang === 'TR' ? 'Karşı taraf iptal teklif etti' : 'Counterparty proposed a cancel'}</p>
+                    <p className="flex items-center gap-1.5 text-sm font-bold text-textPrimary"><Undo2 className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />{lang === 'TR' ? 'Karşı taraf iptal teklif etti' : 'Counterparty proposed a cancel'}</p>
                     <p className="text-xs text-textMuted mt-1">
                       {roomState === 'LOCKED'
                         ? (lang === 'TR' ? 'Ödeme bildirilmediği için kesinti yok.' : 'No fees before payment is reported.')
@@ -929,17 +934,17 @@ export const buildAppViews = (ctx) => {
   // [EN] Mobile bottom navigation bar — visible only on mobile devices
   const renderMobileNav = () => {
     // [TR] Her ikonun altında kısa etiket: yalnız emoji ile menü tahmin oyununa dönüyordu. Giriş yapınca
-    //      cüzdan düğmesi profil ikonuyla aynı (👤) görünüyordu; artık cüzdan ikonu + yeşil nokta.
+    //      cüzdan düğmesi profil ikonuyla aynı görünüyordu; artık cüzdan ikonu + yeşil nokta.
     // [EN] Short label under each icon (emoji-only nav was guesswork). The wallet button no longer
-    //      turns into a second 👤 when signed in; it keeps the wallet icon with a green dot.
-    const item = ({ key, icon, label, active, onClick, activeClass = 'text-textPrimary', dot = null }) => (
+    //      turns into a second profile icon when signed in; it keeps the wallet icon with a green dot.
+    const item = ({ key, icon: Icon, label, active, onClick, activeClass = 'text-textPrimary', dot = null }) => (
       <button
         key={key}
         onClick={onClick}
         aria-label={label}
         className={`h-10 min-w-0 flex-1 basis-0 rounded-xl transition-all relative flex flex-col items-center justify-center gap-0.5 leading-none ${active ? `bg-elevated ${activeClass}` : 'text-textMuted'}`}
       >
-        <span className="text-[17px]" aria-hidden="true">{icon}</span>
+        <Icon className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" />
         <span className="text-[9px] font-semibold truncate max-w-full">{label}</span>
         {dot && <span className={`absolute top-0.5 right-2 w-2 h-2 border border-shell rounded-full ${dot}`}></span>}
       </button>
@@ -948,16 +953,16 @@ export const buildAppViews = (ctx) => {
     const signedIn = isConnected && isAuthenticated;
     return (
       <div className="md:hidden fixed inset-x-0 bottom-0 box-border h-[calc(4rem_+_env(safe-area-inset-bottom))] max-w-full bg-shell border-t border-borderSubtle z-[45] flex items-center justify-around gap-0 overflow-hidden px-[calc(0.25rem_+_env(safe-area-inset-left))] pr-[calc(0.25rem_+_env(safe-area-inset-right))] pb-[env(safe-area-inset-bottom)] shadow-[0_-10px_30px_rgba(0,0,0,0.12)]">
-        {item({ key: 'home', icon: '🏠', label: tr ? 'Ana' : 'Home', active: currentView === 'home', onClick: () => setCurrentView('home') })}
-        {item({ key: 'market', icon: '🛒', label: tr ? 'Pazar' : 'Market', active: currentView === 'market', onClick: () => setCurrentView('market') })}
-        {item({ key: 'trade', icon: '💼', label: tr ? 'İşlem' : 'Trade', active: currentView === 'tradeRoom', activeClass: 'text-warning', onClick: () => setCurrentView('tradeRoom'), dot: activeEscrows.length > 0 ? 'bg-orange-500 animate-pulse' : null })}
-        {item({ key: 'ops', icon: '📍', label: tr ? 'Takip' : 'Track', active: currentView === 'operations', activeClass: 'text-info', onClick: () => setCurrentView('operations') })}
+        {item({ key: 'home', icon: House, label: tr ? 'Ana' : 'Home', active: currentView === 'home', onClick: () => setCurrentView('home') })}
+        {item({ key: 'market', icon: Store, label: tr ? 'Pazar' : 'Market', active: currentView === 'market', onClick: () => setCurrentView('market') })}
+        {item({ key: 'trade', icon: Briefcase, label: tr ? 'İşlem' : 'Trade', active: currentView === 'tradeRoom', activeClass: 'text-warning', onClick: () => setCurrentView('tradeRoom'), dot: activeEscrows.length > 0 ? 'bg-orange-500 animate-pulse' : null })}
+        {item({ key: 'ops', icon: Radar, label: tr ? 'Takip' : 'Track', active: currentView === 'operations', activeClass: 'text-info', onClick: () => setCurrentView('operations') })}
         {/* [TR] Mobil admin girişi authenticated kullanıcıya açık kalır; backend nihai otoritedir.
             [EN] Mobile admin entry remains reachable for authenticated users; backend is authoritative. */}
-        {canSeeAdminEntry && item({ key: 'admin', icon: '🧭', label: 'Admin', active: currentView === 'admin', activeClass: 'text-success', onClick: () => setCurrentView('admin') })}
-        {item({ key: 'profile', icon: '👤', label: tr ? 'Profil' : 'Profile', active: currentView === 'profile', activeClass: 'text-success', onClick: () => setCurrentView('profile') })}
-        {item({ key: 'menu', icon: '☰', label: tr ? 'Menü' : 'Menu', active: sidebarOpen, onClick: toggleSidebar })}
-        {item({ key: 'wallet', icon: '👛', label: signedIn ? (tr ? 'Bağlı' : 'Linked') : (tr ? 'Bağlan' : 'Connect'), active: false, onClick: handleAuthAction, dot: signedIn ? 'bg-success' : null })}
+        {canSeeAdminEntry && item({ key: 'admin', icon: Compass, label: 'Admin', active: currentView === 'admin', activeClass: 'text-success', onClick: () => setCurrentView('admin') })}
+        {item({ key: 'profile', icon: UserRound, label: tr ? 'Profil' : 'Profile', active: currentView === 'profile', activeClass: 'text-success', onClick: () => setCurrentView('profile') })}
+        {item({ key: 'menu', icon: Menu, label: tr ? 'Menü' : 'Menu', active: sidebarOpen, onClick: toggleSidebar })}
+        {item({ key: 'wallet', icon: Wallet, label: signedIn ? (tr ? 'Bağlı' : 'Linked') : (tr ? 'Bağlan' : 'Connect'), active: false, onClick: handleAuthAction, dot: signedIn ? 'bg-success' : null })}
       </div>
     );
   };

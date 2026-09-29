@@ -4,7 +4,7 @@ export const contextRegistry = [
   {
     key: 'home',
     label: { TR: 'Ana Sayfa', EN: 'Home' },
-    icon: '🏠',
+    icon: 'house',
     requiresAuth: false,
     layout: CONTEXT_LAYOUTS.FULL,
     order: 10,
@@ -12,7 +12,7 @@ export const contextRegistry = [
   {
     key: 'market',
     label: { TR: 'Pazar', EN: 'Market' },
-    icon: '🛒',
+    icon: 'store',
     requiresAuth: false,
     layout: CONTEXT_LAYOUTS.MARKET,
     order: 20,
@@ -20,7 +20,7 @@ export const contextRegistry = [
   {
     key: 'operations',
     label: { TR: 'İşlem Takip Merkezi', EN: 'Operations Center' },
-    icon: '⚙️',
+    icon: 'radar',
     requiresAuth: true,
     layout: CONTEXT_LAYOUTS.OPERATIONS,
     order: 30,
@@ -28,7 +28,7 @@ export const contextRegistry = [
   {
     key: 'tradeRoom',
     label: { TR: 'İşlem Odası', EN: 'Trade Room' },
-    icon: '💼',
+    icon: 'briefcase',
     requiresAuth: true,
     layout: CONTEXT_LAYOUTS.TRADE_ROOM,
     order: 40,
@@ -36,7 +36,7 @@ export const contextRegistry = [
   {
     key: 'profile',
     label: { TR: 'Profil', EN: 'Profile' },
-    icon: '👤',
+    icon: 'user-round',
     requiresAuth: true,
     layout: CONTEXT_LAYOUTS.PROFILE,
     order: 50,
@@ -44,7 +44,7 @@ export const contextRegistry = [
   {
     key: 'rewards',
     label: { TR: 'Ödüller', EN: 'Rewards' },
-    icon: '🎁',
+    icon: 'gift',
     requiresAuth: true,
     layout: CONTEXT_LAYOUTS.REWARDS,
     order: 60,
@@ -52,7 +52,7 @@ export const contextRegistry = [
   {
     key: 'help',
     label: { TR: 'Yardım', EN: 'Help' },
-    icon: '❓',
+    icon: 'circle-help',
     requiresAuth: false,
     layout: CONTEXT_LAYOUTS.HELP,
     order: 70,
@@ -60,7 +60,7 @@ export const contextRegistry = [
   {
     key: 'admin',
     label: { TR: 'Yönetim', EN: 'Admin' },
-    icon: '🧭',
+    icon: 'compass',
     requiresAuth: true,
     layout: CONTEXT_LAYOUTS.ADMIN,
     order: 80,

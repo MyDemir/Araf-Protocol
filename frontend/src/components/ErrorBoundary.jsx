@@ -18,6 +18,7 @@
  *   /api/logs/client-error (env/proxy senaryolarında normalize).
  */
 
+import { TriangleAlert } from 'lucide-react';
 import React from 'react';
 import { resolveClientErrorLogUrl } from '../app/apiConfig';
 
@@ -108,7 +109,7 @@ export default class ErrorBoundary extends React.Component {
       return (
         <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4 font-sans">
           <div className="bg-slate-800 border border-red-500/30 rounded-2xl p-8 max-w-md w-full text-center shadow-2xl">
-            <div className="text-5xl mb-6">⚠️</div>
+            <div className="mb-6 flex justify-center text-red-400"><TriangleAlert className="w-12 h-12" strokeWidth={1.8} aria-hidden="true" /></div>
             <h2 className="text-white font-bold text-2xl mb-3">Sistemde Kesinti Oluştu</h2>
             <p className="text-slate-400 text-sm mb-8 leading-relaxed">
               İşleminiz sırasında teknik bir sorun oluştu.

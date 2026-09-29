@@ -1,29 +1,35 @@
 import React from 'react';
+import { Monitor, Moon, Sun } from 'lucide-react';
 import { useThemeMode } from '../providers/ThemeProvider';
 
-// [TR] Dar kenar çubuğunda metin "Sy" diye kesiliyordu; ikon seçenekleri tam sığar. Erişilebilir ad aria-label'da.
-// [EN] Text got clipped to "Sy" in the slim rail; icon options fit. The accessible name lives in aria-label.
+// [TR] Görünen ikon, aynı boyutta şeffaf bir <select> ile örtülür: erişilebilirlik ve klavye davranışı
+//      yerel select'ten gelir, görünüm ise tek tip çizgi ikondur.
+// [EN] The visible icon is covered by a same-size transparent <select>: accessibility and keyboard
+//      behaviour come from the native select, the look is a consistent line icon.
 const OPTIONS = [
-  { value: 'system', icon: '🖥️', title: 'System' },
-  { value: 'day', icon: '☀️', title: 'Day' },
-  { value: 'night', icon: '🌙', title: 'Night' },
+  { value: 'system', Icon: Monitor, label: 'System' },
+  { value: 'day', Icon: Sun, label: 'Day' },
+  { value: 'night', Icon: Moon, label: 'Night' },
 ];
 
 export const ThemeToggle = () => {
   const { themeMode, setThemeMode } = useThemeMode();
   const current = OPTIONS.find((o) => o.value === themeMode) || OPTIONS[0];
+  const { Icon } = current;
   return (
-    <select
-      aria-label="Theme mode"
-      title={`Theme: ${current.title}`}
-      value={themeMode}
-      onChange={(e) => setThemeMode(e.target.value)}
-      className="w-10 h-10 appearance-none text-center text-base bg-surface border border-borderSubtle rounded-xl cursor-pointer hover:bg-elevated focus:outline-none focus:ring-1 focus:ring-brand"
-    >
-      {OPTIONS.map((o) => (
-        <option key={o.value} value={o.value} title={o.title}>{o.icon}</option>
-      ))}
-    </select>
+    <div className="relative w-10 h-10 rounded-xl border border-borderSubtle bg-surface text-textMuted hover:text-textPrimary hover:bg-elevated flex items-center justify-center" title={`Theme: ${current.label}`}>
+      <Icon className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" />
+      <select
+        aria-label="Theme mode"
+        value={themeMode}
+        onChange={(e) => setThemeMode(e.target.value)}
+        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+      >
+        {OPTIONS.map((o) => (
+          <option key={o.value} value={o.value}>{o.label}</option>
+        ))}
+      </select>
+    </div>
   );
 };
 
