@@ -10,8 +10,12 @@ export const OperationsSummaryBar = ({ summary, lang = 'EN' }) => {
     { key: 'challenged', label: getStateLabel('CHALLENGED', lang) },
     { key: 'settlementWaiting', label: lang === 'TR' ? 'Yanıt bekleniyor' : 'Awaiting response' },
     { key: 'locked', label: getStateLabel('LOCKED', lang) },
-    { key: 'pendingBackendSync', label: lang === 'TR' ? 'Oda senkronu' : 'Room sync' },
+    { key: 'pendingBackendSync', label: lang === 'TR' ? 'Senkron bekliyor' : 'Room sync' },
   ];
+
+  // [TR] Aktif işlem yokken 7 adet "0" kartı bilgi taşımıyordu; boş durum kartı yeterli.
+  // [EN] With no active trades, seven "0" tiles carried no information; the empty-state card is enough.
+  if (!Number(summary?.totalActive)) return null;
 
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-2 mb-4">

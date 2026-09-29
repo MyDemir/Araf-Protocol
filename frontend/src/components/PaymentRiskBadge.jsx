@@ -127,9 +127,26 @@ export default function PaymentRiskBadge({
   if (!riskEntry) return null;
 
   if (compact) {
+    // [TR] Pazar satırında her emirde aynı iki cümlelik açıklama tekrar ediyordu. Kompakt mod tek bir etikettir;
+    //      açıklama ipucu (title) ve ekran okuyucu metni olarak kalır. Genel/kısıtlı uyarılar görünür kalır.
+    // [EN] The market row repeated the same two-sentence explanation on every order. Compact mode is a single chip;
+    //      the explanation stays as a tooltip and screen-reader text. Generic/restricted warnings stay visible.
+    const riskLevel = String(riskEntry.riskLevel || 'MEDIUM').toUpperCase();
+    const chipClass = RISK_LEVEL_CLASS[riskLevel] || RISK_LEVEL_CLASS.MEDIUM;
+    const explanation = `${getPaymentRiskSummaryCopy('subtitle', lang)} ${getPaymentRiskSummaryCopy('notTrustScore', lang)}`;
     return (
-      <div className="mt-2 p-2 rounded-lg border border-borderStrong bg-surface">
-        <PaymentRiskSummary lang={lang} riskEntry={riskEntry} compact />
+      <div className="mt-1.5" title={explanation}>
+        <span className="inline-flex items-center gap-1.5 text-[11px] text-textMuted">
+          {getPaymentRiskSummaryCopy('compactTitle', lang)}
+          <span className={`text-[10px] px-2 py-0.5 rounded border font-bold ${chipClass}`}>{getPaymentRiskLevelLabel(riskLevel, lang)}</span>
+        </span>
+        <span className="sr-only">{explanation}</span>
+        {riskEntry?.generic === true && (
+          <p className="mt-1 text-[11px] text-warning leading-snug">{getPaymentRiskSummaryCopy('genericWarning', lang)}</p>
+        )}
+        {(riskLevel === 'RESTRICTED' || riskEntry.enabled === false) && (
+          <p className="mt-1 text-[11px] text-danger leading-snug">{getPaymentRiskSummaryCopy('restrictedAvailability', lang)}</p>
+        )}
       </div>
     );
   }

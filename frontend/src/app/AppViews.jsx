@@ -165,7 +165,7 @@ export const buildAppViews = (ctx) => {
         </div>
         <button onClick={() => setLang(lang === 'TR' ? 'EN' : 'TR')} title={lang === 'TR' ? 'Dili Değiştir' : 'Change Language'} className="text-xs font-bold text-textMuted hover:text-textPrimary mb-1">{lang}</button>
         <button onClick={handleAuthAction} title={isConnected && isAuthenticated ? (lang === 'TR' ? 'Profil Merkezi' : 'Profile Center') : (lang === 'TR' ? 'Cüzdan Bağla' : 'Connect Wallet')} className={`w-10 h-10 rounded-full border-2 flex items-center justify-center transition-all shadow-lg mx-auto ${isConnected && isAuthenticated ? 'border-emerald-500 bg-emerald-900/20 text-emerald-400 hover:bg-emerald-900/40 shadow-[0_0_10px_rgba(16,185,129,0.2)]' : 'border-borderStrong bg-surface text-textMuted hover:text-textPrimary hover:border-brand/50 hover:bg-elevated'}`}>
-          {isLoggingIn || !authChecked ? <span className="text-xs animate-spin">⚙️</span> : (isConnected && isAuthenticated ? <span className="text-base drop-shadow-[0_0_5px_rgba(16,185,129,0.8)]">👤</span> : <span className="text-base drop-shadow-[0_0_5px_rgba(255,255,255,0.5)]">👛</span>)}
+          {isLoggingIn || !authChecked ? <span className="text-xs animate-spin">⚙️</span> : <span className="text-base">👛</span>}
         </button>
       </div>
     </div>
@@ -326,43 +326,55 @@ export const buildAppViews = (ctx) => {
 
   // [TR] Ana sayfa — protokol açıklaması ve istatistik kartları
   // [EN] Home page — protocol description and stats cards
+  // [TR] İstatistik gelmediyse "$0" yanıltıcıdır; veri yokken tire gösterilir.
+  // [EN] "$0" is misleading when stats failed to load; show a dash when there is no data.
+  const statValue = (value, format) => (protocolStats == null || value == null ? '—' : format(value));
+
   const renderHome = () => (
     <div className="w-full max-w-[1200px] min-w-0 p-4 md:p-8">
-      <div className="mb-12">
+      <div className="mb-10">
         <h1 className="text-4xl md:text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-textPrimary via-textSecondary to-textMuted tracking-tight mb-3">
           {lang === 'TR' ? <>Sistem yargılamaz. <br/>Dürüstsüzlüğü pahalıya mal eder.</> : <>The system does not judge. <br/>It makes dishonesty expensive.</>}
         </h1>
-        <p className="text-textMuted text-sm max-w-lg">{lang === 'TR' ? 'Merkeziyetsiz, emanet tutmayan ve oracle-bağımsız eşten eşe escrow protokolü. Hakem yok, sadece matematik.' : 'Decentralized, non-custodial, and oracle-free P2P escrow protocol. No arbitrators, just math.'}</p>
+        <p className="text-textMuted text-sm max-w-lg">{lang === 'TR' ? 'Emanet tutmayan, hakemsiz eşten eşe USDT/USDC takası. Kurallar kontratta.' : 'Non-custodial, arbitrator-free P2P USDT/USDC trading. The rules live in the contract.'}</p>
+        <div className="mt-5 flex flex-col sm:flex-row gap-3">
+          <button onClick={() => setCurrentView('market')} className="px-6 py-3 rounded-xl bg-brand text-black text-sm font-bold hover:opacity-90 transition">
+            {lang === 'TR' ? '🛒 Pazara git' : '🛒 Open market'}
+          </button>
+          <button onClick={handleOpenMakerModal} disabled={isPaused} className="px-6 py-3 rounded-xl bg-surface border border-borderStrong text-textPrimary text-sm font-bold hover:bg-elevated transition disabled:opacity-50 disabled:cursor-not-allowed">
+            {lang === 'TR' ? '+ Emir oluştur' : '+ Create order'}
+          </button>
+        </div>
       </div>
 
       <div className="grid min-w-0 grid-cols-2 md:grid-cols-5 gap-3 md:gap-4 mb-10">
         <div className="min-w-0 overflow-hidden bg-surface border border-borderSubtle p-4 md:p-5 rounded-2xl">
           <p className="text-textMuted text-[10px] font-bold tracking-widest uppercase mb-2">{lang === 'TR' ? 'TOPLAM HACİM' : 'TOTAL VOL'}</p>
           <div className="flex min-w-0 flex-wrap items-baseline">
-            <span className="max-w-full truncate text-2xl font-bold text-textPrimary">${Number(protocolStats?.total_volume_usdt ?? 0).toLocaleString('en-US', { notation: 'compact', maximumFractionDigits: 1 })}</span>
+            <span className="max-w-full truncate text-2xl font-bold text-textPrimary">{statValue(protocolStats?.total_volume_usdt, (v) => `$${Number(v).toLocaleString('en-US', { notation: 'compact', maximumFractionDigits: 1 })}`)}</span>
             <StatChange value={protocolStats?.changes_30d?.total_volume_usdt_pct} />
           </div>
         </div>
         <div className="min-w-0 overflow-hidden bg-surface border border-borderSubtle p-4 md:p-5 rounded-2xl">
           <p className="text-textMuted text-[10px] font-bold tracking-widest uppercase mb-2">{lang === 'TR' ? 'BAŞARILI İŞLEM' : 'SUCCESS TRADES'}</p>
           <div className="flex min-w-0 flex-wrap items-baseline">
-            <span className="max-w-full truncate text-2xl font-bold text-textPrimary">{(protocolStats?.completed_trades ?? 0).toLocaleString()}</span>
+            <span className="max-w-full truncate text-2xl font-bold text-textPrimary">{statValue(protocolStats?.completed_trades, (v) => Number(v).toLocaleString())}</span>
             <StatChange value={protocolStats?.changes_30d?.completed_trades_pct} />
           </div>
         </div>
         <div className="min-w-0 overflow-hidden bg-surface border border-borderSubtle p-4 md:p-5 rounded-2xl">
           <p className="text-textMuted text-[10px] font-bold tracking-widest uppercase mb-2">{lang === 'TR' ? 'AÇIK SATIŞ EMİRLERİ' : 'OPEN SELL ORDERS'}</p>
-          <span className="max-w-full truncate text-2xl font-bold text-textPrimary">{(protocolStats?.open_sell_orders ?? 0).toLocaleString()}</span>
+          <span className="max-w-full truncate text-2xl font-bold text-textPrimary">{statValue(protocolStats?.open_sell_orders, (v) => Number(v).toLocaleString())}</span>
         </div>
         <div className="min-w-0 overflow-hidden bg-surface border border-borderSubtle p-4 md:p-5 rounded-2xl">
           <p className="text-textMuted text-[10px] font-bold tracking-widest uppercase mb-2">{lang === 'TR' ? 'ORT. SÜRE' : 'AVG TIME'}</p>
           <span className="max-w-full truncate text-2xl font-bold text-yellow-500">{protocolStats?.avg_trade_hours != null ? `${protocolStats.avg_trade_hours}h` : '—'}</span>
         </div>
-        <div className="min-w-0 bg-surface border border-danger/30 p-4 md:p-5 rounded-2xl relative overflow-hidden group">
+        <div className="col-span-2 md:col-span-1 min-w-0 bg-surface border border-danger/30 p-4 md:p-5 rounded-2xl relative overflow-hidden group">
           <div className="absolute -right-4 -bottom-4 text-danger/10 text-6xl group-hover:scale-110 transition-transform" aria-hidden="true">🔥</div>
           <p className="text-danger text-[10px] font-bold tracking-widest uppercase mb-2">{lang === 'TR' ? 'ERİYEN HAZİNE' : 'BURNED BONDS'}</p>
           <div className="flex min-w-0 flex-wrap items-baseline relative z-10">
-            <span className="max-w-full truncate text-2xl font-bold text-danger">${Number(protocolStats?.burned_bonds_usdt ?? 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>
+            <span className="max-w-full truncate text-2xl font-bold text-danger">{statValue(protocolStats?.burned_bonds_usdt, (v) => `$${Number(v).toLocaleString('en-US', { maximumFractionDigits: 0 })}`)}</span>
           </div>
         </div>
       </div>
@@ -385,7 +397,7 @@ export const buildAppViews = (ctx) => {
             {lang === 'TR' ? 'Kararı backend değil, kontrat verir.' : 'The contract decides, not the backend.'}
           </h3>
           <ul className="space-y-2 text-sm text-textSecondary leading-relaxed">
-            <li>• {lang === 'TR' ? 'Parent order sahibi USDT/USDC + teminat kilitler, karşı taraf şartları kabul edip girer.' : 'Maker locks USDT/USDC + bond, Taker joins under clear on-chain rules.'}</li>
+            <li>• {lang === 'TR' ? 'Satıcı USDT/USDC ve teminatını kilitler; alıcı şartları kabul edip işleme girer.' : 'Maker locks USDT/USDC + bond, Taker joins under clear on-chain rules.'}</li>
             <li>• {lang === 'TR' ? 'Uyuşmazlıkta insan hakem yok; süre uzadıkça her iki taraf için de maliyet artar.' : 'No human arbitrator in disputes; delay becomes progressively expensive for both sides.'}</li>
             <li>• {lang === 'TR' ? 'Bu yapı gereksiz tartışmayı değil, hızlı uzlaşıyı ekonomik olarak teşvik eder.' : 'This structure rewards fast settlement rather than endless argument.'}</li>
           </ul>
@@ -414,7 +426,20 @@ export const buildAppViews = (ctx) => {
   const renderMarket = () => (
     <div className="w-full max-w-[1200px] min-w-0 p-4 md:p-8">
       <div className="mb-6 flex min-w-0 flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <h2 className="text-xl font-bold text-textPrimary">{lang === 'TR' ? 'Pazar Yeri' : 'Marketplace'}</h2>
+        <div className="flex w-full md:w-auto items-center justify-between gap-3">
+          <h2 className="text-xl font-bold text-textPrimary">{lang === 'TR' ? 'Pazar Yeri' : 'Marketplace'}</h2>
+          {(filteredOrders || []).length > 0 && (
+            <button onClick={handleOpenMakerModal} disabled={isPaused} className="md:hidden px-3 py-2 rounded-xl bg-brand text-black text-xs font-bold hover:opacity-90 disabled:opacity-50">
+              {lang === 'TR' ? '+ Emir' : '+ Order'}
+            </button>
+          )}
+        </div>
+        <div className="flex min-w-0 flex-wrap items-center gap-3 w-full md:w-auto">
+          {(filteredOrders || []).length > 0 && (
+            <button onClick={handleOpenMakerModal} disabled={isPaused} className="hidden md:inline-flex px-4 py-2 rounded-xl bg-brand text-black text-sm font-bold hover:opacity-90 disabled:opacity-50">
+              {lang === 'TR' ? '+ Emir oluştur' : '+ Create order'}
+            </button>
+          )}
         {isFaucetEnabled && (
           <div className="flex min-w-0 flex-wrap gap-3 w-full md:w-auto">
             <button onClick={() => handleMint('USDT')} disabled={isContractLoading} className="flex-1 md:flex-none px-4 py-2 bg-surface border border-borderSubtle hover:bg-elevated rounded-xl text-xs sm:text-sm font-bold text-emerald-400 transition shadow-lg flex items-center justify-center gap-2">
@@ -425,6 +450,7 @@ export const buildAppViews = (ctx) => {
             </button>
           </div>
         )}
+        </div>
       </div>
 
       <ReferenceRateTicker lang={lang} />
@@ -514,7 +540,7 @@ export const buildAppViews = (ctx) => {
                     {Number(order.remainingAmount || 0).toLocaleString(lang === 'TR' ? 'tr-TR' : 'en-US', { maximumFractionDigits: 2 })} {order.crypto}
                   </p>
                   <p className="text-[11px] text-textMuted mt-0.5">
-                    {lang === 'TR' ? 'Min' : 'Min'} {Number(order.minFillAmount || 0).toLocaleString(lang === 'TR' ? 'tr-TR' : 'en-US', { maximumFractionDigits: 2 })} · T{order.tier} · {order.bondLabel === '—' ? (lang === 'TR' ? 'teminatsız' : 'no bond') : `${order.bondLabel} ${lang === 'TR' ? 'teminat' : 'bond'}`}
+                    {lang === 'TR' ? 'Min' : 'Min'} {Number(order.minFillAmount || 0).toLocaleString(lang === 'TR' ? 'tr-TR' : 'en-US', { maximumFractionDigits: 2 })} · T{order.tier}{Number(order.tier) === 0 ? ` · ${lang === 'TR' ? 'teminatsız' : 'no bond'}` : (order.bondLabel !== '—' ? ` · ${order.bondLabel} ${lang === 'TR' ? 'teminat' : 'bond'}` : '')}
                   </p>
                   {order.paymentRiskSignal && <PaymentRiskBadge lang={lang} riskEntry={order.paymentRiskSignal} compact />}
                 </div>
@@ -901,31 +927,46 @@ export const buildAppViews = (ctx) => {
 
   // [TR] Mobil alt navigasyon çubuğu — yalnızca mobil cihazlarda görünür
   // [EN] Mobile bottom navigation bar — visible only on mobile devices
-  const renderMobileNav = () => (
-    <div className="md:hidden fixed inset-x-0 bottom-0 box-border h-[calc(4rem_+_env(safe-area-inset-bottom))] max-w-full bg-shell border-t border-borderSubtle z-[45] flex items-center justify-around gap-0 overflow-hidden px-[calc(0.25rem_+_env(safe-area-inset-left))] pr-[calc(0.25rem_+_env(safe-area-inset-right))] pb-[env(safe-area-inset-bottom)] shadow-[0_-10px_30px_rgba(0,0,0,0.12)]">
-      <button onClick={() => setCurrentView('home')} className={`h-10 min-w-0 flex-1 basis-0 rounded-xl text-lg transition-all flex items-center justify-center ${currentView === 'home' ? 'bg-elevated text-textPrimary -translate-y-1' : 'text-textMuted'}`}>🏠</button>
-      <button onClick={() => setCurrentView('market')} className={`h-10 min-w-0 flex-1 basis-0 rounded-xl text-lg transition-all flex items-center justify-center ${currentView === 'market' ? 'bg-elevated text-textPrimary -translate-y-1' : 'text-textMuted'}`}>🛒</button>
-      <button onClick={() => setCurrentView('operations')} className={`h-10 min-w-0 flex-1 basis-0 rounded-xl text-lg transition-all flex items-center justify-center ${currentView === 'operations' ? 'bg-elevated text-info -translate-y-1' : 'text-textMuted'}`}>📍</button>
-      <button onClick={() => setCurrentView('tradeRoom')} className={`h-10 min-w-0 flex-1 basis-0 rounded-xl text-lg transition-all relative flex items-center justify-center ${currentView === 'tradeRoom' ? 'bg-elevated text-warning -translate-y-1' : 'text-textMuted'}`}>
-        💼{activeEscrows.length > 0 && <span className="absolute top-2 right-1 w-2.5 h-2.5 bg-orange-500 border border-shell rounded-full animate-pulse"></span>}
+  const renderMobileNav = () => {
+    // [TR] Her ikonun altında kısa etiket: yalnız emoji ile menü tahmin oyununa dönüyordu. Giriş yapınca
+    //      cüzdan düğmesi profil ikonuyla aynı (👤) görünüyordu; artık cüzdan ikonu + yeşil nokta.
+    // [EN] Short label under each icon (emoji-only nav was guesswork). The wallet button no longer
+    //      turns into a second 👤 when signed in; it keeps the wallet icon with a green dot.
+    const item = ({ key, icon, label, active, onClick, activeClass = 'text-textPrimary', dot = null }) => (
+      <button
+        key={key}
+        onClick={onClick}
+        aria-label={label}
+        className={`h-10 min-w-0 flex-1 basis-0 rounded-xl transition-all relative flex flex-col items-center justify-center gap-0.5 leading-none ${active ? `bg-elevated ${activeClass}` : 'text-textMuted'}`}
+      >
+        <span className="text-[17px]" aria-hidden="true">{icon}</span>
+        <span className="text-[9px] font-semibold truncate max-w-full">{label}</span>
+        {dot && <span className={`absolute top-0.5 right-2 w-2 h-2 border border-shell rounded-full ${dot}`}></span>}
       </button>
-      {/* [TR] Mobil admin girişi authenticated kullanıcıya açık kalır; backend nihai otoritedir.
-          [EN] Mobile admin entry remains reachable for authenticated users; backend is authoritative. */}
-      {canSeeAdminEntry && (
-        <button onClick={() => setCurrentView('admin')} className={`h-10 min-w-0 flex-1 basis-0 rounded-xl text-lg transition-all flex items-center justify-center ${currentView === 'admin' ? 'bg-elevated text-success -translate-y-1' : 'text-textMuted'}`}>🧭</button>
-      )}
-      <button onClick={toggleSidebar} className={`h-10 min-w-0 flex-1 basis-0 rounded-xl text-lg transition-all flex items-center justify-center ${sidebarOpen ? 'bg-elevated text-textPrimary -translate-y-1' : 'text-textMuted'}`}>☰</button>
-      <button onClick={() => setCurrentView('profile')} className={`h-10 min-w-0 flex-1 basis-0 rounded-xl text-lg transition-all flex items-center justify-center ${currentView === 'profile' ? 'bg-elevated text-success -translate-y-1' : 'text-textMuted'}`}>👤</button>
-      <button onClick={handleAuthAction} className={`h-10 min-w-0 flex-1 basis-0 rounded-xl text-lg transition-all flex items-center justify-center ${isConnected && isAuthenticated ? 'bg-elevated text-success -translate-y-1' : 'text-textMuted'}`}>
-        {isConnected && isAuthenticated ? '👤' : '👛'}
-      </button>
-    </div>
-  );
+    );
+    const tr = lang === 'TR';
+    const signedIn = isConnected && isAuthenticated;
+    return (
+      <div className="md:hidden fixed inset-x-0 bottom-0 box-border h-[calc(4rem_+_env(safe-area-inset-bottom))] max-w-full bg-shell border-t border-borderSubtle z-[45] flex items-center justify-around gap-0 overflow-hidden px-[calc(0.25rem_+_env(safe-area-inset-left))] pr-[calc(0.25rem_+_env(safe-area-inset-right))] pb-[env(safe-area-inset-bottom)] shadow-[0_-10px_30px_rgba(0,0,0,0.12)]">
+        {item({ key: 'home', icon: '🏠', label: tr ? 'Ana' : 'Home', active: currentView === 'home', onClick: () => setCurrentView('home') })}
+        {item({ key: 'market', icon: '🛒', label: tr ? 'Pazar' : 'Market', active: currentView === 'market', onClick: () => setCurrentView('market') })}
+        {item({ key: 'trade', icon: '💼', label: tr ? 'İşlem' : 'Trade', active: currentView === 'tradeRoom', activeClass: 'text-warning', onClick: () => setCurrentView('tradeRoom'), dot: activeEscrows.length > 0 ? 'bg-orange-500 animate-pulse' : null })}
+        {item({ key: 'ops', icon: '📍', label: tr ? 'Takip' : 'Track', active: currentView === 'operations', activeClass: 'text-info', onClick: () => setCurrentView('operations') })}
+        {/* [TR] Mobil admin girişi authenticated kullanıcıya açık kalır; backend nihai otoritedir.
+            [EN] Mobile admin entry remains reachable for authenticated users; backend is authoritative. */}
+        {canSeeAdminEntry && item({ key: 'admin', icon: '🧭', label: 'Admin', active: currentView === 'admin', activeClass: 'text-success', onClick: () => setCurrentView('admin') })}
+        {item({ key: 'profile', icon: '👤', label: tr ? 'Profil' : 'Profile', active: currentView === 'profile', activeClass: 'text-success', onClick: () => setCurrentView('profile') })}
+        {item({ key: 'menu', icon: '☰', label: tr ? 'Menü' : 'Menu', active: sidebarOpen, onClick: toggleSidebar })}
+        {item({ key: 'wallet', icon: '👛', label: signedIn ? (tr ? 'Bağlı' : 'Linked') : (tr ? 'Bağlan' : 'Connect'), active: false, onClick: handleAuthAction, dot: signedIn ? 'bg-success' : null })}
+      </div>
+    );
+  };
 
 
   const renderProfileContext = () => (
     <ProfileContextPage
       lang={lang}
+      onConnect={handleAuthAction}
       address={address}
       formatAddress={formatAddress}
       isConnected={isConnected}
