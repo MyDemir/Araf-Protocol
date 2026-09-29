@@ -20,6 +20,7 @@ export const resolveSystemStatuses = ({
   sybilStatus = null,
   walletAgeRemainingDays = null,
   activeTrade = null,
+  ordersFeedError = false,
   lang = 'EN',
 }) => {
   const statuses = [];
@@ -101,6 +102,15 @@ export const resolveSystemStatuses = ({
     });
   }
 
+  if (ordersFeedError) {
+    statuses.push({
+      key: 'orders_feed_unavailable',
+      tone: 'warning',
+      title: t(lang, 'Pazar verisi alınamıyor', 'Market data unavailable'),
+      message: t(lang, 'Sunucuya ulaşılamadı; emir listesi güncel olmayabilir. Otomatik olarak yeniden denenecek.', 'The server could not be reached; the order list may be stale. Retrying automatically.'),
+    });
+  }
+
   return statuses;
 };
 
@@ -125,6 +135,7 @@ export const SystemStatusBar = ({
   sybilStatus = null,
   walletAgeRemainingDays = null,
   activeTrade = null,
+  ordersFeedError = false,
   lang = 'EN',
   children = null,
 }) => {
@@ -142,6 +153,7 @@ export const SystemStatusBar = ({
     sybilStatus,
     walletAgeRemainingDays,
     activeTrade,
+    ordersFeedError,
     lang,
   });
 
@@ -151,11 +163,12 @@ export const SystemStatusBar = ({
     <section aria-label={lang === 'TR' ? 'Sistem durumu' : 'System status'} className="shrink-0 border-b border-borderSubtle" data-testid="system-status-bar">
       <div className="flex flex-col">
         {statuses.map((status) => (
-          <div key={status.key} className={`pl-4 pr-16 md:pr-44 py-2 text-sm border-b last:border-b-0 ${toneClass(status.tone)}`} data-status-key={status.key}>
+          <div key={status.key} className={`pl-4 pr-16 md:pr-44 py-1.5 md:py-2 text-xs md:text-sm border-b last:border-b-0 ${toneClass(status.tone)}`} data-status-key={status.key}>
             <div className="max-w-[1200px] mx-auto flex items-center justify-between gap-3">
               <div>
                 <p className="font-bold">{status.title}</p>
-                <p className="opacity-90">{status.message}</p>
+                {/* [TR] Mobilde bant ekranın üçte birini kaplamasın: açıklama masaüstünde görünür. */}
+                <p className="hidden md:block opacity-90">{status.message}</p>
                 {Array.isArray(status.details) && status.details.length > 0 && (
                   <details className="mt-1 opacity-85">
                     <summary className="cursor-pointer">{lang === 'TR' ? 'Teknik Detay' : 'Technical Details'}</summary>

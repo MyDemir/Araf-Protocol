@@ -266,6 +266,9 @@ export function useAppSessionData({
   const [bleedingAmounts, setBleedingAmounts] = useState(null);
 
   const [orders, setOrders] = useState([]);
+  // [TR] Pazar akışı alınamazsa sayaçlar "0" yerine "—" göstermeli; boş pazar ile ulaşılamayan sunucu ayırt edilir.
+  // [EN] Distinguish an unreachable feed from an empty market.
+  const [ordersFeedError, setOrdersFeedError] = useState(false);
   const [myOrders, setMyOrders] = useState([]);
   const [activeEscrows, setActiveEscrows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -700,12 +703,14 @@ export function useAppSessionData({
       try {
         if (initialLoad) setLoading(true);
         const res = await fetch(buildApiUrl('orders?status=ACTIVE&limit=50'), { credentials: 'include' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        if (data.orders) {
-          setOrders(mapOrders(data.orders));
-        }
+        if (!Array.isArray(data.orders)) throw new Error('Malformed orders payload');
+        setOrders(mapOrders(data.orders));
+        setOrdersFeedError(false);
       } catch (err) {
         console.error('Order fetch error:', err);
+        setOrdersFeedError(true);
       } finally {
         if (initialLoad) setLoading(false);
         initialLoad = false;
@@ -1133,6 +1138,7 @@ export function useAppSessionData({
     tokenDecimalsMap,
     bleedingAmounts,
     orders,
+    ordersFeedError,
     myOrders,
     setMyOrders,
     setOrders,

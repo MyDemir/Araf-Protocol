@@ -9,6 +9,12 @@ import AppShell from '../../frontend/src/app/shell/AppShell';
 afterEach(() => cleanup());
 
 describe('SystemStatusBar global warnings', () => {
+  it('warns when the market feed is unreachable instead of silently showing zero orders', () => {
+    render(<SystemStatusBar lang="TR" ordersFeedError />);
+    expect(screen.getByText('Pazar verisi alınamıyor')).toBeTruthy();
+    cleanup();
+  });
+
   it('renders env errors in the shell status bar with technical details collapsed by default', () => {
     render(<SystemStatusBar envErrors={['VITE_ESCROW_ADDRESS missing', 'API policy invalid']} />);
 

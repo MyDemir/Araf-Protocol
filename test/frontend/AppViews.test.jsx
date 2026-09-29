@@ -327,7 +327,7 @@ describe('AppViews market side-aware rendering', () => {
 
     expect(container.querySelector('[class*="w-0"][class*="opacity-0"]')).not.toBeNull();
     await user.click(filtersButton);
-    expect(container.querySelector('[class*="w-[260px]"][class*="opacity-100"]')).not.toBeNull();
+    expect(container.querySelector('[class*="w-[280px]"][class*="opacity-100"]')).not.toBeNull();
     await user.click(filtersButton);
     expect(container.querySelector('[class*="w-0"][class*="opacity-0"]')).not.toBeNull();
   });

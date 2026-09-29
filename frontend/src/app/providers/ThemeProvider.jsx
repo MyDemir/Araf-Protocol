@@ -21,7 +21,10 @@ export const ThemeProvider = ({ children }) => {
     if (typeof document === 'undefined') return;
 
     const applyTheme = () => {
-      document.documentElement.dataset.theme = resolveTheme(themeMode);
+      const resolved = resolveTheme(themeMode);
+      document.documentElement.dataset.theme = resolved;
+      // [TR] Mobil tarayıcı/PWA durum çubuğu uygulama kabuğuyla aynı renkte olsun.
+      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', resolved === 'day' ? '#f1f5f9' : '#0c0c0e');
     };
 
     applyTheme();

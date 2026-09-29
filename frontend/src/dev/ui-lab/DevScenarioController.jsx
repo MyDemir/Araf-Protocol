@@ -1,4 +1,5 @@
 import React from 'react';
+import { FlaskConical } from 'lucide-react';
 import { scenarioCategories } from './scenarioRegistry';
 import ScenarioActionLog from './ScenarioActionLog';
 import ScenarioSelector from './ScenarioSelector';
@@ -41,7 +42,7 @@ export const DevScenarioController = ({ activeScenario, onApplyScenario, onClear
   };
 
   return (
-    <div className="hidden md:block fixed bottom-6 right-6 z-[90] pointer-events-none">
+    <div className="fixed bottom-[calc(4.75rem_+_env(safe-area-inset-bottom))] right-[calc(0.75rem_+_env(safe-area-inset-right))] md:bottom-6 md:right-6 z-[90] pointer-events-none">
       <div className="flex max-w-full flex-col items-end gap-2 md:gap-3 pointer-events-auto" data-testid="dev-scenario-controller">
         {open && (
           <div className="box-border w-[calc(100vw_-_1rem_-_env(safe-area-inset-left)_-_env(safe-area-inset-right))] max-w-[780px] max-h-[calc(100dvh_-_8rem_-_env(safe-area-inset-bottom)_-_env(safe-area-inset-top))] overflow-x-hidden overflow-y-auto overscroll-contain bg-[#0b0b0f]/95 backdrop-blur-md border border-fuchsia-500/30 rounded-2xl shadow-2xl p-3 md:p-4">
@@ -88,11 +89,12 @@ export const DevScenarioController = ({ activeScenario, onApplyScenario, onClear
         <button
           type="button"
           onClick={() => setOpen((prev) => !prev)}
-          className={`h-10 md:h-12 max-w-[calc(100vw_-_1rem)] px-3 md:px-4 rounded-full border shadow-xl font-bold text-xs md:text-sm transition ${activeScenario ? 'bg-fuchsia-900/70 border-fuchsia-400/50 text-fuchsia-100' : 'bg-[#111113] border-[#2a2a2e] text-slate-200 hover:text-white'}`}
+          className={`h-10 md:h-12 min-w-10 max-w-[calc(100vw_-_1rem)] px-3 md:px-4 rounded-full inline-flex items-center justify-center gap-2 border shadow-xl font-bold text-xs md:text-sm transition ${activeScenario ? 'bg-fuchsia-900/70 border-fuchsia-400/50 text-fuchsia-100' : 'bg-[#111113] border-[#2a2a2e] text-slate-200 hover:text-white'}`}
           aria-label="Open dev scenario controller"
           title="Dev scenario controller"
         >
-          🧪 {activeScenario ? 'Scenario active' : 'Scenarios'}
+          <FlaskConical className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />
+          <span className="hidden sm:inline">{activeScenario ? 'Scenario active' : 'Scenarios'}</span>
         </button>
       </div>
     </div>
