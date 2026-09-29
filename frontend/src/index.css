@@ -116,3 +116,7 @@ body {
     --color-danger: #dc2626;
     --color-success: #16a34a;
 }
+
+/* [TR] Yatay kaydırılan sekme şeritlerinde kaydırma çubuğunu gizler. [EN] Hide scrollbar on horizontal tab strips. */
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }

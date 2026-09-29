@@ -1371,6 +1371,8 @@ function App() {
                     : currentView === 'admin'
                     ? (
                       <AdminPanel
+                        // [TR] Lab'da senaryo değişince panel yeniden kurulur; aksi halde önceki 403 durumu kalıyordu.
+                        key={devScenarioActive && devScenario.categoryKey === 'admin' ? `lab-${devScenario.scenario.id}` : 'admin'}
                         lang={lang}
                         authenticatedFetch={effectiveAuthenticatedFetch}
                         isAuthenticated={effectiveIsAuthenticated}
