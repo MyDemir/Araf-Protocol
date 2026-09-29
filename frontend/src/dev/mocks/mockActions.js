@@ -33,3 +33,34 @@ export const createTradeRoomActionCallbacks = ({ scenarioId, appendLog, disabled
 export const createSetterAction = ({ scenarioId, appendLog, actionKey }) => (...args) => {
   createUiLabActionLogger({ scenarioId, appendLog })(actionKey, { args });
 };
+
+// [TR] Lab işlem odası: gerçek buton kuralları (buildTradeRoomPanelCallbacks) çalışır, yalnız kontrat
+//      çağrısı yerine günlüğe yazılır. Anahtarlar AppViews'taki handler adlarıyla eşleşir.
+// [EN] Trade-room lab handlers: real enablement rules run, contract calls are replaced by log entries.
+const HANDLER_ACTION_KEYS = {
+  handleReportPayment: 'report_payment',
+  handleRelease: 'release_funds',
+  handleChallenge: 'start_challenge',
+  handlePingMaker: 'ping_maker',
+  handleAutoRelease: 'auto_release',
+  handleProposeCancel: 'propose_cancel',
+  handleBurnExpired: 'burn_expired',
+  handleExpirePaymentWindow: 'expire_payment_window',
+};
+
+export const createTradeRoomHandlers = ({ scenarioId, appendLog } = {}) => {
+  const log = createUiLabActionLogger({ scenarioId, appendLog });
+  return Object.fromEntries(Object.entries(HANDLER_ACTION_KEYS).map(([handler, key]) => [handler, (...args) => log(key, { args })]));
+};
+
+export const createSettlementContractMocks = ({ scenarioId, appendLog } = {}) => {
+  const log = createUiLabActionLogger({ scenarioId, appendLog });
+  const fn = (key) => async (...args) => { log(key, { args: args.map(String) }); return { hash: `0xlab-${key}` }; };
+  return {
+    proposeSettlement: fn('propose_settlement'),
+    acceptSettlement: fn('accept_settlement'),
+    rejectSettlement: fn('reject_settlement'),
+    withdrawSettlement: fn('withdraw_settlement'),
+    expireSettlement: fn('expire_settlement'),
+  };
+};

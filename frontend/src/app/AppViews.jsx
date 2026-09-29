@@ -738,7 +738,9 @@ export const buildAppViews = (ctx) => {
       const sec = Math.floor(left / 1000);
       return { days: Math.floor(sec / 86400), hours: Math.floor((sec % 86400) / 3600), minutes: Math.floor((sec % 3600) / 60), seconds: sec % 60, isFinished: false };
     })();
-    const tradeActionCallbacks = ctx.devTradeActionCallbacks || buildTradeRoomPanelCallbacks({
+    // [TR] Lab'da handler'lar günlüğe yazar; aktif/pasif kuralları her iki durumda da aynıdır.
+    const labHandlers = ctx.devTradeHandlers || null;
+    const tradeActionCallbacks = buildTradeRoomPanelCallbacks({
       lang,
       activeTrade,
       roomState,
@@ -750,15 +752,16 @@ export const buildAppViews = (ctx) => {
       canMakerChallenge,
       canMakerStartChallengeFlow,
       burnExpiredDeadlinePassed,
-      handleReportPayment,
-      handleRelease,
-      handleChallenge,
-      handlePingMaker,
-      handleAutoRelease,
-      handleProposeCancel,
-      handleBurnExpired,
-      handleExpirePaymentWindow,
+      handleReportPayment: labHandlers?.handleReportPayment || handleReportPayment,
+      handleRelease: labHandlers?.handleRelease || handleRelease,
+      handleChallenge: labHandlers?.handleChallenge || handleChallenge,
+      handlePingMaker: labHandlers?.handlePingMaker || handlePingMaker,
+      handleAutoRelease: labHandlers?.handleAutoRelease || handleAutoRelease,
+      handleProposeCancel: labHandlers?.handleProposeCancel || handleProposeCancel,
+      handleBurnExpired: labHandlers?.handleBurnExpired || handleBurnExpired,
+      handleExpirePaymentWindow: labHandlers?.handleExpirePaymentWindow || handleExpirePaymentWindow,
       paymentWindowExpired,
+      confirmFn: labHandlers ? () => true : undefined,
     });
     const challengedDetails = isChallenged ? (() => {
       const riskLines = bleedingAmounts
@@ -804,10 +807,11 @@ export const buildAppViews = (ctx) => {
       lang,
       canBurnExpired: burnExpiredDeadlinePassed,
       paymentWindowExpired,
+      cancelStatus,
       challengedDetails,
     };
     const tradeDecisionInput = ctx.devTradeDecisionInput
-      ? { ...ctx.devTradeDecisionInput, lang, challengedDetails: ctx.devTradeDecisionInput.challengedDetails || challengedDetails }
+      ? { ...ctx.devTradeDecisionInput, lang, cancelStatus, challengedDetails: ctx.devTradeDecisionInput.challengedDetails || challengedDetails, timers: { ...ctx.devTradeDecisionInput.timers } }
       : defaultTradeDecisionInput;
 
     return (
@@ -826,7 +830,7 @@ export const buildAppViews = (ctx) => {
               {fiatTotal && <p className="text-sm font-medium text-textMuted">≈ {fiatTotal}</p>}
             </div>
             <div className="shrink-0 text-right">
-              <span className={`inline-block text-xs px-3 py-1 rounded-full border ${isChallenged ? 'bg-danger/10 text-danger border-danger/40' : 'bg-brand/10 text-brand border-brand/40'}`}>{getStateLabel(roomState, lang)}</span>
+              <span className={`inline-block text-xs px-3 py-1 rounded-full border ${isChallenged || roomState === 'BURNED' ? 'bg-danger/10 text-danger border-danger/40' : roomState === 'CANCELED' ? 'bg-elevated text-textMuted border-borderSubtle' : 'bg-brand/10 text-brand border-brand/40'}`}>{getStateLabel(roomState, lang)}</span>
               <p className="mt-1.5 text-[11px] text-textMuted">{lang === 'TR' ? 'Karşı taraf' : 'Counterparty'}</p>
               <p className="text-xs text-textPrimary font-mono">{counterpartyDisplay}</p>
             </div>
@@ -865,7 +869,7 @@ export const buildAppViews = (ctx) => {
                       </div>
                     </div>
                     {/* [TR] Süreler aşağıdaki "Süreler" kartında; burada yalnız eriyen toplam gösterilir. */}
-                    <p className="mt-3 flex items-center justify-center gap-1.5 text-sm font-bold text-danger"><Flame className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />{lang === 'TR' ? 'Eriyen toplam' : 'Total burned'}: {formatTokenAmountFromRaw(decayedTotal, tradeTokenDecimals)} {asset}</p>
+                    <p className="mt-3 flex items-center justify-center gap-1.5 text-sm font-bold text-danger"><Flame className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />{lang === 'TR' ? 'Eriyen toplam' : 'Total burned'}: {bleedingAmounts ? `${formatTokenAmountFromRaw(decayedTotal, tradeTokenDecimals)} ${asset}` : (lang === 'TR' ? 'hesaplanıyor…' : 'calculating…')}</p>
                   </>
                 );
               })()}
@@ -1014,8 +1018,9 @@ export const buildAppViews = (ctx) => {
       onConnect={handleAuthAction}
       address={address}
       formatAddress={formatAddress}
-      isConnected={isConnected}
-      isAuthenticated={isAuthenticated}
+      // [TR] Lab "Aktif İşlemler" senaryosu cüzdan kapısına takılmasın diye oturum varsayılır.
+      isConnected={isConnected || ctx.devScenarioCategory === 'activeTrades'}
+      isAuthenticated={isAuthenticated || ctx.devScenarioCategory === 'activeTrades'}
       payoutProfileDraft={ctx.payoutProfileDraft}
       setPayoutProfileDraft={ctx.setPayoutProfileDraft}
       handleUpdatePII={ctx.handleUpdatePII}

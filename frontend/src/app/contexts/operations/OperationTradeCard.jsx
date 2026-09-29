@@ -2,7 +2,7 @@ import React from 'react';
 import { getStateLabel } from '../../copy/states';
 
 const roleCopy = {
-  maker: { TR: 'Maker', EN: 'Maker' },
+  maker: { TR: 'Satıcı', EN: 'Maker' },
   taker: { TR: 'Alıcı', EN: 'Taker' },
 };
 
@@ -91,8 +91,8 @@ const resolveCardModel = (escrow = {}, lang = 'EN') => {
   if (hasSettlementProposal) {
     const waitingForViewer = proposer && viewer && String(proposer).toLowerCase() !== String(viewer).toLowerCase();
     settlementCopy = waitingForViewer
-      ? (lang === 'TR' ? 'Settlement yanıtı gerekiyor' : 'Settlement needs your response')
-      : (lang === 'TR' ? 'Settlement yanıtı bekleniyor' : 'Waiting on settlement response');
+      ? (lang === 'TR' ? 'Uzlaşma teklifine yanıt verin' : 'Settlement needs your response')
+      : (lang === 'TR' ? 'Uzlaşma yanıtı bekleniyor' : 'Waiting on settlement response');
   }
 
   return {

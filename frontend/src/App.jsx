@@ -12,9 +12,10 @@ import { useAppSessionData } from './app/useAppSessionData';
 import AdminPanel from './AdminPanel';
 import DevScenarioController from './dev/ui-lab/DevScenarioController';
 import useFullscreen from './app/shell/useFullscreen';
+import { deriveTradeTimeline, estimateBleeding } from './app/contexts/trade-room/tradeTimeline';
 import { isUiLabEnabled } from './dev/ui-lab/isUiLabEnabled';
 import { createMockAdminFetch } from './dev/mocks/mockAdminFetch';
-import { createSetterAction, createTradeRoomActionCallbacks } from './dev/mocks/mockActions';
+import { createSetterAction, createSettlementContractMocks, createTradeRoomHandlers } from './dev/mocks/mockActions';
 import { getInitialLang, getInitialTermsAccepted, APP_LANG_STORAGE_KEY } from './app/bootstrapState';
 import { buildApiUrl, resolveApiPolicyDiagnostics } from './app/apiConfig';
 import { getSupportedChainsMap, isMintTokenEnabled, isSupportedChainId } from './app/chainPolicy';
@@ -359,7 +360,8 @@ function App() {
     const appendLog = devScenario.appendLog;
     const setter = (key) => createSetterAction({ scenarioId: devScenario.scenario.id, appendLog, actionKey: key });
     return {
-      tradeRoom: createTradeRoomActionCallbacks({ scenarioId: devScenario.scenario.id, appendLog }),
+      tradeRoomHandlers: createTradeRoomHandlers({ scenarioId: devScenario.scenario.id, appendLog }),
+      settlementFns: createSettlementContractMocks({ scenarioId: devScenario.scenario.id, appendLog }),
       setter,
       noop: (actionKey) => (...args) => setter(actionKey)(...args),
     };
@@ -453,8 +455,12 @@ function App() {
   const effectiveChargebackAccepted = activeScenarioCategory === 'tradeRoom'
     ? (effectiveTradeScenarioInput.chargebackAccepted ?? effectiveTradeScenarioInput.trade?.chargebackAcked ?? chargebackAccepted)
     : chargebackAccepted;
+  // [TR] Lab senaryosu süreleri zaman damgasından, canlı uygulamayla aynı kurallarla türetir.
+  const scenarioTimeline = activeScenarioCategory === 'tradeRoom' && effectiveTradeScenarioInput.trade
+    ? deriveTradeTimeline(effectiveTradeScenarioInput.trade, { state: effectiveTradeScenarioInput.tradeState || effectiveTradeScenarioInput.trade.state })
+    : null;
   const effectiveTradeTimers = activeScenarioCategory === 'tradeRoom'
-    ? (effectiveTradeScenarioInput.timers || {})
+    ? (effectiveTradeScenarioInput.timers || scenarioTimeline?.timers || {})
     : {};
   const effectivePaymentIpfsHash = activeScenarioCategory === 'tradeRoom'
     ? (effectiveTradeScenarioInput.paymentIpfsHash || '')
@@ -463,32 +469,33 @@ function App() {
   const effectiveTradeDecisionInput = React.useMemo(() => {
     if (activeScenarioCategory !== 'tradeRoom') return null;
     const input = activeScenarioPayload?.decisionInput || {};
+    const trade = input.trade || activeTrade;
+    const state = input.tradeState || trade?.state || resolvedTradeState;
+    const timeline = deriveTradeTimeline(trade, { state });
     return {
-      trade: input.trade || activeTrade,
-      tradeState: input.tradeState || input.trade?.state || resolvedTradeState,
-      userRole: input.userRole || input.trade?.role || userRole,
-      chargebackAccepted: input.chargebackAccepted ?? input.trade?.chargebackAcked ?? chargebackAccepted,
+      trade,
+      tradeState: state,
+      userRole: input.userRole || trade?.role || userRole,
+      chargebackAccepted: input.chargebackAccepted ?? trade?.chargebackAcked ?? chargebackAccepted,
       paymentIpfsHash: input.paymentIpfsHash ?? paymentIpfsHash,
-      timers: {
-        gracePeriod: input.timers?.gracePeriod || gracePeriodTimer,
-        makerPing: input.timers?.makerPing || makerPingTimer,
-        makerChallengePing: input.timers?.makerChallengePing || makerChallengePingTimer,
-        makerChallenge: input.timers?.makerChallenge || makerChallengeTimer,
-        bleeding: input.timers?.bleeding || bleedingTimer,
-        principalProtection: input.timers?.principalProtection || principalProtectionTimer,
-      },
+      timers: input.timers || timeline.timers,
       isConnected: input.isConnected ?? isConnected,
       isAuthenticated: input.isAuthenticated ?? isAuthenticated,
       isSupportedChain: input.isSupportedChain ?? isSupportedChainId(chainId),
       isPaused: input.isPaused ?? isPaused,
-      lang: input.lang || lang,
-      canBurnExpired: input.canBurnExpired ?? false,
+      lang,
+      canBurnExpired: input.canBurnExpired ?? timeline.flags.canBurn,
+      paymentWindowExpired: timeline.flags.paymentWindowExpired,
     };
-  }, [activeScenarioCategory, activeScenarioPayload, activeTrade, resolvedTradeState, userRole, chargebackAccepted, paymentIpfsHash, gracePeriodTimer, makerPingTimer, makerChallengePingTimer, makerChallengeTimer, bleedingTimer, principalProtectionTimer, isConnected, isAuthenticated, chainId, isPaused, lang]);
+  }, [activeScenarioCategory, activeScenarioPayload, activeTrade, resolvedTradeState, userRole, chargebackAccepted, paymentIpfsHash, isConnected, isAuthenticated, chainId, isPaused, lang]);
 
-  const effectiveActionCallbacks = activeScenarioCategory === 'tradeRoom'
-    ? devScenarioActions?.tradeRoom
+  // [TR] Lab'da kontrat çağrıları yerine günlüğe yazan sahte handler'lar kullanılır; butonların aktif/pasif
+  //      kuralları ise canlıdaki buildTradeRoomPanelCallbacks'ten gelir.
+  const effectiveTradeHandlers = activeScenarioCategory === 'tradeRoom'
+    ? devScenarioActions?.tradeRoomHandlers
     : null;
+  const effectiveAddress = activeScenarioCategory === 'tradeRoom' ? (activeScenarioPayload?.viewerAddress || address) : address;
+  const effectiveCancelStatus = activeScenarioCategory === 'tradeRoom' ? (activeScenarioPayload?.cancelStatus ?? null) : cancelStatus;
 
   const operationsActionSetters = React.useMemo(() => {
     if (activeScenarioCategory !== 'operations' || !devScenarioActions) return null;
@@ -1113,7 +1120,7 @@ function App() {
     toggleSidebar,
     handleAuthAction,
     formatAddress,
-    address,
+    address: effectiveAddress,
     chainId,
     sidebarOpen,
     setSidebarOpen,
@@ -1176,7 +1183,7 @@ function App() {
     handleFileUpload,
     handleReportPayment,
     handleProposeCancel,
-    cancelStatus,
+    cancelStatus: effectiveCancelStatus,
     chargebackAccepted: effectiveChargebackAccepted,
     handleChargebackAck,
     handleRelease,
@@ -1193,7 +1200,8 @@ function App() {
     gracePeriodTimer: effectiveTradeTimers.gracePeriod || gracePeriodTimer,
     bleedingTimer: effectiveTradeTimers.bleeding || bleedingTimer,
     principalProtectionTimer: effectiveTradeTimers.principalProtection || principalProtectionTimer,
-    bleedingAmounts,
+    // [TR] Lab'da kontrat okuması yok; eriyen tutar kontrat formülünün aynasıyla tahmin edilir.
+    bleedingAmounts: activeScenarioCategory === 'tradeRoom' ? estimateBleeding(effectiveTradeScenarioInput.trade || {}) : bleedingAmounts,
     takerName,
     tokenDecimalsMap,
     DEFAULT_TOKEN_DECIMALS,
@@ -1205,10 +1213,11 @@ function App() {
     getSafeTelegramUrl,
     authenticatedFetch: effectiveAuthenticatedFetch,
     showToast,
-    settlementContractFns,
+    settlementContractFns: activeScenarioCategory === 'tradeRoom' ? devScenarioActions?.settlementFns : settlementContractFns,
     uiLabEnabled,
+    devScenarioCategory: activeScenarioCategory,
     devTradeDecisionInput: effectiveTradeDecisionInput,
-    devTradeActionCallbacks: effectiveActionCallbacks,
+    devTradeHandlers: effectiveTradeHandlers,
     operationsActionSetters,
     payoutProfileDraft,
     setPayoutProfileDraft,

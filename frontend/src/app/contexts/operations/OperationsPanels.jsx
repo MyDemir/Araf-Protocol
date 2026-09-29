@@ -44,7 +44,7 @@ export const SettlementQueueCard = ({ escrow, lang, onGoToRoom }) => {
   const mode = resolveSettlementMode(escrow);
   const isActionRequired = mode === 'action_required';
   const title = isActionRequired
-    ? (lang === 'TR' ? 'Settlement yanıtı gerekiyor' : 'Settlement needs your response')
+    ? (lang === 'TR' ? 'Uzlaşma teklifine yanıt verin' : 'Settlement needs your response')
     : (lang === 'TR' ? 'Karşı taraf settlement yanıtı bekleniyor' : 'Waiting on counterparty settlement response');
   const accentClass = isActionRequired
     ? 'border-red-500/40 bg-red-950/10 text-red-300'

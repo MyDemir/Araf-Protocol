@@ -53,7 +53,7 @@ export const PrimaryActionPanel = ({ primaryAction, disabledReasons = [], action
     <div className="mb-3 bg-surface border border-borderSubtle rounded-xl p-4 text-sm text-textSecondary" data-testid="trade-primary-guidance">
       {!isExecutable && primaryAction?.label && (
         <p className="flex items-center gap-2 font-semibold text-textPrimary">
-          <span className="inline-block w-2 h-2 rounded-full bg-info animate-pulse" aria-hidden="true" />
+          <span className={`inline-block w-2 h-2 rounded-full ${primaryAction.type === 'info' ? 'bg-textMuted' : 'bg-info animate-pulse'}`} aria-hidden="true" />
           {primaryAction.label}
         </p>
       )}

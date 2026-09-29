@@ -5,10 +5,13 @@ const labels = {
     LOCKED: { TR: 'Kilitli', EN: 'Locked' },
     PAID: { TR: 'Ödeme Bildirildi', EN: 'Payment Reported' },
     CHALLENGED: { TR: 'İtiraz Süreci', EN: 'Challenge Phase' },
+    RESOLVED: { TR: 'Tamamlandı', EN: 'Completed' },
+    CANCELED: { TR: 'İptal Edildi', EN: 'Canceled' },
+    BURNED: { TR: 'Yakıldı', EN: 'Burned' },
   },
   role: {
     taker: { TR: 'Alıcı', EN: 'Taker' },
-    maker: { TR: 'Maker', EN: 'Maker' },
+    maker: { TR: 'Satıcı', EN: 'Maker' },
   },
 };
 
@@ -122,6 +125,15 @@ const decisionCopy = {
   },
 };
 
+// [TR] Kapanmış işlemler: kontrat son sözü söyledi; odada yapılacak aksiyon yoktur.
+// [EN] Closed trades: the contract has settled it; there is nothing left to do in the room.
+const terminalCopy = {
+  RESOLVED: { headline: { TR: 'İşlem tamamlandı', EN: 'Trade completed' }, subheadline: { TR: 'Fonlar kontrat tarafından dağıtıldı.', EN: 'Funds were distributed by the contract.' } },
+  CANCELED: { headline: { TR: 'İşlem iptal edildi', EN: 'Trade canceled' }, subheadline: { TR: 'Kilit çözüldü; fonlar kontrat kurallarına göre iade edildi.', EN: 'The lock was released; funds were returned under contract rules.' } },
+  BURNED: { headline: { TR: 'İşlem yakıldı', EN: 'Trade burned' }, subheadline: { TR: '240 saatlik süre dolduğu için kalan değer yakıldı.', EN: 'The 240h window ran out, so the remaining value was burned.' } },
+};
+export const TERMINAL_TRADE_STATES = Object.freeze(['RESOLVED', 'CANCELED', 'BURNED']);
+
 const localizeDecisionCopy = (copy, lang) => ({
   headline: copy?.headline?.[pickLocale(lang)] || t(lang, 'İşlem durumu güncellendi', 'Trade status updated'),
   subheadline: copy?.subheadline?.[pickLocale(lang)] || t(lang, 'Mevcut işlem durumuna göre bir sonraki adımı izleyin.', 'Follow the next step for the current trade state.'),
@@ -131,7 +143,7 @@ const localizeDecisionCopy = (copy, lang) => ({
   nextDescription: copy?.nextDescription?.[pickLocale(lang)] || t(lang, 'Mevcut süreler ve kontrat kuralları sonraki seçenekleri belirler.', 'Existing timers and contract rules determine the next options.'),
 });
 
-const buildDecisionSummary = (state, role, lang) => localizeDecisionCopy(decisionCopy[state]?.[role] || decisionCopy[state]?.taker, lang);
+const buildDecisionSummary = (state, role, lang) => localizeDecisionCopy(terminalCopy[state] || decisionCopy[state]?.[role] || decisionCopy[state]?.taker, lang);
 
 export function buildTradeDecisionModel({
   trade,
@@ -146,6 +158,7 @@ export function buildTradeDecisionModel({
   lang = 'EN',
   canBurnExpired = false,
   paymentWindowExpired = false,
+  cancelStatus = null,
 }) {
   const normalizedState = String(tradeState || trade?.state || 'LOCKED').toUpperCase();
   const normalizedRole = String(userRole || 'taker').toLowerCase();
@@ -180,16 +193,24 @@ export function buildTradeDecisionModel({
   }
 
   if (normalizedState === 'PAID' && normalizedRole === 'maker') {
-    primaryAction = action('contract', 'release_funds', t(lang, 'Ödemeyi Onayla', 'Release Funds'), null);
-    secondaryActions = [action('contract', 'start_challenge', t(lang, 'Ödeme Gelmedi', 'Payment Not Received'), null)];
+    primaryAction = action('contract', 'release_funds', t(lang, 'Ödemeyi Onayla', 'Release Funds'), trade?.pingedAt
+      ? t(lang, 'Alıcı sizi uyardı: 24 saat içinde onaylamazsanız alıcı fonları otomatik serbest bırakabilir.', 'The taker pinged you: if you do not release within 24h, the taker can auto-release.')
+      : null);
+    // [TR] Aynı buton iki kontrat adımıdır: önce pingTakerForChallenge, 24 saat sonra challengeTrade.
+    const makerPinged = Boolean(trade?.challengePingedAt);
+    secondaryActions = [action('contract', 'start_challenge', makerPinged
+      ? t(lang, 'İtiraz Başlat', 'Open Challenge')
+      : t(lang, 'Ödeme Gelmedi — Alıcıyı Uyar', 'Payment Not Received — Ping Taker'), null)];
   }
 
   if (normalizedState === 'PAID' && normalizedRole === 'taker') {
-    primaryAction = action('waiting', 'waiting_for_maker', t(lang, 'Satıcı Bekleniyor', 'Waiting for Maker'), null);
-    secondaryActions = [
-      action('conditional', 'ping_maker', t(lang, 'Satıcıyı Uyar', 'Ping Maker'), null),
-      action('conditional', 'auto_release', t(lang, 'Otomatik Serbest Bırak', 'Auto-Release Funds'), null),
-    ];
+    primaryAction = action('waiting', 'waiting_for_maker', t(lang, 'Satıcı Bekleniyor', 'Waiting for Maker'), trade?.challengePingedAt
+      ? t(lang, 'Satıcı ödemenin gelmediğini bildirdi; 24 saat sonra itiraz açabilir. Ödeme kanıtınızı kontrol edin veya iptal teklif edin.', 'The maker reported the payment as missing and can open a challenge after 24h. Check your proof or propose a cancel.')
+      : null);
+    // [TR] Uyarı öncesi yalnız "Satıcıyı Uyar", sonrası yalnız "Otomatik Serbest Bırak" anlamlıdır.
+    secondaryActions = [trade?.pingedAt
+      ? action('conditional', 'auto_release', t(lang, 'Otomatik Serbest Bırak', 'Auto-Release Funds'), null)
+      : action('conditional', 'ping_maker', t(lang, 'Satıcıyı Uyar', 'Ping Maker'), null)];
   }
 
   if (normalizedState === 'CHALLENGED') {
@@ -201,16 +222,33 @@ export function buildTradeDecisionModel({
   }
 
   if (normalizedState === 'LOCKED' && paymentWindowExpired) {
-    secondaryActions.push(action('contract', 'expire_payment_window', t(lang, 'Kilidi Çöz (48 saat doldu)', 'Unlock (48h passed)'), null));
+    // [TR] Kontrat: süre dolunca iki taraf da kilidi çözebilir; alıcı teminatından küçük ceza kesilir ve
+    //      alıcıya negatif sinyal yazılır. Taker ödeme bildirimi hâlâ mümkündür ama satıcıyla yarışır.
+    if (normalizedRole === 'taker') {
+      primaryAction = {
+        ...primaryAction,
+        description: t(lang, '48 saatlik ödeme süresi doldu: satıcı işlemi her an iptal edebilir. Ödediyseniz hemen bildirin.', 'The 48h payment window has passed: the maker can unwind the trade at any time. If you paid, report it now.'),
+      };
+      secondaryActions.push(action('contract', 'expire_payment_window', t(lang, 'Ödemedim — kilidi çöz (teminattan ceza)', 'I did not pay — unlock (bond penalty)'), null));
+    } else {
+      primaryAction = action('contract', 'expire_payment_window', t(lang, 'Kilidi Çöz (48 saat doldu)', 'Unlock (48h passed)'), t(lang, 'Alıcı süresinde ödeme bildirmedi. Kilidi çözerseniz fonlarınız ve teminatınız iade edilir.', 'The taker did not report payment in time. Unlocking returns your funds and bond.'));
+    }
   }
 
 
-  if (['LOCKED', 'PAID', 'CHALLENGED'].includes(normalizedState)) {
+  // [TR] İptal teklifi zaten varsa tekrar teklif butonu gösterilmez; yanıt iptal kartındadır.
+  if (['LOCKED', 'PAID', 'CHALLENGED'].includes(normalizedState) && !cancelStatus) {
     secondaryActions.push(action('contract', 'propose_cancel', t(lang, 'İptal Teklif Et', 'Propose Cancel'), t(lang, 'Karşılıklı iptal için mevcut iptal teklif akışını kullanın.', 'Use the existing cancel proposal flow for mutual cancellation.')));
   }
 
   if (normalizedState === 'CHALLENGED' && canBurnExpired) {
     secondaryActions.push(action('contract', 'burn_expired', t(lang, 'Süre Aşımı Yakımı', 'Burn Expired Trade'), t(lang, '10 günlük süre dolduysa mevcut süre aşımı yakımı akışı kullanılabilir.', 'If the 10-day deadline has passed, the existing burn flow can be used.')));
+  }
+
+  if (TERMINAL_TRADE_STATES.includes(normalizedState)) {
+    primaryAction = action('info', 'trade_closed', labels.state[normalizedState][pickLocale(lang)], null);
+    secondaryActions = [];
+    primaryDisabledReasons.length = 0;
   }
 
   const decisionSummary = buildDecisionSummary(normalizedState, normalizedRole, lang);
@@ -224,7 +262,7 @@ export function buildTradeDecisionModel({
     secondaryActions,
     disabledReasons: primaryDisabledReasons,
     globalDisabledReasons,
-    timerCards: buildTimerCards(timers, lang, normalizedState, normalizedRole),
+    timerCards: TERMINAL_TRADE_STATES.includes(normalizedState) ? [] : buildTimerCards(timers, lang, normalizedState, normalizedRole),
     guidance,
     riskCopy: {
       chargeback: t(lang, 'Chargeback riski kullanıcı sorumluluğundadır.', 'Chargeback risk remains user responsibility.'),
