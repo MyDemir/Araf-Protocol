@@ -137,7 +137,7 @@ describe('shared active trade cards', () => {
     expect(screen.getAllByText('Taker').length).toBeGreaterThan(0);
     expect(screen.getByText('Counterparty')).toBeInTheDocument();
     expect(screen.getAllByText(/Room sync in progress/i).length).toBeGreaterThan(0);
-    expect(screen.getByTestId('pending-sync-card')).toHaveClass('border-sky-500/40');
+    expect(screen.getByTestId('pending-sync-card')).toHaveClass('border-info/40');
     expect(screen.getByRole('button', { name: /Go to Room/i })).toBeInTheDocument();
   });
 

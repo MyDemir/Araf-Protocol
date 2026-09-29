@@ -30,7 +30,7 @@ const pickLocale = (lang) => (lang === 'TR' ? 'TR' : 'EN');
 
 const formatTimerValue = (timer, lang) => {
   if (!timer || typeof timer !== 'object') return null;
-  if (timer.isFinished) return t(lang, 'Tamamlandı', 'Finished');
+  if (timer.isFinished) return t(lang, 'Süre doldu', 'Elapsed');
 
   const parts = [];
   if (Number.isFinite(Number(timer.days)) && Number(timer.days) > 0) parts.push(`${Number(timer.days)}d`);
@@ -61,6 +61,7 @@ const buildTimerCards = (timers = {}, lang = 'EN', state = null, role = 'taker')
         key,
         label: timerLabels[key]?.[pickLocale(lang)] || key,
         summary,
+        finished: Boolean(timer.isFinished),
       };
     })
     .filter(Boolean);
@@ -246,7 +247,8 @@ export function buildTradeDecisionModel({
   }
 
   if (TERMINAL_TRADE_STATES.includes(normalizedState)) {
-    primaryAction = action('info', 'trade_closed', labels.state[normalizedState][pickLocale(lang)], null);
+    // Headline already states the outcome; the panel only carries the next-step buttons.
+    primaryAction = action('info', 'trade_closed', '', null);
     secondaryActions = [];
     primaryDisabledReasons.length = 0;
   }

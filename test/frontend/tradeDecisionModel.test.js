@@ -186,7 +186,7 @@ describe('buildTradeDecisionModel', () => {
       timers: { gracePeriod: { isFinished: false, hours: 1, minutes: 2, seconds: 3 } },
     });
     expect(model.timerCards).toEqual([
-      { key: 'gracePeriod', label: 'Grace period', summary: '01h 02m 03s' },
+      { key: 'gracePeriod', label: 'Grace period', summary: '01h 02m 03s', finished: false },
     ]);
   });
 

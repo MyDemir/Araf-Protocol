@@ -141,14 +141,14 @@ export default function PIIDisplay({ tradeId, lang = 'tr', getSafeTelegramUrl, a
 
         {/* HTTP uyarısı — ORTA-15 */}
         {!window.isSecureContext && (
-          <div className="p-3 bg-yellow-950/40 border border-yellow-800/60 rounded-lg">
-            <p className="text-yellow-300 text-sm leading-relaxed">{t.noSecureContext}</p>
+          <div className="p-3 bg-warning/10 border border-warning/40 rounded-lg">
+            <p className="text-warning text-sm leading-relaxed">{t.noSecureContext}</p>
           </div>
         )}
 
         {error && (
-          <div className="p-3 bg-red-950/40 border border-red-800/60 rounded-lg">
-            <p className="text-red-300 text-sm leading-relaxed flex items-start gap-1.5"><TriangleAlert className="w-4 h-4 mt-0.5 shrink-0" strokeWidth={1.8} aria-hidden="true" />{error}</p>
+          <div className="p-3 bg-danger/10 border border-danger/40 rounded-lg">
+            <p className="text-danger text-sm leading-relaxed flex items-start gap-1.5"><TriangleAlert className="w-4 h-4 mt-0.5 shrink-0" strokeWidth={1.8} aria-hidden="true" />{error}</p>
           </div>
         )}
 
@@ -193,7 +193,7 @@ export default function PIIDisplay({ tradeId, lang = 'tr', getSafeTelegramUrl, a
           {['TR_IBAN', 'SEPA_IBAN'].includes(pii?.payoutProfile?.rail) && (
             <>
               <p className="text-textMuted text-xs mb-1 uppercase tracking-wider">IBAN</p>
-              <p className="font-mono text-emerald-400 mb-3 break-all text-base tracking-wide">
+              <p className="font-mono text-success mb-3 break-all text-base tracking-wide">
                 {pii?.payoutProfile?.fields?.iban || '—'}
               </p>
             </>
@@ -224,9 +224,9 @@ export default function PIIDisplay({ tradeId, lang = 'tr', getSafeTelegramUrl, a
                 onClick={() => handleCopyField('iban', pii?.payoutProfile?.fields?.iban)}
                 className={`flex-1 text-xs font-medium py-2 rounded-lg transition border ${
                   copyState.status === 'success' && copyState.field === 'iban'
-                    ? 'bg-emerald-900/30 text-emerald-400 border-emerald-700'
+                    ? 'bg-success/10 text-success border-success/40'
                     : copyState.status === 'error' && copyState.field === 'iban'
-                    ? 'bg-red-900/30 text-red-400 border-red-700'
+                    ? 'bg-danger/10 text-danger border-danger/40'
                     : 'bg-elevated hover:bg-surface text-textSecondary border-borderStrong'
                 }`}
               >
@@ -285,7 +285,7 @@ export default function PIIDisplay({ tradeId, lang = 'tr', getSafeTelegramUrl, a
         </>
       ) : error ? (
         <div className="text-center py-4">
-          <p className="text-red-400 text-sm mb-2 inline-flex items-center gap-1.5"><TriangleAlert className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />{error}</p>
+          <p className="text-danger text-sm mb-2 inline-flex items-center gap-1.5"><TriangleAlert className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />{error}</p>
           <button
             onClick={handleHide}
             className="px-4 bg-elevated hover:bg-surface text-textSecondary text-xs py-2 rounded-lg transition border border-borderStrong"

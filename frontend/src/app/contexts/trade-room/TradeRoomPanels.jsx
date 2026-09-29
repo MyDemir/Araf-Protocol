@@ -12,9 +12,9 @@ export const TradeSummaryCard = ({
   roleLabel,
   lang = 'EN',
 }) => (
-  <section className="mb-3 bg-surface border border-borderSubtle rounded-xl p-4 text-textSecondary" data-testid="trade-summary-card">
+  <section className="mb-4 text-textSecondary" data-testid="trade-summary-card">
     <div className="flex items-start justify-between gap-3">
-      <h2 className="text-base md:text-lg font-bold text-textPrimary">{headline || t(lang, 'İşlem durumunu kontrol edin', 'Review the trade status')}</h2>
+      <h2 className="text-lg md:text-xl font-bold leading-snug text-textPrimary">{headline || t(lang, 'İşlem durumunu kontrol edin', 'Review the trade status')}</h2>
       {roleLabel && <span className="shrink-0 rounded-full border border-borderSubtle px-2 py-0.5 text-xs text-textMuted">{roleLabel}</span>}
     </div>
     {(subheadline || nowDescription) && <p className="mt-1 text-sm leading-relaxed text-textSecondary">{subheadline || nowDescription}</p>}
@@ -70,19 +70,21 @@ export const ChallengedDecisionPanel = ({ details = null, primaryAction = null, 
   );
 };
 
+// [TR] Süreler sade bir liste: dolan süre uyarı rengiyle "Süre doldu" olarak öne çıkar.
+// [EN] Timers as a plain list; an elapsed timer is highlighted instead of a neutral "Finished".
 export const TimerStack = ({ timerCards = [], lang = 'EN' }) => {
   if (!Array.isArray(timerCards) || timerCards.length === 0) return null;
   return (
-    <div className="mb-3 bg-surface border border-borderSubtle rounded-xl p-3 text-sm text-textSecondary" data-testid="trade-timer-summaries">
-      <p className="text-textMuted font-bold uppercase tracking-wide text-xs mb-2">{t(lang, 'Süreler', 'Timers')}</p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+    <div className="mb-4 text-sm text-textSecondary" data-testid="trade-timer-summaries">
+      <p className="text-textMuted font-bold uppercase tracking-wide text-[11px] mb-1">{t(lang, 'Süreler', 'Timers')}</p>
+      <ul className="divide-y divide-borderSubtle">
         {timerCards.map((timer) => (
-          <div key={timer.key} className="flex justify-between gap-3 bg-elevated border border-borderSubtle rounded-lg px-3 py-2">
-            <span>{timer.label}</span>
-            <span className="font-mono text-textPrimary">{timer.summary}</span>
-          </div>
+          <li key={timer.key} className="flex items-center justify-between gap-3 py-2">
+            <span className="min-w-0">{timer.label}</span>
+            <span className={`shrink-0 font-mono tabular-nums ${timer.finished ? 'text-warning font-semibold' : 'text-textPrimary'}`}>{timer.summary}</span>
+          </li>
         ))}
-      </div>
+      </ul>
     </div>
   );
 };

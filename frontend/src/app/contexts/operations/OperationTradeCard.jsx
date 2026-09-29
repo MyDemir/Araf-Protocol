@@ -137,8 +137,8 @@ export const OperationTradeCard = ({ escrow, lang = 'EN', onGoToRoom }) => {
           </div>
         )}
       </dl>
-      {model.settlementCopy && <p className="text-sm text-orange-300 mb-1">{model.settlementCopy}</p>}
-      {model.pendingSyncCopy && <p className="text-sm text-sky-300 mb-1">{model.pendingSyncCopy}</p>}
+      {model.settlementCopy && <p className="text-sm font-medium text-warning mb-1">{model.settlementCopy}</p>}
+      {model.pendingSyncCopy && <p className="text-sm font-medium text-info mb-1">{model.pendingSyncCopy}</p>}
       <button
         onClick={onGoToRoom}
         className="w-full bg-elevated hover:bg-surface text-textPrimary text-xs font-bold py-2 rounded-lg border border-borderStrong"

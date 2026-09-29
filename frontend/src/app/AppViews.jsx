@@ -823,7 +823,7 @@ export const buildAppViews = (ctx) => {
         <ReferenceRateTicker lang={lang} />
 
         <div className={`border rounded-2xl p-4 md:p-6 shadow-xl transition-colors duration-700 ${isChallenged ? 'bg-surface border-danger/40' : 'bg-surface border-borderSubtle'}`}>
-          <div className="flex items-start justify-between gap-3 mb-4 border-b border-borderSubtle pb-4">
+          <div className="flex items-start justify-between gap-3 mb-4 border-b border-borderSubtle pb-4" data-testid="trade-room-header">
             <div className="min-w-0">
               <p className="text-textMuted text-[11px] tracking-widest mb-1">{lang === 'TR' ? 'İŞLEM' : 'TRADE'} #{activeTrade?.onchainId ?? '—'}</p>
               <h2 className="text-2xl font-bold text-textPrimary leading-tight">{fmt(rawCryptoAmt)} {asset}</h2>
@@ -836,52 +836,47 @@ export const buildAppViews = (ctx) => {
             </div>
           </div>
 
-          {/* Eriyen emanet görsel barı — yalnızca CHALLENGED state'inde gösterilir */}
-          {isChallenged && (
-            <div className="mb-4 p-4 bg-surface border border-danger/40 rounded-xl relative overflow-hidden">
-              <div className="flex justify-between text-xs font-bold mb-3">
-                <span className="text-red-500">{lang === 'TR' ? 'İLAN SAHİBİ TEMİNATI' : 'MAKER BOND'}</span>
-                <span className="text-orange-500">{lang === 'TR' ? 'ALICI TEMİNATI' : 'TAKER BOND'}</span>
-              </div>
-              {(() => {
-                // [TR] Kalan teminat, lock anındaki orijinal teminata oranlanır (önceki hesap her zaman %100'dü).
-                // [EN] Remaining bond is compared with the original lock-time bond (old math was always 100%).
-                const toNum = (v) => { try { return Number(BigInt(v ?? 0)); } catch { return 0; } };
-                const makerOrig = toNum(activeTrade?.makerBondRaw);
-                const takerOrig = toNum(activeTrade?.takerBondRaw);
-                const pctOf = (remaining, original) => (original > 0 ? Math.max(0, Math.min(100, Math.round((remaining / original) * 100))) : 0);
-                const makerPct = bleedingAmounts ? pctOf(toNum(bleedingAmounts.makerBondRemaining), makerOrig) : 100;
-                const takerPct = bleedingAmounts ? pctOf(toNum(bleedingAmounts.takerBondRemaining), takerOrig) : 100;
-                const myPct = isTaker ? takerPct : makerPct;
-                const opponentPct = isTaker ? makerPct : takerPct;
-                const decayedTotal = bleedingAmounts ? (bleedingAmounts.totalDecayed ?? 0n) : 0n;
-                return (
-                  <>
-                    <div className="w-full h-3 bg-elevated rounded-full flex relative border border-borderSubtle">
-                      <div className="h-full bg-gradient-to-r from-red-700 to-red-500 rounded-l-full relative transition-all duration-500" style={{width: `${isMaker ? myPct : opponentPct}%`}}>
-                        <div className="absolute right-0 top-1/2 -translate-y-1/2 w-4 h-4 bg-red-500 rounded-full blur-sm"></div>
+          {/* [TR] Eriyen emanet: her kalem (satıcı teminatı, alıcı teminatı, ana para) kendi çubuğunda, kontrattaki
+              orijinal tutara oranla gösterilir. Veri yoksa "hesaplanıyor" yazar; yanıltıcı %100/0 gösterilmez.
+              [EN] Bleeding escrow: one meter per bucket vs. its lock-time amount; no fake 100%/0 while loading. */}
+          {isChallenged && (() => {
+            const toNum = (v) => { try { return Number(BigInt(v ?? 0)); } catch { return 0; } };
+            const pctOf = (remaining, original) => (original > 0 ? Math.max(0, Math.min(100, Math.round((remaining / original) * 100))) : null);
+            const rows = [
+              { key: 'maker', label: lang === 'TR' ? 'Satıcı teminatı' : 'Maker bond', mine: isMaker, pct: bleedingAmounts ? pctOf(toNum(bleedingAmounts.makerBondRemaining), toNum(activeTrade?.makerBondRaw)) : null },
+              { key: 'taker', label: lang === 'TR' ? 'Alıcı teminatı' : 'Taker bond', mine: isTaker, pct: bleedingAmounts ? pctOf(toNum(bleedingAmounts.takerBondRemaining), toNum(activeTrade?.takerBondRaw)) : null },
+              { key: 'crypto', label: lang === 'TR' ? 'Ana para' : 'Principal', mine: false, pct: bleedingAmounts && bleedingAmounts.currentCrypto !== undefined ? pctOf(toNum(bleedingAmounts.currentCrypto), toNum(activeTrade?.cryptoAmountRaw)) : null },
+            ].filter((row) => row.pct !== null || !bleedingAmounts);
+            const barTone = (pct) => (pct === null ? 'bg-borderStrong' : pct > 66 ? 'bg-emerald-500' : pct > 33 ? 'bg-warning' : 'bg-danger');
+            return (
+              <div className="mb-4 rounded-xl border border-danger/30 bg-danger/5 p-4" data-testid="bleeding-meter">
+                <div className="mb-3">
+                  <p className="flex items-center gap-1.5 text-sm font-bold text-danger"><Flame className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />{lang === 'TR' ? 'Eriyen emanet' : 'Bleeding escrow'}</p>
+                  <p className="mt-0.5 text-xs text-textSecondary">{lang === 'TR' ? 'Eriyen toplam' : 'Total burned'}: <span className="font-semibold text-danger tabular-nums">{bleedingAmounts ? `${formatTokenAmountFromRaw(bleedingAmounts.totalDecayed ?? 0n, tradeTokenDecimals)} ${asset}` : (lang === 'TR' ? 'hesaplanıyor…' : 'calculating…')}</span></p>
+                </div>
+                <div className="space-y-2.5">
+                  {rows.map((row) => (
+                    <div key={row.key} className="text-xs">
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <span className={row.mine ? 'font-semibold text-textPrimary' : 'text-textSecondary'}>{row.label}{row.mine ? (lang === 'TR' ? ' (siz)' : ' (you)') : ''}</span>
+                        <span className="tabular-nums text-textPrimary">{row.pct === null ? '—' : `%${row.pct}`}</span>
                       </div>
-                      <div className="flex-1 bg-transparent border-y border-red-900/30 flex items-center justify-center overflow-hidden">
-                        <div className="w-full h-px bg-red-500/20 shadow-[0_0_10px_red] animate-pulse"></div>
-                      </div>
-                      <div className="h-full bg-gradient-to-l from-orange-700 to-orange-500 rounded-r-full relative transition-all duration-500" style={{width: `${isTaker ? myPct : opponentPct}%`}}>
-                        <div className="absolute left-0 top-1/2 -translate-y-1/2 w-4 h-4 bg-orange-500 rounded-full blur-sm"></div>
+                      <div className="h-1.5 rounded-full bg-elevated overflow-hidden" aria-hidden="true">
+                        <div className={`h-full rounded-full transition-all duration-500 ${barTone(row.pct)}`} style={{ width: `${row.pct ?? 100}%` }} />
                       </div>
                     </div>
-                    {/* [TR] Süreler aşağıdaki "Süreler" kartında; burada yalnız eriyen toplam gösterilir. */}
-                    <p className="mt-3 flex items-center justify-center gap-1.5 text-sm font-bold text-danger"><Flame className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />{lang === 'TR' ? 'Eriyen toplam' : 'Total burned'}: {bleedingAmounts ? `${formatTokenAmountFromRaw(decayedTotal, tradeTokenDecimals)} ${asset}` : (lang === 'TR' ? 'hesaplanıyor…' : 'calculating…')}</p>
-                  </>
-                );
-              })()}
-            </div>
-          )}
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
 
           {(() => {
             // [TR] Önce görülmesi gereken: alıcı için satıcının ödeme bilgileri (nereye ödeyeceği).
             // [EN] Must-see-first: for the taker, the maker's payment details (where to pay).
             const showTakerPii = isTaker && ['LOCKED', 'PAID'].includes(roomState);
             const beforeActions = showTakerPii ? (
-              <div className="mb-3 border border-borderSubtle rounded-xl overflow-hidden bg-surface p-1">
+              <div className="mb-4">
                 <PIIDisplay tradeId={activeTrade?.id} lang={lang} getSafeTelegramUrl={getSafeTelegramUrl} authenticatedFetch={authenticatedFetch} />
               </div>
             ) : null;
@@ -921,11 +916,21 @@ export const buildAppViews = (ctx) => {
               );
             }
 
+            // [TR] Kapanmış işlemde odada yapılacak iş yok: kullanıcıyı sonraki mantıklı yere yönlendir.
+            if (['RESOLVED', 'CANCELED', 'BURNED'].includes(roomState)) {
+              primaryInput = (
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button" onClick={() => setCurrentView('market')} className="h-10 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold">{lang === 'TR' ? 'Pazara dön' : 'Back to market'}</button>
+                  <button type="button" onClick={() => { if (!isConnected || !isAuthenticated) { handleAuthAction(); return; } setProfileTab('gecmis'); setShowProfileModal(true); }} className="h-10 rounded-lg border border-borderStrong bg-surface text-textPrimary text-sm font-semibold hover:bg-elevated">{lang === 'TR' ? 'İşlem geçmişi' : 'Trade history'}</button>
+                </div>
+              );
+            }
+
             return (
               <TradeRoomPage decisionInput={tradeDecisionInput} actionCallbacks={tradeActionCallbacks} beforeActions={beforeActions} primaryInput={primaryInput}>
                 {/* [TR] Uzlaşma kartı yalnız itiraz aşamasında anlamlı; diğer durumlarda "kullanılamaz" kutusu gürültüydü. */}
                 {roomState === 'CHALLENGED' && (
-                  <div className="mb-3">
+                  <div className="mb-4">
                     <SettlementProposalCard
                       activeTrade={activeTrade}
                       userRole={userRole}
@@ -943,13 +948,13 @@ export const buildAppViews = (ctx) => {
 
                 {/* [TR] İptal teklifi durumu: bekleyen teklif veya karşı tarafın teklifine yanıt. Teklif butonu "Diğer seçenekler"de. */}
                 {['LOCKED', 'PAID', 'CHALLENGED'].includes(roomState) && cancelStatus === 'proposed_by_me' && (
-                  <div className="mb-3 py-3 px-4 bg-warning/10 border border-warning/30 rounded-xl flex items-center gap-3">
+                  <div className="mb-4 py-3 px-4 bg-warning/10 border border-warning/30 rounded-xl flex items-center gap-3">
                     <div className="w-4 h-4 border-2 border-warning border-t-transparent rounded-full animate-spin shrink-0"></div>
                     <span className="text-sm font-semibold text-textPrimary">{lang === 'TR' ? 'İptal teklifiniz gönderildi; karşı taraf bekleniyor.' : 'Cancel proposed; waiting for the counterparty.'}</span>
                   </div>
                 )}
                 {['LOCKED', 'PAID', 'CHALLENGED'].includes(roomState) && cancelStatus === 'proposed_by_other' && (
-                  <div className="mb-3 p-4 bg-warning/10 border border-warning/30 rounded-xl">
+                  <div className="mb-4 p-4 bg-warning/10 border border-warning/30 rounded-xl">
                     <p className="flex items-center gap-1.5 text-sm font-bold text-textPrimary"><Undo2 className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />{lang === 'TR' ? 'Karşı taraf iptal teklif etti' : 'Counterparty proposed a cancel'}</p>
                     <p className="text-xs text-textMuted mt-1">
                       {roomState === 'LOCKED'

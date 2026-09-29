@@ -494,7 +494,12 @@ function App() {
   const effectiveTradeHandlers = activeScenarioCategory === 'tradeRoom'
     ? devScenarioActions?.tradeRoomHandlers
     : null;
-  const effectiveAddress = activeScenarioCategory === 'tradeRoom' ? (activeScenarioPayload?.viewerAddress || address) : address;
+  // [TR] Lab senaryolarında izleyici adresi senaryodan gelir; aksi halde "yanıtınız bekleniyor" şeridi hiç oluşmaz.
+  const effectiveAddress = activeScenarioCategory === 'tradeRoom'
+    ? (activeScenarioPayload?.viewerAddress || address)
+    : (activeScenarioCategory === 'operations' || activeScenarioCategory === 'activeTrades')
+      ? (activeScenarioPayload?.address || address)
+      : address;
   const effectiveCancelStatus = activeScenarioCategory === 'tradeRoom' ? (activeScenarioPayload?.cancelStatus ?? null) : cancelStatus;
 
   const operationsActionSetters = React.useMemo(() => {
@@ -1202,7 +1207,7 @@ function App() {
     principalProtectionTimer: effectiveTradeTimers.principalProtection || principalProtectionTimer,
     // [TR] Lab'da kontrat okuması yok; eriyen tutar kontrat formülünün aynasıyla tahmin edilir.
     bleedingAmounts: activeScenarioCategory === 'tradeRoom' ? estimateBleeding(effectiveTradeScenarioInput.trade || {}) : bleedingAmounts,
-    takerName,
+    takerName: activeScenarioCategory === 'tradeRoom' ? 'Ay*** Yıl***' : takerName,
     tokenDecimalsMap,
     DEFAULT_TOKEN_DECIMALS,
     formatTokenAmountFromRaw,

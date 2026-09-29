@@ -102,8 +102,11 @@ export function estimateBleeding({ cryptoAmountRaw, makerBondRaw, takerBondRaw, 
   const takerDecayed = min(takerBond, (takerBond * 42n * bleed) / (BPS * SEC_PER_H));
   const usdtStart = 96n * 3600n;
   const cryptoDecayed = bleed > usdtStart ? min(crypto, (crypto * 34n * 2n * (bleed - usdtStart)) / (BPS * SEC_PER_H)) : 0n;
+  // Same keys as normalizeCurrentAmounts (useArafContract) so the UI treats both sources alike.
   return {
-    cryptoRemaining: crypto - cryptoDecayed,
+    currentCrypto: crypto - cryptoDecayed,
+    currentMakerBond: makerBond - makerDecayed,
+    currentTakerBond: takerBond - takerDecayed,
     makerBondRemaining: makerBond - makerDecayed,
     takerBondRemaining: takerBond - takerDecayed,
     totalDecayed: makerDecayed + takerDecayed + cryptoDecayed,

@@ -50,7 +50,7 @@ export const PrimaryActionPanel = ({ primaryAction, disabledReasons = [], action
   if (!primaryAction && !disabledReasons.length && !children) return null;
   const isExecutable = EXECUTABLE_ACTION_TYPES.has(primaryAction?.type) && Boolean(resolveActionConfig(primaryAction, actionCallbacks));
   return (
-    <div className="mb-3 bg-surface border border-borderSubtle rounded-xl p-4 text-sm text-textSecondary" data-testid="trade-primary-guidance">
+    <div className="mb-4 rounded-xl bg-elevated/60 p-4 text-sm text-textSecondary" data-testid="trade-primary-guidance">
       {!isExecutable && primaryAction?.label && (
         <p className="flex items-center gap-2 font-semibold text-textPrimary">
           <span className={`inline-block w-2 h-2 rounded-full ${primaryAction.type === 'info' ? 'bg-textMuted' : 'bg-info animate-pulse'}`} aria-hidden="true" />
