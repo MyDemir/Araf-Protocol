@@ -145,7 +145,7 @@ Kontrat, V3’ün tek authoritative state machine yüzeyidir. Aşağıdaki fonks
 | Surface | Fonksiyonlar | Mimari anlam |
 |---|---|---|
 | Parent-order write surface | `createSellOrder`, `fillSellOrder`, `cancelSellOrder`, `createBuyOrder`, `fillBuyOrder`, `cancelBuyOrder` | Kamusal market ve fill primitive’i |
-| Child-trade lifecycle write surface | `reportPayment`, `releaseFunds`, `challengeTrade`, `autoRelease`, `burnExpired`, `proposeOrApproveCancel` | Gerçek escrow lifecycle ve ekonomik state geçişleri |
+| Child-trade lifecycle write surface | `reportPayment`, `releaseFunds`, `challengeTrade`, `autoRelease`, `burnExpired`, `proposeOrApproveCancel`, `expirePaymentWindow` | Gerçek escrow lifecycle ve ekonomik state geçişleri |
 | Liveness / yardımcı write surface | `registerWallet`, `pingMaker`, `pingTakerForChallenge`, `decayReputation` | Entry gate, liveness ve clean-slate bakım yüzeyi |
 | Governance / mutable admin surface | `setTreasury`, `setFeeConfig`, `setCooldownConfig`, `setTokenConfig`, `pause`, `unpause` | Runtime policy ve governance kontrol yüzeyi |
 | Read surface | `getOrder`, `getTrade`, `getReputation`, `getFeeConfig`, `getCooldownConfig`, `getCurrentAmounts`, `antiSybilCheck`, `getCooldownRemaining`, `getFirstSuccessfulTradeAt` | Doğrulama, görünürlük ve runtime read yüzeyi |
@@ -331,7 +331,8 @@ stateDiagram-v2
 - **Normal kapanış:** maker `releaseFunds`
 - **Dispute hattı:** maker `pingTakerForChallenge` → bekleme → `challengeTrade`
 - **Liveness hattı:** taker `pingMaker` → bekleme → `autoRelease`
-- **Mutual cancel:** iki tarafın imzalı iradesiyle `proposeOrApproveCancel`
+- **Mutual cancel:** her iki taraf kendi `proposeOrApproveCancel(tradeId)` işlemini gönderir (ayrı imza yok)
+- **Ödeme penceresi aşımı:** LOCKED'da 48 saat içinde ödeme bildirilmezse taraflardan biri `expirePaymentWindow` çağırır; maker tam iade alır, taker bond'undan %2 liveness cezası + negatif itibar sinyali
 - **Terminal burn:** challenge sonrası süre dolunca `burnExpired`
 
 ### 7.2 Bleeding bileşenleri
@@ -350,7 +351,7 @@ stateDiagram-v2
 - Kalan ekonomik değer treasury yönüne gider.
 
 ### 7.5 Cancel semantiği
-- `proposeOrApproveCancel` EIP-712 imza + nonce + deadline disiplinini kontrat içinde doğrular.
+- `proposeOrApproveCancel` onayı msg.sender ile kanıtlanır; onaylar yalnız verildikleri state için geçerlidir (`reportPayment` / `challengeTrade` sıfırlar).
 - Her iki taraf imzası tamamlanmadan cancel finalize edilmez.
 
 <details>
@@ -364,7 +365,7 @@ stateDiagram-v2
 - Bekleme pencereleri state-guard ile enforce edilir.  
 - `burnExpired` permissionless pattern’e yakındır: challenge süresi dolan state’i finalize eder.  
 - Kalan ekonomik değer treasury yönüne gider.  
-- `proposeOrApproveCancel` EIP-712 imza + nonce + deadline disiplinini kontrat içinde doğrular.  
+- `proposeOrApproveCancel` onayı msg.sender ile kanıtlanır; onaylar yalnız verildikleri state için geçerlidir (`reportPayment` / `challengeTrade` sıfırlar).  
 - Her iki taraf imzası tamamlanmadan cancel finalize edilmez.
 
 </details>

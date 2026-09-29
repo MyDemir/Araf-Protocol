@@ -71,9 +71,9 @@ describe("ArafRewards dust sweep claim window", function () {
     const epochEndPlusOne = ((epoch + 1) * epochDuration) + 1;
     await ethers.provider.send("evm_increaseTime", [Math.max(1, epochEndPlusOne - now)]);
     await ethers.provider.send("evm_mine", []);
-    await rewards.connect(owner).finalizeEpochToken(epoch, await token.getAddress());
     await ethers.provider.send("evm_increaseTime", [2 * 24 * 3600]);
     await ethers.provider.send("evm_mine", []);
+    await rewards.connect(owner).finalizeEpochToken(epoch, await token.getAddress());
     return { epoch };
   }
 
@@ -82,7 +82,7 @@ describe("ArafRewards dust sweep claim window", function () {
     const { epoch } = await fundAndFinalizeEpochZero(ctx);
 
     await expect(
-      ctx.rewards.connect(ctx.owner).sweepEpochDust(epoch, await ctx.token.getAddress(), ctx.owner.address)
+      ctx.rewards.connect(ctx.owner).sweepEpochDust(epoch, await ctx.token.getAddress())
     ).to.be.revertedWithCustomError(ctx.rewards, "ClaimWindowActive");
 
     await ctx.rewards.connect(ctx.maker).claim(epoch, await ctx.token.getAddress());
@@ -92,8 +92,7 @@ describe("ArafRewards dust sweep claim window", function () {
     const dust = 3n - claimedTotal;
     expect(dust).to.equal(1n);
 
-    await expect(ctx.rewards.connect(ctx.owner).sweepEpochDust(epoch, await ctx.token.getAddress(), ctx.owner.address))
-      .to.emit(ctx.rewards, "EpochDustSwept")
-      .withArgs(epoch, await ctx.token.getAddress(), ctx.owner.address, dust);
+    await expect(ctx.rewards.connect(ctx.owner).sweepEpochDust(epoch, await ctx.token.getAddress()))
+      .to.emit(ctx.rewards, "EpochDustRolledOver");
   });
 });

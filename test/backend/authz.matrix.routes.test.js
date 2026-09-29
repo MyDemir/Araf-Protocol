@@ -73,7 +73,7 @@ describe("route authorization matrix", () => {
       ["jti-less", withAuth(request(app).get("/api/auth/me"), "no-jti"), 401],
       ["wallet mismatch", withAuth(request(app).put("/api/auth/profile").send({}), "good", OTHER), 409],
       ["orders write route is intentionally unavailable", request(app).post("/api/orders").send({}), 404],
-      ["trades coordination mismatch", withAuth(request(app).post("/api/trades/propose-cancel").send({ tradeId: "507f1f77bcf86cd799439011" }), "good", OTHER), 409],
+      ["trades coordination mismatch", withAuth(request(app).post("/api/trades/507f1f77bcf86cd799439011/chargeback-ack").send({}), "good", OTHER), 409],
       ["pii token missing", withAuth(request(app).get("/api/pii/507f1f77bcf86cd799439011")), 401],
       ["pii token mismatch", withAuth(request(app).get("/api/pii/507f1f77bcf86cd799439011").set("Authorization", "Bearer pii-bad")), 403],
       ["admin non-admin forbidden", withAuth(request(app).get("/api/admin/summary")), 403],

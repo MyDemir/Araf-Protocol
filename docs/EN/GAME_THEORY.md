@@ -75,6 +75,7 @@ flowchart TD
 | Disputed release | Maker releases after challenge | `releaseFunds` from `CHALLENGED` | `RESOLVED` | Late correction after conflict | Zero weight in MVP |
 | Partial settlement | Both parties agree on split inside dispute | `proposeSettlement` -> `acceptSettlement` | `RESOLVED` | Humanless negotiated exit | Low positive weight |
 | Mutual cancel | Both parties agree to unwind | `proposeOrApproveCancel` by both sides | `CANCELED` | Bilateral exit without oracle judgment | Zero weight |
+| Payment window expiry | No payment reported within 48h of `LOCKED` | either party calls `expirePaymentWindow` | `CANCELED` | End, by time, a bond-free taker holding maker funds hostage | Zero weight + taker negative signal |
 | Terminal burn | No settlement by end of challenge horizon | `burnExpired` | `BURNED` | Permissionless deadlock closure | Zero weight |
 
 ---

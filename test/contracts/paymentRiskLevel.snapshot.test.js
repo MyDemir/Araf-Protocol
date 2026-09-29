@@ -151,30 +151,11 @@ describe("ArafEscrow payment risk level snapshot", function () {
     expect(trade.paymentRiskLevelSnapshot).to.equal(PAYMENT_RISK_LEVEL.RESTRICTED);
   });
 
-  it("test_legacy_create_order_overloads_default_to_medium_payment_risk", async () => {
-    const { escrow, token, maker, taker } = await loadFixture(deployFixture);
-
-    const sellTx = await escrow.connect(maker)["createSellOrder(address,uint256,uint256,uint8,bytes32)"](
-      await token.getAddress(),
-      TRADE_AMOUNT,
-      MIN_FILL,
-      0,
-      makeRef("legacy-sell-default")
-    );
-    const sellArgs = await firstEventArgs(await sellTx.wait(), escrow.interface, "OrderCreated");
-    const sellOrder = await escrow.getOrder(sellArgs.orderId);
-
-    const buyTx = await escrow.connect(taker)["createBuyOrder(address,uint256,uint256,uint8,bytes32)"](
-      await token.getAddress(),
-      TRADE_AMOUNT,
-      MIN_FILL,
-      0,
-      makeRef("legacy-buy-default")
-    );
-    const buyArgs = await firstEventArgs(await buyTx.wait(), escrow.interface, "OrderCreated");
-    const buyOrder = await escrow.getOrder(buyArgs.orderId);
-
-    expect(sellOrder.paymentRiskLevel).to.equal(PAYMENT_RISK_LEVEL.MEDIUM);
-    expect(buyOrder.paymentRiskLevel).to.equal(PAYMENT_RISK_LEVEL.MEDIUM);
+  it("test_legacy_create_order_overloads_are_removed_from_the_abi", async () => {
+    const { escrow } = await loadFixture(deployFixture);
+    // [TR] Risk sınıfı artık her emirde açıkça seçilir; sessiz MEDIUM varsayımı yapan eski overload'lar kaldırıldı.
+    // [EN] The risk class is now always explicit; the legacy overloads with a silent MEDIUM default were removed.
+    expect(escrow.interface.getFunction("createSellOrder").inputs.length).to.equal(6);
+    expect(escrow.interface.getFunction("createBuyOrder").inputs.length).to.equal(6);
   });
 });

@@ -144,7 +144,7 @@ describe("ArafEscrow protocol revenue classification", function () {
       TRADE_AMOUNT,
       MIN_FILL,
       tier,
-      makeRef(`${label}-order`)
+      makeRef(`${label}-order`), 1
     );
     const created = await firstEventArgs(await createTx.wait(), escrow.interface, "OrderCreated");
 

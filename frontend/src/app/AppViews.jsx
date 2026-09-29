@@ -13,7 +13,7 @@ import { getOrderSideCopy } from './orderUiModel';
 import { mapResolutionTypeLabel } from './useAppSessionData';
 import TradeRoomPage from './contexts/trade-room/TradeRoomPage';
 import ThemeToggle from './shell/ThemeToggle';
-import { buildTradeRoomPanelCallbacks, getBurnExpiredDeadlinePassed } from './contexts/trade-room/tradeRoomPanelActions';
+import { buildTradeRoomPanelCallbacks, getBurnExpiredDeadlinePassed, getPaymentWindowExpired } from './contexts/trade-room/tradeRoomPanelActions';
 
 // [TR] App ana görünüm/render katmanı burada tutulur.
 // [EN] Main application view/render layer lives here.
@@ -656,6 +656,8 @@ export const buildAppViews = (ctx) => {
     const missingOnchainIdReason = lang === 'TR' ? 'On-chain trade ID bulunamadı.' : 'Missing on-chain trade ID.';
     const burnExpiredDeadlinePassed = getBurnExpiredDeadlinePassed({ activeTrade, roomState });
     const handleBurnExpired = ctx.handleBurnExpired || ctx.tradeRoomActions?.handleBurnExpired;
+    const paymentWindowExpired = getPaymentWindowExpired({ activeTrade, roomState });
+    const handleExpirePaymentWindow = ctx.handleExpirePaymentWindow || ctx.tradeRoomActions?.handleExpirePaymentWindow;
     const tradeActionCallbacks = ctx.devTradeActionCallbacks || buildTradeRoomPanelCallbacks({
       lang,
       activeTrade,
@@ -1010,6 +1012,24 @@ export const buildAppViews = (ctx) => {
                 <div className="text-3xl mb-2">🏦</div>
                 <p className="text-textSecondary font-medium text-sm">{getPiiCopy(lang).waitingTitle}</p>
                 <p className="text-xs text-textMuted mt-2">{getPiiCopy(lang).waitingSub}</p>
+              </div>
+            )}
+
+            {/* Ödeme penceresi doldu — LOCKED ve 48 saati geçmiş işlemler için (maker tam iade alır) */}
+            {paymentWindowExpired && typeof handleExpirePaymentWindow === 'function' && (
+              <div className="mt-6 bg-surface border border-warning/40 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-textPrimary">⏰ {lang === 'TR' ? 'Ödeme süresi doldu' : 'Payment window expired'}</p>
+                  <p className="text-xs text-textMuted">
+                    {lang === 'TR' ? '48 saatte ödeme bildirilmedi. Kilit çözülür, satıcı tam iade alır.' : 'No payment reported in 48h. The lock unwinds and the seller is refunded in full.'}
+                  </p>
+                </div>
+                <button
+                  onClick={handleExpirePaymentWindow}
+                  disabled={isContractLoading}
+                  className={`shrink-0 px-5 py-2.5 rounded-xl font-bold text-sm transition ${isContractLoading ? 'bg-elevated text-textMuted cursor-not-allowed border border-borderStrong' : 'bg-brand text-white hover:opacity-90'}`}>
+                  {isContractLoading ? '⏳...' : (lang === 'TR' ? 'Kilidi Çöz' : 'Unlock')}
+                </button>
               </div>
             )}
 

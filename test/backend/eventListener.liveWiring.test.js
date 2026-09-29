@@ -175,4 +175,30 @@ describe("eventListener live wiring hardening", () => {
     expect(update.$set["financials.burned_amount"]).toBe("118");
     expect(update.$set["financials.burned_amount_num"]).toBe(118);
   });
+  it("mirrors PaymentWindowExpired as a CANCELED trade with its own resolution type", async () => {
+    mockTradeFindOneAndUpdate.mockResolvedValue({ parent_order_id: null });
+    worker._getEventDate = jest.fn().mockResolvedValue(new Date("2026-01-01T00:00:00Z"));
+
+    await worker._onPaymentWindowExpired({
+      eventName: "PaymentWindowExpired",
+      args: { tradeId: 5n, makerRefund: 108n, takerRefund: 9n, takerPenalty: 1n },
+    });
+
+    const [filter, update] = mockTradeFindOneAndUpdate.mock.calls[0];
+    expect(filter.status.$in).toContain("LOCKED");
+    expect(update.$set.status).toBe("CANCELED");
+    expect(update.$set.resolution_type).toBe("PAYMENT_WINDOW_EXPIRED");
+  });
+
+  it("clears mirrored cancel consent when payment is reported (contract resets consent flags)", async () => {
+    mockTradeFindOneAndUpdate.mockResolvedValue({});
+    worker._getEventDate = jest.fn().mockResolvedValue(new Date("2026-01-01T00:00:00Z"));
+
+    await worker._onPaymentReported({ eventName: "PaymentReported", args: { tradeId: 5n, ipfsHash: "Qm", timestamp: 1n } });
+
+    const [, update] = mockTradeFindOneAndUpdate.mock.calls[0];
+    expect(update.$set["cancel_proposal.maker_signed"]).toBe(false);
+    expect(update.$set["cancel_proposal.taker_signed"]).toBe(false);
+    expect(update.$set["cancel_proposal.proposed_by"]).toBeNull();
+  });
 });

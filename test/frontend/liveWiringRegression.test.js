@@ -4,6 +4,7 @@ import { buildCreateOrderAction, resolveTierMaxAmounts } from '../../frontend/sr
 import { mapApiOrderToUi } from '../../frontend/src/app/orderUiModel';
 import { assertReceiptSucceeded, normalizeCurrentAmounts } from '../../frontend/src/hooks/useArafContract';
 import { decorateContractError, describeContractErrorName } from '../../frontend/src/app/contractErrors';
+import { getPaymentWindowExpired } from '../../frontend/src/app/contexts/trade-room/tradeRoomPanelActions';
 
 const baseRoomDeps = (overrides = {}) => ({
   lang: 'EN',
@@ -16,7 +17,6 @@ const baseRoomDeps = (overrides = {}) => ({
   canMakerStartChallengeFlow: false,
   canMakerChallenge: false,
   reportPayment: vi.fn(),
-  signCancelProposal: vi.fn().mockResolvedValue({ signature: '0xsig', deadline: 999 }),
   proposeOrApproveCancel: vi.fn().mockResolvedValue(undefined),
   releaseFunds: vi.fn(),
   pingTakerForChallenge: vi.fn(),
@@ -39,13 +39,38 @@ const baseRoomDeps = (overrides = {}) => ({
 });
 
 describe('live wiring regressions', () => {
-  it('first cancel proposer also submits its own on-chain proposeOrApproveCancel tx', async () => {
+  it('cancel consent is a single on-chain tx with no signature or backend relay', async () => {
     const deps = baseRoomDeps();
     await buildTradeRoomActions(deps).handleProposeCancel();
 
-    expect(deps.proposeOrApproveCancel).toHaveBeenCalledWith(7n, 999, '0xsig');
+    expect(deps.proposeOrApproveCancel).toHaveBeenCalledWith('7');
+    expect(deps.authenticatedFetch).not.toHaveBeenCalled();
     expect(deps.setCancelStatus).toHaveBeenCalledWith('proposed_by_me');
     expect(deps.setTradeState).not.toHaveBeenCalledWith('CANCELED');
+  });
+
+  it('approving a counterparty cancel finishes the trade after the on-chain tx', async () => {
+    const deps = baseRoomDeps({ cancelStatus: 'proposed_by_other' });
+    await buildTradeRoomActions(deps).handleProposeCancel();
+
+    expect(deps.proposeOrApproveCancel).toHaveBeenCalledWith('7');
+    expect(deps.setTradeState).toHaveBeenCalledWith('CANCELED');
+  });
+
+  it('unpaid LOCKED trade can be unwound after the 48h payment window', async () => {
+    const deps = baseRoomDeps({ expirePaymentWindow: vi.fn().mockResolvedValue(undefined) });
+    await buildTradeRoomActions(deps).handleExpirePaymentWindow();
+
+    expect(deps.expirePaymentWindow).toHaveBeenCalledWith('7');
+    expect(deps.setTradeState).toHaveBeenCalledWith('CANCELED');
+  });
+
+  it('payment window expiry is offered only for LOCKED trades past 48h', () => {
+    const lockedAt = new Date('2026-01-01T00:00:00Z');
+    const trade = { onchainId: '7', lockedAt };
+    expect(getPaymentWindowExpired({ activeTrade: trade, roomState: 'LOCKED', now: new Date(lockedAt.getTime() + 47 * 3600e3) })).toBe(false);
+    expect(getPaymentWindowExpired({ activeTrade: trade, roomState: 'LOCKED', now: new Date(lockedAt.getTime() + 49 * 3600e3) })).toBe(true);
+    expect(getPaymentWindowExpired({ activeTrade: trade, roomState: 'PAID', now: new Date(lockedAt.getTime() + 49 * 3600e3) })).toBe(false);
   });
 
   it('receipt upload goes through authenticatedFetch so x-wallet-address is attached', async () => {

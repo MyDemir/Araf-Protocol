@@ -64,9 +64,9 @@ Every owner-controlled change should follow at least this process:
 |---|---|---|---|---|---|
 | `transferOwnership(address)` | Rewards governance owner | Multisig/equivalent | Epoch allocation/finalization/sweep authority lost | New owner, manifest, threshold | `owner()` verification |
 | `allocateEpochRewards(uint256,address,uint256)` | Rewards governance owner | Epoch allocation runbook | Wrong epoch/token/amount; reward reserve depletion or wrong claimable state | Epoch state, `epochTokenFinalized=false`, vault reserve/external funding, token supported, totalWeight | `epochRewardPool`, `epochTokenAllocated`, `EpochRewardAllocated`, vault reserve delta |
-| `finalizeEpochToken(uint256,address)` | Rewards governance owner | Epoch close approval | Early/late finalize; claim flow breaks | Epoch ended, trade outcome records complete, token pool and totalWeight | `epochTokenFinalized`, `EpochTokenFinalizedEvent`, claimable smoke |
-| `sweepEpochDust(uint256,address,address)` | Rewards governance owner | Treasury/accounting approval after claim window | Sweep attempted before claims finish or to wrong recipient | `epochTokenFinalized`, claim delay/window, claimed weight, recipient | `EpochDustSwept`, pool conservation, recipient balance |
-| `pause()` / `unpause()` | Rewards governance owner | Emergency runbook | Outcome recording/claim/allocation stops or restarts incorrectly | Incident, pending claims, allocation state, user comms | `paused()`, record/claim behavior smoke |
+| `finalizeEpochToken(uint256,address)` | **Permissionless** (not an owner power) | Anyone calls it once the recording window (epoch end + claimDelay) closes; pulls epoch-targeted sponsor funding into the pool | Owner cannot delay claims | — | `epochTokenFinalized`, `EpochTokenFinalizedEvent`, claimable smoke |
+| `sweepEpochDust(uint256,address)` | **Permissionless**, no recipient choice | After the claim window the remainder rolls into the current epoch pool | Unclaimed rewards cannot be pulled to treasury | `epochTokenFinalized`, claim window, claimed weight | `EpochDustRolledOver`, pool conservation |
+| `pause()` / `unpause()` | Rewards governance owner | Emergency runbook | Only owner allocation stops; outcome recording, finalize and claim ignore pause (no censorship / sweep lever) | Incident, pending claims, allocation state, user comms | `paused()`, record/claim behavior smoke |
 
 ## 6) Deploy/configure/switch script governance surfaces
 

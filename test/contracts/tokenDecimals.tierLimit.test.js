@@ -97,7 +97,7 @@ describe("ArafEscrow token decimals and token-specific tier limits", function ()
         TIER_LIMITS_6[0],
         TIER_LIMITS_6[0],
         0,
-        makeRef("tier6-ok")
+        makeRef("tier6-ok"), 1
       )
     ).to.not.be.reverted;
   });
@@ -111,7 +111,7 @@ describe("ArafEscrow token decimals and token-specific tier limits", function ()
         TIER_LIMITS_18[0],
         TIER_LIMITS_18[0],
         0,
-        makeRef("tier18-ok")
+        makeRef("tier18-ok"), 1
       )
     ).to.not.be.reverted;
   });
@@ -125,7 +125,7 @@ describe("ArafEscrow token decimals and token-specific tier limits", function ()
         TIER_LIMITS_18[0] + 1n,
         TIER_LIMITS_18[0],
         0,
-        makeRef("tier18-over")
+        makeRef("tier18-over"), 1
       )
     ).to.be.revertedWithCustomError(escrow, "AmountExceedsTierLimit");
   });

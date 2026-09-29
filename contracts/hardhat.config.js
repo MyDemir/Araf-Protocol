@@ -55,10 +55,9 @@ const config = {
     // Yerel geliştirme ağı (Codespaces/Local)
     hardhat: {
       chainId: 31337,
-      // [TR] V3 sözleşme test ortamında EIP-170 code-size limitine takılmadan
-      //      invariant/regresyon testlerinin çalıştırılabilmesi için açık.
-      // [EN] Enables invariant/regression tests in local Hardhat without EIP-170 size gate.
-      allowUnlimitedContractSize: true,
+      // [TR] EIP-170 (24.576 bayt) yerelde de zorlanır; aksi halde mainnet'e deploy edilemeyen kontrat testleri geçer.
+      // [EN] EIP-170 (24,576 bytes) is enforced locally too; otherwise an undeployable contract passes tests.
+      allowUnlimitedContractSize: false,
     },
     //MetaMask ve Deploy betiği için localhost ağ tanımı
     localhost: {

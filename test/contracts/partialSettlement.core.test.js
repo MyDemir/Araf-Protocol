@@ -30,29 +30,6 @@ describe("ArafEscrow partial settlement core", () => {
     throw new Error(`event ${eventName} not found`);
   }
 
-  async function cancelSig({ escrow, signer, tradeId, deadline, nonceOverride }) {
-    const domain = {
-      name: "ArafEscrow",
-      version: "1",
-      chainId: (await ethers.provider.getNetwork()).chainId,
-      verifyingContract: await escrow.getAddress(),
-    };
-    const types = {
-      CancelProposal: [
-        { name: "tradeId", type: "uint256" },
-        { name: "proposer", type: "address" },
-        { name: "nonce", type: "uint256" },
-        { name: "deadline", type: "uint256" },
-      ],
-    };
-    const nonce = nonceOverride ?? await escrow.sigNonces(signer.address, tradeId);
-    return signer.signTypedData(domain, types, {
-      tradeId,
-      proposer: signer.address,
-      nonce,
-      deadline,
-    });
-  }
 
   async function deployFixture() {
     const [owner, treasury, maker, taker, outsider] = await ethers.getSigners();
@@ -75,7 +52,7 @@ describe("ArafEscrow partial settlement core", () => {
   }
 
   async function openLockedTrade({ escrow, maker, taker, token, label, tier = 0 }) {
-    const orderTx = await escrow.connect(maker).createSellOrder(token, TRADE_AMOUNT, MIN_FILL, tier, makeRef(`${label}-order`));
+    const orderTx = await escrow.connect(maker).createSellOrder(token, TRADE_AMOUNT, MIN_FILL, tier, makeRef(`${label}-order`), 1);
     const orderArgs = await firstEventArgs(await orderTx.wait(), escrow.interface, "OrderCreated");
     const fillTx = await escrow.connect(taker).fillSellOrder(orderArgs.orderId, TRADE_AMOUNT, makeRef(`${label}-child`));
     const fillArgs = await firstEventArgs(await fillTx.wait(), escrow.interface, "OrderFilled");
@@ -321,8 +298,7 @@ describe("ArafEscrow partial settlement core", () => {
       .to.be.revertedWithCustomError(escrow, "CannotReleaseInState");
 
     const deadline = (await time.latest()) + 3600;
-    const makerSig = await cancelSig({ escrow, signer: maker, tradeId, deadline });
-    await expect(escrow.connect(maker).proposeOrApproveCancel(tradeId, deadline, makerSig))
+    await expect(escrow.connect(maker).proposeOrApproveCancel(tradeId))
       .to.be.revertedWithCustomError(escrow, "CannotReleaseInState");
 
     await expect(escrow.burnExpired(tradeId))
@@ -421,10 +397,8 @@ describe("ArafEscrow partial settlement core", () => {
     await escrow.connect(maker).proposeSettlement(tradeId, 6200, now + 7200);
 
     const deadline = (await time.latest()) + 3600;
-    const makerSig = await cancelSig({ escrow, signer: maker, tradeId, deadline });
-    const takerSig = await cancelSig({ escrow, signer: taker, tradeId, deadline });
-    await escrow.connect(maker).proposeOrApproveCancel(tradeId, deadline, makerSig);
-    await escrow.connect(taker).proposeOrApproveCancel(tradeId, deadline, takerSig);
+    await escrow.connect(maker).proposeOrApproveCancel(tradeId);
+    await escrow.connect(taker).proposeOrApproveCancel(tradeId);
 
     expect((await escrow.getTrade(tradeId)).state).to.equal(5); // CANCELED
     expect((await escrow.getSettlementProposal(tradeId)).state).to.equal(1); // PROPOSED (frozen)

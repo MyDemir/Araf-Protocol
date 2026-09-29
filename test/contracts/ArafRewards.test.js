@@ -1,6 +1,6 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
-const { loadFixture } = require("@nomicfoundation/hardhat-network-helpers");
+const { loadFixture, time } = require("@nomicfoundation/hardhat-network-helpers");
 
 describe("ArafRewards global epoch weight accounting", function () {
   const DECIMALS = 6;
@@ -16,8 +16,16 @@ describe("ArafRewards global epoch weight accounting", function () {
     BURNED: 6,
   };
 
+  // [TR] Kayıt penceresi zamana bağlı (epoch sonu + claimDelay). Statik testlerdeki küçük zaman damgaları
+  //      fixture anına kaydırılır; böylece "geçmiş epoch" yerine canlı epoch'a kayıt yapılır.
+  // [EN] Recording is time-bound (epoch end + claimDelay). Small literal timestamps in static tests are
+  //      shifted to the fixture time so records land in a live epoch rather than a long-closed one.
+  let T0 = 0;
+  const shift = (v) => (v > 0 && v < 1_000_000_000 ? v + T0 : v);
+
   async function deployFixture() {
     const [owner, caller, maker, taker, other] = await ethers.getSigners();
+    T0 = await time.latest();
 
     const MockEscrow = await ethers.getContractFactory("MockEscrowRewardView");
     const mockEscrow = await MockEscrow.deploy();
@@ -57,9 +65,9 @@ describe("ArafRewards global epoch weight accounting", function () {
       makerFeePaid: 0,
       tier,
       outcome,
-      lockedAt: paidAt > 0 ? paidAt - 60 : 0,
-      paidAt,
-      terminalAt,
+      lockedAt: paidAt > 0 ? shift(paidAt) - 60 : 0,
+      paidAt: shift(paidAt),
+      terminalAt: shift(terminalAt),
       hadChallenge: false,
       isOrderChild,
     };
@@ -322,9 +330,12 @@ describe("ArafRewards global epoch weight accounting", function () {
     const currentBlock = await ethers.provider.getBlock("latest");
     await ethers.provider.send("evm_increaseTime", [Math.max(1, epochEndPlusOne - Number(currentBlock.timestamp))]);
     await ethers.provider.send("evm_mine", []);
-    await rewards.connect(owner).finalizeEpochToken(currentEpoch, await token.getAddress());
+    // [TR] Kayıt penceresi (epoch sonu + claimDelay) kapanmadan finalize/claim açılmaz.
+    // [EN] Finalize/claim stay closed until the recording window (epoch end + claimDelay) closes.
+    await expect(rewards.connect(owner).finalizeEpochToken(currentEpoch, await token.getAddress()))
+      .to.be.revertedWithCustomError(rewards, "RecordingWindowOpen");
     await expect(rewards.connect(maker).claim(currentEpoch, await token.getAddress()))
-      .to.be.revertedWithCustomError(rewards, "ClaimDelayActive");
+      .to.be.revertedWithCustomError(rewards, "EpochTokenNotFinalized");
   });
 
   it("test_claim_reverts_zero_totalWeight", async function () {
@@ -335,9 +346,9 @@ describe("ArafRewards global epoch weight accounting", function () {
     const epochEndPlusOne = ((epoch + 1) * epochDuration) + 1;
     await ethers.provider.send("evm_increaseTime", [Math.max(1, epochEndPlusOne - now)]);
     await ethers.provider.send("evm_mine", []);
-    await rewards.connect(owner).finalizeEpochToken(epoch, await token.getAddress());
     await ethers.provider.send("evm_increaseTime", [2 * 24 * 3600]);
     await ethers.provider.send("evm_mine", []);
+    await rewards.connect(owner).finalizeEpochToken(epoch, await token.getAddress());
     await expect(rewards.connect(maker).claim(epoch, await token.getAddress()))
       .to.be.revertedWithCustomError(rewards, "ZeroTotalWeight");
   });
@@ -388,7 +399,7 @@ describe("ArafRewards global epoch weight accounting", function () {
       .to.be.revertedWithCustomError(rewards, "AlreadyClaimed");
   });
 
-  it("security_recordTradeOutcome_reverts_after_epoch_claims_started", async function () {
+  it("security_recordTradeOutcome_reverts_after_recording_window_closes", async function () {
     const { rewards, vault, token, mockEscrow, owner, caller, maker, taker, other } = await loadFixture(deployFixture);
     const now = (await ethers.provider.getBlock("latest")).timestamp;
     const epochDuration = 7 * 24 * 3600;
@@ -408,11 +419,15 @@ describe("ArafRewards global epoch weight accounting", function () {
     await ethers.provider.send("evm_mine", []);
     await rewards.connect(maker).claim(epoch, await token.getAddress());
 
-    // [TR] Claim başladıktan sonra aynı epoch'a geç ağırlık eklenemez (havuz aşımı engeli).
-    // [EN] Late weight cannot be added once claims started (prevents pool overdraw).
+    // [TR] Kayıt penceresi zamanla kapandığı için claim sonrası aynı epoch'a geç ağırlık eklenemez (havuz aşımı engeli).
+    //      Toplu kayıt da kapalı pencereyi sessizce atlar.
+    // [EN] The recording window closes by time, so no late weight reaches an epoch once claims run (prevents
+    //      pool overdraw). Batch recording silently skips the closed window as well.
     await setTrade(mockEscrow, mkTrade({ tradeId: 41, maker: other.address, taker: caller.address, tier: 1, terminalAt: terminalAt + 1, paidAt: terminalAt - 50 }));
     await expect(rewards.connect(caller).recordTradeOutcome(41))
-      .to.be.revertedWithCustomError(rewards, "EpochClaimsStarted");
+      .to.be.revertedWithCustomError(rewards, "RecordingWindowClosed");
+    await rewards.connect(caller).recordTradeOutcomes([41]);
+    expect(await rewards.recordedTrade(41)).to.equal(false);
 
     await rewards.connect(taker).claim(epoch, await token.getAddress());
     expect(await rewards.epochClaimedAmount(epoch, await token.getAddress())).to.be.lte(alloc);
@@ -544,6 +559,66 @@ describe("ArafRewards global epoch weight accounting", function () {
     expect(afterClaimable).to.be.gt(beforeClaimable);
   });
 
+  it("security_finalize_is_permissionless_and_pulls_sponsor_and_product_funding_into_the_pool", async function () {
+    const { rewards, vault, token, mockEscrow, owner, caller, maker, taker } = await loadFixture(deployFixture);
+    const tokenAddr = await token.getAddress();
+    const now = (await ethers.provider.getBlock("latest")).timestamp;
+    const epochDuration = 7 * 24 * 3600;
+    const epoch = Math.floor(now / epochDuration);
+    const terminalAt = epoch * epochDuration + 100;
+    await setTrade(mockEscrow, mkTrade({ tradeId: 60, maker: maker.address, taker: taker.address, tier: 1, terminalAt, paidAt: terminalAt - 100 }));
+    await rewards.connect(caller).recordTradeOutcomes([60]);
+
+    const globalAmount = ethers.parseUnits("300", DECIMALS);
+    const productAmount = ethers.parseUnits("200", DECIMALS);
+    const productId = ethers.id("campaign-A");
+    await vault.connect(owner).setProductPool(productId, true, "ipfs://campaign-A");
+    await token.mint(owner.address, globalAmount + productAmount);
+    await token.connect(owner).approve(await vault.getAddress(), globalAmount + productAmount);
+    await vault.connect(owner).fundGlobalRewards(tokenAddr, globalAmount, epoch, ethers.id("sponsor"));
+    await vault.connect(owner).fundProductRewards(productId, tokenAddr, productAmount, epoch, ethers.id("product"));
+
+    // [TR] Geçmiş epoch'a fon gönderilemez (fon kimseye ulaşmadan kasada kalırdı).
+    // [EN] Funding a past epoch is rejected (it would sit in the vault and reach no one).
+    await token.mint(owner.address, 1n);
+    await token.connect(owner).approve(await vault.getAddress(), 1n);
+    await expect(vault.connect(owner).fundGlobalRewards(tokenAddr, 1n, epoch - 1, ethers.id("stale")))
+      .to.be.revertedWithCustomError(vault, "StaleTargetEpoch");
+
+    await ethers.provider.send("evm_increaseTime", [9 * 24 * 3600]);
+    await ethers.provider.send("evm_mine", []);
+    // [TR] Owner olmayan biri finalize eder; epoch'a hedeflenmiş tüm sponsor/ürün fonu havuza girer.
+    // [EN] A non-owner finalizes; all sponsor/product funding targeted at the epoch enters the pool.
+    await rewards.connect(caller).finalizeEpochToken(epoch, tokenAddr);
+    expect(await rewards.epochRewardPool(epoch, tokenAddr)).to.equal(globalAmount + productAmount);
+    expect(await vault.externalFundingByEpoch(epoch, tokenAddr)).to.equal(0n);
+  });
+
+  it("security_owner_pause_cannot_block_recording_or_claims", async function () {
+    const { rewards, vault, token, mockEscrow, owner, caller, maker, taker } = await loadFixture(deployFixture);
+    const tokenAddr = await token.getAddress();
+    const now = (await ethers.provider.getBlock("latest")).timestamp;
+    const epochDuration = 7 * 24 * 3600;
+    const epoch = Math.floor(now / epochDuration);
+    const terminalAt = epoch * epochDuration + 100;
+    await setTrade(mockEscrow, mkTrade({ tradeId: 61, maker: maker.address, taker: taker.address, tier: 1, terminalAt, paidAt: terminalAt - 100 }));
+
+    const amount = ethers.parseUnits("100", DECIMALS);
+    await token.mint(owner.address, amount);
+    await token.connect(owner).approve(await vault.getAddress(), amount);
+    await vault.connect(owner).fundGlobalRewards(tokenAddr, amount, epoch, ethers.id("pause-case"));
+
+    await rewards.connect(owner).pause();
+    await vault.connect(owner).pause();
+    await rewards.connect(caller).recordTradeOutcome(61);
+
+    await ethers.provider.send("evm_increaseTime", [9 * 24 * 3600]);
+    await ethers.provider.send("evm_mine", []);
+    await rewards.connect(caller).finalizeEpochToken(epoch, tokenAddr);
+    await expect(rewards.connect(maker).claim(epoch, tokenAddr)).to.emit(rewards, "RewardClaimed");
+    await expect(rewards.connect(taker).claim(epoch, tokenAddr)).to.emit(rewards, "RewardClaimed");
+  });
+
   it("test_rewardReserve_cannot_be_admin_drained", async function () {
     const { vault, token, owner } = await loadFixture(deployFixture);
     await vault.connect(owner).noteEscrowRevenueIntent(await token.getAddress(), NOTIONAL, 0, 2000);
@@ -615,10 +690,14 @@ describe("ArafRewards global epoch weight accounting", function () {
     const claimedTotal = await rewards.epochClaimedAmount(epoch, await token.getAddress());
     const dust = epochPool - claimedTotal;
     expect(dust).to.be.gt(0n);
-    await expect(rewards.connect(owner).sweepEpochDust(epoch, await token.getAddress(), owner.address))
-      .to.emit(rewards, "EpochDustSwept")
-      .withArgs(epoch, await token.getAddress(), owner.address, dust);
-    await expect(rewards.connect(owner).sweepEpochDust(epoch, await token.getAddress(), owner.address)).to.be.reverted;
+    // [TR] Kalan pay alıcı seçilmeden içinde bulunulan epoch havuzuna devredilir; çağıran kim olursa olsun.
+    // [EN] The remainder rolls into the current epoch pool with no recipient choice, whoever calls it.
+    const targetEpoch = BigInt(Math.floor((await time.latest() + 1) / epochDuration));
+    await expect(rewards.connect(caller).sweepEpochDust(epoch, await token.getAddress()))
+      .to.emit(rewards, "EpochDustRolledOver")
+      .withArgs(epoch, await token.getAddress(), targetEpoch, dust);
+    await expect(rewards.connect(caller).sweepEpochDust(epoch, await token.getAddress())).to.be.reverted;
+    expect(await rewards.epochRewardPool(targetEpoch, await token.getAddress())).to.equal(dust);
     expect(claimedTotal + dust).to.equal(epochPool);
   });
 });

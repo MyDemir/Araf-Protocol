@@ -189,17 +189,9 @@ Fetches child trade by on-chain trade identity (`onchain_escrow_id`).
 ### `GET /api/trades/:id`
 Fetches a trade by Mongo `_id` (party-restricted).
 
-### `POST /api/trades/propose-cancel`
-Stores EIP-712 cancel signatures for coordination before on-chain submit.
-
-Request:
-```json
-{
-  "tradeId": "mongodb_object_id",
-  "signature": "0x...",
-  "deadline": 1735000000
-}
-```
+### Cancel coordination (no backend route)
+Mutual cancel runs fully on-chain: each party sends its own `proposeOrApproveCancel(tradeId)` tx and the second consent executes it.
+The worker mirrors `CancelProposed` into `cancel_proposal`. The backend stores no signatures; the old `POST /api/trades/propose-cancel` was removed.
 
 ### `POST /api/trades/:id/chargeback-ack`
 Maker acknowledgment endpoint (legal/risk audit signal) for `PAID/CHALLENGED` states.

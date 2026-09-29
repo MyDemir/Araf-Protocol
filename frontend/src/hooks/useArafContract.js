@@ -8,11 +8,11 @@
  * - registerWallet
  * - createSellOrder / fillSellOrder / cancelSellOrder
  * - createBuyOrder / fillBuyOrder / cancelBuyOrder
- * - reportPayment / releaseFunds / challengeTrade / autoRelease / burnExpired
- * - EIP-712 cancel: signCancelProposal → proposeOrApproveCancel
+ * - reportPayment / releaseFunds / challengeTrade / autoRelease / burnExpired / expirePaymentWindow
+ * - Karşılıklı iptal: her taraf kendi proposeOrApproveCancel(tradeId) işlemini gönderir (imza yok)
  *
  * Kullanım (App.jsx'te):
- * const { releaseFunds, signCancelProposal, proposeOrApproveCancel } = useArafContract();
+ * const { releaseFunds, proposeOrApproveCancel } = useArafContract();
  */
 
 import { useCallback } from 'react';
@@ -25,10 +25,8 @@ import { ARAF_CONTRACT_ERROR_ABI, decorateContractError } from '../app/contractE
 const ArafEscrowABI = parseAbi([
   'function registerWallet()',
   'function createSellOrder(address _token, uint256 _totalAmount, uint256 _minFillAmount, uint8 _tier, bytes32 _orderRef, uint8 _paymentRiskLevel) returns (uint256 orderId)',
-  'function createSellOrder(address _token, uint256 _totalAmount, uint256 _minFillAmount, uint8 _tier, bytes32 _orderRef) returns (uint256 orderId)',
   'function fillSellOrder(uint256 _orderId, uint256 _fillAmount, bytes32 _childListingRef) returns (uint256 tradeId)',
   'function cancelSellOrder(uint256 _orderId)',
-  'function createBuyOrder(address _token, uint256 _totalAmount, uint256 _minFillAmount, uint8 _tier, bytes32 _orderRef) returns (uint256 orderId)',
   'function createBuyOrder(address _token, uint256 _totalAmount, uint256 _minFillAmount, uint8 _tier, bytes32 _orderRef, uint8 _paymentRiskLevel) returns (uint256 orderId)',
   'function fillBuyOrder(uint256 _orderId, uint256 _fillAmount, bytes32 _childListingRef) returns (uint256 tradeId)',
   'function cancelBuyOrder(uint256 _orderId)',
@@ -37,7 +35,8 @@ const ArafEscrowABI = parseAbi([
   'function challengeTrade(uint256 _tradeId)',
   'function autoRelease(uint256 _tradeId)',
   'function burnExpired(uint256 _tradeId)',
-  'function proposeOrApproveCancel(uint256 _tradeId, uint256 _deadline, bytes _sig)',
+  'function expirePaymentWindow(uint256 _tradeId)',
+  'function proposeOrApproveCancel(uint256 _tradeId)',
   'function proposeSettlement(uint256 _tradeId, uint16 _makerShareBps, uint64 _expiresAt)',
   'function rejectSettlement(uint256 _tradeId)',
   'function withdrawSettlement(uint256 _tradeId)',
@@ -55,8 +54,6 @@ const ArafEscrowABI = parseAbi([
   'function getTrade(uint256 _tradeId) view returns ((uint256 id, uint256 parentOrderId, address maker, address taker, address tokenAddress, uint256 cryptoAmount, uint256 makerBond, uint256 takerBond, uint16 takerFeeBpsSnapshot, uint16 makerFeeBpsSnapshot, uint8 tier, uint8 paymentRiskLevelSnapshot, uint8 state, uint256 lockedAt, uint256 paidAt, uint256 challengedAt, string ipfsReceiptHash, bool cancelProposedByMaker, bool cancelProposedByTaker, uint256 pingedAt, bool pingedByTaker, uint256 challengePingedAt, bool challengePingedByMaker))',
   'function getSettlementProposal(uint256 _tradeId) view returns ((uint256 id, uint256 tradeId, address proposer, uint16 makerShareBps, uint16 takerShareBps, uint64 proposedAt, uint64 expiresAt, uint8 state))',
   'function getOrder(uint256 _orderId) view returns ((uint256 id, address owner, uint8 side, address tokenAddress, uint256 totalAmount, uint256 remainingAmount, uint256 minFillAmount, uint256 remainingMakerBondReserve, uint256 remainingTakerBondReserve, uint16 takerFeeBpsSnapshot, uint16 makerFeeBpsSnapshot, uint8 tier, uint8 paymentRiskLevel, uint8 state, bytes32 orderRef))',
-  'function sigNonces(address, uint256) view returns (uint256)',
-  'function domainSeparator() view returns (bytes32)',
   'function getCurrentAmounts(uint256 _tradeId) view returns (uint256 currentCrypto, uint256 currentMakerBond, uint256 currentTakerBond, uint256 totalDecayed)',
   'function paused() view returns (bool)',
   'event OrderCreated(uint256 indexed orderId, address indexed owner, uint8 side, address token, uint256 totalAmount, uint256 minFillAmount, uint8 tier, uint8 paymentRiskLevel, bytes32 orderRef)',
@@ -582,83 +579,20 @@ export function useArafContract() {
   // ── EIP-712 Cancel İmzalama ───────────────────────────────────────────────
 
   /**
-   * Saldırgan sonsuz deadline ile imza oluşturmasını engeller.
-   * Kontrat tarafında da bu kontrolün yapılması önerilir.
-   *
-   * @param {number} tradeId   - On-chain trade ID
-   * @param {number} [deadlineOverride] - Opsiyonel: custom deadline (saniye)
-   * @returns {Promise<{signature: string, deadline: number}>}
+   * Karşılıklı iptal onayı. Her taraf kendi işlemini gönderir; ikinci onay iptali yürütür.
+   * msg.sender kimliği kanıtladığı için ayrı bir EIP-712 imzası gerekmez.
+   * [EN] Mutual-cancel consent. Each party sends its own tx; the second consent executes the cancel.
    */
-  const signCancelProposal = useCallback(async (tradeId, deadlineOverride) => {
-    if (!walletClient) throw new Error("Cüzdan bağlı değil");
-    _validateChain();
-
-    // Deadline üst limiti — maksimum 7 gün
-    const MAX_DEADLINE_SECONDS = 7 * 24 * 60 * 60; // 7 gün
-    const now = Math.floor(Date.now() / 1000);
-    const requestedDeadline = deadlineOverride || (now + 3600); // Varsayılan: 1 saat
-
-    // Deadline'ın makul aralıkta olduğundan emin ol
-    if (requestedDeadline <= now) {
-      throw new Error("Deadline geçmiş bir zamana ayarlanamaz.");
-    }
-    if (requestedDeadline > now + MAX_DEADLINE_SECONDS) {
-      throw new Error(
-        `Deadline çok uzak. Maksimum ${MAX_DEADLINE_SECONDS / 86400} gün sonrası kabul edilir.`
-      );
-    }
-
-    const deadline = requestedDeadline;
-    const tradeIdBigInt = BigInt(tradeId);
-
-    const nonce = await publicClient.readContract({
-      address: getAddress(ESCROW_ADDRESS),
-      abi: ArafEscrowABI,
-      functionName: 'sigNonces',
-      args: [walletClient.account.address, tradeIdBigInt],
-    });
-
-    const domain = {
-      name: "ArafEscrow",
-      version: "1",
-      chainId,
-      //Adresin geçerli ve checksum formatında olduğundan emin ol.
-      verifyingContract: getAddress(ESCROW_ADDRESS),
-    };
-
-    const types = {
-      CancelProposal: [
-        { name: "tradeId",  type: "uint256" },
-        { name: "proposer", type: "address" },
-        { name: "nonce",    type: "uint256" },
-        { name: "deadline", type: "uint256" },
-      ],
-    };
-
-    const message = {
-      tradeId:  tradeIdBigInt,
-      proposer: walletClient.account.address,
-      nonce:    BigInt(nonce),
-      deadline: BigInt(deadline),
-    };
-
-    const signature = await walletClient.signTypedData({
-      domain,
-      types,
-      primaryType: "CancelProposal",
-      message,
-    });
-
-    return { signature, deadline };
-  }, [walletClient, chainId, _validateChain, publicClient]);
+  const proposeOrApproveCancel = useCallback((tradeId) =>
+    writeContract("proposeOrApproveCancel", [BigInt(tradeId)]),
+  [writeContract]);
 
   /**
-   * Kontrat'a cancel proposal gönderir veya onaylar.
-   * Her iki taraf da imzaladığında iptal gerçekleşir.
+   * LOCKED trade'de ödeme penceresi (48 saat) dolduysa kilidi çözer.
+   * [EN] Unwinds a LOCKED trade once the 48h payment window has passed.
    */
-  // Argüman sırası kontrat ile eşleşmeli (tradeId, deadline, signature)
-  const proposeOrApproveCancel = useCallback((tradeId, deadline, signature) =>
-    writeContract("proposeOrApproveCancel", [tradeId, BigInt(deadline), signature]),
+  const expirePaymentWindow = useCallback((tradeId) =>
+    writeContract("expirePaymentWindow", [BigInt(tradeId)]),
   [writeContract]);
 
   return {
@@ -675,11 +609,10 @@ export function useArafContract() {
     challengeTrade,
     autoRelease,
     burnExpired,
+    expirePaymentWindow,
     pingMaker, // App.jsx için export listesine eklendi
     pingTakerForChallenge, //App.jsx için export listesine eklendi
     decayReputation,
-    // EIP-712 Cancel
-    signCancelProposal,
     proposeOrApproveCancel,
     proposeSettlement,
     rejectSettlement,

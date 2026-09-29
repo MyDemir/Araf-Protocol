@@ -64,7 +64,8 @@ contract ArafRewards is Ownable, ReentrancyGuard, Pausable {
     error InvalidRecipient();
     error EpochDustAlreadySwept();
     error NothingToSweep();
-    error EpochClaimsStarted();
+    error RecordingWindowClosed();
+    error RecordingWindowOpen();
 
     uint256 public constant BPS = 10_000;
     uint256 public constant SCALE = 100_000_000; // outcomeBps(1e4) * tierBps(1e4)
@@ -99,11 +100,6 @@ contract ArafRewards is Ownable, ReentrancyGuard, Pausable {
     mapping(uint256 => mapping(address => bool)) public epochTokenAllocated;
     mapping(uint256 => mapping(address => bool)) public epochTokenFinalized;
     mapping(uint256 => mapping(address => bool)) public epochDustSwept;
-    // [TR] Epoch'ta ilk claim yapıldıktan sonra ağırlıklar dondurulur; aksi halde geç kaydedilen
-    //      trade'ler totalWeight'i büyütür, erken claim edenler fazla pay alır ve havuz aşılır.
-    // [EN] Weights freeze once the first claim for an epoch happens; otherwise late records grow
-    //      totalWeight after early claimers were paid on a smaller denominator and overdraw the pool.
-    mapping(uint256 => bool) public epochClaimsStarted;
 
     event TradeOutcomeRecorded(
         uint256 indexed tradeId,
@@ -124,10 +120,10 @@ contract ArafRewards is Ownable, ReentrancyGuard, Pausable {
         uint256 userWeight,
         uint256 totalWeight
     );
-    event EpochDustSwept(
+    event EpochDustRolledOver(
         uint256 indexed epoch,
         address indexed token,
-        address indexed recipient,
+        uint256 indexed targetEpoch,
         uint256 amount
     );
 
@@ -143,35 +139,63 @@ contract ArafRewards is Ownable, ReentrancyGuard, Pausable {
 
     /**
      * @notice Permissionless outcome recording from contract-authoritative escrow view.
-     * @dev    Backend çağırabilir ama authority üretmez; kaynak yalnız escrow.getRewardableTrade'dır.
+     * @dev    Backend relayer'ı veya kullanıcı çağırabilir ama authority üretmez; kaynak yalnız
+     *         escrow.getRewardableTrade'dır. Pause edilemez: owner kaydı durdurup trade'leri epoch dışında
+     *         bırakamaz. Kayıt penceresi epoch bitişi + claimDelay'de zamanla kapanır; claim'ler ancak
+     *         o andan sonra açıldığından toplam ağırlık claim'ler başlamadan kesinleşir.
+     * @dev    Backend relayer or users may call it, but it produces no authority; the only source is
+     *         escrow.getRewardableTrade. Not pausable: the owner cannot censor recordings. The recording
+     *         window closes by time at epoch end + claimDelay; claims only open after that, so total
+     *         weight is final before any claim.
      */
-    function recordTradeOutcome(uint256 tradeId) external nonReentrant whenNotPaused {
-        if (recordedTrade[tradeId]) revert AlreadyRecorded();
+    function recordTradeOutcome(uint256 tradeId) external nonReentrant {
+        _recordTradeOutcome(tradeId, true);
+    }
+
+    /**
+     * @notice Toplu kayıt; kaydedilemeyen (terminal olmayan, Tier 0, zaten kayıtlı, pencere kapalı) id'ler atlanır.
+     * @notice Batch recording; ids that cannot be recorded (non-terminal, Tier 0, recorded, window closed) are skipped.
+     */
+    function recordTradeOutcomes(uint256[] calldata tradeIds) external nonReentrant {
+        for (uint256 i = 0; i < tradeIds.length; i++) {
+            _recordTradeOutcome(tradeIds[i], false);
+        }
+    }
+
+    function _recordTradeOutcome(uint256 tradeId, bool strict) internal {
+        if (recordedTrade[tradeId]) {
+            if (strict) revert AlreadyRecorded();
+            return;
+        }
 
         IArafEscrowRewardView.RewardableTradeView memory t = escrow.getRewardableTrade(tradeId);
-        if (t.outcome == IArafEscrowRewardView.TerminalOutcome.NONE) revert NonTerminalOutcome();
-        if (!t.isOrderChild) revert DirectEscrowNotRewardable();
-        if (t.tier == 0) revert TierZeroNotRewardable();
-
         uint256 epoch = t.terminalAt / epochDuration;
-        if (epochClaimsStarted[epoch]) revert EpochClaimsStarted();
+        bytes4 failure;
+        if (t.outcome == IArafEscrowRewardView.TerminalOutcome.NONE) failure = NonTerminalOutcome.selector;
+        else if (!t.isOrderChild) failure = DirectEscrowNotRewardable.selector;
+        else if (t.tier == 0) failure = TierZeroNotRewardable.selector;
+        else if (block.timestamp >= _recordingDeadline(epoch)) failure = RecordingWindowClosed.selector;
+        if (failure != bytes4(0)) {
+            if (!strict) return;
+            assembly {
+                mstore(0, failure)
+                revert(0, 4)
+            }
+        }
+
+        uint256 weight = 0;
         uint256 outcomeBps = _outcomeMultiplierBps(t);
-        uint256 tierBps = _tierMultiplierBps(t.tier);
-
-        uint256 makerW = 0;
-        uint256 takerW = 0;
-        if (outcomeBps > 0 && tierBps > 0) {
-            uint256 base = t.stableNotional;
-            makerW = (base * outcomeBps * tierBps) / SCALE;
-            takerW = (base * outcomeBps * tierBps) / SCALE;
-
-            userWeight[epoch][t.maker] += makerW;
-            userWeight[epoch][t.taker] += takerW;
-            totalWeight[epoch] += makerW + takerW;
+        if (outcomeBps > 0) {
+            // [TR] Maker ve taker aynı ağırlığı alır: temiz sonuç iki tarafın ortak başarısıdır.
+            // [EN] Maker and taker get the same weight: a clean outcome is a joint success.
+            weight = (t.stableNotional * outcomeBps * _tierMultiplierBps(t.tier)) / SCALE;
+            userWeight[epoch][t.maker] += weight;
+            userWeight[epoch][t.taker] += weight;
+            totalWeight[epoch] += weight * 2;
         }
 
         recordedTrade[tradeId] = true;
-        emit TradeOutcomeRecorded(tradeId, epoch, t.maker, t.taker, makerW, takerW, t.outcome);
+        emit TradeOutcomeRecorded(tradeId, epoch, t.maker, t.taker, weight, weight, t.outcome);
     }
 
     /**
@@ -192,7 +216,11 @@ contract ArafRewards is Ownable, ReentrancyGuard, Pausable {
         emit EpochRewardAllocated(epoch, token, amount);
     }
 
-    function claim(uint256 epoch, address token) external nonReentrant whenNotPaused {
+    /**
+     * @notice Pause edilemez: owner claim penceresini durdurup ödülü süpürme yoluna itemez.
+     * @notice Not pausable: the owner cannot freeze the claim window to push rewards into a sweep.
+     */
+    function claim(uint256 epoch, address token) external nonReentrant {
         if (!epochTokenFinalized[epoch][token]) revert EpochTokenNotFinalized();
         uint256 epochEnd = (epoch + 1) * epochDuration;
         if (block.timestamp < epochEnd) revert EpochNotEnded();
@@ -208,7 +236,6 @@ contract ArafRewards is Ownable, ReentrancyGuard, Pausable {
         uint256 amount = (epochRewardPool[epoch][token] * uWeight) / tWeight;
         if (amount == 0) revert ZeroAmount();
         claimed[epoch][msg.sender][token] = true;
-        if (!epochClaimsStarted[epoch]) epochClaimsStarted[epoch] = true;
         epochClaimedAmount[epoch][token] += amount;
         epochClaimedWeight[epoch][token] += uWeight;
         IERC20(token).safeTransfer(msg.sender, amount);
@@ -216,29 +243,38 @@ contract ArafRewards is Ownable, ReentrancyGuard, Pausable {
         emit RewardClaimed(epoch, msg.sender, token, amount, uWeight, tWeight);
     }
 
-    function finalizeEpochToken(uint256 epoch, address token) external onlyOwner {
+    /**
+     * @notice Kayıt penceresi kapandıktan sonra herkes finalize edebilir; owner claim'i geciktiremez.
+     *         O epoch'a hedeflenmiş sponsor fonları da bu anda havuza çekilir, böylece kasada unutulmaz.
+     * @notice Anyone can finalize once the recording window has closed; the owner cannot delay claims.
+     *         Sponsor funding targeted at the epoch is pulled into the pool so it is never stranded.
+     */
+    function finalizeEpochToken(uint256 epoch, address token) external nonReentrant {
         if (epochTokenFinalized[epoch][token]) revert EpochTokenAlreadyFinalized();
-        uint256 epochEnd = (epoch + 1) * epochDuration;
-        if (block.timestamp < epochEnd) revert EpochNotEnded();
+        if (block.timestamp < _recordingDeadline(epoch)) revert RecordingWindowOpen();
+
+        uint256 external_ = revenueVault.externalFundingByEpoch(epoch, token);
+        if (external_ > 0) {
+            revenueVault.transferEpochAllocation(epoch, token, external_);
+            epochRewardPool[epoch][token] += external_;
+            emit EpochRewardAllocated(epoch, token, external_);
+        }
+
         epochTokenFinalized[epoch][token] = true;
         emit EpochTokenFinalizedEvent(epoch, token);
     }
 
     /**
-     * @notice Claim penceresi bittikten veya tüm ağırlıklı claim'ler tamamlandıktan sonra dust'ı protokol alıcısına süpürür.
-     * @dev Conservation: claimed + swept == epochRewardPool. Sweep, claim başlangıcında açılamaz.
+     * @notice Claim penceresi bittikten (veya tüm ağırlık claim edildikten) sonra kalan pay içinde bulunulan
+     *         epoch'un havuzuna devredilir. Alıcı seçilemez; talep edilmeyen ödül yine barışçıl kullanıcılara gider.
+     * @notice After the claim window ends (or all weight has claimed) the remainder rolls into the current
+     *         epoch's pool. No recipient can be chosen; unclaimed rewards still go to peaceful users.
+     * @dev Conservation: claimed + rolledOver == epochRewardPool.
      */
-    function sweepEpochDust(uint256 epoch, address token, address recipient)
-        external
-        onlyOwner
-        nonReentrant
-        whenNotPaused
-    {
-        if (recipient == address(0)) revert InvalidRecipient();
+    function sweepEpochDust(uint256 epoch, address token) external nonReentrant {
         if (!epochTokenFinalized[epoch][token]) revert EpochTokenNotFinalized();
         if (epochDustSwept[epoch][token]) revert EpochDustAlreadySwept();
         uint256 epochEnd = (epoch + 1) * epochDuration;
-        if (block.timestamp < epochEnd + claimDelay) revert ClaimDelayActive();
         if (epochClaimedWeight[epoch][token] < totalWeight[epoch] && block.timestamp <= _claimWindowEnd(epochEnd)) {
             revert ClaimWindowActive();
         }
@@ -248,9 +284,10 @@ contract ArafRewards is Ownable, ReentrancyGuard, Pausable {
         uint256 dust = pool > claimedAmount ? pool - claimedAmount : 0;
         if (dust == 0) revert NothingToSweep();
 
+        uint256 targetEpoch = block.timestamp / epochDuration;
         epochDustSwept[epoch][token] = true;
-        IERC20(token).safeTransfer(recipient, dust);
-        emit EpochDustSwept(epoch, token, recipient, dust);
+        epochRewardPool[targetEpoch][token] += dust;
+        emit EpochDustRolledOver(epoch, token, targetEpoch, dust);
     }
 
     function claimable(uint256 epoch, address user, address token) external view returns (uint256) {
@@ -264,6 +301,10 @@ contract ArafRewards is Ownable, ReentrancyGuard, Pausable {
 
     function pause() external onlyOwner { _pause(); }
     function unpause() external onlyOwner { _unpause(); }
+
+    function _recordingDeadline(uint256 epoch) internal view returns (uint256) {
+        return (epoch + 1) * epochDuration + claimDelay;
+    }
 
     function _claimWindowEnd(uint256 epochEnd) internal view returns (uint256) {
         return epochEnd + claimDelay + claimWindow;

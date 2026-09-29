@@ -20,6 +20,9 @@ const REWARDS_ABI = parseAbi([
   'function claimable(uint256,address,address) view returns (uint256)',
   'function claim(uint256,address)',
   'function recordTradeOutcome(uint256)',
+  'function recordTradeOutcomes(uint256[])',
+  'function recordedTrade(uint256) view returns (bool)',
+  'function finalizeEpochToken(uint256,address)',
   'error EpochTokenNotFinalized()',
   'error EpochNotEnded()',
   'error ClaimDelayActive()',
@@ -28,7 +31,8 @@ const REWARDS_ABI = parseAbi([
   'error ZeroUserWeight()',
   'error AlreadyClaimed()',
   'error ZeroAmount()',
-  'error EpochClaimsStarted()',
+  'error RecordingWindowClosed()',
+  'error RecordingWindowOpen()',
   'error EnforcedPause()',
 ]);
 
@@ -116,6 +120,11 @@ export function useRewardsContract() {
     getClaimableState,
     claim: (epoch, token) => writeRewards('claim', [BigInt(epoch), getAddress(token)]),
     recordTradeOutcome: (tradeId) => writeRewards('recordTradeOutcome', [BigInt(tradeId)]),
+    recordTradeOutcomes: (tradeIds) => writeRewards('recordTradeOutcomes', [tradeIds.map((id) => BigInt(id))]),
+    isTradeRecorded: (tradeId) => readRewards('recordedTrade', [BigInt(tradeId)]),
+    // [TR] Kayıt penceresi kapandıktan sonra herkes çağırabilir; claim bundan önce açılmaz.
+    // [EN] Callable by anyone once the recording window closes; claims do not open before it.
+    finalizeEpochToken: (epoch, token) => writeRewards('finalizeEpochToken', [BigInt(epoch), getAddress(token)]),
     epochDuration: () => readRewards('epochDuration'),
     claimDelay: () => readRewards('claimDelay'),
     currentEpoch: () => readRewards('currentEpoch'),

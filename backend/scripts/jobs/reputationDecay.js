@@ -23,7 +23,9 @@ const logger = require("../utils/logger");
 
 const DECAY_ABI = [
   "function decayReputation(address _wallet)",
-  "function getReputation(address _wallet) view returns (uint256 successful, uint256 failed, uint256 bannedUntil, uint256 consecutiveBans, uint8 effectiveTier)",
+  // [TR] Tam tuple imzası: kısaltılmış çıktı listesi statik alanlarda tesadüfen çalışır ama ABI drift'i gizler.
+  // [EN] Full tuple signature: a truncated output list only works by accident on static fields and hides ABI drift.
+  "function getReputation(address _wallet) view returns (uint256 successful, uint256 failed, uint256 bannedUntil, uint256 consecutiveBans, uint8 effectiveTier, uint256 manualReleaseCount, uint256 autoReleaseCount, uint256 mutualCancelCount, uint256 disputedResolvedCount, uint256 burnCount, uint256 disputeWinCount, uint256 disputeLossCount, uint256 partialSettlementCount, uint256 riskPoints, uint256 lastPositiveEventAt, uint256 lastNegativeEventAt)",
   "function cleanPeriod() view returns (uint256)",
 ];
 

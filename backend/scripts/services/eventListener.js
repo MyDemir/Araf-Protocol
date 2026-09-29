@@ -74,7 +74,7 @@ const ESCROW_EVENT_NAMES = [
   "WalletRegistered",
   "EscrowCreated", "EscrowLocked", "PaymentReported",
   "EscrowReleased", "DisputeOpened",
-  "CancelProposed", "EscrowCanceled",
+  "CancelProposed", "EscrowCanceled", "PaymentWindowExpired",
   "MakerPinged", "ReputationUpdated",
   "BleedingDecayed", "EscrowBurned",
   "SettlementProposed", "SettlementRejected", "SettlementWithdrawn", "SettlementExpired", "SettlementFinalized",
@@ -101,6 +101,7 @@ const ARAF_ABI = [
   "event DisputeOpened(uint256 indexed tradeId, address indexed challenger, uint256 timestamp)",
   "event CancelProposed(uint256 indexed tradeId, address indexed proposer)",
   "event EscrowCanceled(uint256 indexed tradeId, uint256 makerRefund, uint256 takerRefund)",
+  "event PaymentWindowExpired(uint256 indexed tradeId, uint256 makerRefund, uint256 takerRefund, uint256 takerPenalty)",
   "event MakerPinged(uint256 indexed tradeId, address indexed pinger, uint256 timestamp)",
   // [TR] ReputationUpdated arg sırası kontrat event imzasıyla birebir eşleşmelidir (index kayması mirror bozar).
   // [EN] ReputationUpdated arg order must exactly match contract event signature (index drift breaks mirroring).
@@ -142,7 +143,18 @@ const TERMINAL_OUTCOME_TO_RESOLUTION = {
   4: "PARTIAL_SETTLEMENT",
   5: "DISPUTED_RESOLUTION",
   6: "BURNED",
+  7: "PAYMENT_WINDOW_EXPIRED",
 };
+
+// [TR] reportPayment / challengeTrade sonrası kontrattaki iptal onayı bayraklarının mirror karşılığı.
+// [EN] Mirror equivalent of the contract clearing cancel-consent flags on reportPayment / challengeTrade.
+const CLEARED_CANCEL_PROPOSAL = Object.freeze({
+  "cancel_proposal.proposed_by": null,
+  "cancel_proposal.proposed_at": null,
+  "cancel_proposal.approved_by": null,
+  "cancel_proposal.maker_signed": false,
+  "cancel_proposal.taker_signed": false,
+});
 
 function _isConfiguredAddress(addr) {
   return typeof addr === "string"
@@ -163,6 +175,7 @@ const EVENT_ARG_KEYS = {
   DisputeOpened: ["tradeId", "challenger", "timestamp"],
   CancelProposed: ["tradeId", "proposer"],
   EscrowCanceled: ["tradeId", "makerRefund", "takerRefund"],
+  PaymentWindowExpired: ["tradeId", "makerRefund", "takerRefund", "takerPenalty"],
   MakerPinged: ["tradeId", "pinger", "timestamp"],
   ReputationUpdated: [
     "wallet",
@@ -1209,6 +1222,7 @@ class EventWorker {
       DisputeOpened: this._onDisputeOpened.bind(this),
       CancelProposed: this._onCancelProposed.bind(this),
       EscrowCanceled: this._onEscrowCanceled.bind(this),
+      PaymentWindowExpired: this._onPaymentWindowExpired.bind(this),
       MakerPinged: this._onMakerPinged.bind(this),
       ReputationUpdated: this._onReputationUpdated.bind(this),
       BleedingDecayed: this._onBleedingDecayed.bind(this),
@@ -1561,6 +1575,9 @@ class EventWorker {
           "evidence.ipfs_receipt_hash": canonicalHash,
           "evidence.receipt_timestamp": reportedAt,
           "timers.paid_at": reportedAt,
+          // [TR] Kontrat reportPayment'ta iptal onaylarını sıfırlar; mirror bayat onay göstermemeli.
+          // [EN] The contract clears cancel consents on reportPayment; the mirror must not show stale consent.
+          ...CLEARED_CANCEL_PROPOSAL,
         },
       }
     );
@@ -1652,12 +1669,23 @@ class EventWorker {
         $set: {
           status: "CHALLENGED",
           "timers.challenged_at": challengedAt,
+          ...CLEARED_CANCEL_PROPOSAL,
         },
       }
     );
   }
 
   async _onEscrowCanceled(event) {
+    return this._markTradeCanceled(event, "MUTUAL_CANCEL");
+  }
+
+  // [TR] LOCKED trade'de ödeme penceresi doldu: kilit maker lehine çözüldü (taker liveness cezası).
+  // [EN] Payment window expired on a LOCKED trade: the lock unwound for the maker (taker liveness penalty).
+  async _onPaymentWindowExpired(event) {
+    return this._markTradeCanceled(event, "PAYMENT_WINDOW_EXPIRED");
+  }
+
+  async _markTradeCanceled(event, resolutionType) {
     const { tradeId } = event.args;
     const canceledAt = await this._getEventDate(event);
     const tradeIdNum = _toIdentityString(tradeId);
@@ -1673,7 +1701,7 @@ class EventWorker {
         {
           $set: {
             status: "CANCELED",
-            resolution_type: "MUTUAL_CANCEL",
+            resolution_type: resolutionType,
             "timers.resolved_at": canceledAt,
             "evidence.receipt_delete_at": new Date(canceledAt.getTime() + 24 * 3600 * 1000),
           },

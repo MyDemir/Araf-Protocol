@@ -193,6 +193,7 @@ const tradeSchema = new mongoose.Schema(
         "MUTUAL_CANCEL",
         "BURNED",
         "DISPUTED_RESOLUTION",
+        "PAYMENT_WINDOW_EXPIRED",
         "UNKNOWN",
         null,
       ],
@@ -313,9 +314,6 @@ const tradeSchema = new mongoose.Schema(
       approved_by:     { type: String, lowercase: true, default: null },
       maker_signed:    { type: Boolean, default: false },
       taker_signed:    { type: Boolean, default: false },
-      maker_signature: { type: String, default: null },
-      taker_signature: { type: String, default: null },
-      deadline:        { type: Date,   default: null },
     },
 
     // [TR] Faz-2 partial settlement mirror alanı.

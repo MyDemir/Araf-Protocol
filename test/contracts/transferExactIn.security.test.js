@@ -77,7 +77,7 @@ describe("ArafEscrow exact in-transfer security", function () {
         TRADE_AMOUNT,
         MIN_FILL,
         0,
-        makeRef("fee-create-sell")
+        makeRef("fee-create-sell"), 1
       )
     ).to.be.revertedWithCustomError(escrow, "InvalidTransferAmount");
   });
@@ -90,7 +90,7 @@ describe("ArafEscrow exact in-transfer security", function () {
       TRADE_AMOUNT,
       MIN_FILL,
       0,
-      makeRef("fee-buy-order")
+      makeRef("fee-buy-order"), 1
     );
     const createBuyArgs = await firstEventArgs(await createBuyTx.wait(), escrow.interface, "OrderCreated");
 
@@ -107,7 +107,7 @@ describe("ArafEscrow exact in-transfer security", function () {
       TRADE_AMOUNT,
       MIN_FILL,
       0,
-      makeRef("exact-sell-order")
+      makeRef("exact-sell-order"), 1
     );
     const createSellArgs = await firstEventArgs(await createSellTx.wait(), escrow.interface, "OrderCreated");
 
@@ -134,7 +134,7 @@ describe("ArafEscrow exact in-transfer security", function () {
       TRADE_AMOUNT,
       MIN_FILL,
       0,
-      makeRef("warmup-order")
+      makeRef("warmup-order"), 1
     );
     const warmupOrderArgs = await firstEventArgs(await warmupOrderTx.wait(), escrow.interface, "OrderCreated");
     const warmupFillTx = await escrow.connect(taker).fillSellOrder(
@@ -153,7 +153,7 @@ describe("ArafEscrow exact in-transfer security", function () {
         TRADE_AMOUNT,
         MIN_FILL,
         1,
-        makeRef("fee-create-buy-tier1")
+        makeRef("fee-create-buy-tier1"), 1
       )
     ).to.be.revertedWithCustomError(escrow, "InvalidTransferAmount");
   });

@@ -56,6 +56,11 @@ export const RewardsPanel = ({ lang = 'EN', address, showToast, tokenDecimalsMap
     if (targetEpoch == null || !tokenAddress) return;
     try {
       setIsClaiming(true);
+      // [TR] Dönem henüz kapatılmadıysa önce herkese açık finalize çağrılır (owner beklenmez), sonra claim.
+      // [EN] If the epoch is not finalized yet, the permissionless finalize runs first (no owner wait), then claim.
+      if (!(await rewards.epochTokenFinalized(targetEpoch, tokenAddress))) {
+        await rewards.finalizeEpochToken(targetEpoch, tokenAddress);
+      }
       await rewards.claim(targetEpoch, tokenAddress);
       showToast?.(lang === 'TR' ? '✅ Ödül cüzdanınıza gönderildi.' : '✅ Reward sent to your wallet.', 'success');
       setRefreshKey((k) => k + 1);

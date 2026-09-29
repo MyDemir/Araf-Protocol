@@ -162,6 +162,14 @@ export function mapResolutionTypeLabel(resolutionType, lang = "EN") {
       EN: "Closed by burn",
       TR: "Yakım ile kapandı",
     },
+    DISPUTED_RESOLUTION: {
+      EN: "Released after a dispute",
+      TR: "İtiraz sonrası serbest bırakıldı",
+    },
+    PAYMENT_WINDOW_EXPIRED: {
+      EN: "Unlocked: payment not reported in 48h",
+      TR: "Kilit çözüldü: 48 saatte ödeme bildirilmedi",
+    },
     UNKNOWN: {
       EN: "Closed; outcome type unavailable",
       TR: "Kapandı; sonuç tipi bilinmiyor",

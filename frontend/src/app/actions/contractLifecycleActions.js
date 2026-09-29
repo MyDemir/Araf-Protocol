@@ -283,8 +283,9 @@ export const buildTradeRoomActions = ({
   canMakerStartChallengeFlow,
   canMakerChallenge,
   reportPayment,
-  signCancelProposal,
   proposeOrApproveCancel,
+  expirePaymentWindow,
+  cancelStatus = null,
   releaseFunds,
   pingTakerForChallenge,
   challengeTrade,
@@ -387,34 +388,16 @@ export const buildTradeRoomActions = ({
     if (isContractLoading) return;
     try {
       setIsContractLoading(true);
-      showToast(lang === 'TR' ? 'İptal imzası oluşturuluyor...' : 'Creating cancel signature...', 'info');
-      const { signature, deadline } = await signCancelProposal(activeTrade.onchainId);
+      showToast(lang === 'TR' ? 'İptal onayı gönderiliyor... Cüzdanınızdan onaylayın.' : 'Sending cancel consent... Confirm in wallet.', 'info');
+      // [TR] İptal tamamen on-chain: her taraf kendi tx'ini gönderir, ikinci onay iptali yürütür.
+      //      Ayrı imza/backend rölesi yok; karşı tarafın onayı mirror'daki CancelProposed'dan bilinir.
+      // [EN] Cancel is fully on-chain: each party sends its own tx and the second consent executes it.
+      //      No separate signature or backend relay; counterparty consent comes from the mirrored CancelProposed.
+      const counterpartyAlreadyConsented = cancelStatus === 'proposed_by_other';
+      await proposeOrApproveCancel(activeTrade.onchainId);
 
-      // [TR] Backend yalnız koordinasyon/görünürlük içindir (best-effort).
-      // [EN] Backend relay is coordination/visibility only (best-effort).
-      let counterpartyAlreadySigned = false;
-      try {
-        const relayRes = await authenticatedFetch(buildApiUrl('trades/propose-cancel'), {
-          method: 'POST',
-          body: JSON.stringify({ tradeId: activeTrade.id, signature, deadline }),
-        });
-        const relayData = await relayRes.json();
-        counterpartyAlreadySigned = Boolean(relayData?.bothSigned);
-      } catch (relayErr) {
-        console.warn('[Cancel] Backend relay başarısız, yalnız on-chain devam ediliyor:', relayErr.message);
-      }
-
-      // [TR] Kontrat proposeOrApproveCancel'da msg.sender'ın kendi imzasını ister ve iptal ancak
-      //      iki tarafın da kendi tx'i zincire düştüğünde gerçekleşir. Önceki akış ilk tarafın
-      //      tx'ini hiç göndermiyordu; ikinci taraf gönderince iptal olmadan "iptal edildi" deniyordu.
-      // [EN] The contract requires each party's own tx; cancel executes only after both land.
-      //      The old flow never sent the first party's tx, so cancels never completed on-chain.
-      await proposeOrApproveCancel(BigInt(activeTrade.onchainId), deadline, signature);
-
-      if (counterpartyAlreadySigned) {
-        setCancelStatus(null);
-        setTradeState('CANCELED');
-        setCurrentView('home');
+      if (counterpartyAlreadyConsented) {
+        finishTrade('CANCELED');
         showToast(lang === 'TR' ? '✅ İşlem iptal edildi.' : '✅ Trade cancelled.', 'success');
       } else {
         setCancelStatus('proposed_by_me');
@@ -425,6 +408,25 @@ export const buildTradeRoomActions = ({
       console.error('handleProposeCancel error:', err);
       const errorMessage = getTxErrorMessage(err, lang === 'TR' ? 'İptal teklifi başarısız.' : 'Cancel proposal failed.');
       showToast(isUserRejected(errorMessage) ? (lang === 'TR' ? 'İşlem iptal edildi.' : 'Transaction cancelled.') : errorMessage, 'error');
+    } finally {
+      setIsContractLoading(false);
+    }
+  };
+
+  // [TR] LOCKED trade'de 48 saatlik ödeme penceresi dolduysa kilit zamanla çözülür (maker tam iade alır).
+  // [EN] Once the 48h payment window on a LOCKED trade has passed, the lock unwinds by time (maker refunded in full).
+  const handleExpirePaymentWindow = async () => {
+    if (isContractLoading || !requireActiveOnchainId()) return;
+    try {
+      setIsContractLoading(true);
+      showToast(lang === 'TR' ? 'Kilit çözülüyor... Cüzdanınızdan onaylayın.' : 'Unlocking... Confirm in wallet.', 'info');
+      await expirePaymentWindow(activeTrade.onchainId);
+      finishTrade('CANCELED');
+      showToast(lang === 'TR' ? '✅ Ödeme süresi doldu; fonlar satıcıya iade edildi.' : '✅ Payment window expired; funds returned to the seller.', 'success');
+      if (typeof fetchMyTrades === 'function') fetchMyTrades();
+    } catch (err) {
+      console.error('expirePaymentWindow error:', err);
+      showToast(getTxErrorMessage(err, lang === 'TR' ? 'Kilit çözülemedi.' : 'Unlock failed.'), 'error');
     } finally {
       setIsContractLoading(false);
     }
@@ -570,6 +572,7 @@ export const buildTradeRoomActions = ({
     handlePingMaker,
     handleAutoRelease,
     handleBurnExpired,
+    handleExpirePaymentWindow,
   };
 };
 

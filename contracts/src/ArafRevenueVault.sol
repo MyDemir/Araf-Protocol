@@ -7,6 +7,10 @@ import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
+interface IArafRewardsEpochClock {
+    function currentEpoch() external view returns (uint256);
+}
+
 /**
  * @title ArafRevenueVault
  * @notice Escrow'dan gelen protokol gelirini reward/treasury rezervlerine böler.
@@ -28,6 +32,7 @@ contract ArafRevenueVault is Ownable, ReentrancyGuard, Pausable {
     error RevenueLiabilityMismatch();
     error MissingRevenueIntent();
     error RevenueAmountMismatch();
+    error StaleTargetEpoch();
 
     uint256 public constant BPS = 10_000;
     uint256 public constant MIN_REWARD_BPS = 4_000;
@@ -190,17 +195,7 @@ contract ArafRevenueVault is Ownable, ReentrancyGuard, Pausable {
         uint256 targetEpoch,
         bytes32 fundingRef
     ) external nonReentrant whenNotPaused {
-        if (!supportedToken[token]) revert UnsupportedRewardToken();
-        if (amount == 0) revert ZeroAmount();
-
-        uint256 balanceBefore = IERC20(token).balanceOf(address(this));
-        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
-        uint256 balanceAfter = IERC20(token).balanceOf(address(this));
-        if (balanceAfter - balanceBefore != amount) revert ExactInMismatch();
-
-        externalFundingByEpoch[targetEpoch][token] += amount;
-        totalExternalFunding[token] += amount;
-
+        _pullEpochFunding(token, amount, targetEpoch);
         emit ExternalRewardFunded(msg.sender, token, amount, targetEpoch, fundingRef);
     }
 
@@ -216,16 +211,12 @@ contract ArafRevenueVault is Ownable, ReentrancyGuard, Pausable {
         bytes32 fundingRef
     ) external nonReentrant whenNotPaused {
         if (!productPools[productId].enabled) revert ProductPoolDisabled();
-        if (!supportedToken[token]) revert UnsupportedRewardToken();
-        if (amount == 0) revert ZeroAmount();
-
-        uint256 balanceBefore = IERC20(token).balanceOf(address(this));
-        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
-        uint256 balanceAfter = IERC20(token).balanceOf(address(this));
-        if (balanceAfter - balanceBefore != amount) revert ExactInMismatch();
-
+        // [TR] Ürün fonu da epoch havuzuna akar; önceden hiçbir yol bu bakiyeyi harcamadığı için fon kasada kilitli kalıyordu.
+        //      productFundingByEpoch yalnız kampanya analitiği içindir.
+        // [EN] Product funding also flows into the epoch pool; previously no path ever spent it and funds stayed locked.
+        //      productFundingByEpoch is campaign analytics only.
+        _pullEpochFunding(token, amount, targetEpoch);
         productFundingByEpoch[targetEpoch][productId][token] += amount;
-        totalExternalFunding[token] += amount;
 
         emit ProductRewardFunded(msg.sender, productId, token, amount, targetEpoch, fundingRef);
     }
@@ -255,23 +246,6 @@ contract ArafRevenueVault is Ownable, ReentrancyGuard, Pausable {
     }
 
     /**
-     * @notice Rewards kontratına epoch allocation için reward reserve'den token transfer eder.
-     * @dev    Sadece kayıtlı rewards kontratı çağırabilir; owner doğrudan reward reserve çekemez.
-     */
-    function transferRewardAllocation(address token, uint256 amount)
-        external
-        nonReentrant
-        whenNotPaused
-    {
-        if (msg.sender != rewards) revert UnauthorizedRewards();
-        if (amount == 0) revert ZeroAmount();
-        if (rewardReserve[token] < amount) revert InsufficientRewardReserve();
-
-        rewardReserve[token] -= amount;
-        IERC20(token).safeTransfer(rewards, amount);
-    }
-
-    /**
      * @notice Epoch allocation transfer: önce epoch external funding, kalan varsa reward reserve'den karşılar.
      * @dev    Sadece rewards kontratı çağırabilir.
      */
@@ -279,7 +253,9 @@ contract ArafRevenueVault is Ownable, ReentrancyGuard, Pausable {
         uint256 epoch,
         address token,
         uint256 amount
-    ) external nonReentrant whenNotPaused {
+    ) external nonReentrant {
+        // [TR] Pause edilmez: finalize/allocation akışı vault pause ile kilitlenip sponsor fonları bekletilemez.
+        // [EN] Not pausable: vault pause must not block finalize/allocation and strand sponsor funds.
         if (msg.sender != rewards) revert UnauthorizedRewards();
         if (amount == 0) revert ZeroAmount();
 
@@ -296,6 +272,28 @@ contract ArafRevenueVault is Ownable, ReentrancyGuard, Pausable {
         }
 
         IERC20(token).safeTransfer(rewards, amount);
+    }
+
+    /**
+     * @notice Sponsor fonunu exact-in doğrulamasıyla alır ve hedef epoch'a yazar. Geçmiş epoch hedeflenemez:
+     *         o epoch finalize edilmiş olabilir ve fon kimseye ulaşmaz.
+     * @notice Pulls sponsor funding with exact-in verification and credits the target epoch. Past epochs
+     *         are rejected: they may already be finalized and the funds would reach no one.
+     */
+    function _pullEpochFunding(address token, uint256 amount, uint256 targetEpoch) internal {
+        if (!supportedToken[token]) revert UnsupportedRewardToken();
+        if (amount == 0) revert ZeroAmount();
+        if (rewards.code.length > 0 && targetEpoch < IArafRewardsEpochClock(rewards).currentEpoch()) {
+            revert StaleTargetEpoch();
+        }
+
+        uint256 balanceBefore = IERC20(token).balanceOf(address(this));
+        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
+        uint256 balanceAfter = IERC20(token).balanceOf(address(this));
+        if (balanceAfter - balanceBefore != amount) revert ExactInMismatch();
+
+        externalFundingByEpoch[targetEpoch][token] += amount;
+        totalExternalFunding[token] += amount;
     }
 
     function _revenueIntentKey(

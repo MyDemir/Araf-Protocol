@@ -19,7 +19,7 @@ const makeTradeRoomDeps = (overrides = {}) => ({
   canMakerStartChallengeFlow: true,
   canMakerChallenge: true,
   reportPayment: vi.fn().mockResolvedValue(undefined),
-  signCancelProposal: vi.fn().mockResolvedValue({ signature: '0xsig', deadline: 123 }),
+  expirePaymentWindow: vi.fn().mockResolvedValue(undefined),
   proposeOrApproveCancel: vi.fn().mockResolvedValue(undefined),
   releaseFunds: vi.fn().mockResolvedValue(undefined),
   pingTakerForChallenge: vi.fn().mockResolvedValue(undefined),
@@ -102,7 +102,6 @@ describe('contract lifecycle action builders', () => {
     await actions.handleBurnExpired();
 
     expect(deps.reportPayment).not.toHaveBeenCalled();
-    expect(deps.signCancelProposal).not.toHaveBeenCalled();
     expect(deps.proposeOrApproveCancel).not.toHaveBeenCalled();
     expect(deps.releaseFunds).not.toHaveBeenCalled();
     expect(deps.pingTakerForChallenge).not.toHaveBeenCalled();

@@ -64,9 +64,9 @@ Her owner-controlled değişiklik için minimum süreç:
 |---|---|---|---|---|---|
 | `transferOwnership(address)` | Rewards governance owner | Multisig/eşdeğer | Epoch allocation/finalization/sweep yetkisi kaybedilir | Yeni owner, manifest, threshold | `owner()` doğrulaması |
 | `allocateEpochRewards(uint256,address,uint256)` | Rewards governance owner | Epoch allocation runbook'u | Yanlış epoch/token/tutar; reward reserve tüketimi veya claimable yanlışlığı | Epoch durumu, `epochTokenFinalized=false`, vault reserve/external funding, token supported, totalWeight | `epochRewardPool`, `epochTokenAllocated`, `EpochRewardAllocated`, vault reserve değişimi |
-| `finalizeEpochToken(uint256,address)` | Rewards governance owner | Epoch kapanış onayı | Erken/geç finalize; claim süreci aksar | Epoch ended, trade outcome kayıtları tamam, token pool ve totalWeight kontrolü | `epochTokenFinalized`, `EpochTokenFinalizedEvent`, claimable smoke |
-| `sweepEpochDust(uint256,address,address)` | Rewards governance owner | Claim window sonrası treasury/accounting onayı | Kullanıcı claim penceresi bitmeden dust süpürme denemesi veya yanlış recipient | `epochTokenFinalized`, claim delay/window, claimed weight, recipient | `EpochDustSwept`, pool conservation, recipient balance |
-| `pause()` / `unpause()` | Rewards governance owner | Emergency runbook | Outcome recording/claim/allocation durur; yanlış zamanda açılır/kapanır | Incident, pending claims, allocation state, user comms | `paused()`, record/claim behavior smoke |
+| `finalizeEpochToken(uint256,address)` | **Permissionless** (owner yetkisi değil) | Kayıt penceresi (epoch sonu + claimDelay) kapanınca herkes çağırır; epoch'a hedeflenmiş sponsor fonunu havuza çeker | Owner claim'i geciktiremez | — | `epochTokenFinalized`, `EpochTokenFinalizedEvent`, claimable smoke |
+| `sweepEpochDust(uint256,address)` | **Permissionless**, alıcı seçilemez | Claim penceresi sonrası kalan pay içinde bulunulan epoch havuzuna devredilir | Talep edilmeyen ödül treasury'ye çekilemez | `epochTokenFinalized`, claim window, claimed weight | `EpochDustRolledOver`, pool conservation |
+| `pause()` / `unpause()` | Rewards governance owner | Emergency runbook | Yalnız owner allocation'ı durur; outcome kaydı, finalize ve claim pause'dan etkilenmez (sansür/süpürme kaldıracı yok) | Incident, pending claims, allocation state, user comms | `paused()`, record/claim behavior smoke |
 
 ## 6) Deploy/configure/switch script governance yüzeyleri
 
