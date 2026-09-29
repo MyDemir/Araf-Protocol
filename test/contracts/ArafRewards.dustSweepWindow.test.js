@@ -56,7 +56,7 @@ describe("ArafRewards dust sweep claim window", function () {
 
   async function fundAndFinalizeEpochZero({ owner, mockEscrow, vault, token, rewards, maker, taker }) {
     const now = (await ethers.provider.getBlock("latest")).timestamp;
-    const epochDuration = 7 * 24 * 3600;
+    const epochDuration = 30 * 24 * 3600;
     const epoch = Math.floor(now / epochDuration);
     const terminalAt = epoch * epochDuration + 100;
     const paidAt = terminalAt - 100;

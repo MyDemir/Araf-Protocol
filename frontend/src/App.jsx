@@ -686,7 +686,7 @@ function App() {
   // [TR] Lab "Profil Merkezi": kontrat itibarı ve backend kayıtları senaryodan gelir; sayaçlar seçim anına göre.
   const labProfile = React.useMemo(() => (
     activeScenarioCategory === 'profile' && activeScenarioPayload
-      ? { ...activeScenarioPayload, userReputation: activeScenarioPayload.build?.() || null, labRewards: activeScenarioPayload.labRewards ? buildLabRewards() : null }
+      ? { ...activeScenarioPayload, userReputation: activeScenarioPayload.build?.() || null, labRewards: activeScenarioPayload.labRewards ? buildLabRewards(activeScenarioPayload.labRewards) : null }
       : null
   ), [activeScenarioCategory, activeScenarioPayload]);
 

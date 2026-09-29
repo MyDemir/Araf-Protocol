@@ -153,24 +153,25 @@ export const profileScenarios = [
   }),
 ];
 
-// [TR] Ödüller sekmesi için sahte ArafRewards okuyucusu: kontrat varsayılan süreleri (7g dönem, 24s gecikme,
-//      30g talep penceresi). "Şimdi" mevcut dönemin 12. saatine sabitlenir; böylece önceki dönem kesinleşme
-//      aşamasındadır ve her durum görünür.
+// [TR] Ödüller sekmesi için sahte ArafRewards okuyucusu: kontrat varsayılanları (30g dönem, 24s gecikme,
+//      7g talep penceresi). Pencere dönemden kısa olduğu için aynı anda en fazla bir dönem talep edilebilir.
+//      `hoursIntoEpoch` "şimdi"yi mevcut dönem içinde sabitler: 72 → önceki dönem talep edilebilir,
+//      12 → önceki dönem kesinleşiyor (talep henüz açılmadı).
 const LAB_REWARD_TOKENS = { USDT: '0x' + 'a'.repeat(40), USDC: '0x' + 'b'.repeat(40) };
 const u6 = (n) => BigInt(Math.round(n * 1e6));
 
-export const buildLabRewards = () => {
-  const dur = 7 * DAY;
+export const buildLabRewards = ({ hoursIntoEpoch = 72 } = {}) => {
+  const dur = 30 * DAY;
   const cur = Math.floor(Date.now() / 1000 / dur);
-  const now = cur * dur + 12 * 3600;
+  const now = cur * dur + hoursIntoEpoch * 3600;
   // epochOffset -> { u, t, pools: {USDT, USDC}, finalized: {..}, claimed: {..} }
   const plan = {
-    0: { u: 300n, t: 10000n, pools: { USDT: 1200, USDC: 400 } },
-    1: { u: 500n, t: 8000n, pools: { USDT: 900, USDC: 0 } },
-    2: { u: 250n, t: 5000n, pools: { USDT: 1000, USDC: 200 }, finalized: { USDT: true } },
-    3: { u: 400n, t: 10000n, pools: { USDT: 1500, USDC: 300 }, finalized: { USDT: true, USDC: true }, claimed: { USDT: true } },
-    4: { u: 0n, t: 6000n, pools: { USDT: 800, USDC: 0 }, finalized: { USDT: true } },
-    5: { u: 600n, t: 12000n, pools: { USDT: 1100, USDC: 250 }, finalized: { USDT: true, USDC: true }, claimed: { USDT: true, USDC: true } },
+    0: { u: 300n, t: 10000n, pools: { USDT: 4800, USDC: 1600 } },
+    1: { u: 500n, t: 8000n, pools: { USDT: 3600, USDC: 800 }, finalized: { USDT: true } },
+    2: { u: 250n, t: 5000n, pools: { USDT: 4000, USDC: 900 }, finalized: { USDT: true, USDC: true }, claimed: { USDT: true } },
+    3: { u: 0n, t: 6000n, pools: { USDT: 3200, USDC: 0 }, finalized: { USDT: true } },
+    4: { u: 600n, t: 12000n, pools: { USDT: 4400, USDC: 1000 }, finalized: { USDT: true, USDC: true }, claimed: { USDT: true, USDC: true } },
+    5: { u: 400n, t: 10000n, pools: { USDT: 3000, USDC: 0 }, finalized: { USDT: true } },
   };
   const at = (epoch) => plan[cur - Number(epoch)] || { u: 0n, t: 0n, pools: {} };
   const sym = (addr) => Object.keys(LAB_REWARD_TOKENS).find((k) => LAB_REWARD_TOKENS[k] === addr);
@@ -181,7 +182,7 @@ export const buildLabRewards = () => {
     currentEpoch: async () => BigInt(cur),
     epochDuration: async () => BigInt(dur),
     claimDelay: async () => BigInt(DAY),
-    claimWindow: async () => BigInt(30 * DAY),
+    claimWindow: async () => BigInt(7 * DAY),
     totalWeight: async (e) => at(e).t,
     userWeight: async (e) => at(e).u,
     epochRewardPool: async (e, token) => u6(at(e).pools[sym(token)] || 0),
@@ -197,11 +198,15 @@ export const buildLabRewards = () => {
       token: LAB_REWARD_TOKENS[symbol], amount: ((u6(p.pools[symbol]) * p.u) / p.t).toString(),
     };
   };
-  const history = [claimRow(3, 'USDT'), claimRow(5, 'USDT'), claimRow(5, 'USDC')];
+  const history = [claimRow(2, 'USDT'), claimRow(4, 'USDT'), claimRow(4, 'USDC')];
   return { reader, now, fetchClaimHistory: async () => history };
 };
 
-profileScenarios.push(scenario('rewards', 'Rewards · accruing / finalizing / claimable / claimed', 'rewards', {
+profileScenarios.push(scenario('rewards', 'Rewards · claim window open (day 3 of epoch)', 'rewards', {
   build: () => reputation({ tier: 2, successful: 64, firstSuccessAgoDays: 120 }),
-  labRewards: true,
+  labRewards: { hoursIntoEpoch: 72 },
+}));
+profileScenarios.push(scenario('rewards-finalizing', 'Rewards · previous epoch finalizing (hour 12)', 'rewards', {
+  build: () => reputation({ tier: 2, successful: 64, firstSuccessAgoDays: 120 }),
+  labRewards: { hoursIntoEpoch: 12 },
 }));

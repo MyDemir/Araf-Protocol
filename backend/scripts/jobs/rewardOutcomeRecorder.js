@@ -35,7 +35,8 @@ const REWARDS_RECORDER_ABI = [
 const REWARDABLE_RESOLUTION_TYPES = ["MANUAL_RELEASE", "PARTIAL_SETTLEMENT"];
 const DEFAULT_CANDIDATE_LIMIT = Number(process.env.REWARD_RECORDER_CANDIDATE_LIMIT || 200);
 const DEFAULT_BATCH_LIMIT = Number(process.env.REWARD_RECORDER_BATCH_LIMIT || 50);
-const FALLBACK_EPOCH_SECONDS = 7 * 24 * 3600;
+// [TR] ArafRewards varsayılanı (30 gün); zincirden okunamazsa kullanılır. [EN] ArafRewards default (30 days).
+const FALLBACK_EPOCH_SECONDS = 30 * 24 * 3600;
 const FALLBACK_CLAIM_DELAY_SECONDS = 24 * 3600;
 
 let rewardsContract = null;

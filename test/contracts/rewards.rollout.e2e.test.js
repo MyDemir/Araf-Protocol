@@ -64,7 +64,8 @@ describe('Proof of Peace Rewards rollout safety e2e', function () {
     const allocation = (NOTIONAL * 4000n) / 10000n;
     await rewards.connect(owner).allocateEpochRewards(epoch, await token.getAddress(), allocation);
 
-    await time.increase(Number(epochDuration + (await rewards.claimDelay()) + 10n));
+    // Absolute: talep penceresi (7 gün) dönemden kısa; göreli atlama pencereyi aşabilir.
+    await time.increaseTo(Number((epoch + 1n) * epochDuration + (await rewards.claimDelay()) + 10n));
     await rewards.connect(owner).finalizeEpochToken(epoch, await token.getAddress());
     await time.increase(60);
 
@@ -113,7 +114,8 @@ describe('Proof of Peace Rewards rollout safety e2e', function () {
     await vault.connect(sponsor).fundGlobalRewards(await token.getAddress(), fundAmount, epoch, ethers.id('e2e-fund'));
 
     await rewards.connect(owner).allocateEpochRewards(epoch, await token.getAddress(), fundAmount);
-    await time.increase(Number(epochDuration + (await rewards.claimDelay()) + 10n));
+    // Absolute: talep penceresi (7 gün) dönemden kısa; göreli atlama pencereyi aşabilir.
+    await time.increaseTo(Number((epoch + 1n) * epochDuration + (await rewards.claimDelay()) + 10n));
     await rewards.connect(owner).finalizeEpochToken(epoch, await token.getAddress());
 
     const makerClaimable = await rewards.claimable(epoch, maker.address, await token.getAddress());
