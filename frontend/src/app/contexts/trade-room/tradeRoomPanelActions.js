@@ -1,3 +1,5 @@
+import { deriveTradeTimeline, TRADE_TIMING } from './tradeTimeline';
+
 const panelActionConfig = (onClick, { disabled = false, disabledReasons = [], hasOnchainTradeId, missingOnchainIdReason } = {}) => ({
   onClick,
   disabled: disabled || !hasOnchainTradeId,
@@ -7,21 +9,16 @@ const panelActionConfig = (onClick, { disabled = false, disabledReasons = [], ha
   ],
 });
 
+// [TR] Kontrat MAX_BLEEDING = 240 saat: CHALLENGED trade bu süre sonunda herkes tarafından yakılabilir.
 export const getBurnExpiredDeadlinePassed = ({ activeTrade, roomState, now = new Date() }) => Boolean(
-  activeTrade?.onchainId
-  && roomState === 'CHALLENGED'
-  && activeTrade.challengedAt
-  && (now.getTime() - new Date(activeTrade.challengedAt).getTime() > 10 * 24 * 3600 * 1000)
+  activeTrade?.onchainId && deriveTradeTimeline(activeTrade, { state: roomState, now: now.getTime() }).flags.canBurn
 );
 
 // [TR] Kontrat PAYMENT_WINDOW = 48 saat: LOCKED trade'de taker bu sürede ödeme bildirmezse kilit çözülebilir.
 // [EN] Contract PAYMENT_WINDOW = 48h: a LOCKED trade can be unwound if the taker has not reported payment by then.
-export const PAYMENT_WINDOW_MS = 48 * 3600 * 1000;
+export const PAYMENT_WINDOW_MS = TRADE_TIMING.PAYMENT_WINDOW_MS;
 export const getPaymentWindowExpired = ({ activeTrade, roomState, now = new Date() }) => Boolean(
-  activeTrade?.onchainId
-  && roomState === 'LOCKED'
-  && activeTrade.lockedAt
-  && (now.getTime() - new Date(activeTrade.lockedAt).getTime() > PAYMENT_WINDOW_MS)
+  activeTrade?.onchainId && deriveTradeTimeline(activeTrade, { state: roomState, now: now.getTime() }).flags.paymentWindowExpired
 );
 
 export const buildTradeRoomPanelCallbacks = ({
@@ -47,14 +44,37 @@ export const buildTradeRoomPanelCallbacks = ({
   paymentWindowExpired = false,
   confirmFn = typeof window !== 'undefined' ? window.confirm.bind(window) : () => false,
 }) => {
-  const makerChallengeBlocked = activeTrade?.challengePingedAt ? !canMakerChallenge : !canMakerStartChallengeFlow;
-  const makerChallengeReason = activeTrade?.challengePingedAt
-    ? (lang === 'TR' ? 'İtiraz için 24 saat bekleyin.' : 'Wait 24h to challenge.')
-    : (lang === 'TR' ? 'Uyarı için 24 saat bekleyin.' : 'Wait 24h to ping buyer.');
-  const gracePeriodEnds = activeTrade?.paidAt ? new Date(new Date(activeTrade.paidAt).getTime() + 48 * 3600 * 1000) : null;
-  const canPanelPingMaker = Boolean(activeTrade?.paidAt && !activeTrade?.pingedAt && !activeTrade?.challengePingedAt && gracePeriodEnds && new Date() > gracePeriodEnds);
-  const autoReleaseAt = activeTrade?.pingedAt ? new Date(new Date(activeTrade.pingedAt).getTime() + 24 * 3600 * 1000) : null;
-  const canPanelAutoRelease = Boolean(autoReleaseAt && new Date() > autoReleaseAt);
+  const tr = lang === 'TR';
+  // [TR] Aktif/pasif kararı kontratın süre kurallarının saf aynasından gelir (tradeTimeline.js).
+  //      paidAt yoksa (eski/eksik veri) çağıranın verdiği bayraklara düşülür.
+  // [EN] Enablement mirrors contract timing rules; falls back to caller flags when paidAt is unknown.
+  const { flags } = deriveTradeTimeline(activeTrade, { state: roomState });
+  const hasPaidAt = Boolean(activeTrade?.paidAt);
+  const takerPinged = flags.takerPinged;
+  const makerPinged = flags.makerPinged;
+
+  let makerChallengeBlocked;
+  let makerChallengeReason = null;
+  if (takerPinged) {
+    // Contract: ConflictingPingPath — the taker already opened the auto-release path.
+    makerChallengeBlocked = true;
+    makerChallengeReason = tr ? 'Alıcı sizi zaten uyardı; itiraz yolu kapandı. Ödemeyi kontrol edip onaylayın.' : 'The taker already pinged you; the challenge path is closed. Check the payment and release.';
+  } else if (makerPinged || activeTrade?.challengePingedAt) {
+    makerChallengeBlocked = hasPaidAt ? !flags.canMakerChallenge : !canMakerChallenge;
+    if (makerChallengeBlocked) makerChallengeReason = tr ? 'İtiraz için uyarıdan sonra 24 saat bekleyin.' : 'Wait 24h after your ping to challenge.';
+  } else {
+    makerChallengeBlocked = hasPaidAt ? !flags.canMakerPingTaker : !canMakerStartChallengeFlow;
+    if (makerChallengeBlocked) makerChallengeReason = tr ? 'Alıcıyı uyarmak için ödeme bildiriminden sonra 24 saat bekleyin.' : 'Wait 24h after the payment report to ping the taker.';
+  }
+
+  let pingReason = null;
+  if (makerPinged) pingReason = tr ? 'Satıcı itiraz yolunu başlattı; uyarı yolu kapandı.' : 'The maker started the challenge path; the ping path is closed.';
+  else if (takerPinged) pingReason = tr ? 'Satıcıyı zaten uyardınız.' : 'You already pinged the maker.';
+  else if (!flags.canTakerPing) pingReason = tr ? 'Satıcıyı uyarmak için ödeme bildiriminden sonra 48 saat bekleyin.' : 'Wait 48h after reporting payment to ping the maker.';
+  const autoReleaseReason = !takerPinged
+    ? (tr ? 'Önce satıcıyı uyarın; 24 saat sonra otomatik serbest bırakma açılır.' : 'Ping the maker first; auto-release opens 24h later.')
+    : (tr ? 'Otomatik serbest bırakma için uyarıdan sonra 24 saat bekleyin.' : 'Wait 24h after your ping to auto-release.');
+
   const withGuard = (onClick, options = {}) => panelActionConfig(onClick, { ...options, hasOnchainTradeId, missingOnchainIdReason });
 
   return {
@@ -67,15 +87,15 @@ export const buildTradeRoomPanelCallbacks = ({
     }),
     start_challenge: withGuard(handleChallenge, {
       disabled: isContractLoading || makerChallengeBlocked,
-      disabledReasons: makerChallengeBlocked ? [makerChallengeReason] : [],
+      disabledReasons: makerChallengeBlocked && makerChallengeReason ? [makerChallengeReason] : [],
     }),
     ping_maker: withGuard(() => handlePingMaker(activeTrade.onchainId), {
-      disabled: isContractLoading || !canPanelPingMaker,
-      disabledReasons: !canPanelPingMaker ? [lang === 'TR' ? 'Satıcı uyarısı için onay süresi bekleniyor.' : 'Grace period must expire before pinging maker.'] : [],
+      disabled: isContractLoading || !flags.canTakerPing,
+      disabledReasons: !flags.canTakerPing ? [pingReason] : [],
     }),
     auto_release: withGuard(() => handleAutoRelease(activeTrade.onchainId), {
-      disabled: isContractLoading || !canPanelAutoRelease,
-      disabledReasons: !canPanelAutoRelease ? [lang === 'TR' ? 'Otomatik serbest bırakma için satıcı uyarısı sonrası 24 saat bekleyin.' : 'Wait 24h after maker ping before auto-release.'] : [],
+      disabled: isContractLoading || !flags.canAutoRelease,
+      disabledReasons: !flags.canAutoRelease ? [autoReleaseReason] : [],
     }),
     propose_cancel: withGuard(() => {
       const msg = roomState === 'LOCKED'

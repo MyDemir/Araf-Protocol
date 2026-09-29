@@ -20,6 +20,10 @@ const formatRate = (value) => {
 
 export default function ReferenceRateTicker({ lang = 'TR' }) {
   const [payload, setPayload] = useState(null);
+  // [TR] 'loading' | 'ready' | 'unavailable'. Önceden veri gelmeyince şerit sessizce kayboluyordu;
+  //      kullanıcı özelliğin var olduğunu bile göremiyordu.
+  // [EN] Previously the ticker silently disappeared when no data arrived.
+  const [status, setStatus] = useState('loading');
   const intervalRef = useRef(null);
 
   const fetchTicker = useCallback(async () => {
@@ -31,11 +35,13 @@ export default function ReferenceRateTicker({ lang = 'TR' }) {
       });
       if (!res.ok) throw new Error(`reference ticker request failed: ${res.status}`);
       const nextPayload = await res.json();
-      setPayload((prev) => (nextPayload?.items ? nextPayload : prev));
+      const hasItems = Array.isArray(nextPayload?.items) && nextPayload.items.length > 0;
+      setPayload((prev) => (hasItems ? nextPayload : prev));
+      setStatus((prev) => (hasItems ? 'ready' : (prev === 'ready' ? 'ready' : 'unavailable')));
     } catch {
       // [TR] Network/provider sorunlarında son başarılı payload tutulur.
       // [EN] Keep last successful payload on network/provider failures.
-      setPayload((prev) => prev);
+      setStatus((prev) => (prev === 'ready' ? 'ready' : 'unavailable'));
     }
   }, []);
 
@@ -74,7 +80,19 @@ export default function ReferenceRateTicker({ lang = 'TR' }) {
 
   const items = useMemo(() => payload?.items || [], [payload]);
 
-  if (!items.length) return null;
+  if (!items.length) {
+    if (status === 'loading') {
+      return <div className="mb-4 h-10 rounded-xl border border-borderSubtle bg-surface animate-pulse" aria-hidden="true" data-testid="reference-rate-ticker-loading" />;
+    }
+    return (
+      <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-borderSubtle bg-surface px-3 py-2 text-xs text-textMuted" data-testid="reference-rate-ticker-unavailable">
+        <span>{lang === 'TR' ? 'Referans kurlar şu an alınamıyor.' : 'Reference rates are unavailable right now.'}</span>
+        <button type="button" onClick={() => { setStatus('loading'); fetchTicker(); }} className="shrink-0 font-semibold text-brand hover:underline">
+          {lang === 'TR' ? 'Yeniden dene' : 'Retry'}
+        </button>
+      </div>
+    );
+  }
 
   // [TR] Görsel katman yalnız bilgilendirme amaçlı semantiği yansıtır;
   //      settlement/dispute/reputation/risk otoritesi değildir.
@@ -113,7 +131,7 @@ export default function ReferenceRateTicker({ lang = 'TR' }) {
           : 'Reference rates are informational only and do not affect escrow settlement.'}
       </p>
       {!informationalOnly && (
-        <p className="mt-1 text-[10px] text-amber-400">{lang === 'TR' ? 'Bilgilendirme bayrağı doğrulanamadı.' : 'Informational flag could not be verified.'}</p>
+        <p className="mt-1 text-[10px] text-warning">{lang === 'TR' ? 'Bilgilendirme bayrağı doğrulanamadı.' : 'Informational flag could not be verified.'}</p>
       )}
     </section>
   );

@@ -2,12 +2,16 @@ import { tradeRoomScenarios } from '../fixtures/tradeRoomFixtures';
 import { operationsScenarios } from '../fixtures/operationsFixtures';
 import { activeTradesScenarios } from '../fixtures/activeTradesFixtures';
 import { adminScenarios } from '../fixtures/adminFixtures';
+import { makerOrderScenarios } from '../fixtures/makerOrderFixtures';
+import { profileScenarios } from '../fixtures/profileFixtures';
 
 export const scenarioCategories = [
   { key: 'tradeRoom', label: 'Trade Room', scenarios: tradeRoomScenarios },
   { key: 'operations', label: 'Operations Center', scenarios: operationsScenarios },
   { key: 'activeTrades', label: 'Active Trades', scenarios: activeTradesScenarios },
   { key: 'admin', label: 'Admin', scenarios: adminScenarios },
+  { key: 'makerOrder', label: 'Order Creation', scenarios: makerOrderScenarios },
+  { key: 'profile', label: 'Profile Center', scenarios: profileScenarios },
 ];
 
 export const scenarioRegistry = Object.fromEntries(scenarioCategories.map((category) => [category.key, category]));

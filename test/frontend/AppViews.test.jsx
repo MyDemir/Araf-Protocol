@@ -169,7 +169,7 @@ describe('AppViews market side-aware rendering', () => {
             available: true,
             band: 'YELLOW',
             label: 'Medium Signal',
-            chipClass: 'text-amber-400 border-amber-700/60 bg-amber-900/20',
+            chipClass: 'text-warning border-warning/40 bg-warning/10',
           },
           paymentRiskSignal: {
             riskLevel: 'MEDIUM',
@@ -201,7 +201,7 @@ describe('AppViews market side-aware rendering', () => {
             available: false,
             band: null,
             label: 'Signal unavailable',
-            chipClass: 'text-slate-400 border-slate-700/60 bg-slate-900/20',
+            chipClass: 'text-textSecondary border-borderSubtle bg-elevated',
           },
           paymentRiskSignal: null,
           tokenPolicy: { supported: true, allowSellOrders: true, allowBuyOrders: true },
@@ -590,5 +590,35 @@ describe('AppViews market side-aware rendering', () => {
 
     render(<div>{views.renderMarket()}</div>);
     expect(screen.queryAllByText(/Payment complexity/i)).toHaveLength(0);
+  });
+
+  it('hides session-only navigation until the wallet is connected and signed in', () => {
+    const signedOut = buildAppViews({ ...baseCtx, isConnected: false, isAuthenticated: false });
+    const rail = render(<div>{signedOut.renderSlimRail()}</div>);
+    expect(screen.queryByTitle('Trade Room')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Operations Center')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Profile Center')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Trade History')).not.toBeInTheDocument();
+    expect(screen.getByTitle('Marketplace')).toBeInTheDocument();
+    rail.unmount();
+    const mobile = render(<div>{signedOut.renderMobileNav()}</div>);
+    expect(screen.queryByLabelText('Trade')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Track')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Profile')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Connect')).toBeInTheDocument();
+    mobile.unmount();
+
+    const signedIn = buildAppViews({ ...baseCtx, isConnected: true, isAuthenticated: true });
+    render(<div>{signedIn.renderMobileNav()}</div>);
+    expect(screen.getByLabelText('Trade')).toBeInTheDocument();
+    expect(screen.getByLabelText('Track')).toBeInTheDocument();
+    expect(screen.getByLabelText('Profile')).toBeInTheDocument();
+  });
+
+  it('drawer shows a sign-in card instead of trade sections when signed out', () => {
+    const views = buildAppViews({ ...baseCtx, isConnected: false, isAuthenticated: false, sidebarOpen: true });
+    render(<div>{views.renderContextSidebar()}</div>);
+    expect(screen.getByTestId('drawer-signin-card')).toBeInTheDocument();
+    expect(screen.queryByText('MY TRADES')).not.toBeInTheDocument();
   });
 });

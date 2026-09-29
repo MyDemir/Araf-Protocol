@@ -382,6 +382,7 @@ router.get("/summary", async (req, res, next) => {
       mutualCancelCount: 0,
       burnedCount: 0,
       disputedResolutionCount: 0,
+      paymentWindowExpiredCount: 0,
       unknownResolvedCount: 0,
     };
     try {
@@ -410,6 +411,9 @@ router.get("/summary", async (req, res, next) => {
         mutualCancelCount: Number(exactResolutionCounts[3]) || 0,
         burnedCount: Number(exactResolutionCounts[4]) || 0,
         disputedResolutionCount: Number(exactResolutionCounts[5]) || 0,
+        // [TR] Kontrat TerminalOutcome.PAYMENT_WINDOW_EXPIRED (48s içinde ödeme bildirilmedi). Sayılıyordu ama yanıta konmuyordu.
+        // [EN] Contract PAYMENT_WINDOW_EXPIRED outcome; it was counted but never returned.
+        paymentWindowExpiredCount: Number(exactResolutionCounts[6]) || 0,
         unknownResolvedCount: Number(unknownResolvedCount) || 0,
       };
     } catch (err) {

@@ -2,12 +2,12 @@ import React from 'react';
 
 const LANE_TAB_CLASS = {
   settlement_action_required: {
-    active: 'bg-red-950/40 text-red-200 border-red-500/50',
-    idle: 'bg-surface text-red-300 border-red-900/40 hover:border-red-500/50',
+    active: 'bg-danger/15 text-danger border-danger/50',
+    idle: 'bg-surface text-danger border-danger/30 hover:border-danger/50',
   },
   pending_backend_sync: {
-    active: 'bg-sky-950/40 text-sky-200 border-sky-500/50',
-    idle: 'bg-surface text-sky-300 border-sky-900/40 hover:border-sky-500/50',
+    active: 'bg-info/15 text-info border-info/50',
+    idle: 'bg-surface text-info border-info/30 hover:border-info/50',
   },
 };
 

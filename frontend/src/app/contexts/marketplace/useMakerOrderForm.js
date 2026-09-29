@@ -64,14 +64,17 @@ export const useMakerOrderForm = ({
 
   // [TR] Tier limitleri seçili token'ın on-chain config'inden okunur (fallback: sabit tablo).
   // [EN] Tier limits come from the selected token's on-chain config (fallback: static table).
-  const tierMaxAmounts = React.useMemo(() => {
+  // [TR] Seçili token'ın kontrat politikası (desteklenen yönler, tier limitleri); backend /orders/config aynası.
+  const tokenPolicy = React.useMemo(() => {
     const tokenAddress = String(supportedTokens?.[makerToken]?.address || '').toLowerCase();
-    return resolveTierMaxAmounts(onchainTokenMap?.[tokenAddress]);
+    return onchainTokenMap?.[tokenAddress] || null;
   }, [supportedTokens, makerToken, onchainTokenMap]);
 
+  const tierMaxAmounts = React.useMemo(() => resolveTierMaxAmounts(tokenPolicy), [tokenPolicy]);
+
   const validationError = React.useMemo(
-    () => getMakerOrderValidationError({ ...formState, tierMaxAmounts, lang }),
-    [formState, tierMaxAmounts, lang],
+    () => getMakerOrderValidationError({ ...formState, tierMaxAmounts, tokenPolicy, lang }),
+    [formState, tierMaxAmounts, tokenPolicy, lang],
   );
 
   const canonicalPayoutProfile = React.useMemo(
@@ -113,6 +116,7 @@ export const useMakerOrderForm = ({
     paymentRiskConfig,
     authenticatedFetch,
     tierMaxAmounts,
+    tokenPolicy,
   }), [
     getFormState,
     resetMakerOrderForm,
@@ -139,6 +143,7 @@ export const useMakerOrderForm = ({
     paymentRiskConfig,
     authenticatedFetch,
     tierMaxAmounts,
+    tokenPolicy,
   ]);
 
   const handleOpenMakerModal = React.useCallback(() => {
@@ -163,6 +168,7 @@ export const useMakerOrderForm = ({
     resetMakerOrderForm,
     validationError,
     tierMaxAmounts,
+    tokenPolicy,
     payoutRiskEntry,
     isCreateTemporarilyDisabledByRisk,
     handleCreateOrder,

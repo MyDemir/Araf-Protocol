@@ -36,6 +36,7 @@ const logger = require("../utils/logger");
 const {
   updateCachedFeeConfig,
   updateCachedCooldownConfig,
+  updateCachedReputationPolicy,
   updateCachedTokenConfig,
   refreshProtocolConfig,
 } = require("./protocolConfig");
@@ -80,6 +81,7 @@ const ESCROW_EVENT_NAMES = [
   "SettlementProposed", "SettlementRejected", "SettlementWithdrawn", "SettlementExpired", "SettlementFinalized",
   "OrderCreated", "OrderFilled", "OrderCanceled",
   "FeeConfigUpdated", "CooldownConfigUpdated", "TokenConfigUpdated",
+  "ReputationPolicyUpdated", "ReputationTierThresholdsUpdated",
   "ProtocolRevenueSent",
 ];
 // [TR] Bu event'ler escrow değil ArafRevenueVault / ArafRewards adresinden yayınlanır.
@@ -119,6 +121,8 @@ const ARAF_ABI = [
   "event FeeConfigUpdated(uint256 takerFeeBps, uint256 makerFeeBps)",
   "event CooldownConfigUpdated(uint256 tier0TradeCooldown, uint256 tier1TradeCooldown)",
   "event TokenConfigUpdated(address indexed token, bool supported, bool allowSellOrders, bool allowBuyOrders)",
+  "event ReputationPolicyUpdated(uint256 cleanPeriod, uint256 manualReleaseRewardPts, uint256 autoReleasePenaltyPts, uint256 disputeWinRewardPts, uint256 disputeLossPenaltyPts, uint256 burnPenaltyPts, uint256 mutualCancelPenaltyPts, uint256 baseBanDuration, uint256 banRiskPointsThreshold)",
+  "event ReputationTierThresholdsUpdated(uint32[5] minSuccessfulTrades, uint32[5] maxRiskPoints)",
   "event ProtocolRevenueSent(address indexed token, uint256 amount, uint8 indexed kind, uint256 indexed tradeId, address treasury)",
   "event EscrowRevenueReceived(address indexed token, uint256 amount, uint256 rewardShare, uint256 treasuryShare, uint8 kind, uint256 tradeId)",
   "event ExternalRewardFunded(address indexed funder, address indexed token, uint256 amount, uint256 indexed targetEpoch, bytes32 fundingRef)",
@@ -208,6 +212,8 @@ const EVENT_ARG_KEYS = {
   FeeConfigUpdated: ["takerFeeBps", "makerFeeBps"],
   CooldownConfigUpdated: ["tier0TradeCooldown", "tier1TradeCooldown"],
   TokenConfigUpdated: ["token", "supported", "allowSellOrders", "allowBuyOrders"],
+  ReputationPolicyUpdated: ["cleanPeriod", "manualReleaseRewardPts", "autoReleasePenaltyPts", "disputeWinRewardPts", "disputeLossPenaltyPts", "burnPenaltyPts", "mutualCancelPenaltyPts", "baseBanDuration", "banRiskPointsThreshold"],
+  ReputationTierThresholdsUpdated: ["minSuccessfulTrades", "maxRiskPoints"],
   ProtocolRevenueSent: ["token", "amount", "kind", "tradeId", "treasury"],
   EscrowRevenueReceived: ["token", "amount", "rewardShare", "treasuryShare", "kind", "tradeId"],
   ExternalRewardFunded: ["funder", "token", "amount", "targetEpoch", "fundingRef"],
@@ -1237,6 +1243,8 @@ class EventWorker {
       OrderCanceled: this._onOrderCanceled.bind(this),
       FeeConfigUpdated: this._onFeeConfigUpdated.bind(this),
       CooldownConfigUpdated: this._onCooldownConfigUpdated.bind(this),
+      ReputationPolicyUpdated: this._onReputationPolicyUpdated.bind(this),
+      ReputationTierThresholdsUpdated: this._onReputationTierThresholdsUpdated.bind(this),
       TokenConfigUpdated: this._onTokenConfigUpdated.bind(this),
       ProtocolRevenueSent: this._onProtocolRevenueSent.bind(this),
       EscrowRevenueReceived: this._onEscrowRevenueReceived.bind(this),
@@ -2288,6 +2296,29 @@ class EventWorker {
   async _onCooldownConfigUpdated(event) {
     const { tier0TradeCooldown, tier1TradeCooldown } = event.args;
     await updateCachedCooldownConfig(tier0TradeCooldown, tier1TradeCooldown);
+  }
+
+  async _onReputationPolicyUpdated(event) {
+    const a = event.args;
+    await updateCachedReputationPolicy({
+      cleanPeriodSec: Number(a.cleanPeriod),
+      manualReleaseRewardPts: Number(a.manualReleaseRewardPts),
+      autoReleasePenaltyPts: Number(a.autoReleasePenaltyPts),
+      disputeWinRewardPts: Number(a.disputeWinRewardPts),
+      disputeLossPenaltyPts: Number(a.disputeLossPenaltyPts),
+      burnPenaltyPts: Number(a.burnPenaltyPts),
+      mutualCancelPenaltyPts: Number(a.mutualCancelPenaltyPts),
+      baseBanDurationSec: Number(a.baseBanDuration),
+      banRiskPointsThreshold: Number(a.banRiskPointsThreshold),
+    });
+  }
+
+  async _onReputationTierThresholdsUpdated(event) {
+    const { minSuccessfulTrades, maxRiskPoints } = event.args;
+    await updateCachedReputationPolicy({
+      tierMinSuccessfulTrades: Array.from(minSuccessfulTrades || []).map(Number),
+      tierMaxRiskPoints: Array.from(maxRiskPoints || []).map(Number),
+    });
   }
 
   async _onTokenConfigUpdated(event) {

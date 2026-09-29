@@ -20,8 +20,7 @@ export const createSessionActions = ({
   bestEffortBackendLogout,
   clearLocalSessionState,
   setShowWalletModal,
-  setProfileTab,
-  setShowProfileModal,
+  openProfilePage,
 }) => {
   const hasSignedSessionForActiveWallet = Boolean(
     isConnected
@@ -130,10 +129,8 @@ export const createSessionActions = ({
     }
     if (!isConnected) setShowWalletModal(true);
     else if (!isAuthenticated) loginWithSIWE();
-    else {
-      setProfileTab('ayarlar');
-      setShowProfileModal(true);
-    }
+    // [TR] Oturum açıkken tek profil yüzeyi Profil Merkezi sayfasıdır (eski modal kaldırıldı).
+    else openProfilePage?.('account');
   };
 
   return {

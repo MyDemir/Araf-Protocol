@@ -39,10 +39,12 @@ describe('buildTradeDecisionModel', () => {
     expect(model.nextDescription).toContain('Araf is not an arbitrator');
   });
 
-  it('PAID+taker produces waiting/ping/auto-release conditional family and waiting copy', () => {
+  it('PAID+taker shows only the next step of the ping path: ping before, auto-release after', () => {
     const model = buildTradeDecisionModel({ ...base, tradeState: 'PAID', userRole: 'taker' });
     expect(model.primaryAction.type).toBe('waiting');
-    expect(model.secondaryActions.map((a) => a.key)).toEqual(['ping_maker', 'auto_release', 'propose_cancel']);
+    expect(model.secondaryActions.map((a) => a.key)).toEqual(['ping_maker', 'propose_cancel']);
+    const pinged = buildTradeDecisionModel({ ...base, trade: { ...(base.trade || {}), pingedAt: new Date().toISOString() }, tradeState: 'PAID', userRole: 'taker' });
+    expect(pinged.secondaryActions.map((a) => a.key)).toEqual(['auto_release', 'propose_cancel']);
     expect(model.headline).toBe('Payment reported; waiting for maker review');
     expect(model.nextDescription).toContain('frontend only presents those paths');
   });
@@ -70,7 +72,7 @@ describe('buildTradeDecisionModel', () => {
     expect(lockedTaker.primaryAction.key).toBe('report_payment');
     expect(paidMaker.primaryAction.key).toBe('release_funds');
     expect(paidMaker.secondaryActions.map((a) => a.key)).toEqual(['start_challenge', 'propose_cancel']);
-    expect(paidTaker.secondaryActions.map((a) => a.key)).toEqual(['ping_maker', 'auto_release', 'propose_cancel']);
+    expect(paidTaker.secondaryActions.map((a) => a.key)).toEqual(['ping_maker', 'propose_cancel']);
     expect(challenged.primaryAction.key).toBe('release_funds');
     expect(challenged.secondaryActions.map((a) => a.key)).toContain('propose_cancel');
   });
@@ -108,6 +110,19 @@ describe('buildTradeDecisionModel', () => {
     });
   });
 
+  it('labels the maker challenge button by contract stage and closes terminal trades', () => {
+    const fresh = buildTradeDecisionModel({ ...base, tradeState: 'PAID', userRole: 'maker' });
+    expect(fresh.secondaryActions[0].label).toMatch(/Ping Taker/);
+    const pinged = buildTradeDecisionModel({ ...base, trade: { ...(base.trade || {}), challengePingedAt: new Date().toISOString() }, tradeState: 'PAID', userRole: 'maker' });
+    expect(pinged.secondaryActions[0]).toMatchObject({ key: 'start_challenge', label: 'Open Challenge' });
+    ['RESOLVED', 'CANCELED', 'BURNED'].forEach((state) => {
+      const closed = buildTradeDecisionModel({ ...base, tradeState: state });
+      expect(closed.primaryAction.key).toBe('trade_closed');
+      expect(closed.secondaryActions).toEqual([]);
+      expect(closed.timerCards).toEqual([]);
+    });
+  });
+
   it('keeps stable action keys separate from localized user-facing labels', () => {
     const lockedTaker = buildTradeDecisionModel(base);
     const paidMaker = buildTradeDecisionModel({ ...base, tradeState: 'PAID', userRole: 'maker' });
@@ -116,7 +131,7 @@ describe('buildTradeDecisionModel', () => {
 
     expect(lockedTaker.primaryAction).toMatchObject({ key: 'report_payment', label: 'Report Payment' });
     expect(paidMaker.primaryAction).toMatchObject({ key: 'release_funds', label: 'Release Funds' });
-    expect(paidTaker.secondaryActions.map((a) => a.key)).toEqual(['ping_maker', 'auto_release', 'propose_cancel']);
+    expect(paidTaker.secondaryActions.map((a) => a.key)).toEqual(['ping_maker', 'propose_cancel']);
     expect(challenged.secondaryActions.map((a) => a.key)).toEqual([
       'propose_cancel',
       'burn_expired',
@@ -171,7 +186,7 @@ describe('buildTradeDecisionModel', () => {
       timers: { gracePeriod: { isFinished: false, hours: 1, minutes: 2, seconds: 3 } },
     });
     expect(model.timerCards).toEqual([
-      { key: 'gracePeriod', label: 'Grace period', summary: '01h 02m 03s' },
+      { key: 'gracePeriod', label: 'Grace period', summary: '01h 02m 03s', finished: false },
     ]);
   });
 
@@ -192,7 +207,13 @@ describe('buildTradeDecisionModel', () => {
     const expired = buildTradeDecisionModel({ ...base, userRole: 'maker', paymentWindowExpired: true });
     const paid = buildTradeDecisionModel({ ...base, tradeState: 'PAID', paymentWindowExpired: true });
     expect(open.secondaryActions.map((a) => a.key)).not.toContain('expire_payment_window');
-    expect(expired.secondaryActions.map((a) => a.key)).toContain('expire_payment_window');
+    // Maker: unlocking becomes the primary action. Taker: it stays secondary and names the bond penalty.
+    expect(expired.primaryAction.key).toBe('expire_payment_window');
+    const takerExpired = buildTradeDecisionModel({ ...base, userRole: 'taker', paymentWindowExpired: true });
+    expect(takerExpired.primaryAction.key).toBe('report_payment');
+    expect(takerExpired.secondaryActions.find((a) => a.key === 'expire_payment_window').label).toMatch(/penalty/);
+    const withCancel = buildTradeDecisionModel({ ...base, cancelStatus: 'proposed_by_other' });
+    expect(withCancel.secondaryActions.map((a) => a.key)).not.toContain('propose_cancel');
     expect(paid.secondaryActions.map((a) => a.key)).not.toContain('expire_payment_window');
   });
 });

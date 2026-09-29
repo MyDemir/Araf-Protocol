@@ -18,13 +18,18 @@ export const OperationsSummaryBar = ({ summary, lang = 'EN' }) => {
   if (!Number(summary?.totalActive)) return null;
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-2 mb-4">
-      {items.map((item) => (
-        <div key={item.key} className="bg-surface border border-borderSubtle rounded-xl px-3 py-3">
-          <p className="text-sm font-semibold text-textPrimary leading-snug">{item.label}</p>
-          <p className="mt-1 text-xl font-bold text-textPrimary">{summary?.[item.key] ?? 0}</p>
-        </div>
-      ))}
+    // [TR] Sıkı döşeme: mobilde 4 sütun, sayı üstte; 0 olan kutular soluk (dikkat gerektirenler öne çıkar).
+    <div className="grid grid-cols-4 xl:grid-cols-7 gap-1.5 mb-4">
+      {items.map((item) => {
+        const value = Number(summary?.[item.key] ?? 0);
+        const urgent = item.key === 'settlementActionRequired' && value > 0;
+        return (
+          <div key={item.key} className={`rounded-lg border px-2 py-2 ${urgent ? 'border-danger/40 bg-danger/10' : 'border-borderSubtle bg-surface'} ${value === 0 ? 'opacity-60' : ''}`}>
+            <p className={`text-lg font-bold leading-none tabular-nums ${urgent ? 'text-danger' : 'text-textPrimary'}`}>{value}</p>
+            <p className="mt-1 text-[10px] leading-tight text-textSecondary">{item.label}</p>
+          </div>
+        );
+      })}
     </div>
   );
 };
@@ -44,11 +49,11 @@ export const SettlementQueueCard = ({ escrow, lang, onGoToRoom }) => {
   const mode = resolveSettlementMode(escrow);
   const isActionRequired = mode === 'action_required';
   const title = isActionRequired
-    ? (lang === 'TR' ? 'Settlement yanıtı gerekiyor' : 'Settlement needs your response')
-    : (lang === 'TR' ? 'Karşı taraf settlement yanıtı bekleniyor' : 'Waiting on counterparty settlement response');
+    ? (lang === 'TR' ? 'Uzlaşma teklifine yanıt verin' : 'Settlement needs your response')
+    : (lang === 'TR' ? 'Karşı tarafın uzlaşma yanıtı bekleniyor' : 'Waiting on counterparty settlement response');
   const accentClass = isActionRequired
-    ? 'border-red-500/40 bg-red-950/10 text-red-300'
-    : 'border-amber-500/40 bg-amber-950/10 text-amber-300';
+    ? 'border-danger/40 bg-danger/5 text-danger'
+    : 'border-warning/40 bg-warning/5 text-warning';
 
   return (
     <div className={`rounded-xl border p-2 ${accentClass}`} data-testid="settlement-queue-card">
@@ -60,10 +65,8 @@ export const SettlementQueueCard = ({ escrow, lang, onGoToRoom }) => {
 
 export const PendingSyncCard = ({ escrow, lang, onGoToRoom }) => {
   return (
-    <div className="rounded-xl border border-sky-500/40 bg-sky-950/10 p-2" data-testid="pending-sync-card">
-      <p className="mb-2 text-sm font-bold text-sky-300">
-        {lang === 'TR' ? 'Oda senkronu sürüyor' : 'Room sync in progress'}
-      </p>
+    // [TR] Başlık kartın içinde zaten yazıyor; ayrı başlık tekrar ediyordu.
+    <div className="rounded-xl border border-info/40 bg-info/5 p-1" data-testid="pending-sync-card">
       <OperationTradeCard escrow={escrow} lang={lang} onGoToRoom={onGoToRoom} />
     </div>
   );

@@ -82,29 +82,55 @@ const rawToNumber = (raw, decimals = DEFAULT_TOKEN_DECIMALS) => {
   }
 };
 
+// [TR] ArafEscrow._getMakerBondBps / _getTakerBondBps aynası: tier tabanı + itibar ayarı.
+//      Tier 0 her zaman 0; riskPoints == 0 ve en az 1 başarılı işlem → −100 bps; riskPoints > 0 → +300 bps.
+// [EN] Mirror of the contract bond rule: tier base + reputation adjustment.
+const FALLBACK_BOND_PCT = { maker: [0, 8, 6, 5, 2], taker: [0, 10, 8, 5, 2] };
+export const resolveEffectiveBondBps = ({ side, tier, bondMap = null, reputation = null }) => {
+  const key = side === 'BUY_CRYPTO' ? 'taker' : 'maker';
+  const t = Number(tier) || 0;
+  const pct = Number(bondMap?.[t]?.[key] ?? FALLBACK_BOND_PCT[key][t] ?? 0);
+  const baseBps = Math.round(pct * 100);
+  if (t === 0) return { bps: 0, baseBps: 0, adjustment: null };
+  if (!reputation) return { bps: baseBps, baseBps, adjustment: null };
+  const riskPoints = Number(reputation?.authorityCounters?.riskPoints ?? reputation?.riskPoints ?? 0);
+  const successful = Number(reputation?.successful ?? 0);
+  if (riskPoints === 0 && successful > 0) return { bps: Math.max(0, baseBps - 100), baseBps, adjustment: 'discount' };
+  if (riskPoints > 0) return { bps: baseBps + 300, baseBps, adjustment: 'penalty' };
+  return { bps: baseBps, baseBps, adjustment: null };
+};
+
 export const getMakerModalCopy = (side, lang = 'TR') => {
   if (side === 'BUY_CRYPTO') {
     return {
       submitLabel: lang === 'TR' ? `Onayla ve ${getOrderSideCopy('BUY_CRYPTO', 'order', 'TR')} Aç` : `Approve & Open ${getOrderSideCopy('BUY_CRYPTO', 'order', 'EN')}`,
       previewTitle: lang === 'TR' ? `${getOrderSideCopy('BUY_CRYPTO', 'order', 'TR')} Reserve Özeti` : `${getOrderSideCopy('BUY_CRYPTO', 'order', 'EN')} Reserve Summary`,
-      bondRoleLabel: lang === 'TR' ? 'Taker Reserve' : 'Taker Reserve',
-      totalLabel: lang === 'TR' ? 'Toplam Reserve' : 'Total Reserve',
+      bondRoleLabel: lang === 'TR' ? 'Alıcı teminatı' : 'Taker bond',
+      totalLabel: lang === 'TR' ? 'Toplam kilitlenecek' : 'Total Reserve',
       previewHint: lang === 'TR' ? 'Kontrat buy order oluştururken yalnız taker reserve tutar.' : 'Contract only locks taker reserve when creating a buy order.',
     };
   }
   return {
     submitLabel: lang === 'TR' ? `Onayla ve ${getOrderSideCopy('SELL_CRYPTO', 'order', 'TR')} Aç` : `Approve & Open ${getOrderSideCopy('SELL_CRYPTO', 'order', 'EN')}`,
     previewTitle: lang === 'TR' ? `${getOrderSideCopy('SELL_CRYPTO', 'order', 'TR')} Kilit Özeti` : `${getOrderSideCopy('SELL_CRYPTO', 'order', 'EN')} Lock Summary`,
-    bondRoleLabel: lang === 'TR' ? 'Maker Reserve' : 'Maker Reserve',
-    totalLabel: lang === 'TR' ? 'Toplam Kilitlenecek' : 'Total Locked',
+    bondRoleLabel: lang === 'TR' ? 'Satıcı teminatı' : 'Maker bond',
+    totalLabel: lang === 'TR' ? 'Toplam kilitlenecek' : 'Total Locked',
     previewHint: lang === 'TR' ? 'Kontrat sell order oluştururken inventory + maker reserve kilitler.' : 'Contract locks inventory + maker reserve when creating a sell order.',
   };
 };
 
-export const buildMakerPreview = ({ side, amountUi, bondPct }) => {
+// [TR] Kontrat teminatı base-unit'te AŞAĞI yuvarlar: (amount * bps) / 10_000. Eski önizleme Math.ceil ile tam sayıya
+//      YUKARI yuvarlıyordu (100.5 × %8 → 9 yerine 8.04). Token ondalığıyla aynı hesap yapılır.
+// [EN] The contract floors the bond in base units; the old preview rounded up to a whole token.
+export const buildMakerPreview = ({ side, amountUi, bondPct, bondBps = null, decimals = 6 }) => {
   const safeAmount = Number(amountUi || 0);
-  const safeBondPct = Number(bondPct || 0);
-  const reserveAmount = Math.ceil(safeAmount * safeBondPct / 100);
+  const bps = bondBps != null ? Number(bondBps) : Math.round(Number(bondPct || 0) * 100);
+  let reserveAmount = 0;
+  try {
+    const scale = 10 ** decimals;
+    const amountBase = BigInt(Math.round(safeAmount * scale));
+    reserveAmount = Number((amountBase * BigInt(Math.max(0, bps))) / 10000n) / scale;
+  } catch { reserveAmount = 0; }
 
   if (side === 'BUY_CRYPTO') {
     return {
@@ -230,9 +256,9 @@ export const mapOffchainHealthToUi = ({ signal, lang = 'TR' }) => {
 
   const severityBand = severityScore >= 3 ? 'RED' : severityScore >= 1 ? 'YELLOW' : 'GREEN';
   const severityMeta = {
-    GREEN: { TR: 'Düşük Sinyal', EN: 'Low Signal', chipClass: 'text-emerald-400 border-emerald-700/60 bg-emerald-900/20' },
-    YELLOW: { TR: 'Orta Sinyal', EN: 'Medium Signal', chipClass: 'text-amber-400 border-amber-700/60 bg-amber-900/20' },
-    RED: { TR: 'Yüksek Sinyal', EN: 'High Signal', chipClass: 'text-red-400 border-red-700/60 bg-red-900/20' },
+    GREEN: { TR: 'Düşük Sinyal', EN: 'Low Signal', chipClass: 'text-success border-success/40 bg-success/10' },
+    YELLOW: { TR: 'Orta Sinyal', EN: 'Medium Signal', chipClass: 'text-warning border-warning/40 bg-warning/10' },
+    RED: { TR: 'Yüksek Sinyal', EN: 'High Signal', chipClass: 'text-danger border-danger/40 bg-danger/10' },
   }[severityBand];
 
   return {
@@ -254,11 +280,11 @@ export const mapCompactTrustSummary = ({ compactSummary, signal, lang = 'TR' }) 
   // [EN] Prefer backend-provided market-safe compact summary field.
   if (compactSummary && typeof compactSummary === 'object' && compactSummary.available === true) {
     const band = compactSummary.band || null;
-    const fallbackChip = 'text-slate-400 border-slate-700/60 bg-slate-900/20';
+    const fallbackChip = 'text-textSecondary border-borderSubtle bg-elevated';
     const chipByBand = {
-      GREEN: 'text-emerald-400 border-emerald-700/60 bg-emerald-900/20',
-      YELLOW: 'text-amber-400 border-amber-700/60 bg-amber-900/20',
-      RED: 'text-red-400 border-red-700/60 bg-red-900/20',
+      GREEN: 'text-success border-success/40 bg-success/10',
+      YELLOW: 'text-warning border-warning/40 bg-warning/10',
+      RED: 'text-danger border-danger/40 bg-danger/10',
     };
     return {
       available: true,
@@ -277,7 +303,7 @@ export const mapCompactTrustSummary = ({ compactSummary, signal, lang = 'TR' }) 
       available: false,
       band: null,
       label: lang === 'TR' ? 'Sinyal yok' : 'Signal unavailable',
-      chipClass: 'text-slate-400 border-slate-700/60 bg-slate-900/20',
+      chipClass: 'text-textSecondary border-borderSubtle bg-elevated',
     };
   }
 
@@ -320,6 +346,10 @@ export const mapApiOrderToUi = ({ order, lang = 'TR', bondMap = {}, tokenMap = {
   const remainingAmount = remainingAmountRaw != null
     ? rawToNumber(remainingAmountRaw, tokenDecimals)
     : Number(order?.amounts?.remaining_amount_num ?? 0);
+  const totalAmountRaw = order?.amounts?.total_amount;
+  const totalAmount = totalAmountRaw != null
+    ? rawToNumber(totalAmountRaw, tokenDecimals)
+    : Number(order?.amounts?.total_amount_num ?? 0);
 
   const tier = order?.tier ?? 0;
   const makerBondPct = Number(bondMap?.[tier]?.maker ?? 0);
@@ -375,6 +405,7 @@ export const mapApiOrderToUi = ({ order, lang = 'TR', bondMap = {}, tokenMap = {
     tokenDecimals,
     minFillAmount,
     remainingAmount,
+    totalAmount,
     limitLabel,
     bondLabel: sideBondPct != null && sideBondPct > 0 ? `${sideBondPct}%` : '—',
     tokenAddress,

@@ -37,11 +37,22 @@ export function getPreviewTotalPool(previewData) {
   return previewData?.pool ?? previewData?.totalPool ?? previewData?.total_pool ?? 0;
 }
 
-function renderRawAmount(value) {
-  const asBigInt = normalizeRawBigInt(value);
-  if (asBigInt !== null) return shortNum(asBigInt);
-  return String(value ?? '0');
+// [TR] Backend ham taban birim (ör. USDT 6 ondalık) döndürür; kullanıcıya token birimiyle gösterilir.
+// [EN] Backend returns raw base units; show them in token units.
+export function formatTokenUnits(value, decimals = 6) {
+  const raw = normalizeRawBigInt(value);
+  if (raw === null) return String(value ?? '0');
+  const d = Number.isInteger(Number(decimals)) && Number(decimals) >= 0 ? Number(decimals) : 6;
+  const base = 10n ** BigInt(d);
+  const neg = raw < 0n;
+  const abs = neg ? -raw : raw;
+  const whole = shortNum(abs / base);
+  const frac = d > 0 ? (abs % base).toString().padStart(d, '0').slice(0, 2) : '';
+  return `${neg ? '-' : ''}${whole}${frac && frac !== '00' ? `.${frac}` : ''}`;
 }
+
+const pct = (bps) => (Number.isFinite(Number(bps)) ? `%${(Number(bps) / 100).toLocaleString('tr-TR', { maximumFractionDigits: 2 })}` : '—');
+const pctEn = (bps) => (Number.isFinite(Number(bps)) ? `${(Number(bps) / 100).toLocaleString('en-US', { maximumFractionDigits: 2 })}%` : '—');
 
 export default function SettlementPreviewModal({
   isOpen,
@@ -55,54 +66,93 @@ export default function SettlementPreviewModal({
   onConfirm,
   confirmLabel,
   disableConfirm,
+  userRole = null,
+  tokenSymbol = 'USDT',
+  decimals = 6,
 }) {
   if (!isOpen) return null;
+  const isTR = lang === 'TR';
+  const fmt = (v) => `${formatTokenUnits(v, decimals)} ${tokenSymbol}`;
+  const share = isTR ? pct : pctEn;
 
   const makerPayout = previewData?.makerPayout ?? previewData?.maker_payout ?? 0;
   const takerPayout = previewData?.takerPayout ?? previewData?.taker_payout ?? 0;
   const totalPool = getPreviewTotalPool(previewData);
+  const makerFee = previewData?.makerFee ?? null;
+  const takerFee = previewData?.takerFee ?? null;
+  const decayed = previewData?.decayedAmount ?? null;
+  const makerPctNum = Number(makerShareBps);
+  const barMaker = Number.isFinite(makerPctNum) ? Math.max(0, Math.min(100, makerPctNum / 100)) : 50;
+
+  const Row = ({ label, value, sub, strong, you }) => (
+    <div className="flex items-start justify-between gap-3 py-2">
+      <span className="text-textSecondary">
+        {label}
+        {you && <span className="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded bg-brand/15 text-brand align-middle">{isTR ? 'SİZ' : 'YOU'}</span>}
+        {sub && <span className="block text-[11px] text-textMuted">{sub}</span>}
+      </span>
+      <span className={`text-right tabular-nums ${strong ? 'font-bold text-textPrimary' : 'text-textSecondary'}`}>{value}</span>
+    </div>
+  );
 
   return (
-    <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="w-full max-w-lg bg-[#111113] border border-[#2a2a2e] rounded-2xl p-5 md:p-6 shadow-2xl">
-        <h3 className="text-lg font-bold text-white mb-2">
-          {lang === 'TR' ? 'Settlement Önizleme' : 'Settlement Preview'}
+    <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center sm:p-4" role="dialog" aria-modal="true" aria-labelledby="settlement-preview-title">
+      <div className="w-full sm:max-w-lg bg-surface border border-borderSubtle rounded-t-2xl sm:rounded-2xl p-5 md:p-6 shadow-2xl max-h-[calc(100dvh_-_2rem)] overflow-y-auto pb-[calc(1.25rem_+_env(safe-area-inset-bottom))] sm:pb-6">
+        <h3 id="settlement-preview-title" className="text-lg font-bold text-textPrimary">
+          {isTR ? 'Uzlaşma önizlemesi' : 'Settlement preview'}
         </h3>
-        <p className="text-xs text-slate-400 mb-4">
-          {lang === 'TR'
-            ? 'Bu önizleme yalnız bilgilendirme amaçlıdır (non-authoritative). On-chain sonucu kontrat belirler.'
-            : 'This preview is informational only (non-authoritative). Final on-chain outcome is enforced by contract.'}
+        <p className="text-xs text-textMuted mt-1 mb-4">
+          {isTR
+            ? 'Şu anki zincir tutarlarıyla hesaplandı. Kesin sonucu kabul anındaki kontrat hesabı belirler.'
+            : 'Calculated from current on-chain amounts. The contract computes the final result at acceptance.'}
         </p>
 
-        <div className="bg-[#0c0c0e] border border-[#222] rounded-xl p-4 space-y-2 text-sm">
-          <div className="flex justify-between"><span className="text-slate-400">{lang === 'TR' ? 'Maker alır' : 'Maker receives'}</span><span className="text-white font-bold">{renderRawAmount(makerPayout)}</span></div>
-          <div className="flex justify-between"><span className="text-slate-400">{lang === 'TR' ? 'Taker alır' : 'Taker receives'}</span><span className="text-white font-bold">{renderRawAmount(takerPayout)}</span></div>
-          <div className="flex justify-between"><span className="text-slate-400">{lang === 'TR' ? 'Toplam pool' : 'Total pool'}</span><span className="text-white font-bold">{renderRawAmount(totalPool)}</span></div>
-          <div className="flex justify-between"><span className="text-slate-400">makerShareBps</span><span className="text-emerald-400 font-mono">{makerShareBps}</span></div>
-          <div className="flex justify-between"><span className="text-slate-400">takerShareBps</span><span className="text-emerald-400 font-mono">{takerShareBps}</span></div>
+        <div className="mb-4">
+          <div className="flex justify-between text-xs font-semibold mb-1.5">
+            <span className="text-danger">{isTR ? 'Satıcı' : 'Seller'} {share(makerShareBps)}</span>
+            <span className="text-success">{isTR ? 'Alıcı' : 'Buyer'} {share(takerShareBps)}</span>
+          </div>
+          <div className="h-2.5 rounded-full overflow-hidden flex bg-elevated" aria-hidden="true">
+            <div className="bg-danger/70" style={{ width: `${barMaker}%` }} />
+            <div className="bg-success/70 flex-1" />
+          </div>
         </div>
 
-        <div className="mt-4 p-3 rounded-xl bg-[#1a1a1f] border border-[#2a2a2e] text-xs text-slate-300">
-          {lang === 'TR'
-            ? 'Araf bu dağılıma senin yerine karar vermez. Karşı taraf kabul ederse işlem bu oranla on-chain kapanır.'
-            : 'Araf does not decide this distribution for you. If the counterparty accepts, the trade will close on-chain with this split.'}
+        <div className="bg-elevated border border-borderSubtle rounded-xl px-4 py-1 text-sm divide-y divide-borderSubtle">
+          <Row label={isTR ? 'Satıcı alır' : 'Seller receives'} value={fmt(makerPayout)} strong you={userRole === 'maker'}
+            sub={makerFee != null ? `${isTR ? 'Ücret' : 'Fee'}: ${fmt(makerFee)}` : null} />
+          <Row label={isTR ? 'Alıcı alır' : 'Buyer receives'} value={fmt(takerPayout)} strong you={userRole === 'taker'}
+            sub={takerFee != null ? `${isTR ? 'Ücret' : 'Fee'}: ${fmt(takerFee)}` : null} />
+          <Row label={isTR ? 'Bölüşülen havuz' : 'Pool being split'} value={fmt(totalPool)}
+            sub={isTR ? 'Kalan ana para + iki teminat' : 'Remaining principal + both bonds'} />
+          {decayed != null && normalizeRawBigInt(decayed) > 0n && (
+            <Row label={isTR ? 'Şimdiye kadar eriyen' : 'Decayed so far'} value={fmt(decayed)} sub={isTR ? 'Hazineye gider, bölüşülmez' : 'Goes to treasury, not split'} />
+          )}
         </div>
 
-        {error && <p className="mt-3 text-xs text-red-400">{error}</p>}
+        <p className="mt-3 text-xs text-textSecondary">
+          {isTR
+            ? 'Araf bu oranı sizin yerinize belirlemez. Karşı taraf kabul ederse işlem bu oranla zincirde kapanır.'
+            : 'Araf does not pick this split for you. If the counterparty accepts, the trade closes on-chain with it.'}
+        </p>
 
-        <div className="mt-5 flex flex-col sm:flex-row gap-2">
+        {error && <p className="mt-3 text-xs text-danger bg-danger/10 border border-danger/40 rounded-lg p-2" role="alert">{error}</p>}
+
+        <div className="mt-5 flex flex-col-reverse sm:flex-row gap-2">
           <button
+            type="button"
             onClick={onClose}
-            className="w-full sm:w-auto px-4 py-2 rounded-lg border border-[#333] text-slate-300 hover:bg-[#1a1a1f] transition"
+            className="w-full sm:w-auto px-4 py-2.5 rounded-lg border border-borderStrong text-textSecondary hover:bg-elevated transition"
           >
-            {lang === 'TR' ? 'Kapat' : 'Close'}
+            {isTR ? 'Kapat' : 'Close'}
           </button>
           <button
+            type="button"
             onClick={onConfirm}
             disabled={disableConfirm || isLoading}
-            className={`w-full sm:flex-1 px-4 py-2 rounded-lg font-bold transition ${disableConfirm || isLoading ? 'bg-[#1a1a1f] text-slate-500 border border-[#2a2a2e] cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500 text-white'}`}
+            className="w-full sm:flex-1 px-4 py-2.5 rounded-lg font-bold transition bg-brand text-black hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {isLoading ? (lang === 'TR' ? 'İşleniyor...' : 'Processing...') : confirmLabel}
+            {isLoading ? (isTR ? 'İşleniyor…' : 'Processing…') : confirmLabel}
           </button>
         </div>
       </div>

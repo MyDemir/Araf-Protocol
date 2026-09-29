@@ -118,6 +118,7 @@ describe("admin routes resilience + pagination semantics", () => {
         MUTUAL_CANCEL: 5,
         BURNED: 1,
         DISPUTED_RESOLUTION: 6,
+        PAYMENT_WINDOW_EXPIRED: 7,
       };
       countDocumentsMock = jest.fn((filter = {}) => {
         const resolutionType = filter?.resolution_type;
@@ -150,6 +151,7 @@ describe("admin routes resilience + pagination semantics", () => {
       mutualCancelCount: 5,
       burnedCount: 1,
       disputedResolutionCount: 6,
+      paymentWindowExpiredCount: 7,
       unknownResolvedCount: 10,
     });
     const unknownQuery = countDocumentsMock.mock.calls

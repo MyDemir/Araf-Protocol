@@ -345,7 +345,7 @@ export default function SettlementProposalCard({
                 <button
                   onClick={settlementActions.withdraw}
                   disabled={isContractLoading || !hasOnchainTradeId || !settlementActions.canWithdraw}
-                  className="px-3 py-2 text-sm rounded-lg border border-orange-500/40 text-orange-400 hover:bg-orange-500 hover:text-white transition disabled:opacity-50"
+                  className="px-3 py-2 text-sm rounded-lg border border-warning/50 text-warning hover:bg-warning hover:text-white transition disabled:opacity-50"
                 >
                   {lang === 'TR' ? 'Geri Çek' : 'Withdraw'}
                 </button>
@@ -362,7 +362,7 @@ export default function SettlementProposalCard({
                   <button
                     onClick={settlementActions.reject}
                     disabled={isContractLoading || !hasOnchainTradeId || !settlementActions.canReject}
-                    className="px-3 py-2 text-sm rounded-lg border border-red-500/40 text-red-400 hover:bg-red-500 hover:text-white transition disabled:opacity-50"
+                    className="px-3 py-2 text-sm rounded-lg border border-danger/50 text-danger hover:bg-danger hover:text-white transition disabled:opacity-50"
                   >
                     {lang === 'TR' ? 'Reddet' : 'Reject'}
                   </button>
@@ -372,7 +372,7 @@ export default function SettlementProposalCard({
                 <button
                   onClick={settlementActions.expire}
                   disabled={isContractLoading || !hasOnchainTradeId || !settlementActions.canExpire}
-                  className="px-3 py-2 text-sm rounded-lg border border-yellow-500/40 text-yellow-400 hover:bg-yellow-500 hover:text-black transition disabled:opacity-50"
+                  className="px-3 py-2 text-sm rounded-lg border border-warning/50 text-warning hover:bg-warning hover:text-white transition disabled:opacity-50"
                 >
                   {lang === 'TR' ? 'Süresi Doldu Olarak İşaretle' : 'Mark as Expired'}
                 </button>
@@ -384,7 +384,7 @@ export default function SettlementProposalCard({
 
       {proposalIsRenderable && proposalState === 'FINALIZED' && (
         <div className="space-y-2 text-xs">
-          <p className="text-emerald-400 font-bold">{lang === 'TR' ? 'Uzlaşma tamamlandı' : 'Settlement finalized'}</p>
+          <p className="text-success font-bold">{lang === 'TR' ? 'Uzlaşma tamamlandı' : 'Settlement finalized'}</p>
           <p className="text-textSecondary">{lang === 'TR' ? 'Satıcıya' : 'Maker payout'}: <span className="font-mono">{proposal?.makerPayout ?? proposal?.maker_payout ?? '—'}</span></p>
           <p className="text-textSecondary">{lang === 'TR' ? 'Alıcıya' : 'Taker payout'}: <span className="font-mono">{proposal?.takerPayout ?? proposal?.taker_payout ?? '—'}</span></p>
           <p className="text-textMuted">{lang === 'TR' ? 'Tarih' : 'Finalized at'}: {safeDate(proposal?.finalizedAt ?? proposal?.finalized_at)}</p>
@@ -413,9 +413,12 @@ export default function SettlementProposalCard({
           ? settlementActions.accept
           : onConfirmCreate}
         confirmLabel={previewMode === 'accept'
-          ? (lang === 'TR' ? 'Kabul Et ve On-Chain Gönder' : 'Accept and Submit On-Chain')
-          : (lang === 'TR' ? 'Teklifi On-Chain Gönder' : 'Submit Proposal On-Chain')}
+          ? (lang === 'TR' ? 'Kabul et ve zincire gönder' : 'Accept and submit on-chain')
+          : (lang === 'TR' ? 'Teklifi zincire gönder' : 'Submit proposal on-chain')}
         disableConfirm={previewLoading || Boolean(previewError) || !hasOnchainTradeId}
+        userRole={userRole}
+        tokenSymbol={activeTrade?.crypto || 'USDT'}
+        decimals={activeTrade?.tokenDecimals ?? 6}
       />
     </div>
   );

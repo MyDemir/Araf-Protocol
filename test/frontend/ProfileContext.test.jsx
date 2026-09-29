@@ -35,7 +35,7 @@ describe('ProfileContextPage', () => {
 
     expect(screen.getByText('Profile Center')).toBeInTheDocument();
     fireEvent.click(screen.getByText('Security'));
-    expect(screen.getByText('Logout & Disconnect')).toBeInTheDocument();
+    expect(screen.getByText('Log out & disconnect')).toBeInTheDocument();
   });
 
   it('active trades tab uses go to room transition setters', () => {

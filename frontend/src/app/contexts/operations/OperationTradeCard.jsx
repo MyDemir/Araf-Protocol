@@ -2,7 +2,7 @@ import React from 'react';
 import { getStateLabel } from '../../copy/states';
 
 const roleCopy = {
-  maker: { TR: 'Maker', EN: 'Maker' },
+  maker: { TR: 'Satıcı', EN: 'Maker' },
   taker: { TR: 'Alıcı', EN: 'Taker' },
 };
 
@@ -91,8 +91,8 @@ const resolveCardModel = (escrow = {}, lang = 'EN') => {
   if (hasSettlementProposal) {
     const waitingForViewer = proposer && viewer && String(proposer).toLowerCase() !== String(viewer).toLowerCase();
     settlementCopy = waitingForViewer
-      ? (lang === 'TR' ? 'Settlement yanıtı gerekiyor' : 'Settlement needs your response')
-      : (lang === 'TR' ? 'Settlement yanıtı bekleniyor' : 'Waiting on settlement response');
+      ? (lang === 'TR' ? 'Uzlaşma teklifine yanıt verin' : 'Settlement needs your response')
+      : (lang === 'TR' ? 'Uzlaşma yanıtı bekleniyor' : 'Waiting on settlement response');
   }
 
   return {
@@ -137,8 +137,8 @@ export const OperationTradeCard = ({ escrow, lang = 'EN', onGoToRoom }) => {
           </div>
         )}
       </dl>
-      {model.settlementCopy && <p className="text-sm text-orange-300 mb-1">{model.settlementCopy}</p>}
-      {model.pendingSyncCopy && <p className="text-sm text-sky-300 mb-1">{model.pendingSyncCopy}</p>}
+      {model.settlementCopy && <p className="text-sm font-medium text-warning mb-1">{model.settlementCopy}</p>}
+      {model.pendingSyncCopy && <p className="text-sm font-medium text-info mb-1">{model.pendingSyncCopy}</p>}
       <button
         onClick={onGoToRoom}
         className="w-full bg-elevated hover:bg-surface text-textPrimary text-xs font-bold py-2 rounded-lg border border-borderStrong"

@@ -1,12 +1,18 @@
 import React from 'react';
 import { buildApiUrl } from './app/apiConfig';
 import { mapResolutionTypeLabel } from './app/useAppSessionData';
+import AdminRevenuePanel from './app/contexts/admin/AdminRevenuePanel';
+import AdminChainPanel from './app/contexts/admin/AdminChainPanel';
 
 const TAB_OVERVIEW = 'overview';
 const TAB_SYNC = 'sync';
 const TAB_FEEDBACK = 'feedback';
 const TAB_TRADES = 'trades';
 const TAB_SETTLEMENT = 'settlement';
+// [TR] Önceden hiç gösterilmeyen backend uçları ve kontrat owner ayarları için sekmeler.
+const TAB_REVENUE = 'revenue';
+const TAB_CHAIN = 'chain';
+const ALL_TABS = [TAB_OVERVIEW, TAB_SYNC, TAB_FEEDBACK, TAB_TRADES, TAB_SETTLEMENT, TAB_REVENUE, TAB_CHAIN];
 
 const FEEDBACK_CATEGORY_OPTIONS = ['', 'bug', 'suggestion', 'ui/ux', 'other'];
 const FEEDBACK_RATING_OPTIONS = ['', '1', '2', '3', '4', '5'];
@@ -40,12 +46,12 @@ const toWorkerLagLabel = (lag) => {
 
 const toBoolBadgeClass = (value) => (
   value
-    ? 'bg-emerald-900/30 text-emerald-300 border border-emerald-700/40'
-    : 'bg-[#1a1a1f] text-slate-300 border border-[#333]'
+    ? 'bg-success/10 text-success border border-success/40'
+    : 'bg-elevated text-textSecondary border border-borderStrong'
 );
 
-function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, showToast, initialTab = TAB_OVERVIEW }) {
-  const normalizeInitialTab = (tab) => ([TAB_OVERVIEW, TAB_SYNC, TAB_FEEDBACK, TAB_TRADES, TAB_SETTLEMENT].includes(tab) ? tab : TAB_OVERVIEW);
+function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, showToast, initialTab = TAB_OVERVIEW, readProtocolConfig = null, tokenSymbols = {} }) {
+  const normalizeInitialTab = (tab) => (ALL_TABS.includes(tab) ? tab : TAB_OVERVIEW);
   const [activeTab, setActiveTab] = React.useState(() => normalizeInitialTab(initialTab));
 
   React.useEffect(() => {
@@ -375,23 +381,28 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
   const settlementAnalytics = summary?.settlementAnalytics || {};
 
   const kpis = [
-    { labelTR: 'Readiness', labelEN: 'Readiness', value: readiness?.ok ? 'OK' : 'NOT_READY', tone: readiness?.ok ? 'text-emerald-400' : 'text-red-400' },
-    { labelTR: 'Worker State', labelEN: 'Worker State', value: worker?.state || '—', tone: 'text-slate-100' },
-    { labelTR: 'Worker Lag', labelEN: 'Worker Lag', value: toWorkerLagLabel(worker?.lagBlocks), tone: 'text-orange-400' },
-    { labelTR: 'Eksik Config', labelEN: 'Missing Config', value: `${missingConfig.length}`, tone: missingConfig.length ? 'text-red-400' : 'text-emerald-400' },
-    { labelTR: 'Aktif Child Trade', labelEN: 'Active Child Trades', value: `${stats?.active_child_trades ?? 0}`, tone: 'text-white' },
-    { labelTR: 'Açık Sell', labelEN: 'Open Sell Orders', value: `${stats?.open_sell_orders ?? 0}`, tone: 'text-white' },
-    { labelTR: 'Açık Buy', labelEN: 'Open Buy Orders', value: `${stats?.open_buy_orders ?? 0}`, tone: 'text-white' },
-    { labelTR: 'Tamamlanan İşlem', labelEN: 'Completed Trades', value: `${stats?.completed_trades ?? 0}`, tone: 'text-emerald-400' },
-    { labelTR: 'Yanan Bond', labelEN: 'Burned Bonds', value: `${stats?.burned_bonds_usdt ?? 0}`, tone: 'text-red-400' },
-    { labelTR: 'Eksik Snapshot', labelEN: 'Incomplete Snapshot Trades', value: `${tradeCounts?.incompleteSnapshot ?? 0}`, tone: 'text-orange-400' },
-    { labelTR: 'Challenged', labelEN: 'Challenged Trades', value: `${tradeCounts?.challenged ?? 0}`, tone: 'text-orange-400' },
-    { labelTR: 'DLQ Depth', labelEN: 'DLQ Depth', value: `${dlq?.depth ?? 0}`, tone: Number(dlq?.depth || 0) > 0 ? 'text-orange-400' : 'text-emerald-400' },
-    { labelTR: 'Aktif Settlement', labelEN: 'Active Settlement Proposals', value: `${settlementAnalytics?.activeSettlementProposals ?? 0}`, tone: 'text-cyan-300' },
-    { labelTR: 'Expired Settlement', labelEN: 'Expired Settlement Proposals', value: `${settlementAnalytics?.expiredSettlementProposals ?? 0}`, tone: 'text-orange-400' },
-    { labelTR: '24s Finalized', labelEN: 'Finalized 24h', value: `${settlementAnalytics?.finalizedSettlementProposals24h ?? 0}`, tone: 'text-emerald-400' },
-    { labelTR: 'Ort. Maker Split', labelEN: 'Avg Maker Split Bps', value: `${settlementAnalytics?.avgSettlementSplitMakerBps ?? '—'}`, tone: 'text-slate-100' },
-    { labelTR: 'Finalization Rate', labelEN: 'Settlement Finalization Rate', value: settlementAnalytics?.settlementFinalizationRate === null || settlementAnalytics?.settlementFinalizationRate === undefined ? '—' : `${Number(settlementAnalytics.settlementFinalizationRate * 100).toFixed(2)}%`, tone: 'text-slate-100' },
+    { labelTR: 'Readiness', labelEN: 'Readiness', value: readiness?.ok ? 'OK' : 'NOT_READY', tone: readiness?.ok ? 'text-success' : 'text-danger' },
+    { labelTR: 'Worker State', labelEN: 'Worker State', value: worker?.state || '—', tone: 'text-textPrimary' },
+    { labelTR: 'Worker Lag', labelEN: 'Worker Lag', value: toWorkerLagLabel(worker?.lagBlocks), tone: 'text-warning' },
+    { labelTR: 'Eksik Config', labelEN: 'Missing Config', value: `${missingConfig.length}`, tone: missingConfig.length ? 'text-danger' : 'text-success' },
+    { labelTR: 'Aktif Child Trade', labelEN: 'Active Child Trades', value: `${stats?.active_child_trades ?? 0}`, tone: 'text-textPrimary' },
+    { labelTR: 'Açık Sell', labelEN: 'Open Sell Orders', value: `${stats?.open_sell_orders ?? 0}`, tone: 'text-textPrimary' },
+    { labelTR: 'Açık Buy', labelEN: 'Open Buy Orders', value: `${stats?.open_buy_orders ?? 0}`, tone: 'text-textPrimary' },
+    { labelTR: 'Tamamlanan İşlem', labelEN: 'Completed Trades', value: `${stats?.completed_trades ?? 0}`, tone: 'text-success' },
+    // [TR] HistoricalStat'ta var olup gösterilmeyen emir/hacim alanları.
+    { labelTR: 'Gerçekleşen Hacim', labelEN: 'Executed Volume', value: `${stats?.executed_volume_usdt ?? 0}`, tone: 'text-textPrimary' },
+    { labelTR: 'Kısmi Dolu Emir', labelEN: 'Partially Filled', value: `${stats?.partially_filled_orders ?? 0}`, tone: 'text-textPrimary' },
+    { labelTR: 'Dolan Emir', labelEN: 'Filled Orders', value: `${stats?.filled_orders ?? 0}`, tone: 'text-textPrimary' },
+    { labelTR: 'İptal Emir', labelEN: 'Canceled Orders', value: `${stats?.canceled_orders ?? 0}`, tone: 'text-textPrimary' },
+    { labelTR: 'Yanan Bond', labelEN: 'Burned Bonds', value: `${stats?.burned_bonds_usdt ?? 0}`, tone: 'text-danger' },
+    { labelTR: 'Eksik Snapshot', labelEN: 'Incomplete Snapshot Trades', value: `${tradeCounts?.incompleteSnapshot ?? 0}`, tone: 'text-warning' },
+    { labelTR: 'Challenged', labelEN: 'Challenged Trades', value: `${tradeCounts?.challenged ?? 0}`, tone: 'text-warning' },
+    { labelTR: 'DLQ Depth', labelEN: 'DLQ Depth', value: `${dlq?.depth ?? 0}`, tone: Number(dlq?.depth || 0) > 0 ? 'text-warning' : 'text-success' },
+    { labelTR: 'Aktif Settlement', labelEN: 'Active Settlement Proposals', value: `${settlementAnalytics?.activeSettlementProposals ?? 0}`, tone: 'text-info' },
+    { labelTR: 'Expired Settlement', labelEN: 'Expired Settlement Proposals', value: `${settlementAnalytics?.expiredSettlementProposals ?? 0}`, tone: 'text-warning' },
+    { labelTR: '24s Finalized', labelEN: 'Finalized 24h', value: `${settlementAnalytics?.finalizedSettlementProposals24h ?? 0}`, tone: 'text-success' },
+    { labelTR: 'Ort. Maker Split', labelEN: 'Avg Maker Split Bps', value: `${settlementAnalytics?.avgSettlementSplitMakerBps ?? '—'}`, tone: 'text-textPrimary' },
+    { labelTR: 'Finalization Rate', labelEN: 'Settlement Finalization Rate', value: settlementAnalytics?.settlementFinalizationRate === null || settlementAnalytics?.settlementFinalizationRate === undefined ? '—' : `${Number(settlementAnalytics.settlementFinalizationRate * 100).toFixed(2)}%`, tone: 'text-textPrimary' },
   ];
 
   const updateFeedbackFilter = (key, value) => {
@@ -460,15 +471,15 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
   };
 
   const renderErrorBox = (message) => (
-    <div className="bg-[#1b1010] border border-red-800/40 text-red-300 rounded-xl px-4 py-3 text-sm">
+    <div className="bg-danger/10 border border-danger/40 text-danger rounded-xl px-4 py-3 text-sm">
       {message}
     </div>
   );
 
   const renderUnauthorizedBox = (title, description) => (
-    <div className="bg-[#111113] border border-red-800/40 rounded-xl p-6">
-      <h3 className="text-red-300 text-lg font-semibold mb-2">{title}</h3>
-      <p className="text-slate-300 text-sm">{description}</p>
+    <div className="bg-surface border border-danger/40 rounded-xl p-6">
+      <h3 className="text-danger text-lg font-semibold mb-2">{title}</h3>
+      <p className="text-textSecondary text-sm">{description}</p>
     </div>
   );
 
@@ -478,21 +489,21 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
     <div className="p-4 md:p-8 max-w-[1200px] w-full">
       <div className="mb-6 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold text-white">{lang === 'TR' ? 'Admin Paneli' : 'Admin Panel'}</h1>
-          <p className="text-slate-400 text-sm mt-1">{lang === 'TR' ? 'Read-only gözlem: Overview + Sync + Feedback' : 'Read-only observability: Overview + Sync + Feedback'}</p>
+          <h1 className="text-2xl md:text-3xl font-bold text-textPrimary">{lang === 'TR' ? 'Admin Paneli' : 'Admin Panel'}</h1>
+          <p className="text-textSecondary text-sm mt-1">{lang === 'TR' ? 'Salt okunur gözlem: sistem, işlemler, gelir ve kontrat ayarları' : 'Read-only observability: system, trades, revenue and contract settings'}</p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="text-xs text-slate-500">
+          <div className="text-xs text-textMuted">
             {lang === 'TR' ? 'Son yenileme' : 'Last refreshed'}: {formatDate(lastRefreshedAt)}
           </div>
-          <button onClick={refreshSummaryNow} disabled={summaryLoading} className="bg-[#173428] hover:bg-[#1b3d2e] disabled:opacity-60 border border-emerald-800/50 text-emerald-300 rounded-lg px-3 py-1.5 text-xs font-semibold">
+          <button onClick={refreshSummaryNow} disabled={summaryLoading} className="bg-success/15 hover:bg-success/25 disabled:opacity-60 border border-success/40 text-success rounded-lg px-3 py-1.5 text-xs font-semibold">
             {summaryLoading ? '…' : (lang === 'TR' ? 'Özet Yenile' : 'Refresh Summary')}
           </button>
         </div>
       </div>
 
-      <div className="mb-6 flex gap-2">
-        {[TAB_OVERVIEW, TAB_SYNC, TAB_FEEDBACK, TAB_TRADES, TAB_SETTLEMENT].map((tab) => {
+      <div className="mb-6 -mx-4 px-4 md:mx-0 md:px-0 flex gap-2 overflow-x-auto no-scrollbar">
+        {ALL_TABS.map((tab) => {
           const label = tab === TAB_OVERVIEW
             ? (lang === 'TR' ? 'Overview' : 'Overview')
             : tab === TAB_SYNC
@@ -501,13 +512,17 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
                 ? (lang === 'TR' ? 'Feedback' : 'Feedback')
                 : tab === TAB_TRADES
                   ? (lang === 'TR' ? 'Trades' : 'Trades')
-                  : (lang === 'TR' ? 'Settlement' : 'Settlement');
+                  : tab === TAB_SETTLEMENT
+                    ? (lang === 'TR' ? 'Settlement' : 'Settlement')
+                    : tab === TAB_REVENUE
+                      ? (lang === 'TR' ? 'Gelir & Ödül' : 'Revenue & Rewards')
+                      : (lang === 'TR' ? 'Kontrat' : 'On-chain');
           const active = activeTab === tab;
           return (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`px-4 py-2 rounded-lg border text-sm font-semibold transition ${active ? 'bg-[#1b1f1c] border-emerald-700 text-emerald-300' : 'bg-[#111113] border-[#222] text-slate-300 hover:text-white hover:border-[#333]'}`}
+              className={`shrink-0 px-4 py-2 rounded-lg border text-sm font-semibold transition ${active ? 'bg-success/10 border-success/40 text-success' : 'bg-surface border-borderSubtle text-textSecondary hover:text-textPrimary hover:border-borderStrong'}`}
             >
               {label}
             </button>
@@ -524,19 +539,76 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
               : 'You are not authorized to view this admin summary screen.'
           )}
           {!summaryUnauthorized && summaryError && renderErrorBox(summaryError)}
-          {summaryLoading && <div className="text-slate-400 text-sm">{lang === 'TR' ? 'Özet yükleniyor...' : 'Loading summary...'}</div>}
+          {summaryLoading && <div className="text-textSecondary text-sm">{lang === 'TR' ? 'Özet yükleniyor...' : 'Loading summary...'}</div>}
           {!summaryUnauthorized && !summaryLoading && !summaryError && !summary && (
-            <div className="text-slate-500 text-sm">{lang === 'TR' ? 'Özet verisi henüz yok.' : 'No summary data yet.'}</div>
+            <div className="text-textMuted text-sm">{lang === 'TR' ? 'Özet verisi henüz yok.' : 'No summary data yet.'}</div>
           )}
 
-          {!summaryUnauthorized && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+          {/* [TR] Veri yokken (401/hata) sıfırlarla dolu sahte KPI ızgarası gösterilmez. */}
+          {!summaryUnauthorized && summary && (
+            <div className="grid grid-cols-2 xl:grid-cols-4 gap-2 md:gap-3">
               {kpis.map((kpi) => (
-                <div key={kpi.labelEN} className="bg-[#111113] border border-[#222] rounded-xl px-4 py-3">
-                  <div className="text-[11px] uppercase tracking-wider text-slate-500 mb-1">{lang === 'TR' ? kpi.labelTR : kpi.labelEN}</div>
+                <div key={kpi.labelEN} className="bg-surface border border-borderSubtle rounded-xl px-3 py-2.5 md:px-4 md:py-3">
+                  <div className="text-[11px] uppercase tracking-wider text-textMuted mb-1">{lang === 'TR' ? kpi.labelTR : kpi.labelEN}</div>
                   <div className={`text-xl font-bold ${kpi.tone}`}>{kpi.value}</div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* [TR] Kontratın TerminalOutcome dağılımı (backend resolutionAnalytics) ve zamanlanmış işler — daha önce hiç gösterilmiyordu. */}
+          {!summaryUnauthorized && summary && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              <div className="bg-surface border border-borderSubtle rounded-xl p-4" data-testid="admin-resolution-breakdown">
+                <p className="text-xs font-bold uppercase tracking-wide text-textMuted mb-2">{lang === 'TR' ? 'Kapanış türleri (kontrat sonucu)' : 'Resolution outcomes (contract)'}</p>
+                {(() => {
+                  const ra = summary?.resolutionAnalytics || {};
+                  const rows = [
+                    ['manualReleaseCount', 'Manuel onay', 'Manual release', 'text-success'],
+                    ['autoReleaseCount', 'Otomatik serbest bırakma', 'Auto-release', 'text-info'],
+                    ['partialSettlementCount', 'Kısmi uzlaşma', 'Partial settlement', 'text-info'],
+                    ['mutualCancelCount', 'Karşılıklı iptal', 'Mutual cancel', 'text-textPrimary'],
+                    ['paymentWindowExpiredCount', 'Ödeme süresi doldu (48s)', 'Payment window expired (48h)', 'text-warning'],
+                    ['disputedResolutionCount', 'İtirazlı onay', 'Disputed release', 'text-warning'],
+                    ['burnedCount', 'Yakıldı', 'Burned', 'text-danger'],
+                    ['unknownResolvedCount', 'Bilinmeyen', 'Unknown', 'text-textMuted'],
+                  ];
+                  const total = rows.reduce((acc, [k]) => acc + Number(ra[k] || 0), 0);
+                  return (
+                    <div className="divide-y divide-borderSubtle text-sm">
+                      {rows.map(([k, tr, en, tone]) => {
+                        const v = Number(ra[k] || 0);
+                        const pct = total > 0 ? Math.round((v / total) * 100) : 0;
+                        return (
+                          <div key={k} className="flex items-center justify-between gap-3 py-1.5">
+                            <span className="text-textSecondary">{lang === 'TR' ? tr : en}</span>
+                            <span className={`tabular-nums font-semibold ${tone}`}>{v}<span className="ml-1 text-xs font-normal text-textMuted">%{pct}</span></span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </div>
+              <div className="bg-surface border border-borderSubtle rounded-xl p-4" data-testid="admin-scheduler">
+                <p className="text-xs font-bold uppercase tracking-wide text-textMuted mb-2">{lang === 'TR' ? 'Zamanlanmış işler (son çalışma)' : 'Scheduled jobs (last run)'}</p>
+                <div className="divide-y divide-borderSubtle text-sm">
+                  {[
+                    ['reputationDecayLastRunAt', 'İtibar sönümleme', 'Reputation decay'],
+                    ['statsSnapshotLastRunAt', 'İstatistik anlık görüntüsü', 'Stats snapshot'],
+                    ['sensitiveCleanupLastRunAt', 'Hassas veri temizliği', 'Sensitive data cleanup'],
+                    ['userBankRiskCleanupLastRunAt', 'Banka risk temizliği', 'Bank risk cleanup'],
+                  ].map(([k, tr, en]) => (
+                    <div key={k} className="flex items-center justify-between gap-3 py-1.5">
+                      <span className="text-textSecondary">{lang === 'TR' ? tr : en}</span>
+                      <span className={`tabular-nums ${summary?.scheduler?.[k] ? 'text-textPrimary' : 'text-warning'}`}>{summary?.scheduler?.[k] ? formatDate(summary.scheduler[k]) : (lang === 'TR' ? 'Hiç çalışmadı' : 'Never ran')}</span>
+                    </div>
+                  ))}
+                  {summary?.degraded?.isDegraded && (
+                    <div className="py-1.5 text-xs text-warning">{lang === 'TR' ? 'Kısmi veri: ' : 'Partial data: '}{(summary.degraded.errors || []).map((e) => e.source).join(', ')}</div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
         </section>
@@ -551,27 +623,27 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
               : 'You are not authorized to view this admin sync screen.'
           )}
           {!summaryUnauthorized && summaryError && renderErrorBox(summaryError)}
-          {!summaryUnauthorized && summaryLoading && <div className="text-slate-400 text-sm">{lang === 'TR' ? 'Sync verisi yükleniyor...' : 'Loading sync data...'}</div>}
+          {!summaryUnauthorized && summaryLoading && <div className="text-textSecondary text-sm">{lang === 'TR' ? 'Sync verisi yükleniyor...' : 'Loading sync data...'}</div>}
           {!summaryUnauthorized && !summaryLoading && !summaryError && !summary && (
-            <div className="text-slate-500 text-sm">{lang === 'TR' ? 'Sync verisi henüz yok.' : 'No sync data yet.'}</div>
+            <div className="text-textMuted text-sm">{lang === 'TR' ? 'Sync verisi henüz yok.' : 'No sync data yet.'}</div>
           )}
           {summaryUnauthorized ? null : (
             <>
-          <div className="bg-[#111113] border border-[#222] rounded-xl p-4">
-            <h2 className="text-sm font-bold text-white mb-3">{lang === 'TR' ? 'Health Checklist' : 'Health Checklist'}</h2>
+          <div className="bg-surface border border-borderSubtle rounded-xl p-4">
+            <h2 className="text-sm font-bold text-textPrimary mb-3">{lang === 'TR' ? 'Health Checklist' : 'Health Checklist'}</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
               {Object.entries(checks).map(([key, value]) => (
-                <div key={key} className="flex items-center justify-between bg-[#0d0d0f] border border-[#1d1d1f] rounded-lg px-3 py-2 text-sm">
-                  <span className="text-slate-300">{key}</span>
-                  <span className={value ? 'text-emerald-400 font-semibold' : 'text-red-400 font-semibold'}>{String(value)}</span>
+                <div key={key} className="flex items-center justify-between bg-elevated border border-borderSubtle rounded-lg px-3 py-2 text-sm">
+                  <span className="text-textSecondary">{key}</span>
+                  <span className={value ? 'text-success font-semibold' : 'text-danger font-semibold'}>{String(value)}</span>
                 </div>
               ))}
-              {Object.keys(checks).length === 0 && <div className="text-slate-500 text-sm">—</div>}
+              {Object.keys(checks).length === 0 && <div className="text-textMuted text-sm">—</div>}
             </div>
           </div>
 
-          <div className="bg-[#111113] border border-[#222] rounded-xl p-4">
-            <h2 className="text-sm font-bold text-white mb-3">{lang === 'TR' ? 'Worker Snapshot' : 'Worker Snapshot'}</h2>
+          <div className="bg-surface border border-borderSubtle rounded-xl p-4">
+            <h2 className="text-sm font-bold text-textPrimary mb-3">{lang === 'TR' ? 'Worker Snapshot' : 'Worker Snapshot'}</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
               {[
                 ['state', worker?.state],
@@ -582,22 +654,22 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
                 ['maxAllowedLagBlocks', worker?.maxAllowedLagBlocks],
                 ['livePollInProgress', worker?.livePollInProgress],
               ].map(([label, value]) => (
-                <div key={label} className="bg-[#0d0d0f] border border-[#1d1d1f] rounded-lg px-3 py-2 flex items-center justify-between">
-                  <span className="text-slate-300">{label}</span>
-                  <span className="text-white font-medium">{value === null || value === undefined ? '—' : String(value)}</span>
+                <div key={label} className="bg-elevated border border-borderSubtle rounded-lg px-3 py-2 flex items-center justify-between">
+                  <span className="text-textSecondary">{label}</span>
+                  <span className="text-textPrimary font-medium">{value === null || value === undefined ? '—' : String(value)}</span>
                 </div>
               ))}
             </div>
           </div>
 
-          <div className="bg-[#111113] border border-[#222] rounded-xl p-4">
-            <h2 className="text-sm font-bold text-white mb-3">{lang === 'TR' ? 'Missing Config' : 'Missing Config'}</h2>
+          <div className="bg-surface border border-borderSubtle rounded-xl p-4">
+            <h2 className="text-sm font-bold text-textPrimary mb-3">{lang === 'TR' ? 'Missing Config' : 'Missing Config'}</h2>
             {missingConfig.length === 0 ? (
-              <div className="text-emerald-400 text-sm">{lang === 'TR' ? 'Eksik config yok.' : 'No missing config.'}</div>
+              <div className="text-success text-sm">{lang === 'TR' ? 'Eksik config yok.' : 'No missing config.'}</div>
             ) : (
               <ul className="space-y-2">
                 {missingConfig.map((item) => (
-                  <li key={item} className="text-red-300 text-sm bg-[#1b1010] border border-red-800/30 rounded-lg px-3 py-2">{item}</li>
+                  <li key={item} className="text-danger text-sm bg-danger/10 border border-danger/40 rounded-lg px-3 py-2">{item}</li>
                 ))}
               </ul>
             )}
@@ -616,36 +688,36 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
               : 'You are not authorized to view this admin feedback screen.'
           )}
           {!feedbackUnauthorized && feedbackError && renderErrorBox(feedbackError)}
-          {!feedbackUnauthorized && feedbackLoading && <div className="text-slate-400 text-sm">{lang === 'TR' ? 'Feedback yükleniyor...' : 'Loading feedback...'}</div>}
+          {!feedbackUnauthorized && feedbackLoading && <div className="text-textSecondary text-sm">{lang === 'TR' ? 'Feedback yükleniyor...' : 'Loading feedback...'}</div>}
 
-          {!feedbackUnauthorized && <div className="bg-[#111113] border border-[#222] rounded-xl p-4">
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
-              <label className="text-sm text-slate-300 flex flex-col gap-1">
+          {!feedbackUnauthorized && <div className="bg-surface border border-borderSubtle rounded-xl p-4">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+              <label className="text-sm text-textSecondary flex flex-col gap-1">
                 <span>{lang === 'TR' ? 'Kategori' : 'Category'}</span>
-                <select value={feedbackFilters.category} onChange={(e) => updateFeedbackFilter('category', e.target.value)} className="bg-[#0d0d0f] border border-[#222] rounded-lg px-3 py-2 text-white">
+                <select value={feedbackFilters.category} onChange={(e) => updateFeedbackFilter('category', e.target.value)} className="bg-elevated border border-borderSubtle rounded-lg px-3 py-2 text-textPrimary">
                   {FEEDBACK_CATEGORY_OPTIONS.map((opt) => (
                     <option key={opt || 'all'} value={opt}>{opt || (lang === 'TR' ? 'Tümü' : 'All')}</option>
                   ))}
                 </select>
               </label>
 
-              <label className="text-sm text-slate-300 flex flex-col gap-1">
+              <label className="text-sm text-textSecondary flex flex-col gap-1">
                 <span>{lang === 'TR' ? 'Puan' : 'Rating'}</span>
-                <select value={feedbackFilters.rating} onChange={(e) => updateFeedbackFilter('rating', e.target.value)} className="bg-[#0d0d0f] border border-[#222] rounded-lg px-3 py-2 text-white">
+                <select value={feedbackFilters.rating} onChange={(e) => updateFeedbackFilter('rating', e.target.value)} className="bg-elevated border border-borderSubtle rounded-lg px-3 py-2 text-textPrimary">
                   {FEEDBACK_RATING_OPTIONS.map((opt) => (
                     <option key={opt || 'all'} value={opt}>{opt || (lang === 'TR' ? 'Tümü' : 'All')}</option>
                   ))}
                 </select>
               </label>
 
-              <label className="text-sm text-slate-300 flex flex-col gap-1">
+              <label className="text-sm text-textSecondary flex flex-col gap-1">
                 <span>Page</span>
-                <input type="number" min="1" value={feedbackFilters.page} onChange={(e) => updateFeedbackFilter('page', e.target.value)} className="bg-[#0d0d0f] border border-[#222] rounded-lg px-3 py-2 text-white" />
+                <input type="number" min="1" value={feedbackFilters.page} onChange={(e) => updateFeedbackFilter('page', e.target.value)} className="bg-elevated border border-borderSubtle rounded-lg px-3 py-2 text-textPrimary" />
               </label>
 
-              <label className="text-sm text-slate-300 flex flex-col gap-1">
+              <label className="text-sm text-textSecondary flex flex-col gap-1">
                 <span>Limit</span>
-                <select value={feedbackFilters.limit} onChange={(e) => updateFeedbackFilter('limit', e.target.value)} className="bg-[#0d0d0f] border border-[#222] rounded-lg px-3 py-2 text-white">
+                <select value={feedbackFilters.limit} onChange={(e) => updateFeedbackFilter('limit', e.target.value)} className="bg-elevated border border-borderSubtle rounded-lg px-3 py-2 text-textPrimary">
                   {FEEDBACK_LIMIT_OPTIONS.map((opt) => (
                     <option key={opt} value={opt}>{opt}</option>
                   ))}
@@ -653,17 +725,17 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
               </label>
 
               <div className="flex items-end">
-                <button onClick={refreshFeedbackNow} disabled={feedbackLoading} className="w-full bg-[#173428] hover:bg-[#1b3d2e] disabled:opacity-60 border border-emerald-800/50 text-emerald-300 rounded-lg px-3 py-2 text-sm font-semibold">
+                <button onClick={refreshFeedbackNow} disabled={feedbackLoading} className="w-full bg-success/15 hover:bg-success/25 disabled:opacity-60 border border-success/40 text-success rounded-lg px-3 py-2 text-sm font-semibold">
                   {feedbackLoading ? (lang === 'TR' ? 'Yükleniyor...' : 'Loading...') : (lang === 'TR' ? 'Yenile' : 'Refresh')}
                 </button>
               </div>
             </div>
           </div>}
 
-          {!feedbackUnauthorized && <div className="bg-[#111113] border border-[#222] rounded-xl overflow-x-auto">
+          {!feedbackUnauthorized && <div className="bg-surface border border-borderSubtle rounded-xl overflow-x-auto">
             <table className="w-full min-w-[900px] text-sm">
               <thead>
-                <tr className="bg-[#0d0d0f] border-b border-[#222] text-slate-300">
+                <tr className="bg-elevated border-b border-borderSubtle text-textSecondary">
                   <th className="text-left px-3 py-2">{lang === 'TR' ? 'Tarih' : 'Date'}</th>
                   <th className="text-left px-3 py-2">Wallet</th>
                   <th className="text-left px-3 py-2">Rating</th>
@@ -673,26 +745,26 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
               </thead>
               <tbody>
                 {feedback.map((row) => (
-                  <tr key={row._id} className="border-b border-[#1c1c1f]">
-                    <td className="px-3 py-2 text-slate-300">{formatDate(row.created_at)}</td>
-                    <td className="px-3 py-2 text-slate-400 font-mono">{shortenWallet(row.wallet_address)}</td>
-                    <td className="px-3 py-2 text-white">{row.rating ?? '—'}</td>
-                    <td className="px-3 py-2 text-slate-300">{row.category || '—'}</td>
-                    <td className="px-3 py-2 text-slate-300 max-w-[420px]">
+                  <tr key={row._id} className="border-b border-borderSubtle">
+                    <td className="px-3 py-2 text-textSecondary">{formatDate(row.created_at)}</td>
+                    <td className="px-3 py-2 text-textSecondary font-mono">{shortenWallet(row.wallet_address)}</td>
+                    <td className="px-3 py-2 text-textPrimary">{row.rating ?? '—'}</td>
+                    <td className="px-3 py-2 text-textSecondary">{row.category || '—'}</td>
+                    <td className="px-3 py-2 text-textSecondary max-w-[420px]">
                       <div className="truncate" title={row.comment || ''}>{row.comment || '—'}</div>
                     </td>
                   </tr>
                 ))}
                 {!feedbackLoading && feedback.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-3 py-5 text-center text-slate-500">{lang === 'TR' ? 'Kayıt bulunamadı.' : 'No records found.'}</td>
+                    <td colSpan={5} className="px-3 py-5 text-center text-textMuted">{lang === 'TR' ? 'Kayıt bulunamadı.' : 'No records found.'}</td>
                   </tr>
                 )}
               </tbody>
             </table>
           </div>}
 
-          {!feedbackUnauthorized && <div className="text-xs text-slate-500">
+          {!feedbackUnauthorized && <div className="text-xs text-textMuted">
             {lang === 'TR' ? 'Toplam kayıt' : 'Total records'}: {feedbackTotal}
           </div>}
         </section>
@@ -707,63 +779,63 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
               : 'You are not authorized to view this admin trades screen.'
           )}
           {!tradesUnauthorized && tradesError && renderErrorBox(tradesError)}
-          {!tradesUnauthorized && tradesLoading && <div className="text-slate-400 text-sm">{lang === 'TR' ? 'Trades yükleniyor...' : 'Loading trades...'}</div>}
+          {!tradesUnauthorized && tradesLoading && <div className="text-textSecondary text-sm">{lang === 'TR' ? 'Trades yükleniyor...' : 'Loading trades...'}</div>}
 
           {!tradesUnauthorized && (
-            <div className="bg-[#111113] border border-[#222] rounded-xl p-4 space-y-3">
-              <p className="text-xs text-slate-400">
+            <div className="bg-surface border border-borderSubtle rounded-xl p-4 space-y-3">
+              <p className="text-xs text-textSecondary">
                 {lang === 'TR'
                   ? 'Admin trades yüzeyi yalnız gözlem amaçlıdır; hiçbir aksiyon/authority içermez.'
                   : 'Admin trades surface is observability-only; no actions/authority are exposed.'}
               </p>
 
-              <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-7 gap-3">
-                <label className="text-sm text-slate-300 flex flex-col gap-1">
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+                <label className="text-sm text-textSecondary flex flex-col gap-1">
                   <span>Status</span>
-                  <select value={tradesFilters.status} onChange={(e) => updateTradesFilter('status', e.target.value)} className="bg-[#0d0d0f] border border-[#222] rounded-lg px-3 py-2 text-white">
+                  <select value={tradesFilters.status} onChange={(e) => updateTradesFilter('status', e.target.value)} className="bg-elevated border border-borderSubtle rounded-lg px-3 py-2 text-textPrimary">
                     {TRADES_STATUS_OPTIONS.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
                   </select>
                 </label>
 
-                <label className="text-sm text-slate-300 flex flex-col gap-1">
+                <label className="text-sm text-textSecondary flex flex-col gap-1">
                   <span>Tier</span>
-                  <select value={tradesFilters.tier} onChange={(e) => updateTradesFilter('tier', e.target.value)} className="bg-[#0d0d0f] border border-[#222] rounded-lg px-3 py-2 text-white">
+                  <select value={tradesFilters.tier} onChange={(e) => updateTradesFilter('tier', e.target.value)} className="bg-elevated border border-borderSubtle rounded-lg px-3 py-2 text-textPrimary">
                     {TRADES_TIER_OPTIONS.map((opt) => <option key={opt || 'all'} value={opt}>{opt === '' ? 'ALL' : opt}</option>)}
                   </select>
                 </label>
 
-                <label className="text-sm text-slate-300 flex flex-col gap-1">
+                <label className="text-sm text-textSecondary flex flex-col gap-1">
                   <span>Origin</span>
-                  <select value={tradesFilters.origin} onChange={(e) => updateTradesFilter('origin', e.target.value)} className="bg-[#0d0d0f] border border-[#222] rounded-lg px-3 py-2 text-white">
+                  <select value={tradesFilters.origin} onChange={(e) => updateTradesFilter('origin', e.target.value)} className="bg-elevated border border-borderSubtle rounded-lg px-3 py-2 text-textPrimary">
                     {TRADES_ORIGIN_OPTIONS.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
                   </select>
                 </label>
 
-                <label className="text-sm text-slate-300 flex flex-col gap-1">
+                <label className="text-sm text-textSecondary flex flex-col gap-1">
                   <span>Snapshot</span>
-                  <select value={tradesFilters.snapshotComplete} onChange={(e) => updateTradesFilter('snapshotComplete', e.target.value)} className="bg-[#0d0d0f] border border-[#222] rounded-lg px-3 py-2 text-white">
+                  <select value={tradesFilters.snapshotComplete} onChange={(e) => updateTradesFilter('snapshotComplete', e.target.value)} className="bg-elevated border border-borderSubtle rounded-lg px-3 py-2 text-textPrimary">
                     {TRADES_SNAPSHOT_OPTIONS.map((opt) => <option key={opt} value={opt}>{opt === 'ALL' ? 'ALL' : opt === 'true' ? 'Complete' : 'Incomplete'}</option>)}
                   </select>
                 </label>
 
-                <label className="text-sm text-slate-300 flex flex-col gap-1">
+                <label className="text-sm text-textSecondary flex flex-col gap-1">
                   <span>Page</span>
-                  <input type="number" min="1" value={tradesFilters.page} onChange={(e) => updateTradesFilter('page', e.target.value)} className="bg-[#0d0d0f] border border-[#222] rounded-lg px-3 py-2 text-white" />
+                  <input type="number" min="1" value={tradesFilters.page} onChange={(e) => updateTradesFilter('page', e.target.value)} className="bg-elevated border border-borderSubtle rounded-lg px-3 py-2 text-textPrimary" />
                 </label>
 
-                <label className="text-sm text-slate-300 flex flex-col gap-1">
+                <label className="text-sm text-textSecondary flex flex-col gap-1">
                   <span>Limit</span>
-                  <select value={tradesFilters.limit} onChange={(e) => updateTradesFilter('limit', e.target.value)} className="bg-[#0d0d0f] border border-[#222] rounded-lg px-3 py-2 text-white">
+                  <select value={tradesFilters.limit} onChange={(e) => updateTradesFilter('limit', e.target.value)} className="bg-elevated border border-borderSubtle rounded-lg px-3 py-2 text-textPrimary">
                     {TRADES_LIMIT_OPTIONS.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
                   </select>
                 </label>
 
                 <div className="flex flex-col justify-end gap-2">
-                  <label className="text-sm text-slate-300 flex items-center gap-2">
+                  <label className="text-sm text-textSecondary flex items-center gap-2">
                     <input type="checkbox" checked={tradesFilters.riskOnly} onChange={(e) => updateTradesFilter('riskOnly', e.target.checked)} />
                     Risk Only
                   </label>
-                  <button onClick={refreshTradesNow} disabled={tradesLoading} className="bg-[#173428] hover:bg-[#1b3d2e] disabled:opacity-60 border border-emerald-800/50 text-emerald-300 rounded-lg px-3 py-2 text-sm font-semibold">
+                  <button onClick={refreshTradesNow} disabled={tradesLoading} className="bg-success/15 hover:bg-success/25 disabled:opacity-60 border border-success/40 text-success rounded-lg px-3 py-2 text-sm font-semibold">
                     {tradesLoading ? (lang === 'TR' ? 'Yükleniyor...' : 'Loading...') : (lang === 'TR' ? 'Yenile' : 'Refresh')}
                   </button>
                 </div>
@@ -772,10 +844,10 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
           )}
 
           {!tradesUnauthorized && (
-            <div className="bg-[#111113] border border-[#222] rounded-xl overflow-x-auto">
+            <div className="bg-surface border border-borderSubtle rounded-xl overflow-x-auto">
               <table className="w-full min-w-[1700px] text-sm">
                 <thead>
-                  <tr className="bg-[#0d0d0f] border-b border-[#222] text-slate-300">
+                  <tr className="bg-elevated border-b border-borderSubtle text-textSecondary">
                     <th className="text-left px-3 py-2">Escrow ID</th>
                     <th className="text-left px-3 py-2">Parent Order ID</th>
                     <th className="text-left px-3 py-2">Maker</th>
@@ -805,64 +877,64 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
 
                     return (
                       <React.Fragment key={id}>
-                        <tr className="border-b border-[#1c1c1f] cursor-pointer hover:bg-[#121217]" onClick={() => toggleTradeExpanded(id)}>
-                          <td className="px-3 py-2 text-emerald-300 font-mono">{row.onchain_escrow_id || '—'}</td>
-                          <td className="px-3 py-2 text-slate-300 font-mono">{row.parent_order_id || '—'}</td>
-                          <td className="px-3 py-2 text-slate-300 font-mono">{shortenWallet(row.maker_address)}</td>
-                          <td className="px-3 py-2 text-slate-300 font-mono">{shortenWallet(row.taker_address)}</td>
+                        <tr className="border-b border-borderSubtle cursor-pointer hover:bg-surface" onClick={() => toggleTradeExpanded(id)}>
+                          <td className="px-3 py-2 text-success font-mono">{row.onchain_escrow_id || '—'}</td>
+                          <td className="px-3 py-2 text-textSecondary font-mono">{row.parent_order_id || '—'}</td>
+                          <td className="px-3 py-2 text-textSecondary font-mono">{shortenWallet(row.maker_address)}</td>
+                          <td className="px-3 py-2 text-textSecondary font-mono">{shortenWallet(row.taker_address)}</td>
                           <td className="px-3 py-2">
                             <div className="flex flex-col gap-1 items-start">
-                              <span className={`px-2 py-1 rounded text-xs ${row.status === 'CHALLENGED' ? 'bg-red-900/40 text-red-300 border border-red-700/40' : 'bg-[#1a1a1f] text-slate-200 border border-[#333]'}`}>{row.status || '—'}</span>
+                              <span className={`px-2 py-1 rounded text-xs ${row.status === 'CHALLENGED' ? 'bg-danger/10 text-danger border border-danger/40' : 'bg-elevated text-textPrimary border border-borderStrong'}`}>{row.status || '—'}</span>
                               {['RESOLVED', 'CANCELED', 'BURNED'].includes(row.status) && (
-                                <span className="text-[10px] text-slate-400">{mapResolutionTypeLabel(row?.resolution_type, lang)}</span>
+                                <span className="text-[10px] text-textSecondary">{mapResolutionTypeLabel(row?.resolution_type, lang)}</span>
                               )}
                             </div>
                           </td>
-                          <td className="px-3 py-2 text-white">{row.tier ?? '—'}</td>
-                          <td className="px-3 py-2 text-slate-300">{row.trade_origin || '—'}</td>
-                          <td className="px-3 py-2 text-slate-300 font-mono">{row.token_address ? shortenWallet(row.token_address) : '—'}</td>
+                          <td className="px-3 py-2 text-textPrimary">{row.tier ?? '—'}</td>
+                          <td className="px-3 py-2 text-textSecondary">{row.trade_origin || '—'}</td>
+                          <td className="px-3 py-2 text-textSecondary font-mono">{row.token_address ? shortenWallet(row.token_address) : '—'}</td>
                           <td className="px-3 py-2"><span className={`px-2 py-1 rounded text-xs ${toBoolBadgeClass(row?.payout_snapshot?.is_complete === true)}`}>{row?.payout_snapshot?.is_complete === true ? 'true' : 'false'}</span></td>
-                          <td className="px-3 py-2 text-slate-300">{row?.payout_snapshot?.incomplete_reason || '—'}</td>
+                          <td className="px-3 py-2 text-textSecondary">{row?.payout_snapshot?.incomplete_reason || '—'}</td>
                           <td className="px-3 py-2"><span className={`px-2 py-1 rounded text-xs ${toBoolBadgeClass(row?.bank_profile_risk?.highRiskBankProfile === true)}`}>{row?.bank_profile_risk?.highRiskBankProfile ? 'true' : 'false'}</span></td>
                           <td className="px-3 py-2"><span className={`px-2 py-1 rounded text-xs ${toBoolBadgeClass(row?.bank_profile_risk?.changedAfterLock === true)}`}>{row?.bank_profile_risk?.changedAfterLock ? 'true' : 'false'}</span></td>
                           <td className="px-3 py-2"><span className={`px-2 py-1 rounded text-xs ${toBoolBadgeClass(row?.bank_profile_risk?.frequentRecentChanges === true)}`}>{row?.bank_profile_risk?.frequentRecentChanges ? 'true' : 'false'}</span></td>
-                          <td className="px-3 py-2 text-slate-300">
+                          <td className="px-3 py-2 text-textSecondary">
                             <div className="flex items-center gap-1 flex-wrap">
                               {shownReasons.map((reason) => (
-                                <span key={reason} className="px-2 py-0.5 rounded bg-[#1a1a1f] border border-[#333] text-xs">{reason}</span>
+                                <span key={reason} className="px-2 py-0.5 rounded bg-elevated border border-borderStrong text-xs">{reason}</span>
                               ))}
-                              {hiddenCount > 0 && <span className="px-2 py-0.5 rounded bg-[#1a1a1f] border border-[#333] text-xs">+{hiddenCount}</span>}
+                              {hiddenCount > 0 && <span className="px-2 py-0.5 rounded bg-elevated border border-borderStrong text-xs">+{hiddenCount}</span>}
                               {reasons.length === 0 && '—'}
                             </div>
                           </td>
-                          <td className="px-3 py-2 text-slate-300">{formatDate(row?.offchain_health_score_input?.snapshot?.capturedAt || row?.payout_snapshot?.captured_at)}</td>
+                          <td className="px-3 py-2 text-textSecondary">{formatDate(row?.offchain_health_score_input?.snapshot?.capturedAt || row?.payout_snapshot?.captured_at)}</td>
                         </tr>
                         {expanded && (
-                          <tr className="bg-[#0c0c0f] border-b border-[#1c1c1f]">
+                          <tr className="bg-app border-b border-borderSubtle">
                             <td colSpan={15} className="px-4 py-3">
                               <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
-                                <div className="bg-[#111113] border border-[#222] rounded p-2"><span className="text-slate-500">railAtLock:</span> <span className="text-white">{row?.offchain_health_score_input?.maker?.railAtLock || '—'}</span></div>
-                                <div className="bg-[#111113] border border-[#222] rounded p-2"><span className="text-slate-500">countryAtLock:</span> <span className="text-white">{row?.offchain_health_score_input?.maker?.countryAtLock || '—'}</span></div>
-                                <div className="bg-[#111113] border border-[#222] rounded p-2"><span className="text-slate-500">profileVersionAtLock:</span> <span className="text-white">{row?.offchain_health_score_input?.maker?.profileVersionAtLock ?? '—'}</span></div>
-                                <div className="bg-[#111113] border border-[#222] rounded p-2"><span className="text-slate-500">currentProfileVersion:</span> <span className="text-white">{row?.offchain_health_score_input?.maker?.currentProfileVersion ?? '—'}</span></div>
-                                <div className="bg-[#111113] border border-[#222] rounded p-2"><span className="text-slate-500">bankChangeCount7dAtLock:</span> <span className="text-white">{row?.offchain_health_score_input?.maker?.bankChangeCount7dAtLock ?? '—'}</span></div>
-                                <div className="bg-[#111113] border border-[#222] rounded p-2"><span className="text-slate-500">bankChangeCount30dAtLock:</span> <span className="text-white">{row?.offchain_health_score_input?.maker?.bankChangeCount30dAtLock ?? '—'}</span></div>
-                                <div className="bg-[#111113] border border-[#222] rounded p-2"><span className="text-slate-500">lastBankChangeAtAtLock:</span> <span className="text-white">{formatDate(row?.offchain_health_score_input?.maker?.lastBankChangeAtAtLock)}</span></div>
-                                <div className="bg-[#111113] border border-[#222] rounded p-2"><span className="text-slate-500">snapshot.capturedAt:</span> <span className="text-white">{formatDate(row?.offchain_health_score_input?.snapshot?.capturedAt)}</span></div>
-                                <div className="bg-[#111113] border border-[#222] rounded p-2"><span className="text-slate-500">snapshot.isComplete:</span> <span className="text-white">{String(row?.offchain_health_score_input?.snapshot?.isComplete ?? false)}</span></div>
-                                <div className="bg-[#111113] border border-[#222] rounded p-2 md:col-span-3"><span className="text-slate-500">snapshot.incompleteReason:</span> <span className="text-white">{row?.offchain_health_score_input?.snapshot?.incompleteReason || '—'}</span></div>
-                                <div className="bg-[#111113] border border-[#2a2a2e] rounded p-2 md:col-span-3">
-                                  <div className="text-slate-400 mb-1">
+                                <div className="bg-surface border border-borderSubtle rounded p-2"><span className="text-textMuted">railAtLock:</span> <span className="text-textPrimary">{row?.offchain_health_score_input?.maker?.railAtLock || '—'}</span></div>
+                                <div className="bg-surface border border-borderSubtle rounded p-2"><span className="text-textMuted">countryAtLock:</span> <span className="text-textPrimary">{row?.offchain_health_score_input?.maker?.countryAtLock || '—'}</span></div>
+                                <div className="bg-surface border border-borderSubtle rounded p-2"><span className="text-textMuted">profileVersionAtLock:</span> <span className="text-textPrimary">{row?.offchain_health_score_input?.maker?.profileVersionAtLock ?? '—'}</span></div>
+                                <div className="bg-surface border border-borderSubtle rounded p-2"><span className="text-textMuted">currentProfileVersion:</span> <span className="text-textPrimary">{row?.offchain_health_score_input?.maker?.currentProfileVersion ?? '—'}</span></div>
+                                <div className="bg-surface border border-borderSubtle rounded p-2"><span className="text-textMuted">bankChangeCount7dAtLock:</span> <span className="text-textPrimary">{row?.offchain_health_score_input?.maker?.bankChangeCount7dAtLock ?? '—'}</span></div>
+                                <div className="bg-surface border border-borderSubtle rounded p-2"><span className="text-textMuted">bankChangeCount30dAtLock:</span> <span className="text-textPrimary">{row?.offchain_health_score_input?.maker?.bankChangeCount30dAtLock ?? '—'}</span></div>
+                                <div className="bg-surface border border-borderSubtle rounded p-2"><span className="text-textMuted">lastBankChangeAtAtLock:</span> <span className="text-textPrimary">{formatDate(row?.offchain_health_score_input?.maker?.lastBankChangeAtAtLock)}</span></div>
+                                <div className="bg-surface border border-borderSubtle rounded p-2"><span className="text-textMuted">snapshot.capturedAt:</span> <span className="text-textPrimary">{formatDate(row?.offchain_health_score_input?.snapshot?.capturedAt)}</span></div>
+                                <div className="bg-surface border border-borderSubtle rounded p-2"><span className="text-textMuted">snapshot.isComplete:</span> <span className="text-textPrimary">{String(row?.offchain_health_score_input?.snapshot?.isComplete ?? false)}</span></div>
+                                <div className="bg-surface border border-borderSubtle rounded p-2 md:col-span-3"><span className="text-textMuted">snapshot.incompleteReason:</span> <span className="text-textPrimary">{row?.offchain_health_score_input?.snapshot?.incompleteReason || '—'}</span></div>
+                                <div className="bg-surface border border-borderStrong rounded p-2 md:col-span-3">
+                                  <div className="text-textSecondary mb-1">
                                     {lang === 'TR'
                                       ? 'Kontrat-authority mirror sayaçları (bilgilendirme/read-only)'
                                       : 'Contract-authority mirror counters (informational/read-only)'}
                                   </div>
                                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                                    <div><span className="text-slate-500">burn_count:</span> <span className="text-white">{row?.offchain_health_score_input?.maker?.reputationBanMirrorContext?.reputation_authority_counters?.burn_count ?? '—'}</span></div>
-                                    <div><span className="text-slate-500">auto_release_count:</span> <span className="text-white">{row?.offchain_health_score_input?.maker?.reputationBanMirrorContext?.reputation_authority_counters?.auto_release_count ?? '—'}</span></div>
-                                    <div><span className="text-slate-500">mutual_cancel_count:</span> <span className="text-white">{row?.offchain_health_score_input?.maker?.reputationBanMirrorContext?.reputation_authority_counters?.mutual_cancel_count ?? '—'}</span></div>
-                                    <div><span className="text-slate-500">disputed_resolved_count:</span> <span className="text-white">{row?.offchain_health_score_input?.maker?.reputationBanMirrorContext?.reputation_authority_counters?.disputed_resolved_count ?? '—'}</span></div>
-                                    <div><span className="text-slate-500">partial_settlement_count:</span> <span className="text-white">{row?.offchain_health_score_input?.maker?.reputationBanMirrorContext?.reputation_authority_counters?.partial_settlement_count ?? '—'}</span></div>
+                                    <div><span className="text-textMuted">burn_count:</span> <span className="text-textPrimary">{row?.offchain_health_score_input?.maker?.reputationBanMirrorContext?.reputation_authority_counters?.burn_count ?? '—'}</span></div>
+                                    <div><span className="text-textMuted">auto_release_count:</span> <span className="text-textPrimary">{row?.offchain_health_score_input?.maker?.reputationBanMirrorContext?.reputation_authority_counters?.auto_release_count ?? '—'}</span></div>
+                                    <div><span className="text-textMuted">mutual_cancel_count:</span> <span className="text-textPrimary">{row?.offchain_health_score_input?.maker?.reputationBanMirrorContext?.reputation_authority_counters?.mutual_cancel_count ?? '—'}</span></div>
+                                    <div><span className="text-textMuted">disputed_resolved_count:</span> <span className="text-textPrimary">{row?.offchain_health_score_input?.maker?.reputationBanMirrorContext?.reputation_authority_counters?.disputed_resolved_count ?? '—'}</span></div>
+                                    <div><span className="text-textMuted">partial_settlement_count:</span> <span className="text-textPrimary">{row?.offchain_health_score_input?.maker?.reputationBanMirrorContext?.reputation_authority_counters?.partial_settlement_count ?? '—'}</span></div>
                                   </div>
                                 </div>
                               </div>
@@ -874,7 +946,7 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
                   })}
                   {!tradesLoading && trades.length === 0 && (
                     <tr>
-                      <td colSpan={15} className="px-3 py-5 text-center text-slate-500">{lang === 'TR' ? 'Trade kaydı bulunamadı.' : 'No trade records found.'}</td>
+                      <td colSpan={15} className="px-3 py-5 text-center text-textMuted">{lang === 'TR' ? 'Trade kaydı bulunamadı.' : 'No trade records found.'}</td>
                     </tr>
                   )}
                 </tbody>
@@ -883,10 +955,10 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
           )}
 
           {!tradesUnauthorized && (
-            <div className="text-xs text-slate-500">
+            <div className="text-xs text-textMuted">
               {lang === 'TR' ? 'Toplam trade kaydı' : 'Total trade records'}: {tradesTotal}
               {isWindowedTradeTotal && (
-                <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded border border-orange-800/40 text-orange-300">
+                <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded border border-warning/40 text-warning">
                   {lang === 'TR'
                     ? 'Pencere toplamı (global değil)'
                     : 'Window total (not global)'}
@@ -906,40 +978,40 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
               : 'You are not authorized to view this admin settlement screen.'
           )}
           {!settlementUnauthorized && settlementError && renderErrorBox(settlementError)}
-          {!settlementUnauthorized && settlementLoading && <div className="text-slate-400 text-sm">{lang === 'TR' ? 'Settlement verisi yükleniyor...' : 'Loading settlement data...'}</div>}
+          {!settlementUnauthorized && settlementLoading && <div className="text-textSecondary text-sm">{lang === 'TR' ? 'Settlement verisi yükleniyor...' : 'Loading settlement data...'}</div>}
 
           {!settlementUnauthorized && (
-            <div className="bg-[#111113] border border-[#222] rounded-xl p-4 space-y-3">
-              <p className="text-xs text-amber-300 border border-amber-800/40 bg-amber-950/20 rounded px-3 py-2">
+            <div className="bg-surface border border-borderSubtle rounded-xl p-4 space-y-3">
+              <p className="text-xs text-warning border border-warning/40 bg-warning/10 rounded px-3 py-2">
                 {lang === 'TR'
                   ? 'Admin panel yalnız gözlem içindir. Settlement sonucunu değiştiremez.'
                   : 'Admin panel is observability-only. It cannot change settlement outcomes.'}
               </p>
-              <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
-                <label className="text-sm text-slate-300 flex flex-col gap-1">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                <label className="text-sm text-textSecondary flex flex-col gap-1">
                   <span>State</span>
-                  <select value={settlementFilters.state} onChange={(e) => updateSettlementFilter('state', e.target.value)} className="bg-[#0d0d0f] border border-[#222] rounded-lg px-3 py-2 text-white">
+                  <select value={settlementFilters.state} onChange={(e) => updateSettlementFilter('state', e.target.value)} className="bg-elevated border border-borderSubtle rounded-lg px-3 py-2 text-textPrimary">
                     {SETTLEMENT_STATE_OPTIONS.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
                   </select>
                 </label>
-                <label className="text-sm text-slate-300 flex flex-col gap-1">
+                <label className="text-sm text-textSecondary flex flex-col gap-1">
                   <span>Page</span>
-                  <input type="number" min="1" value={settlementFilters.page} onChange={(e) => updateSettlementFilter('page', e.target.value)} className="bg-[#0d0d0f] border border-[#222] rounded-lg px-3 py-2 text-white" />
+                  <input type="number" min="1" value={settlementFilters.page} onChange={(e) => updateSettlementFilter('page', e.target.value)} className="bg-elevated border border-borderSubtle rounded-lg px-3 py-2 text-textPrimary" />
                 </label>
-                <label className="text-sm text-slate-300 flex flex-col gap-1">
+                <label className="text-sm text-textSecondary flex flex-col gap-1">
                   <span>Limit</span>
-                  <select value={settlementFilters.limit} onChange={(e) => updateSettlementFilter('limit', e.target.value)} className="bg-[#0d0d0f] border border-[#222] rounded-lg px-3 py-2 text-white">
+                  <select value={settlementFilters.limit} onChange={(e) => updateSettlementFilter('limit', e.target.value)} className="bg-elevated border border-borderSubtle rounded-lg px-3 py-2 text-textPrimary">
                     {SETTLEMENT_LIMIT_OPTIONS.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
                   </select>
                 </label>
                 <div className="flex items-end">
-                  <label className="text-sm text-slate-300 flex items-center gap-2">
+                  <label className="text-sm text-textSecondary flex items-center gap-2">
                     <input type="checkbox" checked={settlementFilters.riskOnly} onChange={(e) => updateSettlementFilter('riskOnly', e.target.checked)} />
                     Risk Only
                   </label>
                 </div>
                 <div className="flex items-end">
-                  <button onClick={refreshSettlementNow} disabled={settlementLoading} className="w-full bg-[#173428] hover:bg-[#1b3d2e] disabled:opacity-60 border border-emerald-800/50 text-emerald-300 rounded-lg px-3 py-2 text-sm font-semibold">
+                  <button onClick={refreshSettlementNow} disabled={settlementLoading} className="w-full bg-success/15 hover:bg-success/25 disabled:opacity-60 border border-success/40 text-success rounded-lg px-3 py-2 text-sm font-semibold">
                     {settlementLoading ? (lang === 'TR' ? 'Yükleniyor...' : 'Loading...') : (lang === 'TR' ? 'Yenile' : 'Refresh')}
                   </button>
                 </div>
@@ -966,26 +1038,26 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
                   rows: settlementProposals.filter((row) => row?.state === 'FINALIZED').slice(0, 10),
                 },
               ].map((group) => (
-                <div key={group.key} className="bg-[#111113] border border-[#222] rounded-xl p-3">
+                <div key={group.key} className="bg-surface border border-borderSubtle rounded-xl p-3">
                   <div className="flex items-center justify-between mb-2">
-                    <h3 className="text-sm font-semibold text-white">{group.title}</h3>
-                    <span className="text-xs text-slate-400">{group.rows.length}</span>
+                    <h3 className="text-sm font-semibold text-textPrimary">{group.title}</h3>
+                    <span className="text-xs text-textSecondary">{group.rows.length}</span>
                   </div>
                   <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
                     {group.rows.map((row) => (
-                      <div key={`${group.key}-${row?.proposal_id}-${row?.trade_id}`} className="bg-[#0d0d0f] border border-[#1d1d1f] rounded-lg p-2 text-xs">
+                      <div key={`${group.key}-${row?.proposal_id}-${row?.trade_id}`} className="bg-elevated border border-borderSubtle rounded-lg p-2 text-xs">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-emerald-300 font-mono">#{row?.onchain_escrow_id || '—'}</span>
-                          <span className="text-slate-300">{row?.state || '—'}</span>
+                          <span className="text-success font-mono">#{row?.onchain_escrow_id || '—'}</span>
+                          <span className="text-textSecondary">{row?.state || '—'}</span>
                         </div>
-                        <div className="text-slate-400 mt-1 font-mono">p:{row?.proposal_id || '—'} · age:{row?.proposal_age_seconds ?? '—'}s</div>
-                        <div className="text-slate-400 mt-1">maker:{shortenWallet(row?.maker_address)} · taker:{shortenWallet(row?.taker_address)}</div>
-                        <div className="text-slate-400 mt-1">split:{row?.maker_share_bps ?? '—'} / {row?.taker_share_bps ?? '—'}</div>
-                        <div className="text-slate-500 mt-1 truncate" title={row?.tx_hash || ''}>tx:{row?.tx_hash || '—'}</div>
+                        <div className="text-textSecondary mt-1 font-mono">p:{row?.proposal_id || '—'} · age:{row?.proposal_age_seconds ?? '—'}s</div>
+                        <div className="text-textSecondary mt-1">maker:{shortenWallet(row?.maker_address)} · taker:{shortenWallet(row?.taker_address)}</div>
+                        <div className="text-textSecondary mt-1">split:{row?.maker_share_bps ?? '—'} / {row?.taker_share_bps ?? '—'}</div>
+                        <div className="text-textMuted mt-1 truncate" title={row?.tx_hash || ''}>tx:{row?.tx_hash || '—'}</div>
                       </div>
                     ))}
                     {!settlementLoading && group.rows.length === 0 && (
-                      <div className="text-slate-500 text-xs">{lang === 'TR' ? 'Kayıt yok.' : 'No records.'}</div>
+                      <div className="text-textMuted text-xs">{lang === 'TR' ? 'Kayıt yok.' : 'No records.'}</div>
                     )}
                   </div>
                 </div>
@@ -994,10 +1066,10 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
           )}
 
           {!settlementUnauthorized && (
-            <div className="bg-[#111113] border border-[#222] rounded-xl overflow-x-auto">
+            <div className="bg-surface border border-borderSubtle rounded-xl overflow-x-auto">
               <table className="w-full min-w-[1500px] text-sm">
                 <thead>
-                  <tr className="bg-[#0d0d0f] border-b border-[#222] text-slate-300">
+                  <tr className="bg-elevated border-b border-borderSubtle text-textSecondary">
                     <th className="text-left px-3 py-2">Proposal</th>
                     <th className="text-left px-3 py-2">Escrow</th>
                     <th className="text-left px-3 py-2">Status</th>
@@ -1014,37 +1086,37 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
                 </thead>
                 <tbody>
                   {settlementProposals.map((row) => (
-                    <tr key={`${row?.proposal_id}-${row?.trade_id}`} className="border-b border-[#1c1c1f]">
-                      <td className="px-3 py-2 text-emerald-300 font-mono">{row?.proposal_id || '—'}</td>
-                      <td className="px-3 py-2 text-slate-300 font-mono">{row?.onchain_escrow_id || '—'}</td>
-                      <td className="px-3 py-2 text-slate-200">
+                    <tr key={`${row?.proposal_id}-${row?.trade_id}`} className="border-b border-borderSubtle">
+                      <td className="px-3 py-2 text-success font-mono">{row?.proposal_id || '—'}</td>
+                      <td className="px-3 py-2 text-textSecondary font-mono">{row?.onchain_escrow_id || '—'}</td>
+                      <td className="px-3 py-2 text-textPrimary">
                         <div className="flex flex-col gap-1 items-start">
                           <span>{row?.status || '—'} / {row?.state || '—'}</span>
                           {['RESOLVED', 'CANCELED', 'BURNED'].includes(row?.status) && (
-                            <span className="text-[10px] text-slate-400">{mapResolutionTypeLabel(row?.resolution_type, lang)}</span>
+                            <span className="text-[10px] text-textSecondary">{mapResolutionTypeLabel(row?.resolution_type, lang)}</span>
                           )}
                         </div>
                       </td>
-                      <td className="px-3 py-2 text-slate-300 font-mono">{shortenWallet(row?.maker_address)}</td>
-                      <td className="px-3 py-2 text-slate-300 font-mono">{shortenWallet(row?.taker_address)}</td>
-                      <td className="px-3 py-2 text-slate-300 font-mono">{shortenWallet(row?.proposed_by)}</td>
-                      <td className="px-3 py-2 text-slate-300">{row?.maker_share_bps ?? '—'} / {row?.taker_share_bps ?? '—'}</td>
-                      <td className="px-3 py-2 text-slate-300">{formatDate(row?.proposed_at)}</td>
-                      <td className="px-3 py-2 text-slate-300">{formatDate(row?.expires_at)}</td>
-                      <td className="px-3 py-2 text-slate-300">{formatDate(row?.finalized_at)}</td>
-                      <td className="px-3 py-2 text-slate-300">
+                      <td className="px-3 py-2 text-textSecondary font-mono">{shortenWallet(row?.maker_address)}</td>
+                      <td className="px-3 py-2 text-textSecondary font-mono">{shortenWallet(row?.taker_address)}</td>
+                      <td className="px-3 py-2 text-textSecondary font-mono">{shortenWallet(row?.proposed_by)}</td>
+                      <td className="px-3 py-2 text-textSecondary">{row?.maker_share_bps ?? '—'} / {row?.taker_share_bps ?? '—'}</td>
+                      <td className="px-3 py-2 text-textSecondary">{formatDate(row?.proposed_at)}</td>
+                      <td className="px-3 py-2 text-textSecondary">{formatDate(row?.expires_at)}</td>
+                      <td className="px-3 py-2 text-textSecondary">{formatDate(row?.finalized_at)}</td>
+                      <td className="px-3 py-2 text-textSecondary">
                         <div className="flex flex-wrap gap-1">
                           <span className={`px-2 py-0.5 rounded text-xs ${toBoolBadgeClass(row?.is_expired === true)}`}>expired:{String(row?.is_expired === true)}</span>
                           <span className={`px-2 py-0.5 rounded text-xs ${toBoolBadgeClass(row?.requires_counterparty_action === true)}`}>counterparty_action:{String(row?.requires_counterparty_action === true)}</span>
-                          <span className="px-2 py-0.5 rounded text-xs bg-[#1a1a1f] border border-[#333]">age:{row?.proposal_age_seconds ?? '—'}s</span>
+                          <span className="px-2 py-0.5 rounded text-xs bg-elevated border border-borderStrong">age:{row?.proposal_age_seconds ?? '—'}s</span>
                         </div>
                       </td>
-                      <td className="px-3 py-2 text-slate-400 font-mono truncate max-w-[220px]" title={row?.tx_hash || ''}>{row?.tx_hash || '—'}</td>
+                      <td className="px-3 py-2 text-textSecondary font-mono truncate max-w-[220px]" title={row?.tx_hash || ''}>{row?.tx_hash || '—'}</td>
                     </tr>
                   ))}
                   {!settlementLoading && settlementProposals.length === 0 && (
                     <tr>
-                      <td colSpan={12} className="px-3 py-5 text-center text-slate-500">{lang === 'TR' ? 'Settlement kaydı bulunamadı.' : 'No settlement records found.'}</td>
+                      <td colSpan={12} className="px-3 py-5 text-center text-textMuted">{lang === 'TR' ? 'Settlement kaydı bulunamadı.' : 'No settlement records found.'}</td>
                     </tr>
                   )}
                 </tbody>
@@ -1053,11 +1125,19 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
           )}
 
           {!settlementUnauthorized && (
-            <div className="text-xs text-slate-500">
+            <div className="text-xs text-textMuted">
               {lang === 'TR' ? 'Toplam settlement kaydı' : 'Total settlement records'}: {settlementTotal}
             </div>
           )}
         </section>
+      )}
+
+      {activeTab === TAB_REVENUE && (
+        <AdminRevenuePanel lang={lang} authenticatedFetch={authenticatedFetch} tokenSymbols={tokenSymbols} />
+      )}
+
+      {activeTab === TAB_CHAIN && (
+        <AdminChainPanel lang={lang} readProtocolConfig={readProtocolConfig} />
       )}
     </div>
   );

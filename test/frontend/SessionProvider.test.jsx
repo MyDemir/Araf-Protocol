@@ -21,8 +21,7 @@ const makeDeps = (overrides = {}) => ({
   bestEffortBackendLogout: vi.fn().mockResolvedValue(undefined),
   clearLocalSessionState: vi.fn(),
   setShowWalletModal: vi.fn(),
-  setProfileTab: vi.fn(),
-  setShowProfileModal: vi.fn(),
+  openProfilePage: vi.fn(),
   ...overrides,
 });
 
@@ -121,8 +120,7 @@ describe('SessionProvider session actions', () => {
 
     const authenticated = makeDeps({ isAuthenticated: true, authenticatedWallet: '0xabc0000000000000000000000000000000000000' });
     createSessionActions(authenticated).handleAuthAction();
-    expect(authenticated.setProfileTab).toHaveBeenCalledWith('ayarlar');
-    expect(authenticated.setShowProfileModal).toHaveBeenCalledWith(true);
+    expect(authenticated.openProfilePage).toHaveBeenCalledWith('account');
   });
 
   it('app_imports_session_actions_instead_of_declaring_siwe_inline', () => {

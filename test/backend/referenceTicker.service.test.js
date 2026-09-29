@@ -174,4 +174,39 @@ describe("referenceTicker service", () => {
     expect(payload.items.length).toBeGreaterThan(0);
     expect(payload.items.every((item) => item.stale === true)).toBe(true);
   });
+
+  it("sends the required limit param to the Coinbase public ticker", async () => {
+    let service;
+    jest.isolateModules(() => {
+      jest.doMock("../../backend/scripts/config/redis", () => ({ isReady: () => false, getRedisClient: jest.fn() }));
+      service = require("../../backend/scripts/services/referenceTicker");
+    });
+    const urls = [];
+    global.fetch.mockImplementation(async (url) => {
+      urls.push(String(url));
+      if (String(url).includes("frankfurter")) return { ok: true, json: async () => ({ rates: { TRY: 35, EUR: 0.9, GBP: 0.8 } }) };
+      return { ok: true, json: async () => ({ trades: [{ price: "1" }] }) };
+    });
+    await service.refreshReferenceTicker();
+    const coinbase = urls.filter((u) => u.includes("coinbase.com"));
+    expect(coinbase.length).toBeGreaterThan(0);
+    expect(coinbase.every((u) => u.endsWith("/ticker?limit=1"))).toBe(true);
+  });
+
+  it("falls back to Frankfurter v1 when v2 fails", async () => {
+    let service;
+    jest.isolateModules(() => {
+      jest.doMock("../../backend/scripts/config/redis", () => ({ isReady: () => false, getRedisClient: jest.fn() }));
+      service = require("../../backend/scripts/services/referenceTicker");
+    });
+    global.fetch.mockImplementation(async (url) => {
+      const text = String(url);
+      if (text.includes("frankfurter.dev/v2")) return { ok: false, status: 404, json: async () => ({}) };
+      if (text.includes("frankfurter.dev/v1")) return { ok: true, json: async () => ({ base: "USD", rates: { TRY: 40, EUR: 0.8, GBP: 0.5 } }) };
+      return { ok: false, status: 404, json: async () => ({}) };
+    });
+    const payload = await service.refreshReferenceTicker();
+    expect(payload.items.find((i) => i.symbol === "USD/TRY")?.rate).toBe(40);
+    expect(payload.items.find((i) => i.symbol === "EUR/TRY")?.rate).toBe(50);
+  });
 });

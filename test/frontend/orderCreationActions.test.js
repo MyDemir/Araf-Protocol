@@ -76,10 +76,10 @@ describe('order creation actions', () => {
   });
 
   it('preserves tier validation thresholds including unrestricted tier 4 behavior', () => {
-    expect(getMakerOrderValidationError({ makerTier: 0, makerAmount: '151', makerRate: '1', makerMinLimit: '1', makerMaxLimit: '1', makerFiat: 'TRY' })).toBe('Tier 0 max order limit is 150 USDT/USDC.');
-    expect(getMakerOrderValidationError({ makerTier: 1, makerAmount: '1501', makerRate: '1', makerMinLimit: '1', makerMaxLimit: '1', makerFiat: 'TRY' })).toBe('Tier 1 max order limit is 1500 USDT/USDC.');
-    expect(getMakerOrderValidationError({ makerTier: 2, makerAmount: '7501', makerRate: '1', makerMinLimit: '1', makerMaxLimit: '1', makerFiat: 'TRY' })).toBe('Tier 2 max order limit is 7500 USDT/USDC.');
-    expect(getMakerOrderValidationError({ makerTier: 3, makerAmount: '30001', makerRate: '1', makerMinLimit: '1', makerMaxLimit: '1', makerFiat: 'TRY' })).toBe('Tier 3 max order limit is 30000 USDT/USDC.');
+    expect(getMakerOrderValidationError({ makerTier: 0, makerAmount: '151', makerRate: '1', makerMinLimit: '1', makerMaxLimit: '1', makerFiat: 'TRY' })).toBe('Tier 0 max order limit is 150 USDT.');
+    expect(getMakerOrderValidationError({ makerTier: 1, makerAmount: '1501', makerRate: '1', makerMinLimit: '1', makerMaxLimit: '1', makerFiat: 'TRY' })).toBe('Tier 1 max order limit is 1,500 USDT.');
+    expect(getMakerOrderValidationError({ makerTier: 2, makerAmount: '7501', makerRate: '1', makerMinLimit: '1', makerMaxLimit: '1', makerFiat: 'TRY' })).toBe('Tier 2 max order limit is 7,500 USDT.');
+    expect(getMakerOrderValidationError({ makerTier: 3, makerAmount: '30001', makerRate: '1', makerMinLimit: '1', makerMaxLimit: '1', makerFiat: 'TRY' })).toBe('Tier 3 max order limit is 30,000 USDT.');
     expect(getMakerOrderValidationError({ makerTier: 4, makerAmount: '30001', makerRate: '1', makerMinLimit: '1', makerMaxLimit: '1', makerFiat: 'TRY' })).toBeNull();
   });
 

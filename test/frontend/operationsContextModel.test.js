@@ -143,7 +143,7 @@ describe('buildOperationsContextModel', () => {
     });
 
     expect(model.lanes.map((l) => l.key)).toEqual(['settlement_action_required', 'pending_backend_sync', 'paid']);
-    expect(model.lanes.map((l) => l.label)).toEqual(['Yanıt Gereken Settlement', 'Oda Senkronu Sürüyor', 'Ödeme Bildirilenler']);
+    expect(model.lanes.map((l) => l.label)).toEqual(['Uzlaşma: yanıtınız bekleniyor', 'Oda Senkronu Sürüyor', 'Ödeme Bildirilenler']);
   });
 
 

@@ -93,6 +93,11 @@ export const PaymentProfilePanel = ({
         </div>
       )}
 
+      <div>
+        <label className={labelClass} htmlFor="payout-bank">{isTR ? 'Banka adı (opsiyonel)' : 'Bank name (optional)'}</label>
+        <input id="payout-bank" value={fields.bank_name || ''} onChange={(e) => updateField('bank_name', e.target.value || null)} className={inputClass} />
+      </div>
+
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className={labelClass} htmlFor="payout-contact-channel">{isTR ? 'İletişim (opsiyonel)' : 'Contact (optional)'}</label>
@@ -105,7 +110,7 @@ export const PaymentProfilePanel = ({
         </div>
         <div>
           <label className={labelClass} htmlFor="payout-contact-value">&nbsp;</label>
-          <input id="payout-contact-value" disabled={!draft.contact?.channel} value={draft.contact?.value || ''} onChange={(e) => update({ contact: { ...(draft.contact || {}), value: e.target.value || null } })} className={`${inputClass} disabled:opacity-50`} />
+          <input id="payout-contact-value" placeholder={draft.contact?.channel === 'telegram' ? '@username' : draft.contact?.channel === 'email' ? 'name@example.com' : draft.contact?.channel === 'phone' ? '+90…' : ''} disabled={!draft.contact?.channel} value={draft.contact?.value || ''} onChange={(e) => update({ contact: { ...(draft.contact || {}), value: e.target.value || null } })} className={`${inputClass} disabled:opacity-50`} />
         </div>
       </div>
 

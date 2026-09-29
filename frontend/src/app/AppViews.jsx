@@ -14,8 +14,8 @@ import { mapResolutionTypeLabel } from './useAppSessionData';
 import TradeRoomPage from './contexts/trade-room/TradeRoomPage';
 import ThemeToggle from './shell/ThemeToggle';
 import {
-  Banknote, Briefcase, CircleCheck, CirclePause, Clock, Compass, Droplets, Flame, Handshake, History, Hourglass, House,
-  Layers, LoaderCircle, Lock, Menu, Paperclip, Plus, Radar, Search, Settings, ShieldCheck, ShieldOff, Store, Swords,
+  Banknote, Briefcase, ChevronDown, CircleCheck, CirclePause, Clock, Compass, Droplets, Flame, Handshake, History, Hourglass, House,
+  Layers, ListPlus, LoaderCircle, Lock, Menu, Paperclip, Plus, Radar, Search, Settings, ShieldCheck, ShieldOff, Store, Swords,
   TriangleAlert, Undo2, Unplug, UserRound, Wallet, X, Info, Maximize2, Minimize2, Download, Share,
 } from 'lucide-react';
 import { buildTradeRoomPanelCallbacks, getBurnExpiredDeadlinePassed, getPaymentWindowExpired, PAYMENT_WINDOW_MS } from './contexts/trade-room/tradeRoomPanelActions';
@@ -67,7 +67,7 @@ export const buildAppViews = (ctx) => {
     handleOpenMakerModal,
     activeEscrowCounts,
     setShowProfileModal,
-    setProfileTab,
+    openProfilePage,
     setShowFeedbackModal,
     protocolStats,
     statsLoading,
@@ -136,6 +136,10 @@ export const buildAppViews = (ctx) => {
   const isLikelyAdminWallet =
     Boolean(connectedWalletLower) && adminWalletAllowlist.includes(connectedWalletLower);
   const canSeeAdminEntry = Boolean(isConnected && isAuthenticated && connectedWalletLower);
+  // [TR] İşlem Odası, Takip, Profil ve Geçmiş yalnız imzalı oturumla anlamlıdır; oturum yokken gezinmede
+  //      gösterilmez (App.jsx de bu görünümlerden ana sayfaya yönlendirir). UI Lab senaryoları istisnadır.
+  // [EN] Trade room, tracking, profile and history need a signed session; hidden from navigation otherwise.
+  const navUnlocked = Boolean((isConnected && isAuthenticated) || ctx.devScenarioCategory);
 
   const renderSlimRail = () => (
     <div className="hidden md:flex w-16 bg-shell border-r border-borderSubtle flex-col items-center py-6 justify-between z-50 shrink-0 shadow-2xl">
@@ -146,7 +150,9 @@ export const buildAppViews = (ctx) => {
         <button onClick={toggleSidebar} title={lang === 'TR' ? 'Filtreler' : 'Filters'} className={`w-10 h-10 flex items-center justify-center rounded-xl transition ${sidebarOpen ? 'bg-elevated text-textPrimary border border-borderStrong' : 'text-textMuted hover:text-textPrimary hover:bg-elevated'}`}><Menu className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" /></button>
         <button onClick={() => setCurrentView('home')} title={lang === 'TR' ? 'Ana Sayfa' : 'Home'} className={`w-10 h-10 flex items-center justify-center rounded-xl transition ${currentView === 'home' ? 'bg-elevated text-textPrimary border border-borderStrong' : 'text-textMuted hover:text-textPrimary hover:bg-elevated'}`}><House className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" /></button>
         <button onClick={() => setCurrentView('market')} title={lang === 'TR' ? 'Pazar Yeri' : 'Marketplace'} className={`w-10 h-10 flex items-center justify-center rounded-xl transition ${currentView === 'market' ? 'bg-elevated text-textPrimary border border-borderStrong' : 'text-textMuted hover:text-textPrimary hover:bg-elevated'}`}><Store className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" /></button>
-        <button onClick={() => setCurrentView('operations')} title={lang === 'TR' ? 'İşlem Takip Merkezi' : 'Operations Center'} className={`w-10 h-10 flex items-center justify-center rounded-xl transition ${currentView === 'operations' ? 'bg-elevated text-info border border-borderStrong' : 'text-textMuted hover:text-textPrimary hover:bg-elevated'}`}><Radar className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" /></button>
+        {navUnlocked && (
+          <button onClick={() => setCurrentView('operations')} title={lang === 'TR' ? 'İşlem Takip Merkezi' : 'Operations Center'} className={`w-10 h-10 flex items-center justify-center rounded-xl transition ${currentView === 'operations' ? 'bg-elevated text-info border border-borderStrong' : 'text-textMuted hover:text-textPrimary hover:bg-elevated'}`}><Radar className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" /></button>
+        )}
         {/* [TR] Admin girişi authenticated kullanıcıya her zaman görünür;
             VITE_ADMIN_WALLETS yalnızca UX ipucu amaçlıdır.
             [EN] Admin entry is always visible for authenticated users;
@@ -162,11 +168,15 @@ export const buildAppViews = (ctx) => {
             <Compass className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" />
           </button>
         )}
+        {navUnlocked && (
+          <>
         <button onClick={() => setCurrentView('tradeRoom')} title={lang === 'TR' ? 'İşlem Odası' : 'Trade Room'} className={`w-10 h-10 flex items-center justify-center rounded-xl transition relative ${currentView === 'tradeRoom' ? 'bg-elevated text-warning border border-borderStrong' : 'text-textMuted hover:text-textPrimary hover:bg-elevated'}`}>
           <Briefcase className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" /> {activeEscrows.length > 0 && <span className="absolute top-2 right-2 w-2 h-2 bg-orange-500 rounded-full animate-pulse"></span>}
         </button>
         <button onClick={() => setCurrentView('profile')} title={lang === 'TR' ? 'Profil Merkezi' : 'Profile Center'} className={`w-10 h-10 flex items-center justify-center rounded-xl transition ${currentView === 'profile' ? 'bg-elevated text-success border border-borderStrong' : 'text-textMuted hover:text-textPrimary hover:bg-elevated'}`}><UserRound className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" /></button>
-        <button onClick={() => { if (!isConnected || !isAuthenticated) { handleAuthAction(); return; } setProfileTab('gecmis'); setShowProfileModal(true); }} title={lang === 'TR' ? 'İşlem Geçmişi' : 'Trade History'} className="w-10 h-10 flex items-center justify-center rounded-xl text-textMuted hover:text-textPrimary hover:bg-elevated transition"><History className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" /></button>
+        <button onClick={() => { if (!isConnected || !isAuthenticated) { handleAuthAction(); return; } openProfilePage?.('history'); }} title={lang === 'TR' ? 'İşlem Geçmişi' : 'Trade History'} className="w-10 h-10 flex items-center justify-center rounded-xl text-textMuted hover:text-textPrimary hover:bg-elevated transition"><History className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" /></button>
+          </>
+        )}
       </div>
       <div className="space-y-3 flex flex-col items-center w-full px-2">
         <div className="w-full flex justify-center">
@@ -252,6 +262,8 @@ export const buildAppViews = (ctx) => {
             />
           </nav>
 
+          {navUnlocked ? (
+            <>
           <nav className="mb-5">
             <SectionLabel>{tr ? 'İŞLEMLERİM' : 'MY TRADES'}</SectionLabel>
             {['LOCKED', 'PAID', 'CHALLENGED'].map(status => {
@@ -299,6 +311,17 @@ export const buildAppViews = (ctx) => {
               </div>
             )}
           </nav>
+
+            </>
+          ) : (
+            <div className="mb-5 mx-1 rounded-xl border border-borderSubtle bg-surface p-4" data-testid="drawer-signin-card">
+              <p className="text-sm font-semibold text-textPrimary">{tr ? 'İşlemlerin burada görünür' : 'Your trades show up here'}</p>
+              <p className="text-xs text-textMuted mt-1">{tr ? 'Aktif işlemler, uzlaşma teklifleri ve profil için cüzdanını bağlayıp imzala.' : 'Connect and sign in with your wallet to see active trades, settlement offers and your profile.'}</p>
+              <button type="button" onClick={() => { setSidebarOpen(false); handleAuthAction(); }} className="mt-3 w-full h-9 rounded-lg bg-brand text-black text-sm font-semibold hover:opacity-90 inline-flex items-center justify-center gap-2">
+                <Wallet className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />{isConnected ? (tr ? 'İmzala ve giriş yap' : 'Sign in') : (tr ? 'Cüzdan bağla' : 'Connect wallet')}
+              </button>
+            </div>
+          )}
 
           <div className="mt-auto pt-4 border-t border-borderSubtle px-1 space-y-3">
             {/* [TR] Mobilde tarayıcı çubuklarını gizleme: önce kurulum (PWA), yoksa Fullscreen API, iOS'ta yönerge. */}
@@ -361,70 +384,86 @@ export const buildAppViews = (ctx) => {
         </div>
       </div>
 
-      <div className="grid min-w-0 grid-cols-2 md:grid-cols-5 gap-3 md:gap-4 mb-10">
-        <div className="min-w-0 overflow-hidden bg-surface border border-borderSubtle p-4 md:p-5 rounded-2xl">
-          <p className="text-textMuted text-[10px] font-bold tracking-widest uppercase mb-2">{lang === 'TR' ? 'TOPLAM HACİM' : 'TOTAL VOL'}</p>
-          <div className="flex min-w-0 flex-wrap items-baseline">
-            <span className="max-w-full truncate text-2xl font-bold text-textPrimary">{statValue(protocolStats?.total_volume_usdt, (v) => `$${Number(v).toLocaleString('en-US', { notation: 'compact', maximumFractionDigits: 1 })}`)}</span>
-            <StatChange value={protocolStats?.changes_30d?.total_volume_usdt_pct} />
+      {(() => {
+        const tr = lang === 'TR';
+        const usd = (v) => `$${Number(v).toLocaleString('en-US', { notation: 'compact', maximumFractionDigits: 1 })}`;
+        const openOrders = protocolStats && (protocolStats.open_sell_orders != null || protocolStats.open_buy_orders != null)
+          ? Number(protocolStats.open_sell_orders || 0) + Number(protocolStats.open_buy_orders || 0)
+          : null;
+        const hours = protocolStats?.avg_trade_hours;
+        const tiles = [
+          { k: 'vol', label: tr ? 'Tamamlanan hacim' : 'Settled volume', value: statValue(protocolStats?.total_volume_usdt, usd), change: protocolStats?.changes_30d?.total_volume_usdt_pct },
+          { k: 'trades', label: tr ? 'Başarılı işlem' : 'Successful trades', value: statValue(protocolStats?.completed_trades, (v) => Number(v).toLocaleString(tr ? 'tr-TR' : 'en-US')), change: protocolStats?.changes_30d?.completed_trades_pct },
+          { k: 'open', label: tr ? 'Açık emir' : 'Open orders', value: openOrders == null ? '—' : openOrders.toLocaleString(), sub: openOrders == null ? null : (tr ? `${protocolStats.open_sell_orders || 0} satış · ${protocolStats.open_buy_orders || 0} alış` : `${protocolStats.open_sell_orders || 0} sell · ${protocolStats.open_buy_orders || 0} buy`) },
+          { k: 'time', label: tr ? 'Ort. işlem süresi' : 'Avg. trade time', value: hours != null ? (hours < 1 ? `${Math.max(1, Math.round(hours * 60))} ${tr ? 'dk' : 'min'}` : `${Number(hours).toLocaleString(tr ? 'tr-TR' : 'en-US', { maximumFractionDigits: 1 })} ${tr ? 'sa' : 'h'}`) : '—' },
+          { k: 'burn', label: tr ? 'Eriyen ve yakılan' : 'Decayed & burned', value: statValue(protocolStats?.burned_bonds_usdt, (v) => `$${Number(v).toLocaleString('en-US', { maximumFractionDigits: 0 })}`), danger: true, sub: tr ? 'Uzlaşmayanların kaybı' : 'Lost by those who would not settle' },
+        ];
+        return (
+          <div className="mb-10">
+            <div className="grid min-w-0 grid-cols-2 md:grid-cols-5 gap-3" aria-busy={statsLoading ? 'true' : 'false'} data-testid="home-stats">
+              {tiles.map((tile) => (
+                <div key={tile.k} className={`min-w-0 overflow-hidden bg-surface border p-4 rounded-2xl relative ${tile.danger ? 'border-danger/30 col-span-2 md:col-span-1' : 'border-borderSubtle'}`}>
+                  {tile.danger && <Flame className="absolute -right-2 -bottom-2 w-14 h-14 text-danger/10" strokeWidth={1.8} aria-hidden="true" />}
+                  <p className={`text-[10px] font-bold tracking-widest uppercase mb-2 ${tile.danger ? 'text-danger' : 'text-textMuted'}`}>{tile.label}</p>
+                  {statsLoading && protocolStats == null ? (
+                    <div className="h-7 w-20 rounded-md bg-elevated animate-pulse" />
+                  ) : (
+                    <div className="flex min-w-0 flex-wrap items-baseline relative">
+                      <span className={`max-w-full truncate text-2xl font-bold tabular-nums ${tile.danger ? 'text-danger' : 'text-textPrimary'}`}>{tile.value}</span>
+                      {tile.change != null && <StatChange value={tile.change} />}
+                    </div>
+                  )}
+                  {tile.sub && <p className="text-[11px] text-textMuted mt-1 truncate relative">{tile.sub}</p>}
+                </div>
+              ))}
+            </div>
+            {statsError && (
+              <p className="text-center pt-3 text-textMuted text-xs">
+                {tr ? 'İstatistik verisi alınamadı.' : 'Failed to load stats.'}
+                <button type="button" onClick={fetchStats} className="ml-2 text-brand font-semibold hover:underline">{tr ? 'Tekrar dene' : 'Retry'}</button>
+              </p>
+            )}
           </div>
-        </div>
-        <div className="min-w-0 overflow-hidden bg-surface border border-borderSubtle p-4 md:p-5 rounded-2xl">
-          <p className="text-textMuted text-[10px] font-bold tracking-widest uppercase mb-2">{lang === 'TR' ? 'BAŞARILI İŞLEM' : 'SUCCESS TRADES'}</p>
-          <div className="flex min-w-0 flex-wrap items-baseline">
-            <span className="max-w-full truncate text-2xl font-bold text-textPrimary">{statValue(protocolStats?.completed_trades, (v) => Number(v).toLocaleString())}</span>
-            <StatChange value={protocolStats?.changes_30d?.completed_trades_pct} />
-          </div>
-        </div>
-        <div className="min-w-0 overflow-hidden bg-surface border border-borderSubtle p-4 md:p-5 rounded-2xl">
-          <p className="text-textMuted text-[10px] font-bold tracking-widest uppercase mb-2">{lang === 'TR' ? 'AÇIK SATIŞ EMİRLERİ' : 'OPEN SELL ORDERS'}</p>
-          <span className="max-w-full truncate text-2xl font-bold text-textPrimary">{statValue(protocolStats?.open_sell_orders, (v) => Number(v).toLocaleString())}</span>
-        </div>
-        <div className="min-w-0 overflow-hidden bg-surface border border-borderSubtle p-4 md:p-5 rounded-2xl">
-          <p className="text-textMuted text-[10px] font-bold tracking-widest uppercase mb-2">{lang === 'TR' ? 'ORT. SÜRE' : 'AVG TIME'}</p>
-          <span className="max-w-full truncate text-2xl font-bold text-yellow-500">{protocolStats?.avg_trade_hours != null ? `${protocolStats.avg_trade_hours}h` : '—'}</span>
-        </div>
-        <div className="col-span-2 md:col-span-1 min-w-0 bg-surface border border-danger/30 p-4 md:p-5 rounded-2xl relative overflow-hidden group">
-          <div className="absolute -right-3 -bottom-3 text-danger/10 group-hover:scale-110 transition-transform" aria-hidden="true"><Flame className="w-16 h-16" strokeWidth={1.8} aria-hidden="true" /></div>
-          <p className="text-danger text-[10px] font-bold tracking-widest uppercase mb-2">{lang === 'TR' ? 'ERİYEN HAZİNE' : 'BURNED BONDS'}</p>
-          <div className="flex min-w-0 flex-wrap items-baseline relative z-10">
-            <span className="max-w-full truncate text-2xl font-bold text-danger">{statValue(protocolStats?.burned_bonds_usdt, (v) => `$${Number(v).toLocaleString('en-US', { maximumFractionDigits: 0 })}`)}</span>
-          </div>
-        </div>
-      </div>
-
-      {statsError && (
-        <div className="col-span-2 md:col-span-5 text-center py-4 text-textMuted text-xs">
-          {lang === 'TR' ? 'İstatistik verisi alınamadı.' : 'Failed to load stats.'}
-          <button onClick={fetchStats} className="ml-2 text-emerald-400 hover:underline">
-            {lang === 'TR' ? 'Tekrar dene' : 'Retry'}
-          </button>
-        </div>
-      )}
+        );
+      })()}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
-        <section className="bg-surface border border-borderSubtle rounded-2xl p-5 md:p-6">
-          <p className="text-[11px] tracking-[0.2em] uppercase text-emerald-400 mb-2">
-            {lang === 'TR' ? 'P2P Nasıl Çalışır?' : 'How P2P Works'}
-          </p>
-          <h3 className="text-xl font-bold text-textPrimary mb-3">
-            {lang === 'TR' ? 'Kararı backend değil, kontrat verir.' : 'The contract decides, not the backend.'}
-          </h3>
-          <ul className="space-y-2 text-sm text-textSecondary leading-relaxed">
-            <li>• {lang === 'TR' ? 'Satıcı USDT/USDC ve teminatını kilitler; alıcı şartları kabul edip işleme girer.' : 'Maker locks USDT/USDC + bond, Taker joins under clear on-chain rules.'}</li>
-            <li>• {lang === 'TR' ? 'Uyuşmazlıkta insan hakem yok; süre uzadıkça her iki taraf için de maliyet artar.' : 'No human arbitrator in disputes; delay becomes progressively expensive for both sides.'}</li>
-            <li>• {lang === 'TR' ? 'Bu yapı gereksiz tartışmayı değil, hızlı uzlaşıyı ekonomik olarak teşvik eder.' : 'This structure rewards fast settlement rather than endless argument.'}</li>
-          </ul>
+        <section className="bg-surface border border-borderSubtle rounded-2xl p-5 md:p-6" data-testid="home-how-it-works">
+          <p className="text-[11px] tracking-[0.2em] uppercase text-brand mb-2">{lang === 'TR' ? 'Nasıl çalışır' : 'How it works'}</p>
+          <h3 className="text-xl font-bold text-textPrimary mb-4">{lang === 'TR' ? 'Kararı kontrat verir, backend değil.' : 'The contract decides, not the backend.'}</h3>
+          <ol className="space-y-3">
+            {(lang === 'TR' ? [
+              { icon: ListPlus, title: 'Emir', text: 'Satıcı kriptoyu ve teminatını kilitler; alıcı kendi teminatıyla işleme girer.' },
+              { icon: Banknote, title: 'Ödeme', text: 'Alıcı 48 saat içinde banka ödemesini yapıp bildirir; yapmazsa teminatından kesinti olur.' },
+              { icon: CircleCheck, title: 'Onay', text: 'Satıcı onaylar. Sessiz kalırsa alıcı 48 saat sonra uyarır, 24 saat sonra kripto otomatik serbest kalır.' },
+              { icon: Flame, title: 'İtiraz', text: 'Hakem yok: teminatlar ve sonra ana para erir. Hızlı uzlaşmak her iki taraf için en ucuz yoldur.' },
+            ] : [
+              { icon: ListPlus, title: 'Order', text: 'The seller locks crypto plus a bond; the buyer joins with a bond of their own.' },
+              { icon: Banknote, title: 'Payment', text: 'The buyer pays by bank within 48 hours and reports it; otherwise part of their bond is lost.' },
+              { icon: CircleCheck, title: 'Release', text: 'The seller confirms. If silent, the buyer pings after 48 hours and funds auto-release 24 hours later.' },
+              { icon: Flame, title: 'Dispute', text: 'No arbitrator: bonds, then principal, decay. Settling fast is the cheapest path for both sides.' },
+            ]).map((step, i) => (
+              <li key={step.title} className="flex gap-3">
+                <span className="shrink-0 w-8 h-8 rounded-lg bg-elevated border border-borderSubtle flex items-center justify-center text-textSecondary">
+                  <step.icon className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-textPrimary"><span className="text-textMuted tabular-nums mr-1">{i + 1}.</span>{step.title}</p>
+                  <p className="text-xs md:text-sm text-textSecondary leading-relaxed">{step.text}</p>
+                </div>
+              </li>
+            ))}
+          </ol>
         </section>
 
-        <section className="bg-surface border border-borderSubtle rounded-2xl p-5 md:p-6">
-          <p className="text-[11px] tracking-[0.2em] uppercase text-textMuted mb-3">FAQ</p>
-          <div className="min-w-0 space-y-3">
+        <section className="bg-surface border border-borderSubtle rounded-2xl p-5 md:p-6" data-testid="home-faq">
+          <p className="text-[11px] tracking-[0.2em] uppercase text-textMuted mb-3">{lang === 'TR' ? 'Sık sorulanlar' : 'FAQ'}</p>
+          <div className="min-w-0 divide-y divide-borderSubtle">
             {faqItems.map((item) => (
-              <details key={item.q} className="group border border-borderSubtle rounded-xl p-3 bg-elevated">
+              <details key={item.q} className="group py-3 first:pt-0">
                 <summary className="cursor-pointer list-none text-sm font-semibold text-textPrimary flex items-center justify-between gap-3">
                   {item.q}
-                  <span className="text-textMuted group-open:rotate-45 transition">+</span>
+                  <ChevronDown className="w-4 h-4 shrink-0 text-textMuted group-open:rotate-180 transition" strokeWidth={1.8} aria-hidden="true" />
                 </summary>
                 <p className="text-xs md:text-sm text-textSecondary mt-2 leading-relaxed">{item.a}</p>
               </details>
@@ -526,14 +565,18 @@ export const buildAppViews = (ctx) => {
               const isCooldownOk      = sybilStatus ? sybilStatus.cooldownOk : true;
               const finalCanTakeOrder = canTakeOrder && isCooldownOk && isFunded && !isPaused && isTokenConfigured && isCorrectChain;
               const isSellSide = order.side === 'SELL_CRYPTO';
-              const sideBadgeClass = isSellSide ? 'text-emerald-500 border-emerald-500/30 bg-emerald-500/10' : 'text-blue-500 border-blue-500/30 bg-blue-500/10';
+              // [TR] Renk kullanıcının yapacağı işi anlatır: "Satın Al" yeşil, "Sat" kırmızı. Emir yönü rozeti nötrdür;
+              //      renkli rozet (ör. yeşil "Satış emri") yanındaki butonla çelişiyordu.
+              // [EN] Colour follows the viewer's action (buy green, sell red); the order-side badge stays neutral.
+              const sideBadgeClass = 'text-textSecondary border-borderSubtle bg-elevated';
               const sideLabel = order.sideLabel || getOrderSideCopy(order.side, 'order', lang) || order.side;
               // [TR] Oturum yoksa buton pasif "Kilitli" yerine giriş akışını başlatır.
               const needsSignIn = !isConnected || !isAuthenticated;
               const isDisabled = needsSignIn ? false : (!finalCanTakeOrder || isContractLoading);
               const icon = (I, spin) => <I className={`w-4 h-4${spin ? ' animate-spin' : ''}`} strokeWidth={1.8} aria-hidden="true" />;
               const ctaContent =
-                needsSignIn         ? <>{icon(Wallet)} {tr ? 'Giriş yap' : 'Sign in'}</> :
+                // Signed out: keep the action label and colour; the click starts sign-in.
+                needsSignIn         ? <>{order.ctaLabel || (tr ? 'İşlem yap' : 'Trade')}</> :
                 isPaused            ? <>{icon(CirclePause)} {tr ? 'Bakımda' : 'Paused'}</> :
                 !isCorrectChain     ? <>{icon(Unplug)} {tr ? 'Yanlış ağ' : 'Wrong network'}</> :
                 !isTokenConfigured  ? <>{icon(Settings)} {tr ? 'Token ayarlanmadı' : 'Token not set'}</> :
@@ -546,8 +589,7 @@ export const buildAppViews = (ctx) => {
                 (order.ctaLabel || (tr ? 'İşlem yap' : 'Trade'));
               const ctaTone = isDisabled
                 ? 'bg-elevated text-textMuted border border-borderSubtle cursor-not-allowed'
-                : needsSignIn ? 'bg-elevated text-textPrimary border border-borderStrong hover:bg-surface'
-                  : isSellSide ? 'bg-emerald-600 text-white hover:bg-emerald-500' : 'bg-danger text-white hover:opacity-90';
+                : isSellSide ? 'bg-emerald-600 text-white hover:bg-emerald-500' : 'bg-danger text-white hover:opacity-90';
               const bondText = Number(order.tier) === 0
                 ? (tr ? 'teminatsız' : 'no bond')
                 : (order.bondLabel && order.bondLabel !== '—' ? `${order.bondLabel} ${tr ? 'teminat' : 'bond'}` : null);
@@ -576,7 +618,7 @@ export const buildAppViews = (ctx) => {
                     </div>
                     <div className="shrink-0 flex flex-col items-end gap-2">
                       <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${sideBadgeClass}`}>{sideLabel}</span>
-                      <button onClick={() => (needsSignIn ? handleAuthAction() : handleStartTrade(order))} disabled={isDisabled} className={`h-9 min-w-[5.5rem] px-4 rounded-lg text-sm font-semibold transition inline-flex items-center justify-center gap-1.5 ${ctaTone}`}>
+                      <button onClick={() => (needsSignIn ? handleAuthAction() : handleStartTrade(order))} disabled={isDisabled} title={needsSignIn ? (tr ? 'Önce cüzdanınızı bağlayıp giriş yapın' : 'Connect your wallet and sign in first') : undefined} className={`h-9 min-w-[5.5rem] px-4 rounded-lg text-sm font-semibold transition inline-flex items-center justify-center gap-1.5 ${ctaTone}`}>
                         {ctaContent}
                       </button>
                     </div>
@@ -738,7 +780,9 @@ export const buildAppViews = (ctx) => {
       const sec = Math.floor(left / 1000);
       return { days: Math.floor(sec / 86400), hours: Math.floor((sec % 86400) / 3600), minutes: Math.floor((sec % 3600) / 60), seconds: sec % 60, isFinished: false };
     })();
-    const tradeActionCallbacks = ctx.devTradeActionCallbacks || buildTradeRoomPanelCallbacks({
+    // [TR] Lab'da handler'lar günlüğe yazar; aktif/pasif kuralları her iki durumda da aynıdır.
+    const labHandlers = ctx.devTradeHandlers || null;
+    const tradeActionCallbacks = buildTradeRoomPanelCallbacks({
       lang,
       activeTrade,
       roomState,
@@ -750,15 +794,16 @@ export const buildAppViews = (ctx) => {
       canMakerChallenge,
       canMakerStartChallengeFlow,
       burnExpiredDeadlinePassed,
-      handleReportPayment,
-      handleRelease,
-      handleChallenge,
-      handlePingMaker,
-      handleAutoRelease,
-      handleProposeCancel,
-      handleBurnExpired,
-      handleExpirePaymentWindow,
+      handleReportPayment: labHandlers?.handleReportPayment || handleReportPayment,
+      handleRelease: labHandlers?.handleRelease || handleRelease,
+      handleChallenge: labHandlers?.handleChallenge || handleChallenge,
+      handlePingMaker: labHandlers?.handlePingMaker || handlePingMaker,
+      handleAutoRelease: labHandlers?.handleAutoRelease || handleAutoRelease,
+      handleProposeCancel: labHandlers?.handleProposeCancel || handleProposeCancel,
+      handleBurnExpired: labHandlers?.handleBurnExpired || handleBurnExpired,
+      handleExpirePaymentWindow: labHandlers?.handleExpirePaymentWindow || handleExpirePaymentWindow,
       paymentWindowExpired,
+      confirmFn: labHandlers ? () => true : undefined,
     });
     const challengedDetails = isChallenged ? (() => {
       const riskLines = bleedingAmounts
@@ -804,10 +849,11 @@ export const buildAppViews = (ctx) => {
       lang,
       canBurnExpired: burnExpiredDeadlinePassed,
       paymentWindowExpired,
+      cancelStatus,
       challengedDetails,
     };
     const tradeDecisionInput = ctx.devTradeDecisionInput
-      ? { ...ctx.devTradeDecisionInput, lang, challengedDetails: ctx.devTradeDecisionInput.challengedDetails || challengedDetails }
+      ? { ...ctx.devTradeDecisionInput, lang, cancelStatus, challengedDetails: ctx.devTradeDecisionInput.challengedDetails || challengedDetails, timers: { ...ctx.devTradeDecisionInput.timers } }
       : defaultTradeDecisionInput;
 
     return (
@@ -819,65 +865,60 @@ export const buildAppViews = (ctx) => {
         <ReferenceRateTicker lang={lang} />
 
         <div className={`border rounded-2xl p-4 md:p-6 shadow-xl transition-colors duration-700 ${isChallenged ? 'bg-surface border-danger/40' : 'bg-surface border-borderSubtle'}`}>
-          <div className="flex items-start justify-between gap-3 mb-4 border-b border-borderSubtle pb-4">
+          <div className="flex items-start justify-between gap-3 mb-4 border-b border-borderSubtle pb-4" data-testid="trade-room-header">
             <div className="min-w-0">
               <p className="text-textMuted text-[11px] tracking-widest mb-1">{lang === 'TR' ? 'İŞLEM' : 'TRADE'} #{activeTrade?.onchainId ?? '—'}</p>
               <h2 className="text-2xl font-bold text-textPrimary leading-tight">{fmt(rawCryptoAmt)} {asset}</h2>
               {fiatTotal && <p className="text-sm font-medium text-textMuted">≈ {fiatTotal}</p>}
             </div>
             <div className="shrink-0 text-right">
-              <span className={`inline-block text-xs px-3 py-1 rounded-full border ${isChallenged ? 'bg-danger/10 text-danger border-danger/40' : 'bg-brand/10 text-brand border-brand/40'}`}>{getStateLabel(roomState, lang)}</span>
+              <span className={`inline-block text-xs px-3 py-1 rounded-full border ${isChallenged || roomState === 'BURNED' ? 'bg-danger/10 text-danger border-danger/40' : roomState === 'CANCELED' ? 'bg-elevated text-textMuted border-borderSubtle' : 'bg-brand/10 text-brand border-brand/40'}`}>{getStateLabel(roomState, lang)}</span>
               <p className="mt-1.5 text-[11px] text-textMuted">{lang === 'TR' ? 'Karşı taraf' : 'Counterparty'}</p>
               <p className="text-xs text-textPrimary font-mono">{counterpartyDisplay}</p>
             </div>
           </div>
 
-          {/* Eriyen emanet görsel barı — yalnızca CHALLENGED state'inde gösterilir */}
-          {isChallenged && (
-            <div className="mb-4 p-4 bg-surface border border-danger/40 rounded-xl relative overflow-hidden">
-              <div className="flex justify-between text-xs font-bold mb-3">
-                <span className="text-red-500">{lang === 'TR' ? 'İLAN SAHİBİ TEMİNATI' : 'MAKER BOND'}</span>
-                <span className="text-orange-500">{lang === 'TR' ? 'ALICI TEMİNATI' : 'TAKER BOND'}</span>
-              </div>
-              {(() => {
-                // [TR] Kalan teminat, lock anındaki orijinal teminata oranlanır (önceki hesap her zaman %100'dü).
-                // [EN] Remaining bond is compared with the original lock-time bond (old math was always 100%).
-                const toNum = (v) => { try { return Number(BigInt(v ?? 0)); } catch { return 0; } };
-                const makerOrig = toNum(activeTrade?.makerBondRaw);
-                const takerOrig = toNum(activeTrade?.takerBondRaw);
-                const pctOf = (remaining, original) => (original > 0 ? Math.max(0, Math.min(100, Math.round((remaining / original) * 100))) : 0);
-                const makerPct = bleedingAmounts ? pctOf(toNum(bleedingAmounts.makerBondRemaining), makerOrig) : 100;
-                const takerPct = bleedingAmounts ? pctOf(toNum(bleedingAmounts.takerBondRemaining), takerOrig) : 100;
-                const myPct = isTaker ? takerPct : makerPct;
-                const opponentPct = isTaker ? makerPct : takerPct;
-                const decayedTotal = bleedingAmounts ? (bleedingAmounts.totalDecayed ?? 0n) : 0n;
-                return (
-                  <>
-                    <div className="w-full h-3 bg-elevated rounded-full flex relative border border-borderSubtle">
-                      <div className="h-full bg-gradient-to-r from-red-700 to-red-500 rounded-l-full relative transition-all duration-500" style={{width: `${isMaker ? myPct : opponentPct}%`}}>
-                        <div className="absolute right-0 top-1/2 -translate-y-1/2 w-4 h-4 bg-red-500 rounded-full blur-sm"></div>
+          {/* [TR] Eriyen emanet: her kalem (satıcı teminatı, alıcı teminatı, ana para) kendi çubuğunda, kontrattaki
+              orijinal tutara oranla gösterilir. Veri yoksa "hesaplanıyor" yazar; yanıltıcı %100/0 gösterilmez.
+              [EN] Bleeding escrow: one meter per bucket vs. its lock-time amount; no fake 100%/0 while loading. */}
+          {isChallenged && (() => {
+            const toNum = (v) => { try { return Number(BigInt(v ?? 0)); } catch { return 0; } };
+            const pctOf = (remaining, original) => (original > 0 ? Math.max(0, Math.min(100, Math.round((remaining / original) * 100))) : null);
+            const rows = [
+              { key: 'maker', label: lang === 'TR' ? 'Satıcı teminatı' : 'Maker bond', mine: isMaker, pct: bleedingAmounts ? pctOf(toNum(bleedingAmounts.makerBondRemaining), toNum(activeTrade?.makerBondRaw)) : null },
+              { key: 'taker', label: lang === 'TR' ? 'Alıcı teminatı' : 'Taker bond', mine: isTaker, pct: bleedingAmounts ? pctOf(toNum(bleedingAmounts.takerBondRemaining), toNum(activeTrade?.takerBondRaw)) : null },
+              { key: 'crypto', label: lang === 'TR' ? 'Ana para' : 'Principal', mine: false, pct: bleedingAmounts && bleedingAmounts.currentCrypto !== undefined ? pctOf(toNum(bleedingAmounts.currentCrypto), toNum(activeTrade?.cryptoAmountRaw)) : null },
+            ].filter((row) => row.pct !== null || !bleedingAmounts);
+            const barTone = (pct) => (pct === null ? 'bg-borderStrong' : pct > 66 ? 'bg-emerald-500' : pct > 33 ? 'bg-warning' : 'bg-danger');
+            return (
+              <div className="mb-4 rounded-xl border border-danger/30 bg-danger/5 p-4" data-testid="bleeding-meter">
+                <div className="mb-3">
+                  <p className="flex items-center gap-1.5 text-sm font-bold text-danger"><Flame className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />{lang === 'TR' ? 'Eriyen emanet' : 'Bleeding escrow'}</p>
+                  <p className="mt-0.5 text-xs text-textSecondary">{lang === 'TR' ? 'Eriyen toplam' : 'Total burned'}: <span className="font-semibold text-danger tabular-nums">{bleedingAmounts ? `${formatTokenAmountFromRaw(bleedingAmounts.totalDecayed ?? 0n, tradeTokenDecimals)} ${asset}` : (lang === 'TR' ? 'hesaplanıyor…' : 'calculating…')}</span></p>
+                </div>
+                <div className="space-y-2.5">
+                  {rows.map((row) => (
+                    <div key={row.key} className="text-xs">
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <span className={row.mine ? 'font-semibold text-textPrimary' : 'text-textSecondary'}>{row.label}{row.mine ? (lang === 'TR' ? ' (siz)' : ' (you)') : ''}</span>
+                        <span className="tabular-nums text-textPrimary">{row.pct === null ? '—' : `%${row.pct}`}</span>
                       </div>
-                      <div className="flex-1 bg-transparent border-y border-red-900/30 flex items-center justify-center overflow-hidden">
-                        <div className="w-full h-px bg-red-500/20 shadow-[0_0_10px_red] animate-pulse"></div>
-                      </div>
-                      <div className="h-full bg-gradient-to-l from-orange-700 to-orange-500 rounded-r-full relative transition-all duration-500" style={{width: `${isTaker ? myPct : opponentPct}%`}}>
-                        <div className="absolute left-0 top-1/2 -translate-y-1/2 w-4 h-4 bg-orange-500 rounded-full blur-sm"></div>
+                      <div className="h-1.5 rounded-full bg-elevated overflow-hidden" aria-hidden="true">
+                        <div className={`h-full rounded-full transition-all duration-500 ${barTone(row.pct)}`} style={{ width: `${row.pct ?? 100}%` }} />
                       </div>
                     </div>
-                    {/* [TR] Süreler aşağıdaki "Süreler" kartında; burada yalnız eriyen toplam gösterilir. */}
-                    <p className="mt-3 flex items-center justify-center gap-1.5 text-sm font-bold text-danger"><Flame className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />{lang === 'TR' ? 'Eriyen toplam' : 'Total burned'}: {formatTokenAmountFromRaw(decayedTotal, tradeTokenDecimals)} {asset}</p>
-                  </>
-                );
-              })()}
-            </div>
-          )}
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
 
           {(() => {
             // [TR] Önce görülmesi gereken: alıcı için satıcının ödeme bilgileri (nereye ödeyeceği).
             // [EN] Must-see-first: for the taker, the maker's payment details (where to pay).
             const showTakerPii = isTaker && ['LOCKED', 'PAID'].includes(roomState);
             const beforeActions = showTakerPii ? (
-              <div className="mb-3 border border-borderSubtle rounded-xl overflow-hidden bg-surface p-1">
+              <div className="mb-4">
                 <PIIDisplay tradeId={activeTrade?.id} lang={lang} getSafeTelegramUrl={getSafeTelegramUrl} authenticatedFetch={authenticatedFetch} />
               </div>
             ) : null;
@@ -917,11 +958,21 @@ export const buildAppViews = (ctx) => {
               );
             }
 
+            // [TR] Kapanmış işlemde odada yapılacak iş yok: kullanıcıyı sonraki mantıklı yere yönlendir.
+            if (['RESOLVED', 'CANCELED', 'BURNED'].includes(roomState)) {
+              primaryInput = (
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button" onClick={() => setCurrentView('market')} className="h-10 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold">{lang === 'TR' ? 'Pazara dön' : 'Back to market'}</button>
+                  <button type="button" onClick={() => { if (!isConnected || !isAuthenticated) { handleAuthAction(); return; } openProfilePage?.('history'); }} className="h-10 rounded-lg border border-borderStrong bg-surface text-textPrimary text-sm font-semibold hover:bg-elevated">{lang === 'TR' ? 'İşlem geçmişi' : 'Trade history'}</button>
+                </div>
+              );
+            }
+
             return (
               <TradeRoomPage decisionInput={tradeDecisionInput} actionCallbacks={tradeActionCallbacks} beforeActions={beforeActions} primaryInput={primaryInput}>
                 {/* [TR] Uzlaşma kartı yalnız itiraz aşamasında anlamlı; diğer durumlarda "kullanılamaz" kutusu gürültüydü. */}
                 {roomState === 'CHALLENGED' && (
-                  <div className="mb-3">
+                  <div className="mb-4">
                     <SettlementProposalCard
                       activeTrade={activeTrade}
                       userRole={userRole}
@@ -939,13 +990,13 @@ export const buildAppViews = (ctx) => {
 
                 {/* [TR] İptal teklifi durumu: bekleyen teklif veya karşı tarafın teklifine yanıt. Teklif butonu "Diğer seçenekler"de. */}
                 {['LOCKED', 'PAID', 'CHALLENGED'].includes(roomState) && cancelStatus === 'proposed_by_me' && (
-                  <div className="mb-3 py-3 px-4 bg-warning/10 border border-warning/30 rounded-xl flex items-center gap-3">
+                  <div className="mb-4 py-3 px-4 bg-warning/10 border border-warning/30 rounded-xl flex items-center gap-3">
                     <div className="w-4 h-4 border-2 border-warning border-t-transparent rounded-full animate-spin shrink-0"></div>
                     <span className="text-sm font-semibold text-textPrimary">{lang === 'TR' ? 'İptal teklifiniz gönderildi; karşı taraf bekleniyor.' : 'Cancel proposed; waiting for the counterparty.'}</span>
                   </div>
                 )}
                 {['LOCKED', 'PAID', 'CHALLENGED'].includes(roomState) && cancelStatus === 'proposed_by_other' && (
-                  <div className="mb-3 p-4 bg-warning/10 border border-warning/30 rounded-xl">
+                  <div className="mb-4 p-4 bg-warning/10 border border-warning/30 rounded-xl">
                     <p className="flex items-center gap-1.5 text-sm font-bold text-textPrimary"><Undo2 className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />{lang === 'TR' ? 'Karşı taraf iptal teklif etti' : 'Counterparty proposed a cancel'}</p>
                     <p className="text-xs text-textMuted mt-1">
                       {roomState === 'LOCKED'
@@ -995,12 +1046,12 @@ export const buildAppViews = (ctx) => {
       <div className="md:hidden fixed inset-x-0 bottom-0 box-border h-[calc(4rem_+_env(safe-area-inset-bottom))] max-w-full bg-shell border-t border-borderSubtle z-[45] flex items-center justify-around gap-0 overflow-hidden px-[calc(0.25rem_+_env(safe-area-inset-left))] pr-[calc(0.25rem_+_env(safe-area-inset-right))] pb-[env(safe-area-inset-bottom)] shadow-[0_-10px_30px_rgba(0,0,0,0.12)]">
         {item({ key: 'home', icon: House, label: tr ? 'Ana' : 'Home', active: currentView === 'home', onClick: () => setCurrentView('home') })}
         {item({ key: 'market', icon: Store, label: tr ? 'Pazar' : 'Market', active: currentView === 'market', onClick: () => setCurrentView('market') })}
-        {item({ key: 'trade', icon: Briefcase, label: tr ? 'İşlem' : 'Trade', active: currentView === 'tradeRoom', activeClass: 'text-warning', onClick: () => setCurrentView('tradeRoom'), dot: activeEscrows.length > 0 ? 'bg-orange-500 animate-pulse' : null })}
-        {item({ key: 'ops', icon: Radar, label: tr ? 'Takip' : 'Track', active: currentView === 'operations', activeClass: 'text-info', onClick: () => setCurrentView('operations') })}
+        {navUnlocked && item({ key: 'trade', icon: Briefcase, label: tr ? 'İşlem' : 'Trade', active: currentView === 'tradeRoom', activeClass: 'text-warning', onClick: () => setCurrentView('tradeRoom'), dot: activeEscrows.length > 0 ? 'bg-orange-500 animate-pulse' : null })}
+        {navUnlocked && item({ key: 'ops', icon: Radar, label: tr ? 'Takip' : 'Track', active: currentView === 'operations', activeClass: 'text-info', onClick: () => setCurrentView('operations') })}
         {/* [TR] Mobil admin girişi authenticated kullanıcıya açık kalır; backend nihai otoritedir.
             [EN] Mobile admin entry remains reachable for authenticated users; backend is authoritative. */}
         {canSeeAdminEntry && item({ key: 'admin', icon: Compass, label: 'Admin', active: currentView === 'admin', activeClass: 'text-success', onClick: () => setCurrentView('admin') })}
-        {item({ key: 'profile', icon: UserRound, label: tr ? 'Profil' : 'Profile', active: currentView === 'profile', activeClass: 'text-success', onClick: () => setCurrentView('profile') })}
+        {navUnlocked && item({ key: 'profile', icon: UserRound, label: tr ? 'Profil' : 'Profile', active: currentView === 'profile', activeClass: 'text-success', onClick: () => setCurrentView('profile') })}
         {item({ key: 'menu', icon: Menu, label: tr ? 'Menü' : 'Menu', active: sidebarOpen, onClick: toggleSidebar })}
         {item({ key: 'wallet', icon: Wallet, label: signedIn ? (tr ? 'Bağlı' : 'Linked') : (tr ? 'Bağlan' : 'Connect'), active: false, onClick: handleAuthAction, dot: signedIn ? 'bg-success' : null })}
       </div>
@@ -1008,62 +1059,87 @@ export const buildAppViews = (ctx) => {
   };
 
 
-  const renderProfileContext = () => (
-    <ProfileContextPage
-      lang={lang}
-      onConnect={handleAuthAction}
-      address={address}
-      formatAddress={formatAddress}
-      isConnected={isConnected}
-      isAuthenticated={isAuthenticated}
-      payoutProfileDraft={ctx.payoutProfileDraft}
-      setPayoutProfileDraft={ctx.setPayoutProfileDraft}
-      handleUpdatePII={ctx.handleUpdatePII}
-      userReputation={userReputation}
-      myOrders={ctx.myOrders || []}
-      setConfirmDeleteId={ctx.setConfirmDeleteId || (() => {})}
-      confirmDeleteId={ctx.confirmDeleteId ?? null}
-      handleDeleteOrder={ctx.orderActions?.handleDeleteOrder}
-      initialActiveTab={ctx.profileContextTab}
-      setInitialActiveTab={ctx.setProfileContextTab}
-      activeTradesFilter={ctx.activeTradesFilter}
-      setActiveTradesFilter={ctx.setActiveTradesFilter}
-      activeEscrows={activeEscrows}
-      setActiveTrade={setActiveTrade}
-      setUserRole={setUserRole}
-      setTradeState={setTradeState}
-      setChargebackAccepted={setChargebackAccepted}
-      setCurrentView={setCurrentView}
-      setShowProfileModal={setShowProfileModal}
-      tradeHistory={ctx.tradeHistory || []}
-      mapResolutionTypeLabel={mapResolutionTypeLabel}
-      handleLogoutAndDisconnect={ctx.handleLogoutAndDisconnect}
-      canonicalizePayoutProfileDraft={ctx.canonicalizePayoutProfileDraft}
-      SEPA_COUNTRIES={ctx.SEPA_COUNTRIES}
-      isContractLoading={isContractLoading}
-      tokenDecimalsMap={tokenDecimalsMap}
-      showToast={showToast}
-    />
-  );
+  const renderProfileContext = () => {
+    // [TR] Lab "Profil Merkezi" senaryosu itibar/kayıt verisini sağlar; gerçek oturum verisinin yerine geçer.
+    const lp = ctx.labProfile || null;
+    const labSession = ctx.devScenarioCategory === 'activeTrades' || Boolean(lp);
+    return (
+      <ProfileContextPage
+        lang={lang}
+        onConnect={handleAuthAction}
+        address={address}
+        formatAddress={formatAddress}
+        isConnected={isConnected || labSession}
+        isAuthenticated={isAuthenticated || labSession}
+        authenticatedWallet={lp ? address : ctx.authenticatedWallet}
+        payoutProfileDraft={lp?.payoutProfileDraft || ctx.payoutProfileDraft}
+        setPayoutProfileDraft={ctx.setPayoutProfileDraft}
+        handleUpdatePII={ctx.handleUpdatePII}
+        userReputation={lp ? lp.userReputation : userReputation}
+        reputationPolicy={lp ? lp.reputationPolicy : ctx.reputationPolicy}
+        sybilStatus={lp ? lp.sybilStatus : sybilStatus}
+        walletAgeRemainingDays={lp ? lp.walletAgeRemainingDays : walletAgeRemainingDays}
+        isBanned={lp ? lp.isBanned : Boolean(ctx.isBanned)}
+        decayReputation={ctx.decayReputation}
+        myOrders={lp ? lp.myOrders : (ctx.myOrders || [])}
+        setConfirmDeleteId={ctx.setConfirmDeleteId || (() => {})}
+        confirmDeleteId={ctx.confirmDeleteId ?? null}
+        handleDeleteOrder={ctx.orderActions?.handleDeleteOrder}
+        initialActiveTab={ctx.profileContextTab}
+        setInitialActiveTab={ctx.setProfileContextTab}
+        activeTradesFilter={ctx.activeTradesFilter}
+        setActiveTradesFilter={ctx.setActiveTradesFilter}
+        activeEscrows={activeEscrows}
+        setActiveTrade={setActiveTrade}
+        setUserRole={setUserRole}
+        setTradeState={setTradeState}
+        setChargebackAccepted={setChargebackAccepted}
+        setCurrentView={setCurrentView}
+        setShowProfileModal={setShowProfileModal}
+        tradeHistory={lp ? lp.tradeHistory : (ctx.tradeHistory || [])}
+        historyLoading={lp ? false : Boolean(ctx.historyLoading)}
+        tradeHistoryPage={lp ? 1 : ctx.tradeHistoryPage}
+        setTradeHistoryPage={ctx.setTradeHistoryPage}
+        tradeHistoryTotal={lp ? (lp.tradeHistoryTotal ?? lp.tradeHistory.length) : ctx.tradeHistoryTotal}
+        tradeHistoryLimit={lp ? 6 : ctx.tradeHistoryLimit}
+        mapResolutionTypeLabel={mapResolutionTypeLabel}
+        handleLogoutAndDisconnect={ctx.handleLogoutAndDisconnect}
+        canonicalizePayoutProfileDraft={ctx.canonicalizePayoutProfileDraft}
+        SEPA_COUNTRIES={ctx.SEPA_COUNTRIES}
+        isContractLoading={isContractLoading}
+        setIsContractLoading={setIsContractLoading}
+        tokenDecimalsMap={tokenDecimalsMap}
+        showToast={showToast}
+      />
+    );
+  };
 
-  const renderFooter = () => (
-    <footer className="w-full max-w-[1200px] px-4 md:px-8 pb-6 md:pb-8 mt-2">
-      <div className="border border-borderSubtle bg-surface rounded-2xl px-4 py-4 md:px-6 md:py-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div>
-          <p className="text-sm font-semibold text-textPrimary">Araf © 2026</p>
-          <p className="text-xs text-textMuted">
-            {lang === 'TR' ? 'Hakem değil, oyun teorisi. Karar mercii kontrat.' : 'No arbitrator, only game theory. Final authority is the contract.'}
-          </p>
+  const renderFooter = () => {
+    const links = [
+      { k: 'github', label: 'GitHub', href: socialLinks.github },
+      { k: 'twitter', label: 'X', href: socialLinks.twitter },
+      { k: 'farcaster', label: 'Farcaster', href: socialLinks.farcaster },
+    ].filter((l) => l.href);
+    return (
+      <footer className="w-full max-w-[1200px] px-4 md:px-8 pb-6 md:pb-8 mt-2" data-testid="app-footer">
+        <div className="border-t border-borderSubtle pt-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div>
+            <p className="text-sm font-semibold text-textPrimary">Araf</p>
+            <p className="text-xs text-textMuted">{lang === 'TR' ? 'Hakem değil, oyun teorisi. Karar mercii kontrat.' : 'No arbitrator, only game theory. The contract is the final authority.'}</p>
+            <p className="text-[11px] text-textMuted mt-1">{lang === 'TR' ? 'Deneysel yazılım; kendi sorumluluğunuzda kullanın.' : 'Experimental software; use at your own risk.'}</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" onClick={() => setShowFeedbackModal(true)} className="px-3 py-2 rounded-lg border border-borderSubtle text-xs font-semibold text-textSecondary hover:text-textPrimary hover:bg-elevated transition">
+              {lang === 'TR' ? 'Geri bildirim' : 'Feedback'}
+            </button>
+            {links.map((l) => (
+              <a key={l.k} href={l.href} target="_blank" rel="noreferrer noopener" className="px-3 py-2 rounded-lg border border-borderSubtle text-xs font-semibold text-textSecondary hover:text-textPrimary hover:bg-elevated transition">{l.label}</a>
+            ))}
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <a href={socialLinks.github} target="_blank" rel="noreferrer" className="px-3 py-2 rounded-xl bg-elevated border border-borderStrong text-xs font-semibold text-textSecondary hover:text-textPrimary hover:border-borderStrong transition">GitHub</a>
-          <a href={socialLinks.twitter} target="_blank" rel="noreferrer" className="px-3 py-2 rounded-xl bg-elevated border border-borderStrong text-xs font-semibold text-textSecondary hover:text-textPrimary hover:border-borderStrong transition">Twitter</a>
-          <a href={socialLinks.farcaster} target="_blank" rel="noreferrer" className="px-3 py-2 rounded-xl bg-elevated border border-borderStrong text-xs font-semibold text-textSecondary hover:text-textPrimary hover:border-borderStrong transition">Farcaster</a>
-        </div>
-      </div>
-    </footer>
-  );
-
+      </footer>
+    );
+  };
 
   const renderOperations = () => {
     const operationSetters = ctx.operationsActionSetters || {};
