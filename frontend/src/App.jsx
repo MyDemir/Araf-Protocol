@@ -17,6 +17,7 @@ import { readProtocolConfig } from './app/contexts/admin/adminChainConfig';
 import { createMockProtocolConfigReader } from './dev/mocks/mockAdminFetch';
 import { labTokenSymbols } from './dev/fixtures/adminFixtures';
 import { LAB_TOKEN_ADDRESSES, LAB_BOND_MAP, LAB_FEE_CONFIG } from './dev/fixtures/makerOrderFixtures';
+import { buildLabRewards } from './dev/fixtures/profileFixtures';
 import { isUiLabEnabled } from './dev/ui-lab/isUiLabEnabled';
 import { createMockAdminFetch } from './dev/mocks/mockAdminFetch';
 import { createSetterAction, createSettlementContractMocks, createTradeRoomFetch, createTradeRoomHandlers } from './dev/mocks/mockActions';
@@ -685,7 +686,7 @@ function App() {
   // [TR] Lab "Profil Merkezi": kontrat itibarı ve backend kayıtları senaryodan gelir; sayaçlar seçim anına göre.
   const labProfile = React.useMemo(() => (
     activeScenarioCategory === 'profile' && activeScenarioPayload
-      ? { ...activeScenarioPayload, userReputation: activeScenarioPayload.build?.() || null }
+      ? { ...activeScenarioPayload, userReputation: activeScenarioPayload.build?.() || null, labRewards: activeScenarioPayload.labRewards ? buildLabRewards() : null }
       : null
   ), [activeScenarioCategory, activeScenarioPayload]);
 

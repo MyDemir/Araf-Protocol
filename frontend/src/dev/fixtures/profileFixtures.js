@@ -152,3 +152,56 @@ export const profileScenarios = [
     build: () => reputation({ tier: 1, successful: 22, firstSuccessAgoDays: 40 }),
   }),
 ];
+
+// [TR] Ödüller sekmesi için sahte ArafRewards okuyucusu: kontrat varsayılan süreleri (7g dönem, 24s gecikme,
+//      30g talep penceresi). "Şimdi" mevcut dönemin 12. saatine sabitlenir; böylece önceki dönem kesinleşme
+//      aşamasındadır ve her durum görünür.
+const LAB_REWARD_TOKENS = { USDT: '0x' + 'a'.repeat(40), USDC: '0x' + 'b'.repeat(40) };
+const u6 = (n) => BigInt(Math.round(n * 1e6));
+
+export const buildLabRewards = () => {
+  const dur = 7 * DAY;
+  const cur = Math.floor(Date.now() / 1000 / dur);
+  const now = cur * dur + 12 * 3600;
+  // epochOffset -> { u, t, pools: {USDT, USDC}, finalized: {..}, claimed: {..} }
+  const plan = {
+    0: { u: 300n, t: 10000n, pools: { USDT: 1200, USDC: 400 } },
+    1: { u: 500n, t: 8000n, pools: { USDT: 900, USDC: 0 } },
+    2: { u: 250n, t: 5000n, pools: { USDT: 1000, USDC: 200 }, finalized: { USDT: true } },
+    3: { u: 400n, t: 10000n, pools: { USDT: 1500, USDC: 300 }, finalized: { USDT: true, USDC: true }, claimed: { USDT: true } },
+    4: { u: 0n, t: 6000n, pools: { USDT: 800, USDC: 0 }, finalized: { USDT: true } },
+    5: { u: 600n, t: 12000n, pools: { USDT: 1100, USDC: 250 }, finalized: { USDT: true, USDC: true }, claimed: { USDT: true, USDC: true } },
+  };
+  const at = (epoch) => plan[cur - Number(epoch)] || { u: 0n, t: 0n, pools: {} };
+  const sym = (addr) => Object.keys(LAB_REWARD_TOKENS).find((k) => LAB_REWARD_TOKENS[k] === addr);
+  const reader = {
+    isConfigured: true,
+    isSupportedChain: true,
+    tokens: LAB_REWARD_TOKENS,
+    currentEpoch: async () => BigInt(cur),
+    epochDuration: async () => BigInt(dur),
+    claimDelay: async () => BigInt(DAY),
+    claimWindow: async () => BigInt(30 * DAY),
+    totalWeight: async (e) => at(e).t,
+    userWeight: async (e) => at(e).u,
+    epochRewardPool: async (e, token) => u6(at(e).pools[sym(token)] || 0),
+    epochTokenFinalized: async (e, token) => Boolean(at(e).finalized?.[sym(token)]),
+    hasClaimed: async (e, _user, token) => Boolean(at(e).claimed?.[sym(token)]),
+    finalizeEpochToken: async () => ({ status: 'success' }),
+    claim: async () => ({ status: 'success' }),
+  };
+  const claimRow = (offset, symbol) => {
+    const p = plan[offset];
+    return {
+      tx_hash: `0x${String(offset).repeat(64)}`.slice(0, 66), log_index: offset, epoch: String(cur - offset),
+      token: LAB_REWARD_TOKENS[symbol], amount: ((u6(p.pools[symbol]) * p.u) / p.t).toString(),
+    };
+  };
+  const history = [claimRow(3, 'USDT'), claimRow(5, 'USDT'), claimRow(5, 'USDC')];
+  return { reader, now, fetchClaimHistory: async () => history };
+};
+
+profileScenarios.push(scenario('rewards', 'Rewards · accruing / finalizing / claimable / claimed', 'rewards', {
+  build: () => reputation({ tier: 2, successful: 64, firstSuccessAgoDays: 120 }),
+  labRewards: true,
+}));

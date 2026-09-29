@@ -1110,6 +1110,9 @@ export const buildAppViews = (ctx) => {
         setIsContractLoading={setIsContractLoading}
         tokenDecimalsMap={tokenDecimalsMap}
         showToast={showToast}
+        rewardsReader={lp?.labRewards?.reader || null}
+        fetchClaimHistory={lp?.labRewards?.fetchClaimHistory || null}
+        now={lp?.labRewards?.now ?? null}
       />
     );
   };
