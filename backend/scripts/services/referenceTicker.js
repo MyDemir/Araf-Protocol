@@ -4,7 +4,12 @@ const { getRedisClient, isReady: isRedisReady } = require("../config/redis");
 const logger = require("../utils/logger");
 
 const COINBASE_BASE_URL = "https://api.coinbase.com/api/v3/brokerage";
-const FRANKFURTER_URL = "https://api.frankfurter.dev/v2/rates?base=USD&quotes=TRY,EUR,GBP";
+// [TR] v2 dizi, v1 nesne döndürür; ikisi de extractFrankfurterUsdRates ile ayrıştırılır. v2 başarısızsa v1 denenir.
+// [EN] v2 returns an array, v1 an object; both parse below. v1 is the fallback when v2 fails.
+const FRANKFURTER_URLS = [
+  "https://api.frankfurter.dev/v2/rates?base=USD&quotes=TRY,EUR,GBP",
+  "https://api.frankfurter.dev/v1/latest?base=USD&symbols=TRY,EUR,GBP",
+];
 
 const CACHE_KEYS = {
   crypto: "reference:ticker:crypto:v1",
@@ -97,7 +102,10 @@ function parseCoinbaseTickerPrice(payload) {
 }
 
 async function fetchCoinbaseProductPrice(productId) {
-  const url = `${COINBASE_BASE_URL}/market/products/${encodeURIComponent(productId)}/ticker`;
+  // [TR] Public ticker uç noktası `limit` parametresi ister; yokken 400 dönüyor ve tüm kripto satırları
+  //      sessizce kayboluyordu (şerit boş kalıp hiç görünmüyordu).
+  // [EN] The public ticker endpoint requires `limit`; without it every call returned 400 and the ticker went empty.
+  const url = `${COINBASE_BASE_URL}/market/products/${encodeURIComponent(productId)}/ticker?limit=1`;
   try {
     const payload = await fetchJsonWithTimeout(url, 5000);
     const price = parseCoinbaseTickerPrice(payload);
@@ -107,7 +115,8 @@ async function fetchCoinbaseProductPrice(productId) {
     }
     return price;
   } catch (err) {
-    if (err?.status === 400 || err?.status === 404) {
+    // 404 = pair not listed (expected; a derived rate is used instead). 400 means a malformed request: log it.
+    if (err?.status === 404) {
       return null;
     }
     logger.warn(`[ReferenceTicker] Coinbase fetch failed (${productId}): ${err.message}`);
@@ -165,9 +174,22 @@ function extractFrankfurterUsdRates(payload) {
 
   return payload?.rates || null;
 }
+async function fetchFrankfurterRates() {
+  let lastErr = null;
+  for (const url of FRANKFURTER_URLS) {
+    try {
+      const rates = extractFrankfurterUsdRates(await fetchJsonWithTimeout(url, 5000));
+      if (parsePositiveRate(rates?.TRY)) return rates;
+      lastErr = new Error(`Frankfurter payload without TRY: ${url}`);
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error("Frankfurter unavailable");
+}
+
 async function fetchFiatRates() {
-  const payload = await fetchJsonWithTimeout(FRANKFURTER_URL, 5000);
-  const rates = extractFrankfurterUsdRates(payload);
+  const rates = await fetchFrankfurterRates();
 
   const usdTry = parsePositiveRate(rates?.TRY);
   const usdEur = parsePositiveRate(rates?.EUR);

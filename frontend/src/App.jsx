@@ -48,6 +48,8 @@ const buildDevScenarioEscrowCounts = (activeEscrows = []) => ({
   },
 });
 
+const SESSION_ONLY_VIEWS = new Set(['tradeRoom', 'operations', 'profile', 'admin']);
+
 const ENV_ERRORS = [];
 const { errors: API_POLICY_ERRORS } = resolveApiPolicyDiagnostics(import.meta.env);
 ENV_ERRORS.push(...API_POLICY_ERRORS);
@@ -632,6 +634,15 @@ function App() {
       setShowMakerModal(false);
     }
   }, [authChecked, showMakerModal, isConnected, isAuthenticated, activeScenarioCategory]);
+
+  // [TR] Oturum gerektiren görünümler (İşlem Odası, Takip, Profil) imzalı oturum yokken açık kalmaz:
+  //      doğrudan link veya oturum düşmesi durumunda ana sayfaya dönülür. UI Lab senaryoları hariç.
+  // [EN] Session-only views fall back to home without a signed session (deep links, expired sessions).
+  React.useEffect(() => {
+    if (!authChecked || devScenarioActive) return;
+    if (isConnected && isAuthenticated) return;
+    if (SESSION_ONLY_VIEWS.has(currentView)) setCurrentView('home');
+  }, [authChecked, devScenarioActive, isConnected, isAuthenticated, currentView]);
 
 
   const {

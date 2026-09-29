@@ -17,7 +17,7 @@ describe('ReferenceRateTicker', () => {
     global.fetch = originalFetch;
   });
 
-  it('renders null when items are empty', async () => {
+  it('shows an unavailable line with retry instead of vanishing when items are empty', async () => {
     global.fetch.mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -29,10 +29,11 @@ describe('ReferenceRateTicker', () => {
       }),
     });
 
-    const { container } = render(<ReferenceRateTicker lang="TR" />);
+    render(<ReferenceRateTicker lang="TR" />);
 
-    await vi.waitFor(() => expect(global.fetch).toHaveBeenCalled());
-    expect(container.firstChild).toBeNull();
+    expect(await screen.findByTestId('reference-rate-ticker-unavailable')).toBeInTheDocument();
+    expect(screen.getByText('Referans kurlar şu an alınamıyor.')).toBeInTheDocument();
+    expect(screen.queryByTestId('reference-rate-ticker')).not.toBeInTheDocument();
   });
 
   it('renders informational disclaimer and stale badge', async () => {
@@ -83,6 +84,7 @@ describe('ReferenceRateTicker', () => {
 
     await vi.waitFor(() => expect(global.fetch).toHaveBeenCalled());
     expect(container).toBeInTheDocument();
+    expect(await screen.findByTestId('reference-rate-ticker-unavailable')).toBeInTheDocument();
     expect(screen.queryByTestId('reference-rate-ticker')).not.toBeInTheDocument();
   });
 });

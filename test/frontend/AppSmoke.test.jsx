@@ -186,4 +186,10 @@ describe('App smoke', () => {
     expect(source).toContain("const openProfilePage = React.useCallback((tab = 'account')");
     expect(source).not.toContain('renderProfileModal');
   });
+
+  it('redirects session-only views home without a signed session', () => {
+    const source = fs.readFileSync(path.resolve(process.cwd(), 'src/App.jsx'), 'utf8');
+    expect(source).toContain("const SESSION_ONLY_VIEWS = new Set(['tradeRoom', 'operations', 'profile', 'admin'])");
+    expect(source).toContain("if (SESSION_ONLY_VIEWS.has(currentView)) setCurrentView('home');");
+  });
 });
