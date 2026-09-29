@@ -13,6 +13,9 @@ import AdminPanel from './AdminPanel';
 import DevScenarioController from './dev/ui-lab/DevScenarioController';
 import useFullscreen from './app/shell/useFullscreen';
 import { deriveTradeTimeline, estimateBleeding } from './app/contexts/trade-room/tradeTimeline';
+import { readProtocolConfig } from './app/contexts/admin/adminChainConfig';
+import { createMockProtocolConfigReader } from './dev/mocks/mockAdminFetch';
+import { labTokenSymbols } from './dev/fixtures/adminFixtures';
 import { isUiLabEnabled } from './dev/ui-lab/isUiLabEnabled';
 import { createMockAdminFetch } from './dev/mocks/mockAdminFetch';
 import { createSetterAction, createSettlementContractMocks, createTradeRoomHandlers } from './dev/mocks/mockActions';
@@ -436,6 +439,22 @@ function App() {
       : authenticatedFetch
   ), [devScenarioActive, devScenario, authenticatedFetch]);
   const activeAdminFetch = effectiveAuthenticatedFetch;
+
+  // [TR] Admin "Kontrat" sekmesi zincirden okur; lab'da sahte okuyucu kullanılır.
+  const adminProtocolReader = React.useCallback(() => (
+    activeScenarioCategory === 'admin'
+      ? createMockProtocolConfigReader(devScenario?.scenario)()
+      : readProtocolConfig({
+        publicClient,
+        escrowAddress: import.meta.env.VITE_ESCROW_ADDRESS,
+        vaultAddress: import.meta.env.VITE_REVENUE_VAULT_ADDRESS || import.meta.env.VITE_REWARDS_VAULT_ADDRESS,
+        rewardsAddress: import.meta.env.VITE_REWARDS_ADDRESS,
+        tokens: SUPPORTED_TOKEN_ADDRESSES,
+      })
+  ), [activeScenarioCategory, devScenario, publicClient]); // eslint-disable-line react-hooks/exhaustive-deps
+  const adminTokenSymbols = React.useMemo(() => (activeScenarioCategory === 'admin' ? labTokenSymbols : Object.fromEntries(
+    Object.entries(SUPPORTED_TOKEN_ADDRESSES).filter(([, a]) => a).map(([sym, a]) => [String(a).toLowerCase(), sym])
+  )), [activeScenarioCategory]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const effectiveIsAuthenticated = activeScenarioCategory === 'admin' ? true : isAuthenticated;
   const effectiveAuthChecked = activeScenarioCategory === 'admin' ? true : authChecked;
@@ -1379,6 +1398,8 @@ function App() {
                         authChecked={effectiveAuthChecked}
                         showToast={showToast}
                         initialTab={devScenarioActive && devScenario.categoryKey === 'admin' ? devScenario.scenario.initialTab : undefined}
+                        readProtocolConfig={adminProtocolReader}
+                        tokenSymbols={adminTokenSymbols}
                       />
                     )
                     : renderTradeRoom()}

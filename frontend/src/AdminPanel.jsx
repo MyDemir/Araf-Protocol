@@ -1,12 +1,18 @@
 import React from 'react';
 import { buildApiUrl } from './app/apiConfig';
 import { mapResolutionTypeLabel } from './app/useAppSessionData';
+import AdminRevenuePanel from './app/contexts/admin/AdminRevenuePanel';
+import AdminChainPanel from './app/contexts/admin/AdminChainPanel';
 
 const TAB_OVERVIEW = 'overview';
 const TAB_SYNC = 'sync';
 const TAB_FEEDBACK = 'feedback';
 const TAB_TRADES = 'trades';
 const TAB_SETTLEMENT = 'settlement';
+// [TR] Önceden hiç gösterilmeyen backend uçları ve kontrat owner ayarları için sekmeler.
+const TAB_REVENUE = 'revenue';
+const TAB_CHAIN = 'chain';
+const ALL_TABS = [TAB_OVERVIEW, TAB_SYNC, TAB_FEEDBACK, TAB_TRADES, TAB_SETTLEMENT, TAB_REVENUE, TAB_CHAIN];
 
 const FEEDBACK_CATEGORY_OPTIONS = ['', 'bug', 'suggestion', 'ui/ux', 'other'];
 const FEEDBACK_RATING_OPTIONS = ['', '1', '2', '3', '4', '5'];
@@ -44,8 +50,8 @@ const toBoolBadgeClass = (value) => (
     : 'bg-elevated text-textSecondary border border-borderStrong'
 );
 
-function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, showToast, initialTab = TAB_OVERVIEW }) {
-  const normalizeInitialTab = (tab) => ([TAB_OVERVIEW, TAB_SYNC, TAB_FEEDBACK, TAB_TRADES, TAB_SETTLEMENT].includes(tab) ? tab : TAB_OVERVIEW);
+function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, showToast, initialTab = TAB_OVERVIEW, readProtocolConfig = null, tokenSymbols = {} }) {
+  const normalizeInitialTab = (tab) => (ALL_TABS.includes(tab) ? tab : TAB_OVERVIEW);
   const [activeTab, setActiveTab] = React.useState(() => normalizeInitialTab(initialTab));
 
   React.useEffect(() => {
@@ -383,6 +389,11 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
     { labelTR: 'Açık Sell', labelEN: 'Open Sell Orders', value: `${stats?.open_sell_orders ?? 0}`, tone: 'text-textPrimary' },
     { labelTR: 'Açık Buy', labelEN: 'Open Buy Orders', value: `${stats?.open_buy_orders ?? 0}`, tone: 'text-textPrimary' },
     { labelTR: 'Tamamlanan İşlem', labelEN: 'Completed Trades', value: `${stats?.completed_trades ?? 0}`, tone: 'text-success' },
+    // [TR] HistoricalStat'ta var olup gösterilmeyen emir/hacim alanları.
+    { labelTR: 'Gerçekleşen Hacim', labelEN: 'Executed Volume', value: `${stats?.executed_volume_usdt ?? 0}`, tone: 'text-textPrimary' },
+    { labelTR: 'Kısmi Dolu Emir', labelEN: 'Partially Filled', value: `${stats?.partially_filled_orders ?? 0}`, tone: 'text-textPrimary' },
+    { labelTR: 'Dolan Emir', labelEN: 'Filled Orders', value: `${stats?.filled_orders ?? 0}`, tone: 'text-textPrimary' },
+    { labelTR: 'İptal Emir', labelEN: 'Canceled Orders', value: `${stats?.canceled_orders ?? 0}`, tone: 'text-textPrimary' },
     { labelTR: 'Yanan Bond', labelEN: 'Burned Bonds', value: `${stats?.burned_bonds_usdt ?? 0}`, tone: 'text-danger' },
     { labelTR: 'Eksik Snapshot', labelEN: 'Incomplete Snapshot Trades', value: `${tradeCounts?.incompleteSnapshot ?? 0}`, tone: 'text-warning' },
     { labelTR: 'Challenged', labelEN: 'Challenged Trades', value: `${tradeCounts?.challenged ?? 0}`, tone: 'text-warning' },
@@ -479,7 +490,7 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
       <div className="mb-6 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-textPrimary">{lang === 'TR' ? 'Admin Paneli' : 'Admin Panel'}</h1>
-          <p className="text-textSecondary text-sm mt-1">{lang === 'TR' ? 'Read-only gözlem: Overview + Sync + Feedback' : 'Read-only observability: Overview + Sync + Feedback'}</p>
+          <p className="text-textSecondary text-sm mt-1">{lang === 'TR' ? 'Salt okunur gözlem: sistem, işlemler, gelir ve kontrat ayarları' : 'Read-only observability: system, trades, revenue and contract settings'}</p>
         </div>
         <div className="flex items-center gap-2">
           <div className="text-xs text-textMuted">
@@ -492,7 +503,7 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
       </div>
 
       <div className="mb-6 -mx-4 px-4 md:mx-0 md:px-0 flex gap-2 overflow-x-auto no-scrollbar">
-        {[TAB_OVERVIEW, TAB_SYNC, TAB_FEEDBACK, TAB_TRADES, TAB_SETTLEMENT].map((tab) => {
+        {ALL_TABS.map((tab) => {
           const label = tab === TAB_OVERVIEW
             ? (lang === 'TR' ? 'Overview' : 'Overview')
             : tab === TAB_SYNC
@@ -501,7 +512,11 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
                 ? (lang === 'TR' ? 'Feedback' : 'Feedback')
                 : tab === TAB_TRADES
                   ? (lang === 'TR' ? 'Trades' : 'Trades')
-                  : (lang === 'TR' ? 'Settlement' : 'Settlement');
+                  : tab === TAB_SETTLEMENT
+                    ? (lang === 'TR' ? 'Settlement' : 'Settlement')
+                    : tab === TAB_REVENUE
+                      ? (lang === 'TR' ? 'Gelir & Ödül' : 'Revenue & Rewards')
+                      : (lang === 'TR' ? 'Kontrat' : 'On-chain');
           const active = activeTab === tab;
           return (
             <button
@@ -538,6 +553,62 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
                   <div className={`text-xl font-bold ${kpi.tone}`}>{kpi.value}</div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* [TR] Kontratın TerminalOutcome dağılımı (backend resolutionAnalytics) ve zamanlanmış işler — daha önce hiç gösterilmiyordu. */}
+          {!summaryUnauthorized && summary && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              <div className="bg-surface border border-borderSubtle rounded-xl p-4" data-testid="admin-resolution-breakdown">
+                <p className="text-xs font-bold uppercase tracking-wide text-textMuted mb-2">{lang === 'TR' ? 'Kapanış türleri (kontrat sonucu)' : 'Resolution outcomes (contract)'}</p>
+                {(() => {
+                  const ra = summary?.resolutionAnalytics || {};
+                  const rows = [
+                    ['manualReleaseCount', 'Manuel onay', 'Manual release', 'text-success'],
+                    ['autoReleaseCount', 'Otomatik serbest bırakma', 'Auto-release', 'text-info'],
+                    ['partialSettlementCount', 'Kısmi uzlaşma', 'Partial settlement', 'text-info'],
+                    ['mutualCancelCount', 'Karşılıklı iptal', 'Mutual cancel', 'text-textPrimary'],
+                    ['paymentWindowExpiredCount', 'Ödeme süresi doldu (48s)', 'Payment window expired (48h)', 'text-warning'],
+                    ['disputedResolutionCount', 'İtirazlı onay', 'Disputed release', 'text-warning'],
+                    ['burnedCount', 'Yakıldı', 'Burned', 'text-danger'],
+                    ['unknownResolvedCount', 'Bilinmeyen', 'Unknown', 'text-textMuted'],
+                  ];
+                  const total = rows.reduce((acc, [k]) => acc + Number(ra[k] || 0), 0);
+                  return (
+                    <div className="divide-y divide-borderSubtle text-sm">
+                      {rows.map(([k, tr, en, tone]) => {
+                        const v = Number(ra[k] || 0);
+                        const pct = total > 0 ? Math.round((v / total) * 100) : 0;
+                        return (
+                          <div key={k} className="flex items-center justify-between gap-3 py-1.5">
+                            <span className="text-textSecondary">{lang === 'TR' ? tr : en}</span>
+                            <span className={`tabular-nums font-semibold ${tone}`}>{v}<span className="ml-1 text-xs font-normal text-textMuted">%{pct}</span></span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </div>
+              <div className="bg-surface border border-borderSubtle rounded-xl p-4" data-testid="admin-scheduler">
+                <p className="text-xs font-bold uppercase tracking-wide text-textMuted mb-2">{lang === 'TR' ? 'Zamanlanmış işler (son çalışma)' : 'Scheduled jobs (last run)'}</p>
+                <div className="divide-y divide-borderSubtle text-sm">
+                  {[
+                    ['reputationDecayLastRunAt', 'İtibar sönümleme', 'Reputation decay'],
+                    ['statsSnapshotLastRunAt', 'İstatistik anlık görüntüsü', 'Stats snapshot'],
+                    ['sensitiveCleanupLastRunAt', 'Hassas veri temizliği', 'Sensitive data cleanup'],
+                    ['userBankRiskCleanupLastRunAt', 'Banka risk temizliği', 'Bank risk cleanup'],
+                  ].map(([k, tr, en]) => (
+                    <div key={k} className="flex items-center justify-between gap-3 py-1.5">
+                      <span className="text-textSecondary">{lang === 'TR' ? tr : en}</span>
+                      <span className={`tabular-nums ${summary?.scheduler?.[k] ? 'text-textPrimary' : 'text-warning'}`}>{summary?.scheduler?.[k] ? formatDate(summary.scheduler[k]) : (lang === 'TR' ? 'Hiç çalışmadı' : 'Never ran')}</span>
+                    </div>
+                  ))}
+                  {summary?.degraded?.isDegraded && (
+                    <div className="py-1.5 text-xs text-warning">{lang === 'TR' ? 'Kısmi veri: ' : 'Partial data: '}{(summary.degraded.errors || []).map((e) => e.source).join(', ')}</div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
         </section>
@@ -1059,6 +1130,14 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
             </div>
           )}
         </section>
+      )}
+
+      {activeTab === TAB_REVENUE && (
+        <AdminRevenuePanel lang={lang} authenticatedFetch={authenticatedFetch} tokenSymbols={tokenSymbols} />
+      )}
+
+      {activeTab === TAB_CHAIN && (
+        <AdminChainPanel lang={lang} readProtocolConfig={readProtocolConfig} />
       )}
     </div>
   );
