@@ -526,14 +526,18 @@ export const buildAppViews = (ctx) => {
               const isCooldownOk      = sybilStatus ? sybilStatus.cooldownOk : true;
               const finalCanTakeOrder = canTakeOrder && isCooldownOk && isFunded && !isPaused && isTokenConfigured && isCorrectChain;
               const isSellSide = order.side === 'SELL_CRYPTO';
-              const sideBadgeClass = isSellSide ? 'text-emerald-500 border-emerald-500/30 bg-emerald-500/10' : 'text-blue-500 border-blue-500/30 bg-blue-500/10';
+              // [TR] Renk kullanıcının yapacağı işi anlatır: "Satın Al" yeşil, "Sat" kırmızı. Emir yönü rozeti nötrdür;
+              //      renkli rozet (ör. yeşil "Satış emri") yanındaki butonla çelişiyordu.
+              // [EN] Colour follows the viewer's action (buy green, sell red); the order-side badge stays neutral.
+              const sideBadgeClass = 'text-textSecondary border-borderSubtle bg-elevated';
               const sideLabel = order.sideLabel || getOrderSideCopy(order.side, 'order', lang) || order.side;
               // [TR] Oturum yoksa buton pasif "Kilitli" yerine giriş akışını başlatır.
               const needsSignIn = !isConnected || !isAuthenticated;
               const isDisabled = needsSignIn ? false : (!finalCanTakeOrder || isContractLoading);
               const icon = (I, spin) => <I className={`w-4 h-4${spin ? ' animate-spin' : ''}`} strokeWidth={1.8} aria-hidden="true" />;
               const ctaContent =
-                needsSignIn         ? <>{icon(Wallet)} {tr ? 'Giriş yap' : 'Sign in'}</> :
+                // Signed out: keep the action label and colour; the click starts sign-in.
+                needsSignIn         ? <>{order.ctaLabel || (tr ? 'İşlem yap' : 'Trade')}</> :
                 isPaused            ? <>{icon(CirclePause)} {tr ? 'Bakımda' : 'Paused'}</> :
                 !isCorrectChain     ? <>{icon(Unplug)} {tr ? 'Yanlış ağ' : 'Wrong network'}</> :
                 !isTokenConfigured  ? <>{icon(Settings)} {tr ? 'Token ayarlanmadı' : 'Token not set'}</> :
@@ -546,8 +550,7 @@ export const buildAppViews = (ctx) => {
                 (order.ctaLabel || (tr ? 'İşlem yap' : 'Trade'));
               const ctaTone = isDisabled
                 ? 'bg-elevated text-textMuted border border-borderSubtle cursor-not-allowed'
-                : needsSignIn ? 'bg-elevated text-textPrimary border border-borderStrong hover:bg-surface'
-                  : isSellSide ? 'bg-emerald-600 text-white hover:bg-emerald-500' : 'bg-danger text-white hover:opacity-90';
+                : isSellSide ? 'bg-emerald-600 text-white hover:bg-emerald-500' : 'bg-danger text-white hover:opacity-90';
               const bondText = Number(order.tier) === 0
                 ? (tr ? 'teminatsız' : 'no bond')
                 : (order.bondLabel && order.bondLabel !== '—' ? `${order.bondLabel} ${tr ? 'teminat' : 'bond'}` : null);
@@ -576,7 +579,7 @@ export const buildAppViews = (ctx) => {
                     </div>
                     <div className="shrink-0 flex flex-col items-end gap-2">
                       <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${sideBadgeClass}`}>{sideLabel}</span>
-                      <button onClick={() => (needsSignIn ? handleAuthAction() : handleStartTrade(order))} disabled={isDisabled} className={`h-9 min-w-[5.5rem] px-4 rounded-lg text-sm font-semibold transition inline-flex items-center justify-center gap-1.5 ${ctaTone}`}>
+                      <button onClick={() => (needsSignIn ? handleAuthAction() : handleStartTrade(order))} disabled={isDisabled} title={needsSignIn ? (tr ? 'Önce cüzdanınızı bağlayıp giriş yapın' : 'Connect your wallet and sign in first') : undefined} className={`h-9 min-w-[5.5rem] px-4 rounded-lg text-sm font-semibold transition inline-flex items-center justify-center gap-1.5 ${ctaTone}`}>
                         {ctaContent}
                       </button>
                     </div>
