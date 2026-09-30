@@ -1,4 +1,5 @@
-import React from 'react';
+import { fmtBps } from '../app/copy';
+
 
 function normalizeRawBigInt(value) {
   if (value === null || value === undefined || value === '') return null;
@@ -51,8 +52,6 @@ export function formatTokenUnits(value, decimals = 6) {
   return `${neg ? '-' : ''}${whole}${frac && frac !== '00' ? `.${frac}` : ''}`;
 }
 
-const pct = (bps) => (Number.isFinite(Number(bps)) ? `%${(Number(bps) / 100).toLocaleString('tr-TR', { maximumFractionDigits: 2 })}` : '—');
-const pctEn = (bps) => (Number.isFinite(Number(bps)) ? `${(Number(bps) / 100).toLocaleString('en-US', { maximumFractionDigits: 2 })}%` : '—');
 
 export default function SettlementPreviewModal({
   isOpen,
@@ -73,7 +72,7 @@ export default function SettlementPreviewModal({
   if (!isOpen) return null;
   const isTR = lang === 'TR';
   const fmt = (v) => `${formatTokenUnits(v, decimals)} ${tokenSymbol}`;
-  const share = isTR ? pct : pctEn;
+  const share = (bps) => fmtBps(bps, isTR ? 'TR' : 'EN');
 
   const makerPayout = previewData?.makerPayout ?? previewData?.maker_payout ?? 0;
   const takerPayout = previewData?.takerPayout ?? previewData?.taker_payout ?? 0;

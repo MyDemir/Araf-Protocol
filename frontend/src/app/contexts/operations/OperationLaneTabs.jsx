@@ -1,4 +1,3 @@
-import React from 'react';
 
 const LANE_TAB_CLASS = {
   settlement_action_required: {

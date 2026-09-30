@@ -4,6 +4,7 @@ import { buildSettlementPreviewUrl } from '../app/apiConfig';
 import SettlementPreviewModal from './SettlementPreviewModal';
 import { useSettlementActions } from '../app/contexts/settlement/useSettlementActions';
 import { normalizeSettlementState, toUnixSeconds } from '../app/contexts/settlement/settlementActionModel';
+import { fmtBps } from '../app/copy';
 
 const ACTIVE_ROOM_STATES = ['CHALLENGED'];
 const TERMINAL_ROOM_STATES = ['RESOLVED', 'CANCELED', 'BURNED'];
@@ -22,6 +23,13 @@ export const safeDate = (v) => {
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString();
 };
 
+const CLOSED_PROPOSAL_STATES = ['REJECTED', 'WITHDRAWN', 'EXPIRED'];
+const CLOSED_PROPOSAL_COPY = {
+  REJECTED: { TR: 'Son teklif reddedildi.', EN: 'The last offer was rejected.' },
+  WITHDRAWN: { TR: 'Son teklif geri çekildi.', EN: 'The last offer was withdrawn.' },
+  EXPIRED: { TR: 'Son teklifin süresi doldu.', EN: 'The last offer expired.' },
+};
+
 export default function SettlementProposalCard({
   activeTrade,
   userRole,
@@ -38,6 +46,7 @@ export default function SettlementProposalCard({
   showToast,
   isContractLoading,
   setIsContractLoading,
+  nowOffsetMs = 0,
 }) {
   const [makerShareBps, setMakerShareBps] = React.useState(5000);
   const [expiryPreset, setExpiryPreset] = React.useState('2h');
@@ -48,7 +57,9 @@ export default function SettlementProposalCard({
   const [previewError, setPreviewError] = React.useState('');
   const [previewData, setPreviewData] = React.useState(null);
   const [previewMode, setPreviewMode] = React.useState('create');
-  const [nowTs, setNowTs] = React.useState(Math.floor(Date.now() / 1000));
+  // [TR] Zincir saati farkı (işlem odasından). [EN] Chain-time offset supplied by the trade room.
+  const chainNowSec = React.useCallback(() => Math.floor((Date.now() + (Number(nowOffsetMs) || 0)) / 1000), [nowOffsetMs]);
+  const [nowTs, setNowTs] = React.useState(chainNowSec);
 
   const proposal = activeTrade?.settlementProposal || null;
   const proposalState = normalizeSettlementState(proposal?.state);
@@ -88,6 +99,7 @@ export default function SettlementProposalCard({
     showToast,
     isContractLoading,
     setIsContractLoading,
+    nowTs,
   });
 
   const normalizedMakerShareBps = Number(makerShareBps);
@@ -95,20 +107,25 @@ export default function SettlementProposalCard({
   const computedExpiryMinutes = expiryPreset === 'custom'
     ? Number(customMinutes)
     : (expiryPreset === '30m' ? 30 : expiryPreset === '2h' ? 120 : 24 * 60);
-  const computedExpiresAt = Math.floor(Date.now() / 1000) + (Number.isFinite(computedExpiryMinutes) ? computedExpiryMinutes : 0) * 60;
+  const computedExpiresAt = chainNowSec() + (Number.isFinite(computedExpiryMinutes) ? computedExpiryMinutes : 0) * 60;
   const expiresAt = toUnixSeconds(proposal?.expiresAt ?? proposal?.expires_at ?? 0);
-  const isExpired = expiresAt > 0 && nowTs >= expiresAt;
+  // [TR] Kontratla birebir: `now > expiresAt` dolmuş sayılır. [EN] Mirrors the contract: expired once now > expiresAt.
+  const isExpired = expiresAt > 0 && nowTs > expiresAt;
   const isProposedState = proposalState === 'PROPOSED';
   // [TR] Canonical kural: settlement aksiyonları yalnız CHALLENGED dispute safhasında görünür.
   // [EN] Canonical rule: settlement actions render only in CHALLENGED dispute phase.
   const showActionableProposedControls = proposalIsRenderable && isProposedState && isActionableRoom;
   const showTerminalProposedHistory = proposalIsRenderable && isProposedState && isTerminalRoom;
+  // [TR] Reddedilen, geri çekilen ya da süresi dolan tekliften sonra yeni teklif formu açılır (kontrat izin verir).
+  // [EN] A new offer form opens after a rejected/withdrawn/expired offer (the contract allows overwriting it).
+  const canOpenNewOffer = isActionableRoom && (!proposalIsRenderable || CLOSED_PROPOSAL_STATES.includes(proposalState) || (isProposedState && isExpired));
 
   React.useEffect(() => {
     if (!proposal || proposalState !== 'PROPOSED' || !expiresAt) return undefined;
-    const timer = setInterval(() => setNowTs(Math.floor(Date.now() / 1000)), 1000);
+    setNowTs(chainNowSec());
+    const timer = setInterval(() => setNowTs(chainNowSec()), 1000);
     return () => clearInterval(timer);
-  }, [proposal, proposalState, expiresAt]);
+  }, [proposal, proposalState, expiresAt, chainNowSec]);
 
   const validateInput = React.useCallback(() => {
     if (!Number.isInteger(normalizedMakerShareBps) || normalizedMakerShareBps < 0 || normalizedMakerShareBps > 10000) {
@@ -190,7 +207,7 @@ export default function SettlementProposalCard({
   const isMakerView = String(userRole || '').toLowerCase() === 'maker';
   const myShareBps = Number.isFinite(normalizedMakerShareBps) ? (isMakerView ? normalizedMakerShareBps : 10000 - normalizedMakerShareBps) : 5000;
   const setMyShareBps = (bps) => setMakerShareBps(String(isMakerView ? bps : 10000 - Number(bps)));
-  const pct = (bps) => `%${(Number(bps) / 100).toLocaleString(lang === 'TR' ? 'tr-TR' : 'en-US', { maximumFractionDigits: 2 })}`;
+  const pct = (bps) => fmtBps(bps, lang);
   const inputClass = 'mt-1 w-full bg-elevated border border-borderStrong rounded-lg px-3 py-2 text-sm text-textPrimary';
 
   return (
@@ -210,80 +227,6 @@ export default function SettlementProposalCard({
 
       {isTerminalRoom && !proposalIsRenderable && (
         <p className="text-xs text-textMuted">{lang === 'TR' ? 'İşlem sonlandı. Uzlaşma yalnız geçmiş bilgi olarak gösterilir.' : 'Trade is terminal. Settlement is shown only as history.'}</p>
-      )}
-
-      {isActionableRoom && !proposalIsRenderable && (
-        <div className="space-y-3">
-          <div>
-            <div className="flex items-end justify-between text-sm">
-              <span className="text-textSecondary">{lang === 'TR' ? 'Size' : 'You'} <strong className="text-textPrimary text-lg">{pct(myShareBps)}</strong></span>
-              <span className="text-textSecondary">{lang === 'TR' ? 'Karşı tarafa' : 'Counterparty'} <strong className="text-textPrimary text-lg">{pct(10000 - myShareBps)}</strong></span>
-            </div>
-            <input
-              type="range"
-              min="0"
-              max="10000"
-              step="100"
-              value={myShareBps}
-              onChange={(e) => setMyShareBps(e.target.value)}
-              aria-label={lang === 'TR' ? 'Sizin payınız' : 'Your share'}
-              className="mt-2 w-full accent-emerald-500"
-            />
-            <div className="mt-2 flex gap-2">
-              {[2500, 5000, 7500].map((bps) => (
-                <button
-                  key={bps}
-                  type="button"
-                  onClick={() => setMyShareBps(bps)}
-                  className={`flex-1 py-1.5 rounded-lg text-xs font-bold border transition ${myShareBps === bps ? 'bg-brand/10 border-brand text-brand' : 'bg-elevated border-borderSubtle text-textSecondary hover:text-textPrimary'}`}
-                >
-                  {pct(bps)}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <label className="text-xs text-textSecondary">
-              {lang === 'TR' ? 'Teklif geçerliliği' : 'Offer valid for'}
-              <select
-                value={expiryPreset}
-                onChange={(e) => setExpiryPreset(e.target.value)}
-                className={inputClass}
-              >
-                <option value="30m">{lang === 'TR' ? '30 dakika' : '30 minutes'}</option>
-                <option value="2h">{lang === 'TR' ? '2 saat' : '2 hours'}</option>
-                <option value="24h">{lang === 'TR' ? '24 saat' : '24 hours'}</option>
-                <option value="custom">{lang === 'TR' ? 'Özel' : 'Custom'}</option>
-              </select>
-            </label>
-            {expiryPreset === 'custom' && (
-              <label className="text-xs text-textSecondary">
-                {lang === 'TR' ? 'Özel dakika' : 'Custom minutes'}
-                <input
-                  type="number"
-                  min={String(MIN_CUSTOM_EXPIRY_MINUTES)}
-                  max={String(MAX_CUSTOM_EXPIRY_MINUTES)}
-                  value={customMinutes}
-                  onChange={(e) => setCustomMinutes(e.target.value)}
-                  className={inputClass}
-                />
-              </label>
-            )}
-          </div>
-
-          {validationError && <p className="text-xs text-danger">{validationError}</p>}
-          {!hasBackendTradeId && <p className="text-xs text-warning">{previewUnavailableMessage}</p>}
-          {!hasOnchainTradeId && <p className="text-xs text-warning">{missingOnchainIdMessage}</p>}
-
-          <button
-            onClick={onPreviewCreate}
-            disabled={isContractLoading || !hasBackendTradeId || !hasOnchainTradeId}
-            className={`w-full py-2.5 rounded-lg text-sm font-bold transition ${isContractLoading ? 'bg-elevated text-textMuted border border-borderStrong cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50'}`}
-          >
-            {lang === 'TR' ? 'Teklifi önizle' : 'Preview offer'}
-          </button>
-        </div>
       )}
 
       {proposalIsRenderable && proposalState === 'PROPOSED' && (
@@ -368,17 +311,91 @@ export default function SettlementProposalCard({
           <p className="text-textSecondary">{lang === 'TR' ? 'Satıcıya' : 'Maker payout'}: <span className="font-mono">{proposal?.makerPayout ?? proposal?.maker_payout ?? '—'}</span></p>
           <p className="text-textSecondary">{lang === 'TR' ? 'Alıcıya' : 'Taker payout'}: <span className="font-mono">{proposal?.takerPayout ?? proposal?.taker_payout ?? '—'}</span></p>
           <p className="text-textMuted">{lang === 'TR' ? 'Tarih' : 'Finalized at'}: {safeDate(proposal?.finalizedAt ?? proposal?.finalized_at)}</p>
-          <p className="text-textMuted">txHash: <span className="font-mono text-white">{shortHash(proposal?.txHash ?? proposal?.tx_hash)}</span></p>
+          <p className="text-textMuted">txHash: <span className="font-mono text-textPrimary">{shortHash(proposal?.txHash ?? proposal?.tx_hash)}</span></p>
         </div>
       )}
 
-      {proposalIsRenderable && !['PROPOSED', 'FINALIZED'].includes(proposalState) && (
-        <p className="text-xs text-textMuted">
-          {lang === 'TR'
-            ? `Settlement geçmiş durumu: ${proposalState}`
-            : `Settlement historical state: ${proposalState}`}
-        </p>
+      {proposalIsRenderable && CLOSED_PROPOSAL_STATES.includes(proposalState) && (
+        <p className="text-xs text-textMuted">{CLOSED_PROPOSAL_COPY[proposalState][lang === 'TR' ? 'TR' : 'EN']}</p>
       )}
+
+      {canOpenNewOffer && (
+        <div className={`space-y-3${proposalIsRenderable ? ' mt-4 pt-3 border-t border-borderSubtle' : ''}`}>
+          {proposalIsRenderable && (
+            <p className="text-xs font-semibold text-textPrimary">{lang === 'TR' ? 'Yeni teklif verebilirsiniz' : 'You can make a new offer'}</p>
+          )}
+          <div>
+            <div className="flex items-end justify-between text-sm">
+              <span className="text-textSecondary">{lang === 'TR' ? 'Size' : 'You'} <strong className="text-textPrimary text-lg">{pct(myShareBps)}</strong></span>
+              <span className="text-textSecondary">{lang === 'TR' ? 'Karşı tarafa' : 'Counterparty'} <strong className="text-textPrimary text-lg">{pct(10000 - myShareBps)}</strong></span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="10000"
+              step="100"
+              value={myShareBps}
+              onChange={(e) => setMyShareBps(e.target.value)}
+              aria-label={lang === 'TR' ? 'Sizin payınız' : 'Your share'}
+              className="mt-2 w-full accent-emerald-500"
+            />
+            <div className="mt-2 flex gap-2">
+              {[2500, 5000, 7500].map((bps) => (
+                <button
+                  key={bps}
+                  type="button"
+                  onClick={() => setMyShareBps(bps)}
+                  className={`flex-1 py-1.5 rounded-lg text-xs font-bold border transition ${myShareBps === bps ? 'bg-brand/10 border-brand text-brand' : 'bg-elevated border-borderSubtle text-textSecondary hover:text-textPrimary'}`}
+                >
+                  {pct(bps)}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <label className="text-xs text-textSecondary">
+              {lang === 'TR' ? 'Teklif geçerliliği' : 'Offer valid for'}
+              <select
+                value={expiryPreset}
+                onChange={(e) => setExpiryPreset(e.target.value)}
+                className={inputClass}
+              >
+                <option value="30m">{lang === 'TR' ? '30 dakika' : '30 minutes'}</option>
+                <option value="2h">{lang === 'TR' ? '2 saat' : '2 hours'}</option>
+                <option value="24h">{lang === 'TR' ? '24 saat' : '24 hours'}</option>
+                <option value="custom">{lang === 'TR' ? 'Özel' : 'Custom'}</option>
+              </select>
+            </label>
+            {expiryPreset === 'custom' && (
+              <label className="text-xs text-textSecondary">
+                {lang === 'TR' ? 'Özel dakika' : 'Custom minutes'}
+                <input
+                  type="number"
+                  min={String(MIN_CUSTOM_EXPIRY_MINUTES)}
+                  max={String(MAX_CUSTOM_EXPIRY_MINUTES)}
+                  value={customMinutes}
+                  onChange={(e) => setCustomMinutes(e.target.value)}
+                  className={inputClass}
+                />
+              </label>
+            )}
+          </div>
+
+          {validationError && <p className="text-xs text-danger">{validationError}</p>}
+          {!hasBackendTradeId && <p className="text-xs text-warning">{previewUnavailableMessage}</p>}
+          {!hasOnchainTradeId && <p className="text-xs text-warning">{missingOnchainIdMessage}</p>}
+
+          <button
+            onClick={onPreviewCreate}
+            disabled={isContractLoading || !hasBackendTradeId || !hasOnchainTradeId}
+            className={`w-full py-2.5 rounded-lg text-sm font-bold transition ${isContractLoading ? 'bg-elevated text-textMuted border border-borderStrong cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50'}`}
+          >
+            {lang === 'TR' ? 'Teklifi önizle' : 'Preview offer'}
+          </button>
+        </div>
+      )}
+
 
       <SettlementPreviewModal
         isOpen={previewOpen}

@@ -1,5 +1,4 @@
 import { Lock } from 'lucide-react';
-import React from 'react';
 
 import { SEPA_COUNTRY_CODES } from '../../orderUiModel';
 const RAIL_LABELS = {

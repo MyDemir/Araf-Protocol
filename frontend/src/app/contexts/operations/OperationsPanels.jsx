@@ -1,4 +1,3 @@
-import React from 'react';
 import { getStateLabel } from '../../copy/states';
 import OperationTradeCard from './OperationTradeCard';
 

@@ -8,7 +8,6 @@ afterEach(() => cleanup());
 
 const baseCtx = {
   lang: 'EN',
-  t: {},
   setLang: vi.fn(),
   isConnected: true,
   isAuthenticated: true,
@@ -54,8 +53,6 @@ const baseCtx = {
   sybilStatus: { funded: true, cooldownOk: true, cooldownRemaining: 0 },
   walletAgeRemainingDays: null,
   takerFeeBps: 10,
-  socialLinks: {},
-  faqItems: [],
   activeTrade: null,
   setActiveTrade: vi.fn(),
   userRole: 'taker',
@@ -78,18 +75,12 @@ const baseCtx = {
   handlePingMaker: vi.fn(),
   handleAutoRelease: vi.fn(),
   canMakerPing: false,
-  makerPingTimer: {},
+  tradeTimers: {},
   canMakerStartChallengeFlow: false,
-  makerChallengePingTimer: {},
   canMakerChallenge: false,
-  makerChallengeTimer: {},
-  gracePeriodTimer: {},
-  bleedingTimer: { isFinished: true, hours: 0, minutes: 0, seconds: 0 },
-  principalProtectionTimer: { isFinished: true, days: 0, hours: 0 },
   bleedingAmounts: null,
   takerName: '',
   tokenDecimalsMap: { USDT: 6 },
-  DEFAULT_TOKEN_DECIMALS: 6,
   formatTokenAmountFromRaw: () => '0',
   rawTokenToDisplayNumber: () => 0,
   fetchMyTrades: vi.fn(),
@@ -406,7 +397,7 @@ describe('AppViews market side-aware rendering', () => {
       paymentIpfsHash: '',
       chargebackAccepted: false,
       isSupportedChainId: () => false,
-      gracePeriodTimer: { isFinished: false, hours: 1, minutes: 2, seconds: 3 },
+      tradeTimers: { gracePeriod: { isFinished: false, days: 0, hours: 1, minutes: 2, seconds: 3 } },
     });
 
     render(<div>{views.renderTradeRoom()}</div>);

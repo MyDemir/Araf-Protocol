@@ -1,4 +1,4 @@
-import { deriveTradeTimeline, TRADE_TIMING } from './tradeTimeline';
+import { deriveTradeTimeline } from './tradeTimeline';
 
 const panelActionConfig = (onClick, { disabled = false, disabledReasons = [], hasOnchainTradeId, missingOnchainIdReason } = {}) => ({
   onClick,
@@ -16,7 +16,6 @@ export const getBurnExpiredDeadlinePassed = ({ activeTrade, roomState, now = new
 
 // [TR] Kontrat PAYMENT_WINDOW = 48 saat: LOCKED trade'de taker bu sürede ödeme bildirmezse kilit çözülebilir.
 // [EN] Contract PAYMENT_WINDOW = 48h: a LOCKED trade can be unwound if the taker has not reported payment by then.
-export const PAYMENT_WINDOW_MS = TRADE_TIMING.PAYMENT_WINDOW_MS;
 export const getPaymentWindowExpired = ({ activeTrade, roomState, now = new Date() }) => Boolean(
   activeTrade?.onchainId && deriveTradeTimeline(activeTrade, { state: roomState, now: now.getTime() }).flags.paymentWindowExpired
 );
@@ -42,13 +41,14 @@ export const buildTradeRoomPanelCallbacks = ({
   handleBurnExpired,
   handleExpirePaymentWindow,
   paymentWindowExpired = false,
+  nowMs = Date.now(),
   confirmFn = typeof window !== 'undefined' ? window.confirm.bind(window) : () => false,
 }) => {
   const tr = lang === 'TR';
   // [TR] Aktif/pasif kararı kontratın süre kurallarının saf aynasından gelir (tradeTimeline.js).
   //      paidAt yoksa (eski/eksik veri) çağıranın verdiği bayraklara düşülür.
   // [EN] Enablement mirrors contract timing rules; falls back to caller flags when paidAt is unknown.
-  const { flags } = deriveTradeTimeline(activeTrade, { state: roomState });
+  const { flags } = deriveTradeTimeline(activeTrade, { state: roomState, now: nowMs });
   const hasPaidAt = Boolean(activeTrade?.paidAt);
   const takerPinged = flags.takerPinged;
   const makerPinged = flags.makerPinged;

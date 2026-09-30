@@ -19,10 +19,13 @@ export const useSettlementActions = ({
   showToast,
   isContractLoading,
   setIsContractLoading,
+  nowTs,
 }) => {
+  // [TR] nowTs bağımlılığı şart: yoksa süre dolunca bağlam bayat kalır ve "süresi doldu" butonu pasif görünür.
+  // [EN] nowTs must be a dependency, otherwise the context goes stale at expiry and the expire button stays disabled.
   const context = React.useMemo(
-    () => getSettlementActionContext({ activeTrade, userRole, address }),
-    [activeTrade, userRole, address],
+    () => getSettlementActionContext({ activeTrade, userRole, address, ...(Number.isFinite(nowTs) ? { nowTs } : {}) }),
+    [activeTrade, userRole, address, nowTs],
   );
 
   const refreshTradesAfterTx = React.useCallback(async () => {

@@ -1,6 +1,6 @@
 import { ListOrdered } from 'lucide-react';
-import React from 'react';
 import { getOrderSideCopy } from '../../orderUiModel';
+import { fmtNum, fmtPct } from '../../copy';
 
 const CANCELABLE_STATUSES = new Set(['OPEN', 'PARTIALLY_FILLED']);
 
@@ -24,7 +24,7 @@ export const MyOrdersPanel = ({
       </div>
     );
   }
-  const fmt = (value) => Number(value || 0).toLocaleString(isTR ? 'tr-TR' : 'en-US', { maximumFractionDigits: 2 });
+  const fmt = (value) => fmtNum(value, isTR ? 'TR' : 'EN');
   return (
     <div className="space-y-2 max-w-2xl" data-testid="profile-my-orders">
       {myOrders.map((order) => {
@@ -57,7 +57,7 @@ export const MyOrdersPanel = ({
             {total > 0 && filledPct > 0 && (
               <div className="mt-2">
                 <div className="h-1.5 rounded-full bg-elevated overflow-hidden"><div className="h-full bg-brand" style={{ width: `${filledPct}%` }} /></div>
-                <p className="text-[10px] text-textMuted mt-1">{isTR ? `%${filledPct} dolduruldu` : `${filledPct}% filled`}</p>
+                <p className="text-[10px] text-textMuted mt-1">{isTR ? `${fmtPct(filledPct, 'TR')} dolduruldu` : `${fmtPct(filledPct, 'EN')} filled`}</p>
               </div>
             )}
             {canCancel && !isConfirming && (

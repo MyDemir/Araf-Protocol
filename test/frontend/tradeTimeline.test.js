@@ -26,6 +26,14 @@ describe('tradeTimeline mirrors ArafEscrow timing', () => {
     expect(at({ paidAt: ago(40), challengePingedAt: ago(24) }, 'PAID').canMakerChallenge).toBe(true);
   });
 
+  it('timers: maker ping window counts from the taker ping (autoRelease), not a copy of the grace period', () => {
+    const { timers } = deriveTradeTimeline({ paidAt: ago(50), pingedAt: ago(20) }, { state: 'PAID', now: NOW });
+    expect(timers.gracePeriod.isFinished).toBe(true);
+    expect(timers.makerPing).toMatchObject({ isFinished: false, hours: 4, minutes: 0 });
+    // Not pinged yet: no response window to count down.
+    expect(deriveTradeTimeline({ paidAt: ago(10) }, { state: 'PAID', now: NOW }).timers.makerPing).toBeNull();
+  });
+
   it('ping paths are exclusive (ConflictingPingPath)', () => {
     expect(at({ paidAt: ago(50), pingedAt: ago(1) }, 'PAID').canMakerPingTaker).toBe(false);
     expect(at({ paidAt: ago(50), challengePingedAt: ago(1) }, 'PAID').canTakerPing).toBe(false);
@@ -52,4 +60,14 @@ describe('tradeTimeline mirrors ArafEscrow timing', () => {
     expect(cb.start_challenge.disabled).toBe(true);
     expect(cb.start_challenge.disabledReasons.join(' ')).toMatch(/challenge path is closed/);
   });
+
+  it('panel decisions use the supplied chain time, not the device clock', () => {
+    const trade = { onchainId: 1, paidAt: ago(47.5), state: 'PAID' };
+    const base = { lang: 'EN', activeTrade: trade, roomState: 'PAID', isMaker: false, hasOnchainTradeId: true, handlePingMaker: () => {} };
+    const pingAt = (nowMs) => buildTradeRoomPanelCallbacks({ ...base, nowMs }).ping_maker;
+    // Device clock (NOW) says 47.5h; chain is 1h ahead -> the ping must already be available.
+    expect(pingAt(NOW).disabled).toBe(true);
+    expect(pingAt(NOW + 3600 * 1000).disabled).toBe(false);
+  });
 });
+

@@ -127,20 +127,14 @@ vi.mock('../../frontend/src/app/useAppSessionData', () => ({
     formatAddress: (v) => v || '—',
     filteredOrders: [],
     activeEscrowCounts: { LOCKED: 0, PAID: 0, CHALLENGED: 0 },
-    gracePeriodTimer: { isFinished: true, days: 0, hours: 0, minutes: 0, seconds: 0 },
-    bleedingTimer: { isFinished: true, days: 0, hours: 0, minutes: 0, seconds: 0 },
-    principalProtectionTimer: { isFinished: true, days: 0, hours: 0, minutes: 0, seconds: 0 },
-    makerPingTimer: { isFinished: true, days: 0, hours: 0, minutes: 0, seconds: 0 },
+    tradeTimers: {},
     canMakerPing: false,
-    makerChallengePingTimer: { isFinished: true, days: 0, hours: 0, minutes: 0, seconds: 0 },
     canMakerStartChallengeFlow: false,
-    makerChallengeTimer: { isFinished: true, days: 0, hours: 0, minutes: 0, seconds: 0 },
     canMakerChallenge: false,
   }),
 }));
 
 vi.mock('../../frontend/src/app/AppModals', () => ({
-  EnvWarningBanner: () => null,
   buildAppModals: () => ({
     renderWalletModal: () => null,
     renderFeedbackModal: () => null,

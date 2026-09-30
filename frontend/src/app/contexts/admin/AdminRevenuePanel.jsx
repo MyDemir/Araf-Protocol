@@ -1,7 +1,8 @@
 import React from 'react';
 import { buildApiUrl } from '../../apiConfig';
-import { REVENUE_KIND_LABELS, shortId as short } from './adminChainConfig';
+import { REVENUE_KIND_LABELS } from './adminChainConfig';
 import { formatTokenAmount } from '../../orderUiModel';
+import { shortAddress as short, tx as t } from '../../copy';
 
 const fmtUnits = (raw, decimals = 6) => formatTokenAmount(raw, decimals, 2);
 
@@ -9,7 +10,6 @@ const fmtUnits = (raw, decimals = 6) => formatTokenAmount(raw, decimals, 2);
 //      /admin/rewards/health uçlarını gösterir. Önceden bu veriler hiçbir ekranda görünmüyordu.
 // [EN] Revenue & Rewards tab: surfaces /admin/revenue and /admin/rewards/health, previously shown nowhere.
 
-const t = (lang, tr, en) => (lang === 'TR' ? tr : en);
 
 export default function AdminRevenuePanel({ lang = 'EN', authenticatedFetch, tokenSymbols = {} }) {
   const [state, setState] = React.useState({ loading: true, error: '', unauthorized: false, rows: [], rewards: null });

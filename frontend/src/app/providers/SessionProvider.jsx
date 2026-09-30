@@ -171,8 +171,9 @@ export const SessionProvider = ({ children, actionFactory = createSessionActions
 };
 
 export const useSessionActions = (dependencies) => {
+  // [TR] dependencies her render'da yeni nesne olduğundan memo hiçbir zaman isabet etmiyordu. [EN] The memo never hit.
   const { createActions } = React.useContext(SessionActionsContext);
-  return React.useMemo(() => createActions(dependencies), [createActions, dependencies]);
+  return createActions(dependencies);
 };
 
 export default SessionProvider;

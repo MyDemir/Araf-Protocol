@@ -9,7 +9,6 @@ import { buildMarketOrdersQuery, countActiveMarketFilters, matchesMarketFilters,
 
 const makeMakerCtx = (overrides = {}) => ({
   lang: 'EN',
-  t: { createAd: 'Create Order' },
   showWalletModal: false,
   connectors: [],
   showFeedbackModal: false,
@@ -47,7 +46,6 @@ const makeMakerCtx = (overrides = {}) => ({
   walletAgeRemainingDays: null,
   payoutProfileDraft: { rail: 'TR_IBAN', country: 'TR' },
   tokenDecimalsMap: { USDT: 6 },
-  DEFAULT_TOKEN_DECIMALS: 6,
   formatTokenAmountFromRaw: () => '0',
   ...overrides,
 });

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useCountdown } from '../hooks/useCountdown';
+import { deriveTradeTimeline } from './contexts/trade-room/tradeTimeline';
+import { shortAddress } from './copy';
 import { buildMarketOrdersQuery, MARKET_FILTER_DEFAULTS, matchesMarketFilters } from './contexts/marketplace/marketFilters';
 import { mapApiOrderToUi, formatTokenAmount as formatTokenAmountFromRaw, tokenToNumber as rawTokenToDisplayNumber } from './orderUiModel';
 import { buildApiUrl } from './apiConfig';
@@ -400,7 +401,7 @@ export function useAppSessionData({
     }
   }, [isAuthenticated]);
 
-  const formatAddress = (addr) => addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : '—';
+  const formatAddress = shortAddress;
 
   const fetchStats = React.useCallback(async () => {
     try {
@@ -1086,20 +1087,46 @@ export function useAppSessionData({
     settlement: buildSettlementQuickCounts(activeEscrows, address),
   };
 
-  const gracePeriodEndDate = useMemo(() => activeTrade?.paidAt ? new Date(new Date(activeTrade.paidAt).getTime() + 48 * 3600 * 1000) : null, [activeTrade?.paidAt]);
-  const gracePeriodTimer = useCountdown(gracePeriodEndDate);
-  const bleedingEndDate = useMemo(() => activeTrade?.challengedAt ? new Date(new Date(activeTrade.challengedAt).getTime() + 240 * 3600 * 1000) : null, [activeTrade?.challengedAt]);
-  const bleedingTimer = useCountdown(bleedingEndDate);
-  const principalProtectionEndDate = useMemo(() => activeTrade?.challengedAt ? new Date(new Date(activeTrade.challengedAt).getTime() + (48 + 96) * 3600 * 1000) : null, [activeTrade?.challengedAt]);
-  const principalProtectionTimer = useCountdown(principalProtectionEndDate);
-  const makerPingEndDate = useMemo(() => activeTrade?.paidAt ? new Date(new Date(activeTrade.paidAt).getTime() + 48 * 3600 * 1000) : null, [activeTrade?.paidAt]);
-  const makerPingTimer = useCountdown(makerPingEndDate);
-  const makerChallengePingEndDate = useMemo(() => activeTrade?.paidAt ? new Date(new Date(activeTrade.paidAt).getTime() + 24 * 3600 * 1000) : null, [activeTrade?.paidAt]);
-  const makerChallengePingTimer = useCountdown(makerChallengePingEndDate);
-  const canMakerStartChallengeFlow = makerChallengePingTimer.isFinished;
-  const makerChallengeEndDate = useMemo(() => activeTrade?.challengePingedAt ? new Date(new Date(activeTrade.challengePingedAt).getTime() + 24 * 3600 * 1000) : null, [activeTrade?.challengePingedAt]);
-  const makerChallengeTimer = useCountdown(makerChallengeEndDate);
-  const canMakerChallenge = makerChallengeTimer.isFinished;
+  // [TR] İşlem odası sayaçları tek saatten, kontrat kurallarının aynası tradeTimeline ile türetilir.
+  //      Önceden 6 ayrı useCountdown (6 ayrı 1 sn interval) tüm App'i her saniye 6 kez render ediyordu;
+  //      şimdi tek interval, yalnız işlem odası açıkken ve sekme görünürken çalışır.
+  // [EN] Trade room timers derive from one clock via tradeTimeline (the contract-rule mirror): one interval,
+  //      only while the trade room is open and the tab is visible (was six 1s intervals re-rendering App).
+  const [clockMs, setClockMs] = useState(() => Date.now());
+  // [TR] Süre kararları cihaz saatine değil zincir saatine göre verilir: cihaz saati geri kalan taker'ın uyarı butonu
+  //      geç açılırsa maker ping yolunu önce açıp otomatik serbest bırakma hakkını kapatabilirdi. İşlem odası her
+  //      açıldığında tek bir getBlock ile fark ölçülür (ek yük yok); okunamazsa cihaz saati kullanılır.
+  // [EN] Timing decisions follow chain time, not the device clock (a lagging clock could cost the taker the
+  //      auto-release path). One getBlock per trade-room open measures the offset; falls back to the device clock.
+  const [chainOffsetMs, setChainOffsetMs] = useState(0);
+  const tradeRoomOpen = currentView === 'tradeRoom' && Boolean(activeTrade);
+  useEffect(() => {
+    if (!tradeRoomOpen || !publicClient?.getBlock) return undefined;
+    let alive = true;
+    publicClient.getBlock()
+      .then((block) => {
+        const blockMs = Number(block?.timestamp) * 1000;
+        if (alive && Number.isFinite(blockMs) && blockMs > 0) setChainOffsetMs(blockMs - Date.now());
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [tradeRoomOpen, publicClient]);
+  useEffect(() => {
+    if (!tradeRoomOpen) return undefined;
+    setClockMs(Date.now() + chainOffsetMs);
+    const interval = setInterval(whenVisible(() => setClockMs(Date.now() + chainOffsetMs)), 1000);
+    return () => clearInterval(interval);
+  }, [tradeRoomOpen, chainOffsetMs]);
+  // [TR] Odaya yeniden girişte ilk render'da saat eski kalmasın. [EN] Never decide on a stale tick after re-entering the room.
+  const freshNowMs = Date.now() + chainOffsetMs;
+  const chainNowMs = Math.abs(clockMs - freshNowMs) > 1500 ? freshNowMs : clockMs;
+  const tradeTimers = useMemo(
+    () => deriveTradeTimeline(activeTrade, { state: resolvedTradeState, now: chainNowMs }).timers,
+    [activeTrade, resolvedTradeState, chainNowMs],
+  );
+  // [TR] Zaman damgası bilinmiyorsa (eski veri) buton kilidi kontrata bırakılır. [EN] Unknown timestamp → let the contract decide.
+  const canMakerStartChallengeFlow = tradeTimers.makerChallengePing ? tradeTimers.makerChallengePing.isFinished : true;
+  const canMakerChallenge = tradeTimers.makerChallenge ? tradeTimers.makerChallenge.isFinished : true;
 
   return {
     isAuthenticated,
@@ -1171,13 +1198,10 @@ export function useAppSessionData({
     filteredOrders,
     marketOrdersTotal,
     activeEscrowCounts,
-    gracePeriodTimer,
-    bleedingTimer,
-    principalProtectionTimer,
-    makerPingTimer,
-    makerChallengePingTimer,
+    tradeTimers,
+    chainNowMs,
+    chainOffsetMs,
     canMakerStartChallengeFlow,
-    makerChallengeTimer,
     canMakerChallenge,
   };
 }

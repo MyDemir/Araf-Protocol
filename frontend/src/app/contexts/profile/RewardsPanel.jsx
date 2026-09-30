@@ -4,6 +4,7 @@ import { buildApiUrl } from '../../apiConfig';
 import { formatTokenAmount } from '../../orderUiModel';
 import { useRewardsContract } from '../../../hooks/useRewardsContract';
 import { deriveEpochReward, REWARD_STATUS, summarizeRewards } from './rewardsModel';
+import { fmtBps, localeOf, tx } from '../../copy';
 
 const TOKEN_ADDRESSES = {
   USDT: import.meta.env.VITE_USDT_ADDRESS || '',
@@ -11,16 +12,11 @@ const TOKEN_ADDRESSES = {
 };
 const EPOCHS_BACK = 5;
 
-const tx = (lang, tr, en) => (lang === 'TR' ? tr : en);
 const fmtAmount = (raw, decimals = 6) => formatTokenAmount(raw, decimals, 2);
-const fmtPct = (bps, lang) => {
-  const v = Number(bps) / 100;
-  const s = v.toLocaleString(lang === 'TR' ? 'tr-TR' : 'en-US', { maximumFractionDigits: v < 1 ? 2 : 1 });
-  return lang === 'TR' ? `%${s}` : `${s}%`;
-};
-const fmtDate = (sec, lang) => new Date(Number(sec) * 1000).toLocaleDateString(lang === 'TR' ? 'tr-TR' : 'en-US', { day: 'numeric', month: 'short' });
+const fmtPct = (bps, lang) => fmtBps(bps, lang, Number(bps) < 100 ? 2 : 1);
+const fmtDate = (sec, lang) => new Date(Number(sec) * 1000).toLocaleDateString(localeOf(lang), { day: 'numeric', month: 'short' });
 const durDays = (sec, lang) => { const d = Number(sec) / 86400; return d >= 1 ? tx(lang, `${d} gün`, `${d} days`) : tx(lang, `${Number(sec) / 3600} saat`, `${Number(sec) / 3600} hours`); };
-const fmtDateTime = (sec, lang) => new Date(Number(sec) * 1000).toLocaleString(lang === 'TR' ? 'tr-TR' : 'en-US', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+const fmtDateTime = (sec, lang) => new Date(Number(sec) * 1000).toLocaleString(localeOf(lang), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
 const STATUS_META = {
   [REWARD_STATUS.ACCRUING]: { icon: Hourglass, tone: 'text-info bg-info/10 border-info/30', TR: 'Birikiyor', EN: 'Accruing' },

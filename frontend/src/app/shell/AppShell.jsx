@@ -1,4 +1,3 @@
-import React from 'react';
 import { SystemStatusBar } from './SystemStatusBar';
 
 export const AppShell = ({

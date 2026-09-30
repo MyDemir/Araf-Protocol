@@ -1,4 +1,3 @@
-import React from 'react';
 import { buildGoToTradeRoomAction } from '../../actions/tradeNavigationActions';
 import { getStateLabel } from '../../copy/states';
 import OperationTradeCard, { compareActiveTradePriority } from '../operations/OperationTradeCard';

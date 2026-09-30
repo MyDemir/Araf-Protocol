@@ -1,4 +1,3 @@
-import React from 'react';
 
 const EXECUTABLE_ACTION_TYPES = new Set(['contract', 'conditional']);
 

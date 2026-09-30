@@ -10,7 +10,6 @@ afterEach(() => {
 
 const makeCtx = (overrides = {}) => ({
   lang: 'EN',
-  t: { createAd: 'Create Order' },
   showWalletModal: false,
   setShowWalletModal: vi.fn(),
   connectors: [],
@@ -116,7 +115,6 @@ const makeCtx = (overrides = {}) => ({
   walletAgeRemainingDays: null,
   decayReputation: vi.fn(),
   tokenDecimalsMap: { USDT: 6 },
-  DEFAULT_TOKEN_DECIMALS: 6,
   formatTokenAmountFromRaw: () => '0',
   showToast: vi.fn(),
   ...overrides,
@@ -142,7 +140,7 @@ describe('AppModals side-aware behaviors', () => {
 
 
   it('renders maker modal as a compact form without raw TR order-side wording', () => {
-    const modals = buildAppModals(makeCtx({ lang: 'TR', t: { createAd: 'Order Oluştur' }, profileTab: 'ayarlar', showProfileModal: false }));
+    const modals = buildAppModals(makeCtx({ lang: 'TR', profileTab: 'ayarlar', showProfileModal: false }));
 
     render(<div>{modals.renderMakerModal()}</div>);
 

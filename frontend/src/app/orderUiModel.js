@@ -10,6 +10,47 @@ const DEFAULT_TOKEN_DECIMALS = 6;
 const VALID_ORDER_SIDES = new Set(['SELL_CRYPTO', 'BUY_CRYPTO']);
 // [TR] SEPA ülke listesinin tek kaynağı (profil formu ve rail doğrulaması). [EN] Single source for SEPA countries.
 export const SEPA_COUNTRY_CODES = ['DE', 'FR', 'NL', 'BE', 'ES', 'IT', 'AT', 'PT', 'IE', 'LU', 'FI', 'GR'];
+
+const RAIL_DEFAULT_COUNTRY = { TR_IBAN: 'TR', US_ACH: 'US', SEPA_IBAN: 'DE' };
+// [TR] Frontend payload canonicalizer — backend authority korunur, kirli veri minimize edilir.
+// [EN] Frontend payload canonicalizer — backend stays authoritative, payload quality is improved.
+export const canonicalizePayoutProfileDraft = (draft = {}) => {
+  const rail = String(draft.rail || 'TR_IBAN').toUpperCase();
+  const allowedCountries = rail === 'SEPA_IBAN'
+    ? SEPA_COUNTRY_CODES
+    : [RAIL_DEFAULT_COUNTRY[rail] || 'TR'];
+  const requestedCountry = String(draft.country || '').toUpperCase();
+  const country = allowedCountries.includes(requestedCountry)
+    ? requestedCountry
+    : (RAIL_DEFAULT_COUNTRY[rail] || allowedCountries[0]);
+  const rawChannel = draft?.contact?.channel || null;
+  const channel = rawChannel ? String(rawChannel).toLowerCase() : null;
+  let value = draft?.contact?.value == null ? null : String(draft.contact.value).trim();
+  if (channel === 'telegram' && value) value = value.replace(/^@+/, '');
+  if (channel === 'phone' && value) value = value.replace(/\s+/g, '');
+  if (!channel) value = null;
+  const fields = draft?.fields || {};
+  const base = {
+    account_holder_name: String(fields.account_holder_name || '').trim().replace(/\s+/g, ' '),
+    iban: null,
+    routing_number: null,
+    account_number: null,
+    account_type: null,
+    bic: null,
+    bank_name: fields.bank_name ? String(fields.bank_name).trim() : null,
+  };
+  if (rail === 'TR_IBAN') base.iban = fields.iban ? String(fields.iban).replace(/\s+/g, '').toUpperCase() : null;
+  if (rail === 'SEPA_IBAN') {
+    base.iban = fields.iban ? String(fields.iban).replace(/\s+/g, '').toUpperCase() : null;
+    base.bic = fields.bic ? String(fields.bic).trim().toUpperCase() : null;
+  }
+  if (rail === 'US_ACH') {
+    base.routing_number = fields.routing_number ? String(fields.routing_number).replace(/\s+/g, '') : null;
+    base.account_number = fields.account_number ? String(fields.account_number).replace(/\s+/g, '') : null;
+    base.account_type = fields.account_type || null;
+  }
+  return { rail, country, contact: { channel, value }, fields: base };
+};
 const SEPA_COUNTRIES = new Set(SEPA_COUNTRY_CODES);
 
 export const getOrderSideCopy = (side, variant = 'display', lang = 'TR') => {

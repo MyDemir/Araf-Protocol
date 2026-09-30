@@ -1,10 +1,9 @@
-import React from 'react';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it, afterEach } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
-import { actions as actionCopy, orderSide as orderSideCopy, pii, states as stateCopy, tradeTerms, getPiiCopy, getStateLabel } from '../../frontend/src/app/copy';
-import { CopyProvider, getCopy, useCopy } from '../../frontend/src/app/providers/CopyProvider';
+import { cleanup } from '@testing-library/react';
+import { orderSide as orderSideCopy, pii, states as stateCopy, tradeTerms, getPiiCopy, getStateLabel, getTradeTerm, fmtBps, fmtNum, shortAddress, tx, langKey, localeOf } from '../../frontend/src/app/copy';
+import { getOrderSideCopy } from '../../frontend/src/app/orderUiModel';
 
 describe('copy dictionaries', () => {
   afterEach(() => cleanup());
@@ -15,16 +14,9 @@ describe('copy dictionaries', () => {
     });
   });
 
-  it('every action key has TR and EN', () => {
-    Object.keys(actionCopy).forEach((key) => {
-      expect(actionCopy[key].TR).toBeTruthy();
-      expect(actionCopy[key].EN).toBeTruthy();
-    });
-  });
-
   it('orderSide SELL_CRYPTO and BUY_CRYPTO do not return raw enum as user-facing label', () => {
-    expect(getCopy(orderSideCopy, 'SELL_CRYPTO', 'EN')).not.toBe('SELL_CRYPTO');
-    expect(getCopy(orderSideCopy, 'BUY_CRYPTO', 'EN')).not.toBe('BUY_CRYPTO');
+    expect(getOrderSideCopy('SELL_CRYPTO', 'display', 'EN')).not.toBe('SELL_CRYPTO');
+    expect(getOrderSideCopy('BUY_CRYPTO', 'display', 'EN')).not.toBe('BUY_CRYPTO');
   });
 
   it('state copy helper covers active-trade filter states while preserving raw keys for internal state', () => {
@@ -50,7 +42,7 @@ describe('copy dictionaries', () => {
 
   it('keeps Turkish user-facing copy free of selected mixed English technical leftovers', () => {
     const forbidden = /(?:\bORDER\b|\bOrder\b|Grace period|Bleeding escrow|\bRelease\b|\bBurn\b|Settlement|Auto-release)/;
-    const dictionaries = [actionCopy, orderSideCopy, tradeTerms];
+    const dictionaries = [orderSideCopy, tradeTerms];
     dictionaries.forEach((dictionary) => {
       Object.entries(dictionary).forEach(([key, row]) => {
         expect(row.TR, key).not.toMatch(forbidden);
@@ -63,27 +55,30 @@ describe('copy dictionaries', () => {
   });
 
   it('missing key fails safely with fallback', () => {
-    expect(getCopy(actionCopy, 'missing_action', 'EN')).toBe('missing_action');
+    expect(getTradeTerm('missing_term', 'EN')).toBe('missing_term');
   });
 
-  it('copy index exports PII helper copy without forcing it into row-shaped provider dictionaries', () => {
+  it('copy index exports PII helper copy in its language-bucket shape', () => {
     expect(pii.en.sectionTitle).toBe('Secure payment details');
     expect(getPiiCopy('EN').revealBtn).toMatch(/Reveal secure payment details/i);
   });
 
-  it('CopyProvider exposes dictionaries and getCopy through context', () => {
-    const CopyHarness = () => {
-      const { dictionaries, getCopy: getCopyFromContext } = useCopy();
-      return React.createElement('div', null,
-        React.createElement('span', { 'data-testid': 'state-copy' }, getCopyFromContext(dictionaries.states, 'LOCKED', 'EN')),
-        React.createElement('span', { 'data-testid': 'dict-count' }, String(Object.keys(dictionaries).length)),
-      );
-    };
 
-    render(React.createElement(CopyProvider, null, React.createElement(CopyHarness)));
-
-    expect(screen.getByTestId('state-copy').textContent).not.toBe('LOCKED');
-    expect(Number(screen.getByTestId('dict-count').textContent)).toBeGreaterThan(0);
+  it('shared format helpers: percent sign leads in Turkish and trails in English', () => {
+    expect(fmtBps(4000, 'TR')).toBe('%40');
+    expect(fmtBps(4000, 'EN')).toBe('40%');
+    expect(fmtBps(150, 'TR')).toBe('%1,5');
+    expect(fmtBps(150, 'EN')).toBe('1.5%');
+    expect(fmtBps('x', 'EN')).toBe('—');
+    expect(fmtNum(1234.567, 'TR')).toBe('1.234,57');
+    expect(fmtNum(1234.567, 'EN', 1)).toBe('1,234.6');
+    expect([tx('TR', 'a', 'b'), tx('EN', 'a', 'b'), langKey('tr'), localeOf('TR')]).toEqual(['a', 'b', 'EN', 'tr-TR']);
   });
 
+  it('shortAddress shortens long ids and keeps short values', () => {
+    expect(shortAddress('0x' + '1'.repeat(40))).toBe('0x1111...1111');
+    expect(shortAddress('abc')).toBe('abc');
+    expect(shortAddress('')).toBe('—');
+    expect(shortAddress(null, null)).toBe(null);
+  });
 });

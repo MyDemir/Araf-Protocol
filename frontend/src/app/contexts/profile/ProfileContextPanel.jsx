@@ -1,4 +1,3 @@
-import React from 'react';
 import PaymentProfilePanel from './PaymentProfilePanel';
 import MyOrdersPanel from './MyOrdersPanel';
 import ActiveTradesPanel from './ActiveTradesPanel';

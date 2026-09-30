@@ -1,7 +1,6 @@
-import React from 'react';
 import { ActionGuidanceButton } from './PrimaryActionPanel';
+import { tx as t } from '../../copy';
 
-const t = (lang, tr, en) => (lang === 'TR' ? tr : en);
 
 // [TR] İkincil yollar yan yana küçük butonlardır; yalnız çalıştırılabilir aksiyonlar gösterilir (bilgi metni yok).
 // [EN] Secondary paths are small side-by-side buttons; only executable actions are shown (no info text).
