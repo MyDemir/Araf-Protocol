@@ -2,8 +2,75 @@ import { ChevronRight, Hourglass, Lock, ScrollText, ShieldCheck, Star, TriangleA
 import React from 'react';
 import { buildMakerPreview, getMakerModalCopy, getOrderSideCopy, resolveEffectiveBondBps } from './orderUiModel';
 import { resolveTierMaxAmounts } from './actions/orderCreationActions';
-import { TERMS_ACCEPTED_STORAGE_KEY } from './bootstrapState';
+import { TERMS_ACKNOWLEDGEMENTS, TERMS_SECTIONS, TERMS_VERSION } from './legal/terms';
 import PaymentRiskBadge from '../components/PaymentRiskBadge';
+
+function TermsModal({ lang = 'EN', onAcceptTerms, onDeclineTerms }) {
+  const isTR = lang === 'TR';
+  const acks = TERMS_ACKNOWLEDGEMENTS[isTR ? 'TR' : 'EN'];
+  const sections = TERMS_SECTIONS[isTR ? 'TR' : 'EN'];
+  const [checked, setChecked] = React.useState({});
+  const allChecked = acks.every((a) => checked[a.key]);
+  return (
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center sm:p-4 z-[200]" role="dialog" aria-modal="true" aria-labelledby="terms-modal-title" data-testid="terms-modal">
+      <div className="bg-surface border border-borderSubtle rounded-t-2xl sm:rounded-2xl w-full sm:max-w-2xl shadow-2xl flex flex-col max-h-[calc(100dvh_-_1rem)] sm:max-h-[calc(100dvh_-_2rem)]">
+        <div className="px-5 sm:px-6 pt-5 pb-3 border-b border-borderSubtle">
+          <h2 id="terms-modal-title" className="text-lg font-bold text-textPrimary flex items-center gap-2"><ScrollText className="w-5 h-5 text-brand" strokeWidth={1.8} aria-hidden="true" />{isTR ? 'Araf Kullanım Koşulları' : 'Araf Terms of Use'}</h2>
+          <p className="text-xs text-textMuted mt-0.5">{isTR ? `Sürüm ${TERMS_VERSION} · Devam etmek için okuyup kabul edin.` : `Version ${TERMS_VERSION} · Read and accept to continue.`}</p>
+        </div>
+
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-5 sm:px-6 py-4 space-y-4">
+          <div className="rounded-xl border border-warning/40 bg-warning/10 p-3 text-xs text-textPrimary flex items-start gap-2">
+            <TriangleAlert className="w-4 h-4 text-warning shrink-0 mt-0.5" strokeWidth={1.8} aria-hidden="true" />
+            <span>{isTR
+              ? 'Araf emanet tutmayan bir yazılımdır. Fonlarınız akıllı kontratta kilitlenir; sonuçları yalnız kontrat belirler ve kimse geri alamaz.'
+              : 'Araf is non-custodial software. Your funds lock in the smart contract; only the contract decides outcomes and no one can reverse them.'}</span>
+          </div>
+          <div className="divide-y divide-borderSubtle border border-borderSubtle rounded-xl">
+            {sections.map((sec, i) => (
+              <details key={sec.title} className="group px-3" open={i < 2}>
+                <summary className="cursor-pointer list-none py-2.5 text-sm font-semibold text-textPrimary flex items-center justify-between gap-3">
+                  {sec.title}
+                  <ChevronRight className="w-4 h-4 text-textMuted shrink-0 transition group-open:rotate-90" strokeWidth={1.8} aria-hidden="true" />
+                </summary>
+                <div className="pb-3 space-y-2 text-xs text-textSecondary leading-relaxed">
+                  {sec.body.map((p) => <p key={p}>{p}</p>)}
+                </div>
+              </details>
+            ))}
+          </div>
+            <fieldset className="space-y-2.5 rounded-xl border border-borderStrong bg-elevated p-3" data-testid="terms-acknowledgements">
+              <legend className="px-1 text-xs font-bold text-textPrimary">{isTR ? 'Zorunlu beyanlar' : 'Required acknowledgements'}</legend>
+              {acks.map((a) => (
+                <label key={a.key} className="flex items-start gap-2.5 text-xs text-textPrimary cursor-pointer">
+                  <input type="checkbox" className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--color-brand)]" checked={Boolean(checked[a.key])} onChange={(e) => setChecked((c) => ({ ...c, [a.key]: e.target.checked }))} />
+                  <span>{a.text}</span>
+                </label>
+              ))}
+            </fieldset>
+        </div>
+
+        <div className="px-5 sm:px-6 pt-3 pb-[calc(1rem_+_env(safe-area-inset-bottom))] sm:pb-5 border-t border-borderSubtle space-y-2">
+          {!allChecked && <p className="text-[11px] text-textMuted text-center">{isTR ? 'Kabul için metnin sonundaki 4 beyanı işaretleyin.' : 'Tick the 4 statements at the end of the text to accept.'}</p>}
+          <div className="flex flex-col-reverse sm:flex-row gap-2">
+            <button type="button" onClick={() => onDeclineTerms?.()} className="w-full sm:w-auto px-4 py-2.5 rounded-xl border border-borderStrong text-sm font-semibold text-textSecondary hover:bg-elevated">
+              {isTR ? 'Reddet ve bağlantıyı kes' : 'Decline and disconnect'}
+            </button>
+            <button
+              type="button"
+              disabled={!allChecked}
+              onClick={() => onAcceptTerms?.()}
+              className="w-full sm:flex-1 py-2.5 bg-brand text-black font-bold rounded-xl hover:opacity-90 transition disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {isTR ? 'Kabul ediyorum, imzayla onayla' : 'I accept, confirm with signature'}
+            </button>
+          </div>
+          <p className="text-[11px] text-textMuted text-center">{isTR ? 'Kabulünüz, cüzdanınızla imzaladığınız giriş mesajına eklenir ve kayıt altına alınır.' : 'Your acceptance is included in the sign-in message you sign with your wallet and recorded.'}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // [TR] Eksik env değişkenleri için kapatılabilir uyarı şeridi.
 // [EN] Dismissible warning strip for missing env variables.
@@ -81,7 +148,9 @@ export const buildAppModals = (ctx) => {
     isConnected,
     isAuthenticated,
     termsAccepted,
-    setTermsAccepted,
+    onAcceptTerms,
+    onDeclineTerms,
+    address,
     connector,
     isRegisteringWallet,
     handleRegisterWallet,
@@ -385,51 +454,14 @@ export const buildAppModals = (ctx) => {
 
   // [TR] Sol dar navigasyon çubuğu — yalnızca masaüstünde görünür
 
-  // [TR] Kullanım koşulları modalı — ilk bağlantıda bir kez gösterilir, localStorage'a kaydedilir
-  // [EN] Terms of use modal — shown once on first connect, persisted to localStorage
+  // [TR] Kullanım koşulları — cüzdan başına ve sürüm başına sorulur. Dört temel risk tek tek onaylanmadan
+  //      kabul düğmesi açılmaz; kabul, giriş imzasının içindeki beyanla (SIWE statement) kanıtlanır ve
+  //      backend kaydeder. Reddetmek cüzdan bağlantısını keser.
+  // [EN] Terms per wallet and version; four key risks must be ticked; acceptance is signed in the SIWE
+  //      statement and recorded by the backend. Declining disconnects the wallet.
   const renderTermsModal = () => {
-    if (termsAccepted || (!isConnected && !isAuthenticated)) return null;
-    const points = lang === 'TR' ? [
-      { icon: ShieldCheck, tone: 'text-success', text: 'Araf merkeziyetsiz bir akıllı kontrattır. Aracı kurum veya hakem yoktur; son söz kontratındır.' },
-      { icon: Hourglass, tone: 'text-warning', text: 'İtiraz edilen işlemlerde "Eriyen Kasa" devreye girer: teminatlar ve süre uzarsa ana para zamanla erir, 10 günde yakılır.' },
-      { icon: TriangleAlert, tone: 'text-danger', text: 'Ters ibraz (chargeback) riski tamamen satıcıya aittir. Gelen ödemenin kaynağını doğrulamak sizin sorumluluğunuzdadır.' },
-      { icon: Lock, tone: 'text-textSecondary', text: 'Tüm işlemler kendi sorumluluğunuzdadır. Özel anahtarınızı kimseyle paylaşmayın.' },
-    ] : [
-      { icon: ShieldCheck, tone: 'text-success', text: 'Araf is a decentralized smart contract. There are no intermediaries or arbitrators; the contract has the final say.' },
-      { icon: Hourglass, tone: 'text-warning', text: 'Disputed trades enter the "Bleeding Escrow": bonds and, if it drags on, principal decay over time and burn after 10 days.' },
-      { icon: TriangleAlert, tone: 'text-danger', text: 'Chargeback risk belongs entirely to the seller. Verifying the source of incoming funds is your responsibility.' },
-      { icon: Lock, tone: 'text-textSecondary', text: 'All transactions are at your own risk. Never share your private key.' },
-    ];
-    return (
-      <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center sm:p-4 z-[200]" role="dialog" aria-modal="true" aria-labelledby="terms-modal-title">
-        <div className="bg-surface border border-borderSubtle rounded-t-2xl sm:rounded-2xl p-5 sm:p-6 w-full sm:max-w-lg shadow-2xl flex flex-col max-h-[calc(100dvh_-_2rem)] pb-[calc(1.25rem_+_env(safe-area-inset-bottom))] sm:pb-6">
-          <h2 id="terms-modal-title" className="text-lg font-bold text-textPrimary mb-1 flex items-center gap-2"><ScrollText className="w-5 h-5 text-brand" strokeWidth={1.8} aria-hidden="true" />{lang === 'TR' ? 'Kullanım koşulları' : 'Terms of use'}</h2>
-          <p className="text-xs text-textMuted mb-4">{lang === 'TR' ? 'Devam etmeden önce lütfen okuyun.' : 'Please read before continuing.'}</p>
-          <ul className="space-y-3 text-sm text-textSecondary mb-5 overflow-y-auto">
-            {points.map((p) => (
-              <li key={p.text} className="flex items-start gap-3 bg-elevated border border-borderSubtle rounded-xl p-3">
-                <p.icon className={`w-4 h-4 shrink-0 mt-0.5 ${p.tone}`} strokeWidth={1.8} aria-hidden="true" />
-                <span>{p.text}</span>
-              </li>
-            ))}
-          </ul>
-          <button
-            type="button"
-            onClick={() => {
-              // [TR] Kullanım koşulları kabulü kalıcı tutulur; modal refresh sonrası tekrar açılmaz.
-              // [EN] Persist terms acceptance so modal does not re-open after refresh.
-              if (typeof window !== 'undefined') {
-                window.localStorage.setItem(TERMS_ACCEPTED_STORAGE_KEY, 'true');
-              }
-              setTermsAccepted(true);
-            }}
-            className="w-full py-3 bg-brand text-black font-bold rounded-xl hover:opacity-90 transition"
-          >
-            {lang === 'TR' ? 'Okudum, kabul ediyorum' : 'I have read and accept'}
-          </button>
-        </div>
-      </div>
-    );
+    if (termsAccepted || !isConnected) return null;
+    return <TermsModal key={`${address || ''}-${TERMS_VERSION}`} lang={lang} onAcceptTerms={onAcceptTerms} onDeclineTerms={onDeclineTerms} />;
   };
 
   return {

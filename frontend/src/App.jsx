@@ -21,7 +21,8 @@ import { buildLabRewards } from './dev/fixtures/profileFixtures';
 import { isUiLabEnabled } from './dev/ui-lab/isUiLabEnabled';
 import { createMockAdminFetch } from './dev/mocks/mockAdminFetch';
 import { createSetterAction, createSettlementContractMocks, createTradeRoomFetch, createTradeRoomHandlers } from './dev/mocks/mockActions';
-import { getInitialLang, getInitialTermsAccepted, APP_LANG_STORAGE_KEY } from './app/bootstrapState';
+import { getInitialLang, APP_LANG_STORAGE_KEY } from './app/bootstrapState';
+import { isTermsAcceptedLocally, markTermsAcceptedLocally } from './app/legal/terms';
 import { buildApiUrl, resolveApiPolicyDiagnostics } from './app/apiConfig';
 import { getSupportedChainsMap, isMintTokenEnabled, isSupportedChainId } from './app/chainPolicy';
 import { useMakerOrderForm } from './app/contexts/marketplace/useMakerOrderForm';
@@ -168,7 +169,8 @@ function App() {
   const [marketSide, setMarketSide] = useState('ALL');
   const [searchAmount, setSearchAmount] = useState('');
   const [toast, setToast] = useState(null);
-  const [termsAccepted, setTermsAccepted] = useState(getInitialTermsAccepted);
+  // [TR] Koşul kabulü cüzdan ve sürüm başına; yerel kayıt yalnız modalı tekrar göstermemek içindir, kanıt imzadır.
+  const [termsTick, setTermsTick] = useState(0);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [activeTradesFilter, setActiveTradesFilter] = useState('ALL');
   const [feedbackRating, setFeedbackRating] = useState(0);
@@ -673,6 +675,15 @@ function App() {
     openProfilePage,
   });
 
+
+  const termsAccepted = React.useMemo(() => isTermsAcceptedLocally(address), [address, termsTick]); // eslint-disable-line react-hooks/exhaustive-deps
+  // [TR] Kabul → yerel işaret + hemen giriş imzası (beyan imzalı mesajda). Oturum zaten açıksa da yeniden
+  //      imzalatılır; böylece koşullar yürürlüğe girmeden açılmış oturumlar da kabulü kayda geçirir.
+  const handleAcceptTerms = React.useCallback(() => {
+    markTermsAcceptedLocally(address);
+    setTermsTick((t) => t + 1);
+    loginWithSIWE();
+  }, [address, loginWithSIWE]);
 
   const sessionActions = React.useMemo(() => ({
     loginWithSIWE,
@@ -1411,7 +1422,8 @@ function App() {
     isConnected,
     isAuthenticated: effectiveIsAuthenticated,
     termsAccepted,
-    setTermsAccepted,
+    onAcceptTerms: handleAcceptTerms,
+    onDeclineTerms: handleLogoutAndDisconnect,
     connector,
     isRegisteringWallet,
     handleRegisterWallet,

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createSessionActions } from '../../frontend/src/app/providers/SessionProvider';
+import { markTermsAcceptedLocally, termsStorageKey, TERMS_VERSION } from '../../frontend/src/app/legal/terms';
 
 const makeDeps = (overrides = {}) => ({
   address: '0xabc0000000000000000000000000000000000000',
@@ -35,6 +36,39 @@ describe('SessionProvider session actions', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     global.fetch = vi.fn();
+    localStorage.clear();
+    markTermsAcceptedLocally('0xabc0000000000000000000000000000000000000');
+  });
+
+  it('siwe_is_not_requested_until_the_terms_are_accepted_for_this_wallet', async () => {
+    localStorage.removeItem(termsStorageKey('0xabc0000000000000000000000000000000000000'));
+    const deps = makeDeps();
+    await createSessionActions(deps).loginWithSIWE();
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(deps.signMessageAsync).not.toHaveBeenCalled();
+    expect(deps.showToast).toHaveBeenCalledWith('Please accept the terms of use first.', 'info');
+  });
+
+  it('siwe_statement_signs_acceptance_of_the_current_terms_version', async () => {
+    const deps = makeDeps();
+    global.fetch
+      .mockResolvedValueOnce(jsonResponse({ nonce: 'abc12345', siweDomain: 'backend.example', siweUri: 'https://backend.example/app' }))
+      .mockResolvedValueOnce(jsonResponse({ wallet: '0xabc0000000000000000000000000000000000000' }));
+    await createSessionActions(deps).loginWithSIWE();
+    const signedMessage = deps.signMessageAsync.mock.calls[0][0].message;
+    expect(signedMessage).toContain(`I accept the Araf Terms of Use v${TERMS_VERSION}`);
+    expect(signedMessage).toContain('non-custodial software, not a party to my trades');
+  });
+
+  it('siwe_terms_version_rejection_asks_to_reload_instead_of_generic_failure', async () => {
+    const deps = makeDeps();
+    global.fetch
+      .mockResolvedValueOnce(jsonResponse({ nonce: 'abc12345', siweDomain: 'backend.example', siweUri: 'https://backend.example/app' }))
+      .mockResolvedValueOnce(jsonResponse({ code: 'TERMS_NOT_ACCEPTED' }, false, 401));
+    await createSessionActions(deps).loginWithSIWE();
+    expect(deps.showToast).toHaveBeenCalledWith('The terms were updated. Reload the page and accept the new terms.', 'error');
+    expect(deps.setIsAuthenticated).not.toHaveBeenCalledWith(true);
+    expect(deps.setIsLoggingIn).toHaveBeenLastCalledWith(false);
   });
 
   it('siwe_success_uses_backend_nonce_domain_uri_and_sets_authenticated_wallet_only_when_matching_active_wallet', async () => {

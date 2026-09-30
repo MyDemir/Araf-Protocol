@@ -1,6 +1,7 @@
 import React from 'react';
 import { SiweMessage } from 'siwe';
 import { buildApiUrl } from '../apiConfig';
+import { buildTermsStatement, isTermsAcceptedLocally, TERMS_VERSION } from '../legal/terms';
 
 export const createSessionActions = ({
   address,
@@ -57,6 +58,11 @@ export const createSessionActions = ({
 
   const loginWithSIWE = async () => {
     if (!address) return;
+    // [TR] Koşullar kabul edilmeden imza istenmez; modal açıktır ve kabul düğmesi girişi başlatır.
+    if (!isTermsAcceptedLocally(address)) {
+      showToast(lang === 'TR' ? 'Devam etmek için önce kullanım koşullarını kabul edin.' : 'Please accept the terms of use first.', 'info');
+      return;
+    }
     try {
       setIsLoggingIn(true);
       showToast(lang === 'TR' ? 'Lütfen cüzdanınızdan imza isteğini onaylayın' : 'Please approve the signature request in your wallet', 'info');
@@ -73,7 +79,8 @@ export const createSessionActions = ({
       const siweMessage = new SiweMessage({
         domain: siweDomain,
         address,
-        statement: 'Sign in to Araf Protocol to manage your trades and secure PII data.',
+        // [TR] Kabul beyanı imzalanan metnin parçasıdır; backend sürümü doğrular ve kaydeder.
+        statement: buildTermsStatement(TERMS_VERSION),
         uri: siweUri,
         version: '1',
         chainId,
@@ -103,6 +110,11 @@ export const createSessionActions = ({
         showToast(lang === 'TR' ? 'Sisteme başarıyla giriş yapıldı!' : 'Successfully signed in!', 'success');
       } else {
         const data = await verifyRes.json().catch(() => ({}));
+        if (data.code === 'TERMS_NOT_ACCEPTED') {
+          // [TR] Sunucu farklı bir koşul sürümü bekliyor (ör. yeni sürüm yayımlandı); sayfa yenilenince modal güncel sürümü sorar.
+          showToast(lang === 'TR' ? 'Kullanım koşulları güncellendi. Sayfayı yenileyip yeni koşulları kabul edin.' : 'The terms were updated. Reload the page and accept the new terms.', 'error');
+          return;
+        }
         throw new Error(data.error || 'Doğrulama başarısız');
       }
     } catch (error) {

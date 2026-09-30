@@ -1,5 +1,4 @@
 export const APP_LANG_STORAGE_KEY = 'araf_lang';
-export const TERMS_ACCEPTED_STORAGE_KEY = 'araf_terms_accepted';
 export const APP_THEME_STORAGE_KEY = 'araf_theme_mode';
 
 // [TR] İlk dil kararını SSR-safe şekilde hesaplar:
@@ -13,12 +12,7 @@ export const getInitialLang = () => {
   return 'EN';
 };
 
-// [TR] Kullanım koşulları kabul bilgisini localStorage'dan hydrate eder (SSR-safe).
-// [EN] Hydrates terms acceptance state from localStorage (SSR-safe).
-export const getInitialTermsAccepted = () => {
-  if (typeof window === 'undefined') return false;
-  return window.localStorage.getItem(TERMS_ACCEPTED_STORAGE_KEY) === 'true';
-};
+// [TR] Kullanım koşulları kabulü artık cüzdan+sürüm başına: bkz. app/legal/terms.js.
 
 // [TR] Tema modunu SSR-safe şekilde hydrate eder (system/day/night).
 // [EN] Hydrates theme mode in an SSR-safe manner (system/day/night).
