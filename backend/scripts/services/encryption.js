@@ -168,7 +168,9 @@ async function _getMasterKey() {
       });
 
       if (!response.ok) {
-        throw new Error(`Vault HTTP ${response.status}: ${await response.text()}`);
+        // [TR] Yanıt gövdesi hata mesajına konmaz (Vault iç ayrıntı/sır sızdırabilir); yalnız status kodu.
+        // [EN] The response body is never put in the error message (may leak Vault internals); status only.
+        throw new Error(`Vault HTTP ${response.status}: decrypt isteği reddedildi`);
       }
 
       const data = await response.json();
