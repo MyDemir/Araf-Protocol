@@ -18,6 +18,7 @@ const RewardEpoch = require("../models/RewardEpoch");
 const RewardFunding = require("../models/RewardFunding");
 const RewardClaim = require("../models/RewardClaim");
 const { buildBankProfileRisk, buildTradeHealthSignals } = require("./tradeRisk");
+const { isAdminWallet } = require("../utils/adminWallets");
 
 const router = express.Router();
 
@@ -113,12 +114,7 @@ const ADMIN_TRADE_PROJECTION = [
 ].join(" ");
 
 function requireAdminWallet(req, res, next) {
-  const allowed = String(process.env.ADMIN_WALLETS || "")
-    .split(",")
-    .map((w) => w.trim().toLowerCase())
-    .filter(Boolean);
-
-  if (!req.wallet || allowed.length === 0 || !allowed.includes(req.wallet)) {
+  if (!isAdminWallet(req.wallet)) {
     return res.status(403).json({ error: "Admin erişimi reddedildi." });
   }
 
