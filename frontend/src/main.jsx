@@ -7,6 +7,7 @@ import './index.css'
 import { WagmiProvider, createConfig, http } from 'wagmi'
 import { base, baseSepolia, hardhat } from 'wagmi/chains'
 import { buildRpcTransport } from './app/rpcTransport'
+import { loadConnectorsSafely, renderFatalReload } from './app/connectorsLoader'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import {
   BASE_MAINNET_CHAIN_ID,
@@ -51,14 +52,8 @@ const wagmiChains = getSupportedChainIds().map((id) => CHAIN_BY_ID[id]).filter(B
 
 // [TR] P5 — Bağlayıcılar (coinbaseWallet dahil) ayrı chunk'tan yüklenir; ana paket küçülür.
 // [EN] P5 — Connectors (incl. coinbaseWallet) load from a separate chunk to keep the main bundle small.
-const loadConnectors = async () => {
-  const { coinbaseWallet, injected } = await import('wagmi/connectors')
-  return [
-    injected(), // OKX Wallet ve diğer injected cüzdanlar
-    coinbaseWallet({ appName: 'Araf Protocol' }),
-    // [TR] WalletConnect geçici olarak kapalı (Reown 403 hatasını engellemek için)
-  ]
-}
+// [TR] WalletConnect geçici olarak kapalı (Reown 403 hatasını engellemek için). Yükleme hatası connectorsLoader'da yönetilir.
+const loadConnectors = () => loadConnectorsSafely(() => import('wagmi/connectors'))
 
 // [TR] P4 — VITE_RPC_URL birincil RPC, herkese açık RPC yedek (fallback). Prod'da Base, dev'de Base Sepolia'ya uygulanır.
 const PRIMARY_RPC = import.meta.env.VITE_RPC_URL
@@ -99,4 +94,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 )
 }
 
-bootstrap()
+bootstrap().catch((err) => {
+  console.error('[bootstrap] fatal', err)
+  renderFatalReload(document.getElementById('root'))
+})

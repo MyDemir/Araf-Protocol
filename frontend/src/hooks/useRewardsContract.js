@@ -94,7 +94,12 @@ export async function readRewardsSnapshot(publicClient, { address, user, tokens,
       { ...rewards, functionName: 'claimDelay' },
       { ...rewards, functionName: 'claimWindow' },
     ]),
-    typeof publicClient?.getBlock === 'function' ? publicClient.getBlock().catch(() => null) : Promise.resolve(null),
+    typeof publicClient?.getBlock === 'function'
+      ? publicClient.getBlock().catch((err) => {
+        console.warn('[rewards] getBlock failed; falling back to browser clock for epoch windows', err);
+        return null;
+      })
+      : Promise.resolve(null),
   ]);
   const [current, epochDuration, claimDelay, claimWindow] = head.map((v) => BigInt(v));
   const chainNow = block?.timestamp != null ? Number(block.timestamp) : null;
@@ -128,7 +133,8 @@ export async function readRewardsSnapshot(publicClient, { address, user, tokens,
     };
   });
 
-  return { current, timing: { epochDuration, claimDelay, claimWindow }, chainNow, epochs: rows };
+  // [TR] usingBrowserClock: zincir saati okunamadı, panel tarayıcı saatine düşer (UI isterse uyarabilir).
+  return { current, timing: { epochDuration, claimDelay, claimWindow }, chainNow, usingBrowserClock: chainNow == null, epochs: rows };
 }
 
 export function useRewardsContract() {

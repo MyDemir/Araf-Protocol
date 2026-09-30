@@ -31,6 +31,6 @@ describe('P5: main.jsx loads connectors lazily', () => {
     const path = await import('path');
     const src = fs.readFileSync(path.resolve(process.cwd(), 'src/main.jsx'), 'utf8');
     expect(src).not.toMatch(/import\s+\{[^}]*\}\s+from\s+'wagmi\/connectors'/);
-    expect(src).toContain("await import('wagmi/connectors')");
+    expect(src).toContain("import('wagmi/connectors')");
   });
 });
