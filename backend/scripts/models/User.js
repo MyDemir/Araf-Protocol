@@ -53,6 +53,8 @@ const userSchema = new mongoose.Schema(
       payout_details_enc: { type: String, default: null },
       fingerprint: {
         hash: { type: String, default: null },
+        // [TR] Hash şeması: eksik/"sha256" = eski tuzsuz SHA-256, "hmac-v1" = master-key HMAC.
+        hash_scheme: { type: String, default: null },
         version: { type: Number, default: 0, min: 0 },
         last_changed_at: { type: Date, default: null },
       },
