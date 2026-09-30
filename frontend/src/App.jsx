@@ -22,7 +22,7 @@ import { isUiLabEnabled } from './dev/ui-lab/isUiLabEnabled';
 import { createMockAdminFetch } from './dev/mocks/mockAdminFetch';
 import { createSetterAction, createSettlementContractMocks, createTradeRoomFetch, createTradeRoomHandlers } from './dev/mocks/mockActions';
 import { getInitialLang, APP_LANG_STORAGE_KEY } from './app/bootstrapState';
-import { useTermsGate } from './app/legal/useTermsGate';
+import { markTermsAcceptedLocally } from './app/legal/terms';
 import { buildApiUrl, resolveApiPolicyDiagnostics } from './app/apiConfig';
 import { getSupportedChainsMap, isMintTokenEnabled, isSupportedChainId } from './app/chainPolicy';
 import { useMakerOrderForm } from './app/contexts/marketplace/useMakerOrderForm';
@@ -169,6 +169,7 @@ function App() {
   const [marketSide, setMarketSide] = useState('ALL');
   const [searchAmount, setSearchAmount] = useState('');
   const [toast, setToast] = useState(null);
+  const [termsPromptWallet, setTermsPromptWallet] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [activeTradesFilter, setActiveTradesFilter] = useState('ALL');
   const [feedbackRating, setFeedbackRating] = useState(0);
@@ -671,18 +672,22 @@ function App() {
     clearLocalSessionState,
     setShowWalletModal,
     openProfilePage,
+    onTermsRequired: (wallet) => setTermsPromptWallet(String(wallet || '').toLowerCase()),
   });
 
 
-  // [TR] Koşullar cüzdan başına bir kez sorulur; kabul backend'de imzalı kanıtla saklanır (TermsAcceptance).
-  //      Kabul → hemen giriş imzası (beyan imzalı mesajda); oturum açıksa da yeniden imzalatılır ki
-  //      koşullardan önce açılmış oturumlar da kanıta geçsin.
-  const termsGate = useTermsGate({ address, isConnected });
-  const termsAccepted = termsGate.accepted || termsGate.checking;
+  // [TR] Koşullar cüzdan başına bir kez sorulur: backend, imza doğrulandıktan sonra saklı kabul yoksa
+  //      TERMS_NOT_ACCEPTED döner ve modal yalnız o cüzdan için açılır. Kabul → beyanlı giriş imzası (kanıt).
+  const termsAccepted = !(isConnected && termsPromptWallet && termsPromptWallet === String(address || '').toLowerCase());
   const handleAcceptTerms = React.useCallback(() => {
-    termsGate.markAccepted();
+    markTermsAcceptedLocally(address);
+    setTermsPromptWallet(null);
     loginWithSIWE();
-  }, [termsGate, loginWithSIWE]);
+  }, [address, loginWithSIWE]);
+  const handleDeclineTerms = React.useCallback(() => {
+    setTermsPromptWallet(null);
+    handleLogoutAndDisconnect();
+  }, [handleLogoutAndDisconnect]);
 
   const sessionActions = React.useMemo(() => ({
     loginWithSIWE,
@@ -1422,7 +1427,7 @@ function App() {
     isAuthenticated: effectiveIsAuthenticated,
     termsAccepted,
     onAcceptTerms: handleAcceptTerms,
-    onDeclineTerms: handleLogoutAndDisconnect,
+    onDeclineTerms: handleDeclineTerms,
     connector,
     isRegisteringWallet,
     handleRegisterWallet,

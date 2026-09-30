@@ -301,28 +301,6 @@ router.get("/nonce", authLimiter, nonceLimiter, async (req, res, next) => {
 });
 
 /**
- * GET /api/auth/terms-status?wallet=0x...
- * [TR] Cüzdanın güncel koşul sürümünü daha önce imzayla kabul edip etmediğini söyler; modal cüzdan başına
- *      bir kez gösterilir (cihaz/tarayıcı değişse de). Yalnız evet/hayır döner; mesaj/imza döndürülmez.
- * [EN] Whether the wallet already signed the current terms version; used to show the modal once per wallet.
- */
-router.get("/terms-status", authLimiter, async (req, res, next) => {
-  try {
-    const { wallet } = req.query;
-    if (!wallet || !/^0x[a-fA-F0-9]{40}$/.test(wallet)) {
-      return res.status(400).json({ error: "Geçerli bir Ethereum adresi gir." });
-    }
-    const record = await TermsAcceptance.findOne(
-      { wallet_address: wallet.toLowerCase(), terms_version: CURRENT_TERMS_VERSION },
-      { _id: 1 }
-    ).lean();
-    return res.json({ version: CURRENT_TERMS_VERSION, accepted: Boolean(record) });
-  } catch (err) {
-    return next(err);
-  }
-});
-
-/**
  * POST /api/auth/verify
  * SIWE imzasını doğrular, JWT ve refresh token'ı httpOnly cookie olarak set eder.
  */
@@ -338,23 +316,26 @@ router.post("/verify", authLimiter, async (req, res) => {
       return res.status(400).json({ error: error.message });
     }
 
-    // [TR] Oturum yalnız kullanım koşullarını kabul eden imzayla açılır: kabul beyanı SIWE mesajının
-    //      imzalanan metnindedir. Beyan yoksa ya da sürüm tanınmıyorsa imza doğrulanmadan reddedilir
-    //      (nonce tüketilmez, kullanıcı güncel koşullarla yeniden imzalar).
-    // [EN] A session only opens with a signature that accepts the terms (clause inside the signed statement).
-    let termsVersion = null;
+    // [TR] Koşul kabulü: (a) imzalanan metin güncel sürümün kabul beyanını içerir → kanıt saklanır, ya da
+    //      (b) beyan yoktur ama bu cüzdanın güncel sürüm için daha önce saklanmış imzalı kabulü vardır
+    //      (yeni cihaz; modal tekrar gösterilmez). Kabul durumu yalnız imza doğrulandıktan sonra, yani cüzdan
+    //      sahibine söylenir; herkese açık bir sorgu yoktur (cüzdan numaralandırma yok).
+    // [EN] Terms: either the signed statement accepts the current version (evidence stored), or the wallet
+    //      already has stored signed acceptance. Status is revealed only after the signature is verified.
+    let clauseVersion = null;
     let siweChainId = null;
     try {
       const parsedSiwe = new SiweMessage(value.message);
-      termsVersion = parseTermsAcceptance(parsedSiwe.statement);
+      clauseVersion = parseTermsAcceptance(parsedSiwe.statement);
       siweChainId = Number(parsedSiwe.chainId) || null;
     } catch (_) {
-      termsVersion = null;
+      clauseVersion = null;
     }
-    if (!termsVersion || !ACCEPTED_TERMS_VERSIONS.has(termsVersion)) {
+    if (clauseVersion && !ACCEPTED_TERMS_VERSIONS.has(clauseVersion)) {
       return res.status(401).json({
-        error: "Kullanım koşulları kabul edilmeden giriş yapılamaz. Lütfen güncel koşulları kabul edip yeniden imzalayın.",
+        error: "Bu koşul sürümü artık geçerli değil. Sayfayı yenileyip güncel koşulları kabul edin.",
         code: "TERMS_NOT_ACCEPTED",
+        reason: "UNSUPPORTED_VERSION",
         termsVersion: CURRENT_TERMS_VERSION,
       });
     }
@@ -362,41 +343,58 @@ router.post("/verify", authLimiter, async (req, res) => {
     const wallet = await verifySiweSignature(value.message, value.signature);
     const acceptedAt = new Date();
     const messageSha256 = crypto.createHash("sha256").update(value.message).digest("hex");
+    let termsVersion = clauseVersion;
 
-    // [TR] Bu cüzdanın bu sürümdeki İLK imzalı kabulü kalıcı kanıt olarak saklanır; sonraki girişler
-    //      kaydı değiştirmez. Kayıt başarısız olursa oturum açılmaz: kanıtsız kabul olmaz.
-    // [EN] First signed acceptance per wallet+version is kept as permanent evidence; later logins never
-    //      overwrite it. If it cannot be stored, no session is opened.
-    try {
-      await TermsAcceptance.updateOne(
-        { wallet_address: wallet, terms_version: termsVersion },
-        {
-          $setOnInsert: {
-            wallet_address: wallet,
-            terms_version: termsVersion,
-            accepted_at: acceptedAt,
-            signed_message: value.message,
-            signature: value.signature,
-            message_sha256: messageSha256,
-            chain_id: siweChainId,
+    if (clauseVersion) {
+      // [TR] Bu cüzdanın bu sürümdeki İLK imzalı kabulü kalıcı kanıt olarak saklanır; sonraki girişler
+      //      kaydı değiştirmez. Kayıt başarısız olursa oturum açılmaz: kanıtsız kabul olmaz.
+      try {
+        await TermsAcceptance.updateOne(
+          { wallet_address: wallet, terms_version: clauseVersion },
+          {
+            $setOnInsert: {
+              wallet_address: wallet,
+              terms_version: clauseVersion,
+              accepted_at: acceptedAt,
+              signed_message: value.message,
+              signature: value.signature,
+              message_sha256: messageSha256,
+              chain_id: siweChainId,
+            },
           },
-        },
-        { upsert: true }
-      );
-    } catch (err) {
-      // Concurrent first logins: the unique index already holds the first acceptance.
-      if (err?.code !== 11000) throw err;
+          { upsert: true }
+        );
+      } catch (err) {
+        // Concurrent first logins: the unique index already holds the first acceptance.
+        if (err?.code !== 11000) throw err;
+      }
+    } else {
+      const prior = await TermsAcceptance.findOne(
+        { wallet_address: wallet, terms_version: CURRENT_TERMS_VERSION },
+        { _id: 1 }
+      ).lean();
+      if (!prior) {
+        return res.status(401).json({
+          error: "Devam etmek için kullanım koşullarını kabul edin.",
+          code: "TERMS_NOT_ACCEPTED",
+          reason: "ACCEPTANCE_REQUIRED",
+          termsVersion: CURRENT_TERMS_VERSION,
+        });
+      }
+      termsVersion = CURRENT_TERMS_VERSION;
     }
 
     const user = await User.findOneAndUpdate(
       { wallet_address: wallet },
       {
-        $set: {
-          last_login: acceptedAt,
-          terms_accepted_version: termsVersion,
-          terms_accepted_at: acceptedAt,
-          terms_acceptance_message_sha256: messageSha256,
-        },
+        $set: clauseVersion
+          ? {
+            last_login: acceptedAt,
+            terms_accepted_version: clauseVersion,
+            terms_accepted_at: acceptedAt,
+            terms_acceptance_message_sha256: messageSha256,
+          }
+          : { last_login: acceptedAt },
         $setOnInsert: { wallet_address: wallet },
       },
       { upsert: true, new: true }
@@ -405,13 +403,13 @@ router.post("/verify", authLimiter, async (req, res) => {
     await user.checkBanExpiry();
 
     const token = issueJWT(wallet);
-    const refreshToken = await issueRefreshToken(wallet);
+    const refreshToken = await issueRefreshToken(wallet, null, termsVersion);
 
     res.cookie("araf_jwt", token, _getJwtCookieOptions());
     res.cookie("araf_refresh", refreshToken, _getRefreshCookieOptions());
 
     logger.info(`[Auth] Giriş başarılı: ${wallet} (koşullar v${termsVersion})`);
-    return res.json({ wallet, profile: user.toPublicProfile(), terms: { version: termsVersion, acceptedAt } });
+    return res.json({ wallet, profile: user.toPublicProfile(), terms: { version: termsVersion } });
   } catch (err) {
     logger.warn(`[Auth] SIWE başarısız: ${err.message}`);
     return res.status(401).json({ error: `Kimlik doğrulama başarısız: ${err.message}` });
@@ -454,7 +452,7 @@ router.post("/refresh", authLimiter, async (req, res) => {
     logger.warn(`[Auth] Refresh başarısız: ${err.message}`);
     res.clearCookie("araf_jwt", { ...COOKIE_OPTIONS_BASE, path: "/" });
     res.clearCookie("araf_refresh", { ...COOKIE_OPTIONS_BASE, path: "/api/auth" });
-    return res.status(401).json({ error: err.message });
+    return res.status(401).json({ error: err.message, ...(err.code === "TERMS_NOT_ACCEPTED" ? { code: err.code } : {}) });
   }
 });
 

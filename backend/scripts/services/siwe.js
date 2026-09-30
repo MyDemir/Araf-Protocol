@@ -30,6 +30,7 @@ This could break SIWE verification even when the user flow looked valid from the
 ### Effect
 This makes nonce issuance authoritative under concurrency and removes nonce drift between the app and Redis.*/
 const { SiweMessage } = require("siwe");
+const { CURRENT_TERMS_VERSION } = require("../config/terms");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const { getRedisClient } = require("../config/redis");
@@ -254,7 +255,7 @@ async function blacklistJWT(token) {
 }
 
 // Refresh token değeri familyId ve wallet ile birlikte saklanır.
-async function issueRefreshToken(walletAddress, familyId = null) {
+async function issueRefreshToken(walletAddress, familyId = null, termsVersion = null) {
   const redis = getRedisClient();
   const token = crypto.randomBytes(32).toString("hex");
   const currentFamilyId = familyId || crypto.randomBytes(16).toString("hex");
@@ -269,6 +270,8 @@ async function issueRefreshToken(walletAddress, familyId = null) {
     JSON.stringify({
       familyId: currentFamilyId,
       wallet: normalizedWallet,
+      // [TR] Oturumun kabul ettiği koşul sürümü; rotasyonda DB'ye gitmeden kontrol edilir.
+      termsVersion: termsVersion || null,
     })
   );
   multi.sAdd(familyKey, token);
@@ -314,6 +317,15 @@ async function rotateRefreshToken(refreshToken, expectedWallet = null) {
   }
 
   const { familyId } = storedData;
+
+  // [TR] Oturum güncel koşul sürümüyle açılmadıysa (eski oturum veya sürüm yükseltmesi) yenilenmez;
+  //      kullanıcı yeniden giriş yapar ve koşulları kabul eder. Kontrol Redis verisinden, DB'siz.
+  // [EN] Sessions not opened under the current terms version are not refreshed (no DB read).
+  if (storedData.termsVersion !== CURRENT_TERMS_VERSION) {
+    const err = new Error("Kullanım koşulları güncel değil. Lütfen yeniden giriş yapın.");
+    err.code = "TERMS_NOT_ACCEPTED";
+    throw err;
+  }
   const familyKey = `${REFRESH_FAMILY_PREFIX}${normalizedWallet}:${familyId}`;
   const familyMembers = await redis.sMembers(familyKey);
 
@@ -325,7 +337,7 @@ async function rotateRefreshToken(refreshToken, expectedWallet = null) {
   }
 
   const newJWT = issueJWT(normalizedWallet);
-  const newRefreshToken = await issueRefreshToken(normalizedWallet, familyId);
+  const newRefreshToken = await issueRefreshToken(normalizedWallet, familyId, storedData.termsVersion);
 
   logger.info(`[Auth] Token rotasyonu tamamlandı: ${normalizedWallet}`);
   return { token: newJWT, refreshToken: newRefreshToken, wallet: normalizedWallet };

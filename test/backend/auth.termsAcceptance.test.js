@@ -25,6 +25,7 @@ function buildMessage(statement) {
 function loadApp() {
   process.env.JWT_SECRET = "a".repeat(80);
   const verifySiweSignature = jest.fn(async () => WALLET);
+  const issueRefreshToken = jest.fn(async () => "refresh");
   const findOneAndUpdate = jest.fn(async () => ({
     checkBanExpiry: jest.fn(async () => {}),
     toPublicProfile: () => ({ wallet_address: WALLET }),
@@ -47,7 +48,7 @@ function loadApp() {
       verifySiweSignature,
       getSiweConfig: jest.fn(() => ({ domain: "localhost", uri: "https://localhost" })),
       issueJWT: jest.fn(() => "jwt"),
-      issueRefreshToken: jest.fn(async () => "refresh"),
+      issueRefreshToken,
       rotateRefreshToken: jest.fn(),
       revokeRefreshToken: jest.fn(),
       blacklistJWT: jest.fn(),
@@ -64,35 +65,51 @@ function loadApp() {
   const app = express();
   app.use(express.json());
   app.use("/api/auth", router);
-  return { app, verifySiweSignature, findOneAndUpdate, termsUpdateOne, termsFindOne };
+  return { app, verifySiweSignature, findOneAndUpdate, termsUpdateOne, termsFindOne, issueRefreshToken };
 }
 
 describe("SIWE login requires signed acceptance of the terms", () => {
   afterEach(() => jest.resetModules());
 
-  it("rejects a signature whose statement does not accept the terms, before consuming the nonce", async () => {
-    const { app, verifySiweSignature, findOneAndUpdate } = loadApp();
+  it("without the clause and without stored acceptance: no session, and the status is only revealed after the signature is verified", async () => {
+    const { app, verifySiweSignature, findOneAndUpdate, termsUpdateOne } = loadApp();
     const res = await request(app).post("/api/auth/verify").send({ message: buildMessage("Sign in to Araf Protocol."), signature: SIG });
     expect(res.status).toBe(401);
-    expect(res.body.code).toBe("TERMS_NOT_ACCEPTED");
-    expect(verifySiweSignature).not.toHaveBeenCalled();
+    expect(res.body).toMatchObject({ code: "TERMS_NOT_ACCEPTED", reason: "ACCEPTANCE_REQUIRED" });
+    expect(verifySiweSignature).toHaveBeenCalled();
+    expect(termsUpdateOne).not.toHaveBeenCalled();
     expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 
-  it("rejects an unknown terms version", async () => {
-    const { app } = loadApp();
+  it("without the clause but with stored acceptance (new device): session opens, evidence untouched", async () => {
+    const { CURRENT_TERMS_VERSION } = require("../../backend/scripts/config/terms");
+    const { app, termsFindOne, termsUpdateOne, findOneAndUpdate, issueRefreshToken } = loadApp();
+    termsFindOne.mockReturnValueOnce({ lean: async () => ({ _id: "x" }) });
+    const res = await request(app).post("/api/auth/verify").send({ message: buildMessage("Sign in to Araf Protocol."), signature: SIG });
+    expect(res.status).toBe(200);
+    expect(res.body.terms.version).toBe(CURRENT_TERMS_VERSION);
+    expect(termsFindOne.mock.calls[0][0]).toEqual({ wallet_address: WALLET, terms_version: CURRENT_TERMS_VERSION });
+    expect(termsUpdateOne).not.toHaveBeenCalled();
+    expect(findOneAndUpdate.mock.calls[0][1].$set).toEqual({ last_login: expect.any(Date) });
+    expect(issueRefreshToken).toHaveBeenCalledWith(WALLET, null, CURRENT_TERMS_VERSION);
+  });
+
+  it("rejects an unknown terms version before checking the signature", async () => {
+    const { app, verifySiweSignature } = loadApp();
     const res = await request(app).post("/api/auth/verify").send({ message: buildMessage("I accept the Araf Terms of Use v1999-01-01 and sign in."), signature: SIG });
     expect(res.status).toBe(401);
-    expect(res.body.code).toBe("TERMS_NOT_ACCEPTED");
+    expect(res.body).toMatchObject({ code: "TERMS_NOT_ACCEPTED", reason: "UNSUPPORTED_VERSION" });
+    expect(verifySiweSignature).not.toHaveBeenCalled();
   });
 
   it("records version, time and message digest when the current terms are accepted", async () => {
     const { CURRENT_TERMS_VERSION } = require("../../backend/scripts/config/terms");
-    const { app, findOneAndUpdate } = loadApp();
+    const { app, findOneAndUpdate, issueRefreshToken } = loadApp();
     const message = buildMessage(`Sign in to Araf Protocol. I accept the Araf Terms of Use v${CURRENT_TERMS_VERSION} and acknowledge that Araf is non-custodial software, not a party to my trades.`);
     const res = await request(app).post("/api/auth/verify").send({ message, signature: SIG });
     expect(res.status).toBe(200);
     expect(res.body.terms.version).toBe(CURRENT_TERMS_VERSION);
+    expect(issueRefreshToken).toHaveBeenCalledWith(WALLET, null, CURRENT_TERMS_VERSION);
     const update = findOneAndUpdate.mock.calls[0][1].$set;
     expect(update.terms_accepted_version).toBe(CURRENT_TERMS_VERSION);
     expect(update.terms_accepted_at).toBeInstanceOf(Date);
@@ -132,21 +149,52 @@ describe("SIWE login requires signed acceptance of the terms", () => {
     await request(app).post("/api/auth/verify").send({ message, signature: SIG }).expect(200);
   });
 
-  it("terms-status answers per wallet for the current version without exposing the evidence", async () => {
-    const { CURRENT_TERMS_VERSION } = require("../../backend/scripts/config/terms");
-    const { app, termsFindOne } = loadApp();
-    let res = await request(app).get(`/api/auth/terms-status?wallet=${WALLET.toUpperCase().replace("0X", "0x")}`).expect(200);
-    expect(res.body).toEqual({ version: CURRENT_TERMS_VERSION, accepted: false });
-    expect(termsFindOne.mock.calls[0][0]).toEqual({ wallet_address: WALLET, terms_version: CURRENT_TERMS_VERSION });
-    termsFindOne.mockReturnValueOnce({ lean: async () => ({ _id: "x" }) });
-    res = await request(app).get(`/api/auth/terms-status?wallet=${WALLET}`).expect(200);
-    expect(res.body).toEqual({ version: CURRENT_TERMS_VERSION, accepted: true });
-    await request(app).get("/api/auth/terms-status?wallet=nope").expect(400);
-  });
-
   it("frontend and backend use the same terms version", () => {
     const { CURRENT_TERMS_VERSION } = require("../../backend/scripts/config/terms");
     const src = fs.readFileSync(path.join(__dirname, "../../frontend/src/app/legal/terms.js"), "utf8");
     expect(src).toContain(`export const TERMS_VERSION = '${CURRENT_TERMS_VERSION}';`);
+  });
+});
+
+describe("refresh rotation requires the current terms version (Redis only, no DB)", () => {
+  afterEach(() => jest.resetModules());
+
+  function loadSiwe(stored) {
+    process.env.JWT_SECRET = "k7Q2vX9pL4mZ8rT1wB6nY3cF5hJ0dS2gA7eU9iO4qW1xR8tV6yN3bM5zK2jH0lP9sD4fG7aC1";
+    const store = new Map([["refresh:tok", JSON.stringify(stored)]]);
+    const multi = () => {
+      const ops = [];
+      const m = {
+        setEx: (k, _t, v) => { ops.push(() => store.set(k, v)); return m; },
+        sAdd: () => m, expire: () => m, del: (k) => { ops.push(() => store.delete(k)); return m; },
+        exec: async () => ops.forEach((f) => f()),
+      };
+      return m;
+    };
+    const redis = {
+      getDel: async (k) => { const v = store.get(k) ?? null; store.delete(k); return v; },
+      sMembers: async () => [], multi,
+    };
+    let svc;
+    jest.isolateModules(() => {
+      jest.dontMock("../../backend/scripts/services/siwe");
+      jest.doMock("../../backend/scripts/config/redis", () => ({ getRedisClient: () => redis, isReady: () => true }));
+      svc = jest.requireActual("../../backend/scripts/services/siwe");
+    });
+    return { svc, store };
+  }
+
+  it("refuses sessions opened without (or before) the current terms", async () => {
+    const { svc } = loadSiwe({ familyId: "f1", wallet: WALLET });
+    await expect(svc.rotateRefreshToken("tok")).rejects.toMatchObject({ code: "TERMS_NOT_ACCEPTED" });
+  });
+
+  it("rotates and carries the terms version forward", async () => {
+    const { CURRENT_TERMS_VERSION } = require("../../backend/scripts/config/terms");
+    const { svc, store } = loadSiwe({ familyId: "f1", wallet: WALLET, termsVersion: CURRENT_TERMS_VERSION });
+    const out = await svc.rotateRefreshToken("tok");
+    expect(out.wallet).toBe(WALLET);
+    const next = JSON.parse([...store.values()].find((v) => v.includes("termsVersion")));
+    expect(next.termsVersion).toBe(CURRENT_TERMS_VERSION);
   });
 });
