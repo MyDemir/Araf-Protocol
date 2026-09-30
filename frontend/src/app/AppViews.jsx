@@ -1004,7 +1004,7 @@ export const buildAppViews = (ctx) => {
             const showTakerPii = isTaker && ['LOCKED', 'PAID'].includes(roomState);
             const beforeActions = showTakerPii ? (
               <div className="mb-4">
-                <PIIDisplay tradeId={activeTrade?.id} lang={lang} authenticatedFetch={authenticatedFetch} />
+                <PIIDisplay key={activeTrade?.id} tradeId={activeTrade?.id} lang={lang} authenticatedFetch={authenticatedFetch} />
               </div>
             ) : null;
 
