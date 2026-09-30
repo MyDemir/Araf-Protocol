@@ -130,8 +130,8 @@ const ARAF_ABI = [
   "event EpochRewardAllocated(uint256 indexed epoch, address indexed token, uint256 amount)",
   "event TradeOutcomeRecorded(uint256 indexed tradeId, uint256 indexed epoch, address indexed maker, address taker, uint256 makerWeight, uint256 takerWeight, uint8 outcome)",
   "event RewardClaimed(uint256 indexed epoch, address indexed user, address indexed token, uint256 amount, uint256 userWeight, uint256 totalWeight)",
-  "function getTrade(uint256 _tradeId) view returns ((uint256 id,uint256 parentOrderId,address maker,address taker,address tokenAddress,uint256 cryptoAmount,uint256 makerBond,uint256 takerBond,uint16 takerFeeBpsSnapshot,uint16 makerFeeBpsSnapshot,uint8 tier,uint8 paymentRiskLevelSnapshot,uint8 state,uint256 lockedAt,uint256 paidAt,uint256 challengedAt,string ipfsReceiptHash,bool cancelProposedByMaker,bool cancelProposedByTaker,uint256 pingedAt,bool pingedByTaker,uint256 challengePingedAt,bool challengePingedByMaker))",
-  "function getOrder(uint256 _orderId) view returns ((uint256 id,address owner,uint8 side,address tokenAddress,uint256 totalAmount,uint256 remainingAmount,uint256 minFillAmount,uint256 remainingMakerBondReserve,uint256 remainingTakerBondReserve,uint16 takerFeeBpsSnapshot,uint16 makerFeeBpsSnapshot,uint8 tier,uint8 paymentRiskLevel,uint8 state,bytes32 orderRef))",
+  "function getTrade(uint256 _tradeId) view returns ((uint64 id,uint64 parentOrderId,address maker,address taker,address tokenAddress,uint256 cryptoAmount,uint256 makerBond,uint256 takerBond,uint16 takerFeeBpsSnapshot,uint16 makerFeeBpsSnapshot,uint8 tier,uint8 paymentRiskLevelSnapshot,uint8 state,uint64 lockedAt,uint64 paidAt,uint64 challengedAt,bool cancelProposedByMaker,bool cancelProposedByTaker,uint64 pingedAt,bool pingedByTaker,uint64 challengePingedAt,bool challengePingedByMaker))",
+  "function getOrder(uint256 _orderId) view returns ((uint64 id,address owner,uint8 side,address tokenAddress,uint256 totalAmount,uint256 remainingAmount,uint256 minFillAmount,uint256 remainingMakerBondReserve,uint256 remainingTakerBondReserve,uint16 takerFeeBpsSnapshot,uint16 makerFeeBpsSnapshot,uint8 tier,uint8 paymentRiskLevel,uint8 state,bytes32 orderRef))",
   // [TR] getReputation getter tuple sırası frontend + contract ile lock-step kalmalıdır.
   // [EN] Keep getReputation tuple order in lock-step with frontend + contract.
   "function getReputation(address _wallet) view returns (uint256 successful,uint256 failed,uint256 bannedUntil,uint256 consecutiveBans,uint8 effectiveTier,uint256 manualReleaseCount,uint256 autoReleaseCount,uint256 mutualCancelCount,uint256 disputedResolvedCount,uint256 burnCount,uint256 disputeWinCount,uint256 disputeLossCount,uint256 partialSettlementCount,uint256 riskPoints,uint256 lastPositiveEventAt,uint256 lastNegativeEventAt)",
@@ -1107,7 +1107,8 @@ class EventWorker {
     };
 
     if (opts.listingRef) setPayload["canonical_refs.listing_ref"] = opts.listingRef;
-    if (tradeData.ipfsReceiptHash) setPayload["evidence.ipfs_receipt_hash"] = tradeData.ipfsReceiptHash;
+    // [TR] Dekont hash'i kontrat storage'ında tutulmaz; PaymentReported event'inden aynalanır.
+    // [EN] The receipt hash is not in contract storage; it is mirrored from the PaymentReported event.
 
     // [TR] Parent order'daki maker kur/fiat bilgisi (UI enrichment) child trade'e fill anında kopyalanır.
     // [EN] Copy the maker's fiat/rate enrichment from the parent order into the child trade at fill time.
