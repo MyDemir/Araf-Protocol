@@ -343,7 +343,7 @@ contract ArafEscrow is ReentrancyGuard, Ownable, Pausable {
     uint256 public constant PAYMENT_WINDOW       =  48 hours;
     uint256 public constant USDT_DECAY_START     =  96 hours;
     uint256 public constant MAX_BLEEDING         = 240 hours;
-    uint256 internal constant WALLET_AGE_MIN       =   7 days;
+    uint256 internal constant WALLET_AGE_MIN       =   2 days;
     uint256 internal constant DEFAULT_TIER0_TRADE_COOLDOWN = 4 hours;
     uint256 internal constant DEFAULT_TIER1_TRADE_COOLDOWN = 4 hours;
     uint256 internal constant MAX_CANCEL_DEADLINE  =   7 days;

@@ -6,6 +6,7 @@ import React from 'react';
 import { formatUnits } from 'viem';
 import { mapOffchainHealthToUi } from '../../orderUiModel';
 import { deriveReputationView, MIN_REPUTATION_NOTIONAL_USD } from './reputationModel';
+import { WALLET_AGE_MIN_DAYS } from '../../walletAge';
 
 export const profileTabs = [
   { key: 'account', icon: UserRound, label: { TR: 'Hesap', EN: 'Account' } },
@@ -146,7 +147,7 @@ export const AccountPanel = ({
           <CheckRow
             pending={!sybilStatus}
             ok={Boolean(sybilStatus?.aged)}
-            label={tx(lang, 'Cüzdan yaşı (7 gün)', 'Wallet age (7 days)')}
+            label={tx(lang, `Cüzdan yaşı (${WALLET_AGE_MIN_DAYS} gün)`, `Wallet age (${WALLET_AGE_MIN_DAYS} days)`)}
             detail={!sybilStatus ? '…' : sybilStatus.aged ? tx(lang, 'Tamam', 'OK') : (walletAgeRemainingDays != null ? tx(lang, `${walletAgeRemainingDays} gün kaldı`, `${walletAgeRemainingDays} days left`) : tx(lang, 'Kayıt gerekli', 'Registration needed'))}
           />
           <CheckRow

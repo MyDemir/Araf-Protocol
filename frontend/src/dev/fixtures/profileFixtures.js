@@ -104,7 +104,7 @@ export const profileScenarios = [
   scenario('new-wallet', 'Account · new wallet (age check pending)', 'account', {
     build: () => reputation(),
     sybilStatus: { aged: false, funded: true, cooldownOk: true, cooldownRemaining: 0 },
-    walletAgeRemainingDays: 4,
+    walletAgeRemainingDays: 1,
   }),
   scenario('account-active', 'Account · T1 trader with orders and trades', 'account', {
     build: () => reputation({ tier: 1, successful: 22, failed: 1, firstSuccessAgoDays: 40, counters: { manualReleaseCount: 18, autoReleaseCount: 3, partialSettlementCount: 1, disputeWinCount: 1 } }),

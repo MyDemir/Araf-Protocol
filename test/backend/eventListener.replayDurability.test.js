@@ -27,7 +27,8 @@ describe("eventListener replay durability", () => {
     worker.provider = { getBlockNumber: jest.fn().mockResolvedValue(10) };
     const good = { eventName: "WalletRegistered", transactionHash: "0xgood", logIndex: 1, blockNumber: 4, args: { wallet: "0xabc", timestamp: 1 } };
     const bad = { eventName: "EscrowReleased", transactionHash: "0xbad", logIndex: 2, blockNumber: 4, args: { tradeId: "1" } };
-    worker.contract = { queryFilter: jest.fn().mockResolvedValueOnce([good, bad]).mockResolvedValue([]) };
+    worker.contract = {};
+    worker._fetchRangeEvents = jest.fn().mockResolvedValueOnce([good, bad]).mockResolvedValue([]);
     worker._processEvent = jest.fn(async (evt) => { if (evt.transactionHash === "0xbad") throw new Error("poison"); });
 
     await worker._replayMissedEvents();

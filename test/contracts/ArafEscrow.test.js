@@ -14,7 +14,7 @@ describe("ArafEscrow V3", function () {
     ethers.parseUnits("30000", USDT_DECIMALS),
   ];
 
-  const WALLET_AGE_MIN = 7 * 24 * 3600;
+  const WALLET_AGE_MIN = 2 * 24 * 3600;
   const GRACE_PERIOD = 48 * 3600;
   const RESPONSE_WINDOW = 24 * 3600;
   const DEFAULT_TIER0_COOLDOWN = 4 * 3600;

@@ -7,6 +7,7 @@
  */
 
 import { APP_LANG_STORAGE_KEY } from './bootstrapState';
+import { WALLET_AGE_MIN_DAYS } from './walletAge';
 
 export const ARAF_CONTRACT_ERROR_ABI = [
   'error NotTradeParty()',
@@ -94,7 +95,7 @@ const MESSAGES = {
   TierNotAllowed: { TR: 'Bu tier için seviyeniz yetersiz.', EN: 'Your tier is too low for this order.' },
   AmountExceedsTierLimit: { TR: 'Tutar tier limitini aşıyor.', EN: 'Amount exceeds the tier limit.' },
   SelfTradeForbidden: { TR: 'Kendi emrinizi dolduramazsınız.', EN: 'You cannot fill your own order.' },
-  WalletTooYoung: { TR: 'Cüzdanınız kayıttan sonra 7 gün beklemeli.', EN: 'Your wallet must be registered for 7 days.' },
+  WalletTooYoung: { TR: `Cüzdanınız kayıttan sonra ${WALLET_AGE_MIN_DAYS} gün beklemeli.`, EN: `Your wallet must be registered for ${WALLET_AGE_MIN_DAYS} days.` },
   InsufficientNativeBalance: { TR: 'Cüzdanda en az 0.001 ETH olmalı.', EN: 'Keep at least 0.001 ETH in your wallet.' },
   TierCooldownActive: { TR: 'Bekleme süresi dolmadı. Biraz sonra tekrar deneyin.', EN: 'Cooldown active. Try again later.' },
   EmptyIpfsHash: { TR: 'Önce dekont yükleyin.', EN: 'Upload a receipt first.' },

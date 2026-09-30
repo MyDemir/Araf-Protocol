@@ -210,6 +210,10 @@ const tradeSchema = new mongoose.Schema(
       last_decay_at:         { type: Date, default: null },
       pinged_at:             { type: Date, default: null },
       challenge_pinged_at:   { type: Date, default: null },
+      // [TR] Ödül ağırlığının zincire kaydedildiği an (TradeOutcomeRecorded aynası / recorder işareti).
+      //      Authority değildir; yalnız recorder'ın aynı trade'i tekrar göndermemesi içindir.
+      // [EN] When the reward outcome was recorded on-chain. Not authority; stops the recorder resending.
+      reward_recorded_at:    { type: Date, default: null },
     },
 
     pinged_by_taker:           { type: Boolean, default: false },
