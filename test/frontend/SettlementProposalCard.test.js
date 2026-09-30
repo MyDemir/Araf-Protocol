@@ -1,8 +1,10 @@
 import React from 'react';
-import { describe, it, expect, vi } from 'vitest';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { SETTLEMENT_NEUTRALITY_COPY, safeDate } from '../../frontend/src/components/SettlementProposalCard';
-import { normalizeSettlementState, toUnixSeconds } from '../../frontend/src/app/contexts/settlement/settlementActionModel';
+import { getSettlementActionContext, normalizeSettlementState, toUnixSeconds } from '../../frontend/src/app/contexts/settlement/settlementActionModel';
+
+afterEach(() => cleanup());
 import { getPreviewTotalPool, shortNum } from '../../frontend/src/components/SettlementPreviewModal';
 import SettlementProposalCard from '../../frontend/src/components/SettlementProposalCard';
 
@@ -386,3 +388,53 @@ describe('SettlementProposalCard state normalization safety', () => {
     expect(scope.queryByRole('button', { name: /Preview/i })).toBeNull();
   });
 });
+
+describe('settlement re-proposal after a closed offer (contract only blocks a live proposal)', () => {
+  const MAKER = '0x1111111111111111111111111111111111111111';
+  const TAKER = '0x2222222222222222222222222222222222222222';
+  const NOW = 1_800_000_000;
+  const trade = (proposal) => ({ id: 'db-id', onchainId: '7', state: 'CHALLENGED', makerFull: MAKER, takerFull: TAKER, settlementProposal: proposal });
+  const ctx = (proposal, nowTs = NOW) => getSettlementActionContext({ activeTrade: trade(proposal), userRole: 'maker', address: MAKER, nowTs });
+  const offer = (state, expiresAt = NOW + 600) => ({ state, proposer: TAKER, makerShareBps: 4000, expiresAt });
+
+  it('model: can propose again after REJECTED / WITHDRAWN / EXPIRED, or over an expired PROPOSED offer', () => {
+    expect(ctx(null).canPropose).toBe(true);
+    ['REJECTED', 'WITHDRAWN', 'EXPIRED'].forEach((state) => expect(ctx(offer(state)).canPropose, state).toBe(true));
+    expect(ctx(offer('PROPOSED')).canPropose).toBe(false);
+    expect(ctx(offer('PROPOSED', NOW - 1)).canPropose).toBe(true);
+    expect(ctx(offer('FINALIZED')).canPropose).toBe(false);
+  });
+
+  it('model: boundary second mirrors the contract (live while now <= expiresAt)', () => {
+    const atBoundary = ctx(offer('PROPOSED', NOW), NOW);
+    expect(atBoundary.isExpired).toBe(false);
+    expect(atBoundary.canAccept).toBe(true);
+    expect(atBoundary.canExpire).toBe(false);
+    expect(ctx(offer('PROPOSED', NOW), NOW + 1).canExpire).toBe(true);
+  });
+
+  const renderCard = (proposal) => render(React.createElement(SettlementProposalCard, {
+    activeTrade: trade(proposal), userRole: 'maker', address: MAKER, lang: 'EN', authenticatedFetch: vi.fn(),
+    proposeSettlement: vi.fn(), acceptSettlement: vi.fn(), rejectSettlement: vi.fn(), withdrawSettlement: vi.fn(), expireSettlement: vi.fn(),
+    fetchMyTrades: vi.fn(), showToast: vi.fn(), isContractLoading: false, setIsContractLoading: vi.fn(),
+  }));
+
+  it('card: a rejected offer shows its outcome and reopens the new-offer form', () => {
+    renderCard(offer('REJECTED'));
+    expect(screen.getByText('The last offer was rejected.')).toBeInTheDocument();
+    expect(screen.getByText('You can make a new offer')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Preview offer/i })).toBeEnabled();
+  });
+
+  it('card: a live offer does not show a competing new-offer form', () => {
+    renderCard(offer('PROPOSED', Math.floor(Date.now() / 1000) + 3600));
+    expect(screen.queryByRole('button', { name: /Preview offer/i })).not.toBeInTheDocument();
+  });
+
+  it('card: an expired PROPOSED offer offers both "mark expired" and a new offer', () => {
+    renderCard(offer('PROPOSED', Math.floor(Date.now() / 1000) - 60));
+    expect(screen.getByRole('button', { name: /Mark as Expired/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Preview offer/i })).toBeInTheDocument();
+  });
+});
+

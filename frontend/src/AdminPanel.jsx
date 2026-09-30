@@ -1,6 +1,6 @@
 import React from 'react';
 import { buildApiUrl } from './app/apiConfig';
-import { shortAddress as shortenWallet } from './app/copy';
+import { fmtPct, shortAddress as shortenWallet } from './app/copy';
 import { mapResolutionTypeLabel } from './app/useAppSessionData';
 import AdminRevenuePanel from './app/contexts/admin/AdminRevenuePanel';
 import AdminChainPanel from './app/contexts/admin/AdminChainPanel';
@@ -577,7 +577,7 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
                         return (
                           <div key={k} className="flex items-center justify-between gap-3 py-1.5">
                             <span className="text-textSecondary">{lang === 'TR' ? tr : en}</span>
-                            <span className={`tabular-nums font-semibold ${tone}`}>{v}<span className="ml-1 text-xs font-normal text-textMuted">%{pct}</span></span>
+                            <span className={`tabular-nums font-semibold ${tone}`}>{v}<span className="ml-1 text-xs font-normal text-textMuted">{fmtPct(pct, lang)}</span></span>
                           </div>
                         );
                       })}

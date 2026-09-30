@@ -39,7 +39,9 @@ export const getSettlementActionContext = ({ activeTrade, userRole, address, now
   const isProposer = Boolean(isTradeParty && userAddress && proposer && userAddress === proposer);
   const isCounterparty = Boolean(isTradeParty && userAddress && proposer && userAddress !== proposer);
   const expiresAt = toUnixSeconds(proposal?.expiresAt ?? proposal?.expires_at ?? 0);
-  const isExpired = expiresAt > 0 && nowTs >= expiresAt;
+  // [TR] Kontrat: teklif `now <= expiresAt` iken canlıdır, `now > expiresAt` iken dolmuştur (sınır saniyesi dahil birebir).
+  // [EN] Contract: live while now <= expiresAt, expired once now > expiresAt (boundary second mirrored exactly).
+  const isExpired = expiresAt > 0 && nowTs > expiresAt;
   const isProposed = proposalState === 'PROPOSED';
   const isTerminalProposal = TERMINAL_PROPOSAL_STATES.includes(proposalState);
 
@@ -57,7 +59,12 @@ export const getSettlementActionContext = ({ activeTrade, userRole, address, now
     isExpired,
     isProposed,
     isTerminalProposal,
-    canPropose: Boolean(activeTrade && isActionableRoom && !proposal),
+    // [TR] Kontrat yalnız canlı (PROPOSED ve süresi dolmamış) teklif varken yeni teklifi reddeder. Reddedilen, geri
+    //      çekilen ya da süresi dolan tekliften sonra taraflar yeniden teklif verebilmeli; aksi halde itiraz erimeyle
+    //      yakıma giderken uzlaşma yolu UI'da kapanıyordu.
+    // [EN] The contract only blocks a new offer while a live one exists; after a rejected/withdrawn/expired offer the
+    //      parties must be able to propose again (the UI used to close the settlement path while funds kept decaying).
+    canPropose: Boolean(activeTrade && isActionableRoom && (!proposal || proposalState === 'NONE' || (isTerminalProposal && proposalState !== 'FINALIZED') || (isProposed && isExpired))),
     canAccept: Boolean(activeTrade && isActionableRoom && isProposed && !isExpired && isCounterparty),
     canReject: Boolean(activeTrade && isActionableRoom && isProposed && !isExpired && isCounterparty),
     canWithdraw: Boolean(activeTrade && isActionableRoom && isProposed && !isExpired && isProposer),

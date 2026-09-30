@@ -1093,16 +1093,36 @@ export function useAppSessionData({
   // [EN] Trade room timers derive from one clock via tradeTimeline (the contract-rule mirror): one interval,
   //      only while the trade room is open and the tab is visible (was six 1s intervals re-rendering App).
   const [clockMs, setClockMs] = useState(() => Date.now());
+  // [TR] Süre kararları cihaz saatine değil zincir saatine göre verilir: cihaz saati geri kalan taker'ın uyarı butonu
+  //      geç açılırsa maker ping yolunu önce açıp otomatik serbest bırakma hakkını kapatabilirdi. İşlem odası her
+  //      açıldığında tek bir getBlock ile fark ölçülür (ek yük yok); okunamazsa cihaz saati kullanılır.
+  // [EN] Timing decisions follow chain time, not the device clock (a lagging clock could cost the taker the
+  //      auto-release path). One getBlock per trade-room open measures the offset; falls back to the device clock.
+  const [chainOffsetMs, setChainOffsetMs] = useState(0);
   const tradeRoomOpen = currentView === 'tradeRoom' && Boolean(activeTrade);
   useEffect(() => {
+    if (!tradeRoomOpen || !publicClient?.getBlock) return undefined;
+    let alive = true;
+    publicClient.getBlock()
+      .then((block) => {
+        const blockMs = Number(block?.timestamp) * 1000;
+        if (alive && Number.isFinite(blockMs) && blockMs > 0) setChainOffsetMs(blockMs - Date.now());
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [tradeRoomOpen, publicClient]);
+  useEffect(() => {
     if (!tradeRoomOpen) return undefined;
-    setClockMs(Date.now());
-    const interval = setInterval(whenVisible(() => setClockMs(Date.now())), 1000);
+    setClockMs(Date.now() + chainOffsetMs);
+    const interval = setInterval(whenVisible(() => setClockMs(Date.now() + chainOffsetMs)), 1000);
     return () => clearInterval(interval);
-  }, [tradeRoomOpen]);
+  }, [tradeRoomOpen, chainOffsetMs]);
+  // [TR] Odaya yeniden girişte ilk render'da saat eski kalmasın. [EN] Never decide on a stale tick after re-entering the room.
+  const freshNowMs = Date.now() + chainOffsetMs;
+  const chainNowMs = Math.abs(clockMs - freshNowMs) > 1500 ? freshNowMs : clockMs;
   const tradeTimers = useMemo(
-    () => deriveTradeTimeline(activeTrade, { state: resolvedTradeState, now: clockMs }).timers,
-    [activeTrade, resolvedTradeState, clockMs],
+    () => deriveTradeTimeline(activeTrade, { state: resolvedTradeState, now: chainNowMs }).timers,
+    [activeTrade, resolvedTradeState, chainNowMs],
   );
   // [TR] Zaman damgası bilinmiyorsa (eski veri) buton kilidi kontrata bırakılır. [EN] Unknown timestamp → let the contract decide.
   const canMakerStartChallengeFlow = tradeTimers.makerChallengePing ? tradeTimers.makerChallengePing.isFinished : true;
@@ -1179,6 +1199,8 @@ export function useAppSessionData({
     marketOrdersTotal,
     activeEscrowCounts,
     tradeTimers,
+    chainNowMs,
+    chainOffsetMs,
     canMakerStartChallengeFlow,
     canMakerChallenge,
   };

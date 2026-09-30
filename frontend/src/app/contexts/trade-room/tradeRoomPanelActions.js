@@ -41,13 +41,14 @@ export const buildTradeRoomPanelCallbacks = ({
   handleBurnExpired,
   handleExpirePaymentWindow,
   paymentWindowExpired = false,
+  nowMs = Date.now(),
   confirmFn = typeof window !== 'undefined' ? window.confirm.bind(window) : () => false,
 }) => {
   const tr = lang === 'TR';
   // [TR] Aktif/pasif kararı kontratın süre kurallarının saf aynasından gelir (tradeTimeline.js).
   //      paidAt yoksa (eski/eksik veri) çağıranın verdiği bayraklara düşülür.
   // [EN] Enablement mirrors contract timing rules; falls back to caller flags when paidAt is unknown.
-  const { flags } = deriveTradeTimeline(activeTrade, { state: roomState });
+  const { flags } = deriveTradeTimeline(activeTrade, { state: roomState, now: nowMs });
   const hasPaidAt = Boolean(activeTrade?.paidAt);
   const takerPinged = flags.takerPinged;
   const makerPinged = flags.makerPinged;

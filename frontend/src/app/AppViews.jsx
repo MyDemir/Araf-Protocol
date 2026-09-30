@@ -1,5 +1,5 @@
 import PIIDisplay from '../components/PIIDisplay';
-import { fmtBps, fmtNum, getStateLabel, localeOf } from './copy';
+import { fmtBps, fmtNum, fmtPct, getStateLabel, localeOf } from './copy';
 import ReferenceRateTicker from '../components/ReferenceRateTicker';
 import SettlementProposalCard from '../components/SettlementProposalCard';
 import { normalizeSettlementState } from './contexts/settlement/settlementActionModel';
@@ -140,6 +140,8 @@ export const buildAppViews = (ctx) => {
     canMakerStartChallengeFlow,
     canMakerChallenge,
     tradeTimers = {},
+    chainNowMs,
+    chainOffsetMs = 0,
     bleedingAmounts,
     takerName,
     tokenDecimalsMap,
@@ -716,7 +718,7 @@ export const buildAppViews = (ctx) => {
                         <span className={`w-4 h-4 shrink-0 rounded-full text-[9px] font-bold text-white flex items-center justify-center ${order.crypto === 'USDC' ? 'bg-blue-600' : 'bg-emerald-600'}`} aria-hidden="true">{order.crypto === 'USDC' ? 'C' : 'T'}</span>
                         <span className="font-mono truncate">{order.maker}</span>
                         <span className="shrink-0 px-1.5 rounded bg-elevated text-[10px] font-semibold text-textSecondary">T{order.tier}</span>
-                        {order.successRate != null && <span className="shrink-0 text-[11px] text-textMuted">%{order.successRate}</span>}
+                        {order.successRate != null && <span className="shrink-0 text-[11px] text-textMuted">{fmtPct(order.successRate, lang)}</span>}
                       </div>
                       <p className="mt-1.5 text-xl font-bold text-textPrimary tabular-nums leading-tight">
                         {order.hasPrice === false
@@ -887,9 +889,11 @@ export const buildAppViews = (ctx) => {
     const fiatTotal = Number(activeTrade?.max) > 0 && activeTrade?.fiat ? `${fmt(activeTrade.max)} ${activeTrade.fiat}` : null;
     const hasOnchainTradeId = activeTrade?.onchainId !== null && activeTrade?.onchainId !== undefined && activeTrade?.onchainId !== '';
     const missingOnchainIdReason = lang === 'TR' ? 'On-chain trade ID bulunamadı.' : 'Missing on-chain trade ID.';
-    const burnExpiredDeadlinePassed = getBurnExpiredDeadlinePassed({ activeTrade, roomState });
+    // [TR] Zincir saati (yoksa cihaz saati). [EN] Chain time, falling back to the device clock.
+    const nowMs = Number.isFinite(chainNowMs) ? chainNowMs : Date.now();
+    const burnExpiredDeadlinePassed = getBurnExpiredDeadlinePassed({ activeTrade, roomState, now: new Date(nowMs) });
     const handleBurnExpired = ctx.handleBurnExpired || ctx.tradeRoomActions?.handleBurnExpired;
-    const paymentWindowExpired = getPaymentWindowExpired({ activeTrade, roomState });
+    const paymentWindowExpired = getPaymentWindowExpired({ activeTrade, roomState, now: new Date(nowMs) });
     const handleExpirePaymentWindow = ctx.handleExpirePaymentWindow || ctx.tradeRoomActions?.handleExpirePaymentWindow;
     // [TR] Lab'da handler'lar günlüğe yazar; aktif/pasif kuralları her iki durumda da aynıdır.
     const labHandlers = ctx.devTradeHandlers || null;
@@ -914,6 +918,7 @@ export const buildAppViews = (ctx) => {
       handleBurnExpired: labHandlers?.handleBurnExpired || handleBurnExpired,
       handleExpirePaymentWindow: labHandlers?.handleExpirePaymentWindow || handleExpirePaymentWindow,
       paymentWindowExpired,
+      nowMs,
       confirmFn: labHandlers ? () => true : undefined,
     });
     const defaultTradeDecisionInput = {
@@ -981,7 +986,7 @@ export const buildAppViews = (ctx) => {
                     <div key={row.key} className="text-xs">
                       <div className="flex items-center justify-between gap-2 mb-1">
                         <span className={row.mine ? 'font-semibold text-textPrimary' : 'text-textSecondary'}>{row.label}{row.mine ? (lang === 'TR' ? ' (siz)' : ' (you)') : ''}</span>
-                        <span className="tabular-nums text-textPrimary">{row.pct === null ? '—' : `%${row.pct}`}</span>
+                        <span className="tabular-nums text-textPrimary">{row.pct === null ? '—' : fmtPct(row.pct, lang)}</span>
                       </div>
                       <div className="h-1.5 rounded-full bg-elevated overflow-hidden" aria-hidden="true">
                         <div className={`h-full rounded-full transition-all duration-500 ${barTone(row.pct)}`} style={{ width: `${row.pct ?? 100}%` }} />
@@ -1064,6 +1069,7 @@ export const buildAppViews = (ctx) => {
                       showToast={showToast}
                       isContractLoading={isContractLoading}
                       setIsContractLoading={setIsContractLoading}
+                      nowOffsetMs={chainOffsetMs}
                     />
                   </div>
                 )}

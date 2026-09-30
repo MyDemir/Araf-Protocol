@@ -17,6 +17,8 @@ export const fmtBps = (bps, lang, maxDigits = 2) => {
   const s = (n / 100).toLocaleString(localeOf(lang), { maximumFractionDigits: maxDigits });
   return lang === 'TR' ? `%${s}` : `${s}%`;
 };
+// [TR] Hazır yüzde değeri (bps değil) için aynı kural. [EN] Same rule for a plain percent value (not bps).
+export const fmtPct = (value, lang) => (lang === 'TR' ? `%${value}` : `${value}%`);
 export const shortAddress = (value, fallback = '—') => {
   const s = String(value || '').trim();
   if (!s) return fallback;

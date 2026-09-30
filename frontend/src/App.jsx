@@ -235,6 +235,8 @@ function App() {
     marketOrdersTotal,
     activeEscrowCounts,
     tradeTimers,
+    chainNowMs,
+    chainOffsetMs,
     canMakerStartChallengeFlow,
     canMakerChallenge,
   } = useAppSessionData({
@@ -890,6 +892,8 @@ function App() {
     handleAutoRelease,
     handleBurnExpired,
     tradeTimers: labTradeRoom ? { ...tradeTimers, ...labTradeRoom.timers } : tradeTimers,
+    chainNowMs,
+    chainOffsetMs,
     canMakerStartChallengeFlow,
     canMakerChallenge,
     // [TR] Lab'da kontrat okuması yok; eriyen tutar kontrat formülünün aynasıyla tahmin edilir.
