@@ -1,5 +1,6 @@
 import { ListOrdered } from 'lucide-react';
 import { getOrderSideCopy } from '../../orderUiModel';
+import { fmtNum } from '../../copy';
 
 const CANCELABLE_STATUSES = new Set(['OPEN', 'PARTIALLY_FILLED']);
 
@@ -23,7 +24,7 @@ export const MyOrdersPanel = ({
       </div>
     );
   }
-  const fmt = (value) => Number(value || 0).toLocaleString(isTR ? 'tr-TR' : 'en-US', { maximumFractionDigits: 2 });
+  const fmt = (value) => fmtNum(value, isTR ? 'TR' : 'EN');
   return (
     <div className="space-y-2 max-w-2xl" data-testid="profile-my-orders">
       {myOrders.map((order) => {

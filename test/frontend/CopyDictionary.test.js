@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it, afterEach } from 'vitest';
 import { cleanup } from '@testing-library/react';
-import { orderSide as orderSideCopy, pii, states as stateCopy, tradeTerms, getPiiCopy, getStateLabel, getTradeTerm } from '../../frontend/src/app/copy';
+import { orderSide as orderSideCopy, pii, states as stateCopy, tradeTerms, getPiiCopy, getStateLabel, getTradeTerm, fmtBps, fmtNum, shortAddress, tx, langKey, localeOf } from '../../frontend/src/app/copy';
 import { getOrderSideCopy } from '../../frontend/src/app/orderUiModel';
 
 describe('copy dictionaries', () => {
@@ -63,4 +63,22 @@ describe('copy dictionaries', () => {
     expect(getPiiCopy('EN').revealBtn).toMatch(/Reveal secure payment details/i);
   });
 
+
+  it('shared format helpers: percent sign leads in Turkish and trails in English', () => {
+    expect(fmtBps(4000, 'TR')).toBe('%40');
+    expect(fmtBps(4000, 'EN')).toBe('40%');
+    expect(fmtBps(150, 'TR')).toBe('%1,5');
+    expect(fmtBps(150, 'EN')).toBe('1.5%');
+    expect(fmtBps('x', 'EN')).toBe('—');
+    expect(fmtNum(1234.567, 'TR')).toBe('1.234,57');
+    expect(fmtNum(1234.567, 'EN', 1)).toBe('1,234.6');
+    expect([tx('TR', 'a', 'b'), tx('EN', 'a', 'b'), langKey('tr'), localeOf('TR')]).toEqual(['a', 'b', 'EN', 'tr-TR']);
+  });
+
+  it('shortAddress shortens long ids and keeps short values', () => {
+    expect(shortAddress('0x' + '1'.repeat(40))).toBe('0x1111...1111');
+    expect(shortAddress('abc')).toBe('abc');
+    expect(shortAddress('')).toBe('—');
+    expect(shortAddress(null, null)).toBe(null);
+  });
 });

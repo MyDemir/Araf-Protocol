@@ -6,6 +6,7 @@ import React from 'react';
 import { formatTokenAmount, mapOffchainHealthToUi } from '../../orderUiModel';
 import { deriveReputationView, MIN_REPUTATION_NOTIONAL_USD } from './reputationModel';
 import { WALLET_AGE_MIN_DAYS } from '../../walletAge';
+import { fmtNum, localeOf, tx } from '../../copy';
 
 export const profileTabs = [
   { key: 'account', icon: UserRound, label: { TR: 'Hesap', EN: 'Account' } },
@@ -18,12 +19,11 @@ export const profileTabs = [
   { key: 'security', icon: ShieldCheck, label: { TR: 'Güvenlik', EN: 'Security' } },
 ];
 
-const tx = (lang, tr, en) => (lang === 'TR' ? tr : en);
 const ic = (Icon, cls = 'w-4 h-4') => <Icon className={cls} strokeWidth={1.8} aria-hidden="true" />;
 const fmtDate = (sec, lang, withTime = false) => {
   if (!sec) return '—';
   const d = new Date(Number(sec) * 1000);
-  return withTime ? d.toLocaleString(lang === 'TR' ? 'tr-TR' : 'en-US') : d.toLocaleDateString(lang === 'TR' ? 'tr-TR' : 'en-US');
+  return withTime ? d.toLocaleString(localeOf(lang)) : d.toLocaleDateString(localeOf(lang));
 };
 const daysUntil = (sec, now = Date.now() / 1000) => Math.max(0, Math.ceil((Number(sec) - now) / 86400));
 
@@ -413,7 +413,7 @@ export const HistoryPanel = ({
         const isMaker = me && String(item.maker_address || '').toLowerCase() === me;
         const resolvedAt = item.timers?.resolved_at ? Math.floor(new Date(item.timers.resolved_at).getTime() / 1000) : null;
         const fiat = item.financials?.fiat_amount && item.financials?.fiat_currency
-          ? `${Number(item.financials.fiat_amount).toLocaleString(lang === 'TR' ? 'tr-TR' : 'en-US', { maximumFractionDigits: 2 })} ${item.financials.fiat_currency}`
+          ? `${fmtNum(item.financials.fiat_amount, lang)} ${item.financials.fiat_currency}`
           : null;
         return (
           <div key={`${item._id || item.id || idx}`} className="bg-surface border border-borderSubtle rounded-xl p-3 flex items-start gap-3">

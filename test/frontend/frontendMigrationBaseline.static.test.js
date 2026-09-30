@@ -389,7 +389,7 @@ describe('PR #94 frontend regression guards', () => {
 
     expect(appCopyFiles).toEqual(['states.js']);
     expect(readSrc('app', 'contexts', 'profile', 'ActiveTradesPanel.jsx')).toContain("import { getStateLabel } from '../../copy/states';");
-    expect(readSrc('app', 'contexts', 'operations', 'OperationTradeCard.jsx')).toContain("import { getStateLabel } from '../../copy/states';");
+    expect(readSrc('app', 'contexts', 'operations', 'OperationTradeCard.jsx')).toMatch(/import \{[^}]*\bgetStateLabel\b[^}]*\} from '\.\.\/\.\.\/copy(?:\/states)?';/);
   });
 
   it('does not let a future fixed SystemStatusBar rely only on blind top padding for content safety', () => {

@@ -1,4 +1,4 @@
-import { deriveTradeTimeline, TRADE_TIMING } from './tradeTimeline';
+import { deriveTradeTimeline } from './tradeTimeline';
 
 const panelActionConfig = (onClick, { disabled = false, disabledReasons = [], hasOnchainTradeId, missingOnchainIdReason } = {}) => ({
   onClick,
@@ -16,7 +16,6 @@ export const getBurnExpiredDeadlinePassed = ({ activeTrade, roomState, now = new
 
 // [TR] Kontrat PAYMENT_WINDOW = 48 saat: LOCKED trade'de taker bu sürede ödeme bildirmezse kilit çözülebilir.
 // [EN] Contract PAYMENT_WINDOW = 48h: a LOCKED trade can be unwound if the taker has not reported payment by then.
-export const PAYMENT_WINDOW_MS = TRADE_TIMING.PAYMENT_WINDOW_MS;
 export const getPaymentWindowExpired = ({ activeTrade, roomState, now = new Date() }) => Boolean(
   activeTrade?.onchainId && deriveTradeTimeline(activeTrade, { state: roomState, now: now.getTime() }).flags.paymentWindowExpired
 );

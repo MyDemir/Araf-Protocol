@@ -1,4 +1,4 @@
-import { getTradeTerm } from '../../copy/tradeTerms';
+import { getTradeTerm, langKey, tx as t } from '../../copy';
 
 const labels = {
   state: {
@@ -25,8 +25,6 @@ const timerLabels = {
   principalProtection: { TR: 'Ana para koruması', EN: 'Principal protection' },
 };
 
-const t = (lang, tr, en) => (lang === 'TR' ? tr : en);
-const pickLocale = (lang) => (lang === 'TR' ? 'TR' : 'EN');
 
 const formatTimerValue = (timer, lang) => {
   if (!timer || typeof timer !== 'object') return null;
@@ -59,7 +57,7 @@ const buildTimerCards = (timers = {}, lang = 'EN', state = null, role = 'taker')
       if (!summary) return null;
       return {
         key,
-        label: timerLabels[key]?.[pickLocale(lang)] || key,
+        label: timerLabels[key]?.[langKey(lang)] || key,
         summary,
         finished: Boolean(timer.isFinished),
       };
@@ -136,12 +134,12 @@ const terminalCopy = {
 export const TERMINAL_TRADE_STATES = Object.freeze(['RESOLVED', 'CANCELED', 'BURNED']);
 
 const localizeDecisionCopy = (copy, lang) => ({
-  headline: copy?.headline?.[pickLocale(lang)] || t(lang, 'İşlem durumu güncellendi', 'Trade status updated'),
-  subheadline: copy?.subheadline?.[pickLocale(lang)] || t(lang, 'Mevcut işlem durumuna göre bir sonraki adımı izleyin.', 'Follow the next step for the current trade state.'),
-  nowLabel: copy?.nowLabel?.[pickLocale(lang)] || t(lang, 'Şimdi', 'Now'),
-  nowDescription: copy?.nowDescription?.[pickLocale(lang)] || t(lang, 'Frontend rehberlik eder; kontrat otoritedir.', 'The frontend guides you; the contract remains authoritative.'),
-  nextLabel: copy?.nextLabel?.[pickLocale(lang)] || t(lang, 'Sonraki adım', 'Next'),
-  nextDescription: copy?.nextDescription?.[pickLocale(lang)] || t(lang, 'Mevcut süreler ve kontrat kuralları sonraki seçenekleri belirler.', 'Existing timers and contract rules determine the next options.'),
+  headline: copy?.headline?.[langKey(lang)] || t(lang, 'İşlem durumu güncellendi', 'Trade status updated'),
+  subheadline: copy?.subheadline?.[langKey(lang)] || t(lang, 'Mevcut işlem durumuna göre bir sonraki adımı izleyin.', 'Follow the next step for the current trade state.'),
+  nowLabel: copy?.nowLabel?.[langKey(lang)] || t(lang, 'Şimdi', 'Now'),
+  nowDescription: copy?.nowDescription?.[langKey(lang)] || t(lang, 'Frontend rehberlik eder; kontrat otoritedir.', 'The frontend guides you; the contract remains authoritative.'),
+  nextLabel: copy?.nextLabel?.[langKey(lang)] || t(lang, 'Sonraki adım', 'Next'),
+  nextDescription: copy?.nextDescription?.[langKey(lang)] || t(lang, 'Mevcut süreler ve kontrat kuralları sonraki seçenekleri belirler.', 'Existing timers and contract rules determine the next options.'),
 });
 
 const buildDecisionSummary = (state, role, lang) => localizeDecisionCopy(terminalCopy[state] || decisionCopy[state]?.[role] || decisionCopy[state]?.taker, lang);
@@ -258,8 +256,8 @@ export function buildTradeDecisionModel({
   return {
     ...decisionSummary,
     decisionSummary,
-    stateLabel: labels.state[normalizedState]?.[pickLocale(lang)] || normalizedState,
-    roleLabel: labels.role[normalizedRole]?.[pickLocale(lang)] || normalizedRole,
+    stateLabel: labels.state[normalizedState]?.[langKey(lang)] || normalizedState,
+    roleLabel: labels.role[normalizedRole]?.[langKey(lang)] || normalizedRole,
     primaryAction,
     secondaryActions,
     disabledReasons: primaryDisabledReasons,

@@ -234,13 +234,8 @@ function App() {
     filteredOrders,
     marketOrdersTotal,
     activeEscrowCounts,
-    gracePeriodTimer,
-    bleedingTimer,
-    principalProtectionTimer,
-    makerPingTimer,
-    makerChallengePingTimer,
+    tradeTimers,
     canMakerStartChallengeFlow,
-    makerChallengeTimer,
     canMakerChallenge,
   } = useAppSessionData({
     address,
@@ -289,7 +284,7 @@ function App() {
     activeTrade, resolvedTradeState, userRole, chargebackAccepted, paymentIpfsHash, isConnected, isAuthenticated,
     isSupportedChain: isSupportedChainId(chainId), isPaused, lang,
   }) : null), [lab, uiLab, activeTrade, resolvedTradeState, userRole, chargebackAccepted, paymentIpfsHash, isConnected, isAuthenticated, chainId, isPaused, lang]);
-  const room = labTradeRoom || { activeTrade, tradeState: resolvedTradeState, userRole, chargebackAccepted, paymentIpfsHash, timers: {}, bleedingAmounts };
+  const room = labTradeRoom || { activeTrade, tradeState: resolvedTradeState, userRole, chargebackAccepted, paymentIpfsHash, bleedingAmounts };
 
   const applyHashRoute = React.useCallback(() => {
     if (devScenarioActive) return;
@@ -894,14 +889,9 @@ function App() {
     handlePingMaker,
     handleAutoRelease,
     handleBurnExpired,
-    makerPingTimer: room.timers.makerPing || makerPingTimer,
+    tradeTimers: labTradeRoom ? { ...tradeTimers, ...labTradeRoom.timers } : tradeTimers,
     canMakerStartChallengeFlow,
-    makerChallengePingTimer: room.timers.makerChallengePing || makerChallengePingTimer,
     canMakerChallenge,
-    makerChallengeTimer: room.timers.makerChallenge || makerChallengeTimer,
-    gracePeriodTimer: room.timers.gracePeriod || gracePeriodTimer,
-    bleedingTimer: room.timers.bleeding || bleedingTimer,
-    principalProtectionTimer: room.timers.principalProtection || principalProtectionTimer,
     // [TR] Lab'da kontrat okuması yok; eriyen tutar kontrat formülünün aynasıyla tahmin edilir.
     bleedingAmounts: room.bleedingAmounts,
     takerName: lab?.tradeRoom?.takerName ?? takerName,

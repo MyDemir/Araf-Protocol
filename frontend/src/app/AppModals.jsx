@@ -4,6 +4,7 @@ import { buildMakerPreview, getMakerModalCopy, getOrderSideCopy, resolveEffectiv
 import { resolveTierMaxAmounts } from './actions/orderCreationActions';
 import { TERMS_ACKNOWLEDGEMENTS, TERMS_SECTIONS, TERMS_VERSION } from './legal/terms';
 import PaymentRiskBadge from '../components/PaymentRiskBadge';
+import { fmtBps, fmtNum } from './copy';
 
 function TermsModal({ lang = 'EN', onAcceptTerms, onDeclineTerms }) {
   const isTR = lang === 'TR';
@@ -256,8 +257,7 @@ export const buildAppModals = (ctx) => {
   const renderMakerModal = () => {
     if (!showMakerModal) return null;
     const tr = lang === 'TR';
-    const locale = tr ? 'tr-TR' : 'en-US';
-    const fmt = (n, d = 2) => Number(n || 0).toLocaleString(locale, { maximumFractionDigits: d });
+    const fmt = (n, d = 2) => fmtNum(n, lang, d);
 
     // [TR] Kontrat verisi: token politikası (yön/tier limiti), itibara göre gerçek teminat oranı, ücret yapılandırması.
     // [EN] Contract data: token policy (directions, tier caps), reputation-adjusted bond, fee config.
@@ -361,7 +361,7 @@ export const buildAppModals = (ctx) => {
                       title={locked ? (tr ? `İtibarınız Tier ${tier} için yetmiyor` : `Your reputation does not unlock Tier ${tier}`) : undefined}
                       className={`h-14 rounded-xl border text-center transition ${active ? 'border-brand bg-brand/10 text-textPrimary' : 'border-borderSubtle bg-elevated text-textSecondary hover:border-borderStrong'} disabled:opacity-40 disabled:cursor-not-allowed`}>
                       <span className="block text-sm font-bold">T{tier}{locked && <Lock className="inline w-3 h-3 ml-0.5 -mt-0.5" strokeWidth={2} aria-hidden="true" />}</span>
-                      <span className="block text-[10px] text-textMuted">{b.bps === 0 ? (tr ? 'teminatsız' : 'no bond') : `%${(b.bps / 100).toLocaleString(locale)}`}</span>
+                      <span className="block text-[10px] text-textMuted">{b.bps === 0 ? (tr ? 'teminatsız' : 'no bond') : fmtBps(b.bps, lang)}</span>
                     </button>
                   );
                 })}
@@ -383,7 +383,7 @@ export const buildAppModals = (ctx) => {
                 </div>
               )}
               <div className="flex justify-between gap-3 text-textSecondary">
-                <span>{modalCopy.bondRoleLabel}{bond.bps > 0 ? ` (%${(bond.bps / 100).toLocaleString(locale)})` : ''}</span>
+                <span>{modalCopy.bondRoleLabel}{bond.bps > 0 ? ` (${fmtBps(bond.bps, lang)})` : ''}</span>
                 <span className="font-mono">{preview.reserveAmount > 0 ? `${fmt(preview.reserveAmount, decimals)} ${makerToken}` : '—'}</span>
               </div>
               <div className="flex justify-between gap-3 font-bold text-textPrimary border-t border-borderSubtle pt-1.5">
@@ -391,7 +391,7 @@ export const buildAppModals = (ctx) => {
                 <span className="font-mono">{preview.totalAmount > 0 ? `${fmt(preview.totalAmount, decimals)} ${makerToken}` : '—'}</span>
               </div>
               {Number.isFinite(Number(feeBps)) && (
-                <p className="text-[11px] text-textMuted pt-0.5">{tr ? `Protokol ücreti işlem kapanışında kesilir: %${(Number(feeBps) / 100).toLocaleString(locale)} (${feeBps} bps).` : `Protocol fee is taken at settlement: ${(Number(feeBps) / 100).toLocaleString(locale)}% (${feeBps} bps).`}</p>
+                <p className="text-[11px] text-textMuted pt-0.5">{tr ? `Protokol ücreti işlem kapanışında kesilir: ${fmtBps(feeBps, lang)} (${feeBps} bps).` : `Protocol fee is taken at settlement: ${fmtBps(feeBps, lang)} (${feeBps} bps).`}</p>
               )}
             </div>
 

@@ -4,6 +4,7 @@ import { buildSettlementPreviewUrl } from '../app/apiConfig';
 import SettlementPreviewModal from './SettlementPreviewModal';
 import { useSettlementActions } from '../app/contexts/settlement/useSettlementActions';
 import { normalizeSettlementState, toUnixSeconds } from '../app/contexts/settlement/settlementActionModel';
+import { fmtBps } from '../app/copy';
 
 const ACTIVE_ROOM_STATES = ['CHALLENGED'];
 const TERMINAL_ROOM_STATES = ['RESOLVED', 'CANCELED', 'BURNED'];
@@ -190,7 +191,7 @@ export default function SettlementProposalCard({
   const isMakerView = String(userRole || '').toLowerCase() === 'maker';
   const myShareBps = Number.isFinite(normalizedMakerShareBps) ? (isMakerView ? normalizedMakerShareBps : 10000 - normalizedMakerShareBps) : 5000;
   const setMyShareBps = (bps) => setMakerShareBps(String(isMakerView ? bps : 10000 - Number(bps)));
-  const pct = (bps) => `%${(Number(bps) / 100).toLocaleString(lang === 'TR' ? 'tr-TR' : 'en-US', { maximumFractionDigits: 2 })}`;
+  const pct = (bps) => fmtBps(bps, lang);
   const inputClass = 'mt-1 w-full bg-elevated border border-borderStrong rounded-lg px-3 py-2 text-sm text-textPrimary';
 
   return (

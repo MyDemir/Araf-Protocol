@@ -26,6 +26,14 @@ describe('tradeTimeline mirrors ArafEscrow timing', () => {
     expect(at({ paidAt: ago(40), challengePingedAt: ago(24) }, 'PAID').canMakerChallenge).toBe(true);
   });
 
+  it('timers: maker ping window counts from the taker ping (autoRelease), not a copy of the grace period', () => {
+    const { timers } = deriveTradeTimeline({ paidAt: ago(50), pingedAt: ago(20) }, { state: 'PAID', now: NOW });
+    expect(timers.gracePeriod.isFinished).toBe(true);
+    expect(timers.makerPing).toMatchObject({ isFinished: false, hours: 4, minutes: 0 });
+    // Not pinged yet: no response window to count down.
+    expect(deriveTradeTimeline({ paidAt: ago(10) }, { state: 'PAID', now: NOW }).timers.makerPing).toBeNull();
+  });
+
   it('ping paths are exclusive (ConflictingPingPath)', () => {
     expect(at({ paidAt: ago(50), pingedAt: ago(1) }, 'PAID').canMakerPingTaker).toBe(false);
     expect(at({ paidAt: ago(50), challengePingedAt: ago(1) }, 'PAID').canTakerPing).toBe(false);

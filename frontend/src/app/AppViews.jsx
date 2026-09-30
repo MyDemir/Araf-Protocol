@@ -1,5 +1,5 @@
 import PIIDisplay from '../components/PIIDisplay';
-import { getStateLabel, getTradeTerm } from './copy';
+import { fmtBps, fmtNum, getStateLabel, localeOf } from './copy';
 import ReferenceRateTicker from '../components/ReferenceRateTicker';
 import SettlementProposalCard from '../components/SettlementProposalCard';
 import { normalizeSettlementState } from './contexts/settlement/settlementActionModel';
@@ -19,7 +19,7 @@ import {
   Banknote, ChevronDown, CircleCheck, CirclePause, Clock, Droplets, Flame, Handshake, History, Hourglass, Layers, ListPlus, LoaderCircle, Lock, Menu, Paperclip, Plus, RotateCcw, Search, Settings, Store, Swords,
   TriangleAlert, Undo2, Unplug, Wallet, X, EyeOff, Info, Maximize2, Minimize2, Download, Share,
 } from 'lucide-react';
-import { buildTradeRoomPanelCallbacks, getBurnExpiredDeadlinePassed, getPaymentWindowExpired, PAYMENT_WINDOW_MS } from './contexts/trade-room/tradeRoomPanelActions';
+import { buildTradeRoomPanelCallbacks, getBurnExpiredDeadlinePassed, getPaymentWindowExpired } from './contexts/trade-room/tradeRoomPanelActions';
 
 // [TR] App ana görünüm/render katmanı burada tutulur.
 // [EN] Main application view/render layer lives here.
@@ -46,8 +46,7 @@ const buildFaqItems = (lang, protocolFeeConfig) => {
     const tb = Number(protocolFeeConfig?.takerFeeBps);
     const mb = Number(protocolFeeConfig?.makerFeeBps);
     if (!Number.isFinite(tb) || !Number.isFinite(mb)) return null;
-    const f = (b) => (lang === 'TR' ? `%${(b / 100).toLocaleString('tr-TR')}` : `${(b / 100).toLocaleString('en-US')}%`);
-    return lang === 'TR' ? `alıcıdan ${f(tb)}, satıcıdan ${f(mb)}` : `${f(tb)} from the buyer and ${f(mb)} from the seller`;
+    return lang === 'TR' ? `alıcıdan ${fmtBps(tb, lang)}, satıcıdan ${fmtBps(mb, lang)}` : `${fmtBps(tb, lang)} from the buyer and ${fmtBps(mb, lang)} from the seller`;
   })();
   return lang === 'TR'
     ? [
@@ -138,14 +137,9 @@ export const buildAppViews = (ctx) => {
     handleChallenge,
     handlePingMaker,
     handleAutoRelease,
-    makerPingTimer,
     canMakerStartChallengeFlow,
-    makerChallengePingTimer,
     canMakerChallenge,
-    makerChallengeTimer,
-    gracePeriodTimer,
-    bleedingTimer,
-    principalProtectionTimer,
+    tradeTimers = {},
     bleedingAmounts,
     takerName,
     tokenDecimalsMap,
@@ -422,9 +416,9 @@ export const buildAppViews = (ctx) => {
         const hours = protocolStats?.avg_trade_hours;
         const tiles = [
           { k: 'vol', label: tr ? 'Tamamlanan hacim' : 'Settled volume', value: statValue(protocolStats?.total_volume_usdt, usd), change: protocolStats?.changes_30d?.total_volume_usdt_pct },
-          { k: 'trades', label: tr ? 'Başarılı işlem' : 'Successful trades', value: statValue(protocolStats?.completed_trades, (v) => Number(v).toLocaleString(tr ? 'tr-TR' : 'en-US')), change: protocolStats?.changes_30d?.completed_trades_pct },
+          { k: 'trades', label: tr ? 'Başarılı işlem' : 'Successful trades', value: statValue(protocolStats?.completed_trades, (v) => Number(v).toLocaleString(localeOf(lang))), change: protocolStats?.changes_30d?.completed_trades_pct },
           { k: 'open', label: tr ? 'Açık emir' : 'Open orders', value: openOrders == null ? '—' : openOrders.toLocaleString(), sub: openOrders == null ? null : (tr ? `${protocolStats.open_sell_orders || 0} satış · ${protocolStats.open_buy_orders || 0} alış` : `${protocolStats.open_sell_orders || 0} sell · ${protocolStats.open_buy_orders || 0} buy`) },
-          { k: 'time', label: tr ? 'Ort. işlem süresi' : 'Avg. trade time', value: hours != null ? (hours < 1 ? `${Math.max(1, Math.round(hours * 60))} ${tr ? 'dk' : 'min'}` : `${Number(hours).toLocaleString(tr ? 'tr-TR' : 'en-US', { maximumFractionDigits: 1 })} ${tr ? 'sa' : 'h'}`) : '—' },
+          { k: 'time', label: tr ? 'Ort. işlem süresi' : 'Avg. trade time', value: hours != null ? (hours < 1 ? `${Math.max(1, Math.round(hours * 60))} ${tr ? 'dk' : 'min'}` : `${Number(hours).toLocaleString(localeOf(lang), { maximumFractionDigits: 1 })} ${tr ? 'sa' : 'h'}`) : '—' },
           { k: 'burn', label: tr ? 'Eriyen ve yakılan' : 'Decayed & burned', value: statValue(protocolStats?.burned_bonds_usdt, (v) => `$${Number(v).toLocaleString('en-US', { maximumFractionDigits: 0 })}`), danger: true, sub: tr ? 'Uzlaşmayanların kaybı' : 'Lost by those who would not settle' },
         ];
         return (
@@ -510,8 +504,7 @@ export const buildAppViews = (ctx) => {
   // [EN] Market — dense P2P rows: price first, action on the right, details on tap.
   const renderMarket = () => {
     const tr = lang === 'TR';
-    const locale = tr ? 'tr-TR' : 'en-US';
-    const fmt = (n, digits = 2) => Number(n || 0).toLocaleString(locale, { maximumFractionDigits: digits });
+    const fmt = (n, digits = 2) => fmtNum(n, lang, digits);
     const filters = { ...MARKET_FILTER_DEFAULTS, ...marketFilters };
     const side = filters.side;
     const setFilter = (key, value) => setMarketFilter?.(key, value);
@@ -883,7 +876,7 @@ export const buildAppViews = (ctx) => {
     const protocolFee  = rawCryptoAmt * (effectiveTakerFeeBps / 10000);
     const netAmount    = rawCryptoAmt - protocolFee;
     const asset        = activeTrade?.crypto || 'USDT';
-    const fmt = (value, digits = 2) => Number(value || 0).toLocaleString(lang === 'TR' ? 'tr-TR' : 'en-US', { maximumFractionDigits: digits });
+    const fmt = (value, digits = 2) => fmtNum(value, lang, digits);
     const feeBreakdownText = lang === 'TR'
       ? `Kilitli ${fmt(rawCryptoAmt)} ${asset} · Ücret ${fmt(protocolFee, 4)} · Alıcıya net ${fmt(netAmount)} ${asset}`
       : `Locked ${fmt(rawCryptoAmt)} ${asset} · Fee ${fmt(protocolFee, 4)} · Net to taker ${fmt(netAmount)} ${asset}`;
@@ -898,14 +891,6 @@ export const buildAppViews = (ctx) => {
     const handleBurnExpired = ctx.handleBurnExpired || ctx.tradeRoomActions?.handleBurnExpired;
     const paymentWindowExpired = getPaymentWindowExpired({ activeTrade, roomState });
     const handleExpirePaymentWindow = ctx.handleExpirePaymentWindow || ctx.tradeRoomActions?.handleExpirePaymentWindow;
-    const paymentWindowTimer = (() => {
-      if (!activeTrade?.lockedAt) return null;
-      const left = new Date(activeTrade.lockedAt).getTime() + PAYMENT_WINDOW_MS - Date.now();
-      if (!Number.isFinite(left)) return null;
-      if (left <= 0) return { isFinished: true };
-      const sec = Math.floor(left / 1000);
-      return { days: Math.floor(sec / 86400), hours: Math.floor((sec % 86400) / 3600), minutes: Math.floor((sec % 3600) / 60), seconds: sec % 60, isFinished: false };
-    })();
     // [TR] Lab'da handler'lar günlüğe yazar; aktif/pasif kuralları her iki durumda da aynıdır.
     const labHandlers = ctx.devTradeHandlers || null;
     const tradeActionCallbacks = buildTradeRoomPanelCallbacks({
@@ -931,43 +916,13 @@ export const buildAppViews = (ctx) => {
       paymentWindowExpired,
       confirmFn: labHandlers ? () => true : undefined,
     });
-    const challengedDetails = isChallenged ? (() => {
-      const riskLines = bleedingAmounts
-        ? [
-            `${lang === 'TR' ? 'Yakılan toplam' : 'Total burned'}: ${formatTokenAmountFromRaw(bleedingAmounts.totalDecayed ?? 0n, tradeTokenDecimals)} ${asset}`,
-            `${lang === 'TR' ? 'Kalan teminatlar' : 'Remaining bonds'}: ${formatTokenAmountFromRaw(bleedingAmounts.makerBondRemaining ?? 0n, tradeTokenDecimals)} ${asset} / ${formatTokenAmountFromRaw(bleedingAmounts.takerBondRemaining ?? 0n, tradeTokenDecimals)} ${asset}`,
-          ]
-        : [lang === 'TR' ? 'Riskteki değer şu anda yükleniyor veya hesaplanamıyor.' : 'Value at risk is loading or unavailable.'];
-      const timerLines = [
-        `${getTradeTerm('bleedingEscrow', lang)}: ${bleedingTimer?.isFinished ? (lang === 'TR' ? 'Tamamlandı' : 'Finished') : `${String(bleedingTimer?.hours ?? 0).padStart(2, '0')}:${String(bleedingTimer?.minutes ?? 0).padStart(2, '0')}:${String(bleedingTimer?.seconds ?? 0).padStart(2, '0')}`}`,
-        `${lang === 'TR' ? 'Ana para koruması' : 'Principal protection'}: ${principalProtectionTimer?.isFinished ? (lang === 'TR' ? 'Tamamlandı' : 'Finished') : `${principalProtectionTimer?.days ?? 0}d ${principalProtectionTimer?.hours ?? 0}h`}`,
-      ];
-      return {
-        whatHappening: lang === 'TR'
-          ? 'İşlem itiraz sürecinde. Araf karar vermez; tarafların uzlaşma veya mevcut kontrat aksiyonlarıyla ilerlemesi gerekir.'
-          : 'The trade is in a challenge phase. Araf does not decide the outcome; parties proceed through settlement or available contract actions.',
-        riskLines,
-        timerLines,
-        nextActionLabel: lang === 'TR' ? 'Uzlaşma adımlarını değerlendir' : 'Review settlement steps',
-        nextActionDescription: lang === 'TR' ? 'Önce uzlaşma kartındaki taraf aksiyonlarını kontrol edin.' : 'Check party actions in the settlement card first.',
-      };
-    })() : null;
-
     const defaultTradeDecisionInput = {
       trade: activeTrade,
       tradeState: roomState,
       userRole,
       chargebackAccepted,
       paymentIpfsHash,
-      timers: {
-        paymentWindow: paymentWindowTimer,
-        gracePeriod: gracePeriodTimer,
-        makerPing: makerPingTimer,
-        makerChallengePing: makerChallengePingTimer,
-        makerChallenge: makerChallengeTimer,
-        bleeding: bleedingTimer,
-        principalProtection: principalProtectionTimer,
-      },
+      timers: tradeTimers,
       isConnected,
       isAuthenticated,
       isSupportedChain: isSupportedChainId(chainId),
@@ -976,10 +931,9 @@ export const buildAppViews = (ctx) => {
       canBurnExpired: burnExpiredDeadlinePassed,
       paymentWindowExpired,
       cancelStatus,
-      challengedDetails,
     };
     const tradeDecisionInput = ctx.devTradeDecisionInput
-      ? { ...ctx.devTradeDecisionInput, lang, cancelStatus, challengedDetails: ctx.devTradeDecisionInput.challengedDetails || challengedDetails, timers: { ...ctx.devTradeDecisionInput.timers } }
+      ? { ...ctx.devTradeDecisionInput, lang, cancelStatus, timers: { ...ctx.devTradeDecisionInput.timers } }
       : defaultTradeDecisionInput;
 
     return (

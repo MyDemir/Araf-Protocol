@@ -1,5 +1,5 @@
+import { tx as t } from '../../copy';
 
-const t = (lang, tr, en) => (lang === 'TR' ? tr : en);
 
 // [TR] Özet kartı tek başlık + tek açıklama satırına indirildi. "Şimdi / Sonraki" kutuları ve durum/rol
 //      çipleri, sayfa başlığı ve aksiyon paneliyle aynı bilgiyi tekrar ediyordu.

@@ -1,5 +1,6 @@
 import { normalizeOrderSide, resolveOrderActionFns, resolvePaymentRiskEntry } from '../orderUiModel';
 import { buildApiUrl } from '../apiConfig';
+import { fmtNum } from '../copy';
 
 export const MAKER_ORDER_DEFAULTS = {
   makerTier: 1,
@@ -63,7 +64,7 @@ export const getMakerOrderValidationError = ({
   if (tokenPolicy && makerSide === 'BUY_CRYPTO' && tokenPolicy.allowBuyOrders === false) return lang === 'TR' ? `${makerToken} için alış emri şu an kapalı.` : `Buy orders are closed for ${makerToken}.`;
   if (!makerAmount || cryptoAmtNum <= 0) return lang === 'TR' ? 'Order miktarını giriniz.' : 'Enter order amount.';
   if (makerTier < 4 && Number.isFinite(tierMax) && cryptoAmtNum > tierMax) {
-    const formatted = tierMax.toLocaleString(lang === 'TR' ? 'tr-TR' : 'en-US', { maximumFractionDigits: 2 });
+    const formatted = fmtNum(tierMax, lang);
     return lang === 'TR'
       ? `Tier ${makerTier} maksimum emir limiti ${formatted} ${makerToken}.`
       : `Tier ${makerTier} max order limit is ${formatted} ${makerToken}.`;

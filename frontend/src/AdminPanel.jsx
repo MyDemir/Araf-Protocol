@@ -1,5 +1,6 @@
 import React from 'react';
 import { buildApiUrl } from './app/apiConfig';
+import { shortAddress as shortenWallet } from './app/copy';
 import { mapResolutionTypeLabel } from './app/useAppSessionData';
 import AdminRevenuePanel from './app/contexts/admin/AdminRevenuePanel';
 import AdminChainPanel from './app/contexts/admin/AdminChainPanel';
@@ -25,12 +26,6 @@ const TRADES_LIMIT_OPTIONS = [10, 20, 50];
 const SETTLEMENT_STATE_OPTIONS = ['ALL', 'PROPOSED', 'EXPIRED', 'FINALIZED', 'REJECTED', 'WITHDRAWN'];
 const SETTLEMENT_LIMIT_OPTIONS = [10, 20, 50];
 const ADMIN_POLL_INTERVAL_MS = 10 * 60 * 1000;
-
-const shortenWallet = (wallet) => {
-  const value = String(wallet || '').trim();
-  if (!value || value.length < 10) return value || '—';
-  return `${value.slice(0, 6)}...${value.slice(-4)}`;
-};
 
 const formatDate = (value) => {
   if (!value) return '—';

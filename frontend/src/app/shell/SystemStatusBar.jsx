@@ -1,7 +1,7 @@
 import { LoaderCircle } from 'lucide-react';
 import { WALLET_AGE_MIN_DAYS } from '../walletAge';
+import { tx as t } from '../copy';
 
-const t = (lang, tr, en) => (lang === 'TR' ? tr : en);
 
 const supportedChainNames = (supportedChains) => Object.values(supportedChains || {})
   .filter(Boolean)

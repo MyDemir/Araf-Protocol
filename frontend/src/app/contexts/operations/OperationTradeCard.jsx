@@ -1,4 +1,4 @@
-import { getStateLabel } from '../../copy/states';
+import { getStateLabel, langKey } from '../../copy';
 import { normalizeSettlementState } from '../settlement/settlementActionModel';
 
 const roleCopy = {
@@ -20,15 +20,14 @@ export const ACTIVE_TRADE_STATE_PRIORITY = {
   LOCKED: 2,
 };
 
-const pickLang = (lang) => (lang === 'TR' ? 'TR' : 'EN');
 
-const t = (key, lang = 'EN') => fieldCopy[key]?.[pickLang(lang)] || fieldCopy[key]?.EN || key;
+const t = (key, lang = 'EN') => fieldCopy[key]?.[langKey(lang)] || fieldCopy[key]?.EN || key;
 
 const getRoleLabel = (role, lang = 'EN') => {
   const normalized = String(role || '').toLowerCase();
   const row = roleCopy[normalized];
   if (!row) return role || '—';
-  return row[pickLang(lang)] || row.EN || row.TR || role;
+  return row[langKey(lang)] || row.EN || row.TR || role;
 };
 
 
