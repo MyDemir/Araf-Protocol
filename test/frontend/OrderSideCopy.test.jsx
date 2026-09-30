@@ -4,7 +4,8 @@ import { render, screen } from '@testing-library/react';
 import { orderSide as orderSideCopy } from '../../frontend/src/app/copy';
 import { buildAppModals } from '../../frontend/src/app/AppModals';
 import MyOrdersPanel from '../../frontend/src/app/contexts/profile/MyOrdersPanel';
-import { buildMarketOrdersQuery, getOrderSideCopy, mapApiOrderToUi } from '../../frontend/src/app/orderUiModel';
+import { getOrderSideCopy, mapApiOrderToUi } from '../../frontend/src/app/orderUiModel';
+import { buildMarketOrdersQuery, countActiveMarketFilters, matchesMarketFilters, MARKET_FILTER_DEFAULTS } from '../../frontend/src/app/contexts/marketplace/marketFilters';
 
 const makeMakerCtx = (overrides = {}) => ({
   lang: 'EN',
@@ -114,19 +115,64 @@ describe('order side copy', () => {
 describe('market orders query (server-side filters)', () => {
   const tokenAddresses = { USDT: '0x' + 'a'.repeat(40), USDC: '0x' + 'c'.repeat(40) };
   const parse = (q) => Object.fromEntries(new URLSearchParams(q.split('?')[1]));
+  const q = (filters, extra = {}) => parse(buildMarketOrdersQuery({ filters: { ...MARKET_FILTER_DEFAULTS, ...filters }, tokenAddresses, ...extra }));
   it('defaults to active orders without side or sort', () => {
     expect(parse(buildMarketOrdersQuery())).toEqual({ status: 'ACTIVE', limit: '50' });
   });
-  it('maps the Buy tab to SELL_CRYPTO with best-rate sort, and applies tier/token/amount server-side', () => {
-    expect(parse(buildMarketOrdersQuery({ marketSide: 'BUY', filterTier1: true, filterToken: 'USDC', searchAmount: '250', tokenAddresses }))).toEqual({
-      status: 'ACTIVE', limit: '50', side: 'SELL_CRYPTO', sort: 'best_rate', tier: '0', token_address: tokenAddresses.USDC, min_amount: '250',
+  it('maps the Buy tab to SELL_CRYPTO with best-rate sort, and applies tier/token/amount/fiat server-side', () => {
+    expect(q({ side: 'BUY', tier: 'NO_BOND', token: 'USDC', amount: '250', fiat: 'TRY' })).toEqual({
+      status: 'ACTIVE', limit: '50', side: 'SELL_CRYPTO', sort: 'best_rate', tier: '0', token_address: tokenAddresses.USDC, min_amount: '250', fiat: 'TRY',
     });
-    expect(parse(buildMarketOrdersQuery({ marketSide: 'SELL' })).side).toBe('BUY_CRYPTO');
+    expect(q({ side: 'SELL' }).side).toBe('BUY_CRYPTO');
   });
-  it('ignores empty, zero or invalid amounts and unknown tokens', () => {
-    for (const searchAmount of ['', '0', 'abc', '-5']) {
-      expect(parse(buildMarketOrdersQuery({ searchAmount })).min_amount).toBeUndefined();
+  it('sort: AUTO without side uses the server default, AMOUNT drops best_rate, NEWEST maps to newest', () => {
+    expect(q({}).sort).toBeUndefined();
+    expect(q({ side: 'BUY', sort: 'AMOUNT' }).sort).toBeUndefined();
+    expect(q({ sort: 'NEWEST' }).sort).toBe('newest');
+    expect(q({ side: 'SELL', sort: 'NEWEST' }).sort).toBe('newest');
+  });
+  it('ELIGIBLE sends max_tier only when the viewer tier is known', () => {
+    expect(q({ tier: 'ELIGIBLE' }, { userTier: 2 }).max_tier).toBe('2');
+    expect(q({ tier: 'ELIGIBLE' }, { userTier: null }).max_tier).toBeUndefined();
+    expect(q({ tier: 'ELIGIBLE' }, { userTier: 9 }).max_tier).toBeUndefined();
+  });
+  it('ignores empty, zero or invalid amounts, unknown tokens and fiats', () => {
+    for (const amount of ['', '0', 'abc', '-5']) {
+      expect(q({ amount }).min_amount).toBeUndefined();
     }
-    expect(parse(buildMarketOrdersQuery({ filterToken: 'DAI', tokenAddresses })).token_address).toBeUndefined();
+    expect(q({ token: 'DAI' }).token_address).toBeUndefined();
+    expect(q({ fiat: 'GBP' }).fiat).toBeUndefined();
+  });
+});
+
+describe('market filters (client matcher mirrors the server)', () => {
+  const me = '0x' + '1'.repeat(40);
+  const order = { side: 'SELL_CRYPTO', crypto: 'USDT', fiat: 'TRY', tier: 2, remainingAmount: 500, minFillAmount: 100, makerFull: '0x' + '2'.repeat(40) };
+  const match = (filters, o = order, ctx = {}) => matchesMarketFilters(o, { ...MARKET_FILTER_DEFAULTS, ...filters }, ctx);
+  it('amount must fit a single fill (remaining >= amount and min fill <= amount, or the full remainder)', () => {
+    expect(match({ amount: '250' })).toBe(true);
+    expect(match({ amount: '50' })).toBe(false);
+    expect(match({ amount: '600' })).toBe(false);
+    expect(match({ amount: '80' }, { ...order, remainingAmount: 80, minFillAmount: 100 })).toBe(true);
+  });
+  it('side, token, fiat and tier narrow the list', () => {
+    expect(match({ side: 'BUY' })).toBe(true);
+    expect(match({ side: 'SELL' })).toBe(false);
+    expect(match({ token: 'USDC' })).toBe(false);
+    expect(match({ fiat: 'EUR' })).toBe(false);
+    expect(match({ tier: 'NO_BOND' })).toBe(false);
+    expect(match({ tier: 'ELIGIBLE' }, order, { userTier: 1 })).toBe(false);
+    expect(match({ tier: 'ELIGIBLE' }, order, { userTier: 3 })).toBe(true);
+  });
+  it('hideOwn removes only the viewer own orders', () => {
+    expect(match({ hideOwn: true }, { ...order, makerFull: me.toUpperCase().replace('0X', '0x') }, { viewerAddress: me })).toBe(false);
+    expect(match({ hideOwn: true }, order, { viewerAddress: me })).toBe(true);
+    expect(match({ hideOwn: true }, { ...order, makerFull: me })).toBe(true);
+  });
+  it('counts only result-narrowing filters (not side or sort)', () => {
+    expect(countActiveMarketFilters(MARKET_FILTER_DEFAULTS)).toBe(0);
+    expect(countActiveMarketFilters({ ...MARKET_FILTER_DEFAULTS, side: 'BUY', sort: 'NEWEST' })).toBe(0);
+    expect(countActiveMarketFilters({ ...MARKET_FILTER_DEFAULTS, token: 'USDT', amount: '5', fiat: 'TRY', tier: 'NO_BOND', hideOwn: true })).toBe(5);
+    expect(countActiveMarketFilters({ ...MARKET_FILTER_DEFAULTS, amount: '0' })).toBe(0);
   });
 });

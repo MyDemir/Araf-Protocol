@@ -107,16 +107,22 @@ describe("orders and trades routes use deterministic _id tie-break sort semantic
     expect(res.status).toBe(200);
     const filter = Order.find.mock.calls[0][0];
     expect(filter["market.fiat_currency"]).toBe("TRY");
-    expect(filter.$or).toEqual([
-      { token_address: USDT, "amounts.remaining_amount_num": { $gte: 50e6 } },
-      { token_address: DAI, "amounts.remaining_amount_num": { $gte: 50e18 } },
-    ]);
+    const fits = (token, raw) => ({
+      token_address: token,
+      "amounts.remaining_amount_num": { $gte: raw },
+      $or: [{ "amounts.min_fill_amount_num": { $lte: raw } }, { "amounts.remaining_amount_num": raw }],
+    });
+    expect(filter.$or).toEqual([fits(USDT, 50e6), fits(DAI, 50e18)]);
   });
 
   it("market search: min_amount with a token filter uses only that token's decimals", async () => {
     const { app, Order } = buildOrdersApp({ tokenMap: { [USDT]: { decimals: 6 }, [DAI]: { decimals: 18 } } });
     await request(app).get(`/api/orders?token_address=${DAI}&min_amount=2`).expect(200);
-    expect(Order.find.mock.calls[0][0].$or).toEqual([{ token_address: DAI, "amounts.remaining_amount_num": { $gte: 2e18 } }]);
+    expect(Order.find.mock.calls[0][0].$or).toEqual([{
+      token_address: DAI,
+      "amounts.remaining_amount_num": { $gte: 2e18 },
+      $or: [{ "amounts.min_fill_amount_num": { $lte: 2e18 } }, { "amounts.remaining_amount_num": 2e18 }],
+    }]);
   });
 
   it("market search: min_amount fails closed (503) when token decimals are unknown", async () => {
@@ -177,6 +183,13 @@ describe("orders and trades routes use deterministic _id tie-break sort semantic
     expect(pipeline.find((st) => st.$sort).$sort).toEqual({ maker_address: 1, created_at: -1, _id: -1 });
     expect(pipeline.find((st) => st.$project).$project).toEqual({ maker_address: 1, "payout_snapshot.is_complete": 1, "payout_snapshot.maker": 1 });
     expect(pipeline.find((st) => st.$unset).$unset).toEqual(["payout_snapshot.maker.payout_details_enc", "payout_snapshot.maker.contact_value_enc"]);
+  });
+
+  it("market search: max_tier limits to orders the viewer can enter; newest sorts by creation time", async () => {
+    const { app, Order, findChain } = buildOrdersApp();
+    await request(app).get("/api/orders?max_tier=2&sort=newest").expect(200);
+    expect(Order.find.mock.calls[0][0].tier).toEqual({ $lte: 2 });
+    expect(findChain.sort.mock.calls[0][0]).toEqual({ created_at: -1, _id: -1 });
   });
 
   it("trades history route uses _id tie-break instead of onchain_escrow_id lexicographic sort", async () => {

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useCountdown } from '../hooks/useCountdown';
-import { buildMarketOrdersQuery, mapApiOrderToUi, formatTokenAmount as formatTokenAmountFromRaw, tokenToNumber as rawTokenToDisplayNumber } from './orderUiModel';
+import { buildMarketOrdersQuery, MARKET_FILTER_DEFAULTS, matchesMarketFilters } from './contexts/marketplace/marketFilters';
+import { mapApiOrderToUi, formatTokenAmount as formatTokenAmountFromRaw, tokenToNumber as rawTokenToDisplayNumber } from './orderUiModel';
 import { buildApiUrl } from './apiConfig';
 import { WALLET_AGE_MIN_SEC } from './walletAge';
 
@@ -187,10 +188,7 @@ export function useAppSessionData({
   getCooldownRemaining,
   getPaused,
   SUPPORTED_TOKEN_ADDRESSES,
-  filterTier1,
-  filterToken,
-  searchAmount,
-  marketSide = 'ALL',
+  marketFilters = MARKET_FILTER_DEFAULTS,
   devScenarioActive = false,
 }) {
   const [tradeState, setTradeState] = useState('LOCKED');
@@ -254,6 +252,8 @@ export function useAppSessionData({
   const [bleedingAmounts, setBleedingAmounts] = useState(null);
 
   const [orders, setOrders] = useState([]);
+  // [TR] Sunucudaki eşleşen emir sayısı (ilk sayfa 50 ile sınırlı olduğundan ayrı tutulur). [EN] Server-side match count.
+  const [marketOrdersTotal, setMarketOrdersTotal] = useState(null);
   // [TR] Pazar akışı alınamazsa sayaçlar "0" yerine "—" göstermeli; boş pazar ile ulaşılamayan sunucu ayırt edilir.
   // [EN] Distinguish an unreachable feed from an empty market.
   const [ordersFeedError, setOrdersFeedError] = useState(false);
@@ -676,15 +676,19 @@ export function useAppSessionData({
   }, [isConnected, connectedWallet, clearLocalSessionState, bestEffortBackendLogout]);
 
   // [TR] Tutar araması her tuşta istek atmasın diye 400 ms geciktirilir. [EN] Debounce the amount search.
+  const searchAmount = marketFilters.amount;
   const [debouncedSearchAmount, setDebouncedSearchAmount] = useState(searchAmount);
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearchAmount(searchAmount), 400);
     return () => clearTimeout(t);
   }, [searchAmount]);
+  const viewerTier = Number.isInteger(userReputation?.effectiveTier) ? userReputation.effectiveTier : null;
   const marketViewOpen = currentView === 'market';
   const ordersLoadedRef = React.useRef(false);
   const marketOrdersQuery = buildMarketOrdersQuery({
-    marketSide, filterTier1, filterToken, searchAmount: debouncedSearchAmount, tokenAddresses: SUPPORTED_TOKEN_ADDRESSES,
+    filters: { ...marketFilters, amount: debouncedSearchAmount },
+    tokenAddresses: SUPPORTED_TOKEN_ADDRESSES,
+    userTier: viewerTier,
   });
 
   useEffect(() => {
@@ -709,6 +713,7 @@ export function useAppSessionData({
         const data = await res.json();
         if (!Array.isArray(data.orders)) throw new Error('Malformed orders payload');
         setOrders(mapOrders(data.orders));
+        setMarketOrdersTotal(Number.isFinite(data.total) ? data.total : null);
         setOrdersFeedError(false);
         ordersLoadedRef.current = true;
       } catch (err) {
@@ -1072,12 +1077,7 @@ export function useAppSessionData({
     };
   }, [connector, connectedWallet, isAuthenticated, authenticatedWallet, lang, bestEffortBackendLogout, clearLocalSessionState, showToast]);
 
-  const filteredOrders = orders.filter((order) => {
-    const amountMatch = searchAmount === '' || Number(searchAmount) <= Number(order.remainingAmount || 0);
-    const tierMatch = filterTier1 ? order.tier === 0 : true;
-    const tokenMatch = filterToken === 'ALL' || order.crypto === filterToken;
-    return amountMatch && tierMatch && tokenMatch;
-  });
+  const filteredOrders = orders.filter((order) => matchesMarketFilters(order, marketFilters, { viewerAddress: connectedWallet, userTier: viewerTier }));
 
   const activeEscrowCounts = {
     LOCKED: activeEscrows.filter((e) => e.state === 'LOCKED').length,
@@ -1169,6 +1169,7 @@ export function useAppSessionData({
     setChargebackAccepted,
     formatAddress,
     filteredOrders,
+    marketOrdersTotal,
     activeEscrowCounts,
     gracePeriodTimer,
     bleedingTimer,

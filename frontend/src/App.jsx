@@ -20,6 +20,7 @@ import { markTermsAcceptedLocally } from './app/legal/terms';
 import { buildApiUrl, resolveApiPolicyDiagnostics } from './app/apiConfig';
 import { checkDeploymentAlignment, getSupportedChainsMap, isMintTokenEnabled, isSupportedChainId } from './app/chainPolicy';
 import { useMakerOrderForm } from './app/contexts/marketplace/useMakerOrderForm';
+import { useMarketFilters } from './app/contexts/marketplace/marketFilters';
 import { buildMintAction, buildOrderActions, buildProfileActions, buildStartTradeAction, buildTradeRoomActions } from './app/actions/contractLifecycleActions';
 import { buildNextActiveTrade, findEscrowByRouteTradeId, getEscrowRouteId, parseAppHashRoute, writeAppHashRoute } from './app/actions/tradeNavigationActions';
 
@@ -134,10 +135,7 @@ function App() {
   const [lang, setLang] = useState(getInitialLang);
   const [loadingText, setLoadingText] = useState('');
   const [isContractLoading, setIsContractLoading] = useState(false);
-  const [filterTier1, setFilterTier1] = useState(false);
-  const [filterToken, setFilterToken] = useState('ALL');
-  const [marketSide, setMarketSide] = useState('ALL');
-  const [searchAmount, setSearchAmount] = useState('');
+  const { marketFilters, setMarketFilter, resetMarketFilters } = useMarketFilters();
   const [toast, setToast] = useState(null);
   const [termsPromptWallet, setTermsPromptWallet] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
@@ -296,6 +294,7 @@ function App() {
     setChargebackAccepted,
     formatAddress,
     filteredOrders,
+    marketOrdersTotal,
     activeEscrowCounts,
     gracePeriodTimer,
     bleedingTimer,
@@ -328,10 +327,7 @@ function App() {
     getCooldownRemaining,
     getPaused,
     SUPPORTED_TOKEN_ADDRESSES,
-    filterTier1,
-    filterToken,
-    searchAmount,
-    marketSide,
+    marketFilters,
     devScenarioActive,
   });
 
@@ -1116,14 +1112,10 @@ function App() {
     setSidebarOpen,
     setExpandedStatus,
     expandedStatus,
-    filterTier1,
-    setFilterTier1,
-    filterToken,
-    setFilterToken,
-    marketSide,
-    setMarketSide,
-    searchAmount,
-    setSearchAmount,
+    marketFilters,
+    setMarketFilter,
+    resetMarketFilters,
+    marketOrdersTotal,
     filteredOrders,
     orders,
     ordersFeedError,

@@ -438,21 +438,3 @@ export const mapApiOrderToUi = ({ order, lang = 'TR', bondMap = {}, tokenMap = {
     totalTrades: fillsCount,
   };
 };
-
-// [TR] Pazar yeri sorgusu: filtreler sunucuda uygulanır (yalnız ilk sayfa çekildiği için istemci
-//      filtresi sayfa dışındaki uygun emirleri kaçırırdı). Taraf seçiliyken en iyi kur sıralaması istenir.
-// [EN] Marketplace query: filters run server-side (client filtering of the first page missed matches).
-export const buildMarketOrdersQuery = ({ marketSide = 'ALL', filterTier1 = false, filterToken = 'ALL', searchAmount = '', tokenAddresses = {} } = {}) => {
-  const params = new URLSearchParams({ status: 'ACTIVE', limit: '50' });
-  const side = marketSide === 'BUY' ? 'SELL_CRYPTO' : marketSide === 'SELL' ? 'BUY_CRYPTO' : null;
-  if (side) {
-    params.set('side', side);
-    params.set('sort', 'best_rate');
-  }
-  if (filterTier1) params.set('tier', '0');
-  const tokenAddress = filterToken !== 'ALL' ? tokenAddresses?.[filterToken] : null;
-  if (tokenAddress) params.set('token_address', tokenAddress);
-  const amount = Number(searchAmount);
-  if (searchAmount !== '' && Number.isFinite(amount) && amount > 0) params.set('min_amount', String(amount));
-  return `orders?${params.toString()}`;
-};

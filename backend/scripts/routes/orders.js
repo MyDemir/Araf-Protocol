@@ -61,7 +61,14 @@ function _buildMinRemainingClauses(minAmount, tokenAddress) {
   for (const token of tokens) {
     const decimals = Number(byAddress[token]?.decimals);
     if (!Number.isInteger(decimals) || decimals < 0) continue;
-    clauses.push({ token_address: token, "amounts.remaining_amount_num": { $gte: minAmount * 10 ** decimals } });
+    // [TR] Tutar bu emirle tek fill'de alınabilmeli: kalan >= tutar ve (min fill <= tutar ya da tutar kalanın tamamı).
+    // [EN] The amount must be fillable in one go: remaining >= amount and (min fill <= amount or it is the remainder).
+    const raw = minAmount * 10 ** decimals;
+    clauses.push({
+      token_address: token,
+      "amounts.remaining_amount_num": { $gte: raw },
+      $or: [{ "amounts.min_fill_amount_num": { $lte: raw } }, { "amounts.remaining_amount_num": raw }],
+    });
   }
   return clauses.length ? clauses : null;
 }
@@ -277,6 +284,8 @@ router.get("/", marketReadLimiter, async (req, res, next) => {
       // [EN] ACTIVE = fillable (OPEN + PARTIALLY_FILLED), used by the marketplace feed.
       status: Joi.string().valid("ACTIVE", "OPEN", "PARTIALLY_FILLED", "FILLED", "CANCELED").optional(),
       tier: Joi.number().valid(0, 1, 2, 3, 4).optional(),
+      // [TR] Kullanıcının girebileceği emirler: tier <= max_tier. [EN] Orders the viewer can enter: tier <= max_tier.
+      max_tier: Joi.number().valid(0, 1, 2, 3, 4).optional(),
       token_address: Joi.string().pattern(/^0x[a-fA-F0-9]{40}$/).optional(),
       owner_address: Joi.string().pattern(/^0x[a-fA-F0-9]{40}$/).optional(),
       // [TR] Sunucu tarafı pazar araması: fiat, token biriminde minimum kalan tutar ve en iyi kur sıralaması.
@@ -284,7 +293,7 @@ router.get("/", marketReadLimiter, async (req, res, next) => {
       // [EN] Server-side market search: fiat, minimum remaining amount (token units) and best-rate sort.
       fiat: Joi.string().valid("TRY", "USD", "EUR").optional(),
       min_amount: Joi.number().positive().optional(),
-      sort: Joi.string().valid("default", "best_rate").default("default"),
+      sort: Joi.string().valid("default", "best_rate", "newest").default("default"),
       page: Joi.number().integer().min(1).default(1),
       limit: Joi.number().integer().min(1).max(50).default(20),
     });
@@ -296,6 +305,7 @@ router.get("/", marketReadLimiter, async (req, res, next) => {
     if (value.status === "ACTIVE") filter.status = { $in: FILLABLE_ORDER_STATUSES };
     else if (value.status) filter.status = value.status;
     if (value.tier !== undefined) filter.tier = value.tier;
+    else if (value.max_tier !== undefined) filter.tier = { $lte: value.max_tier };
     if (value.token_address) filter.token_address = value.token_address.toLowerCase();
     if (value.owner_address) filter.owner_address = value.owner_address.toLowerCase();
     if (value.fiat) filter["market.fiat_currency"] = value.fiat;
@@ -335,7 +345,7 @@ router.get("/", marketReadLimiter, async (req, res, next) => {
         // [TR] onchain_order_id string olduğu için lexicographic drift'i önlemek adına
         //      tie-break'i deterministic _id ile yapıyoruz.
         // [EN] Use deterministic _id tie-break to avoid lexicographic drift on string IDs.
-        .sort({ status: 1, "amounts.remaining_amount_num": -1, _id: -1 })
+        .sort(value.sort === "newest" ? { created_at: -1, _id: -1 } : { status: 1, "amounts.remaining_amount_num": -1, _id: -1 })
         .skip(skip)
         .limit(value.limit)
         .lean(),

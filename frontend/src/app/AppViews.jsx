@@ -10,13 +10,14 @@ import { SettlementQueueCard } from './contexts/operations/OperationsPanels';
 import OperationsCenterPage from './contexts/operations/OperationsCenterPage';
 import ProfileContextPage from './contexts/profile/ProfileContextPage';
 import { getOrderSideCopy } from './orderUiModel';
+import { countActiveMarketFilters, MARKET_FIAT_OPTIONS, MARKET_FILTER_DEFAULTS } from './contexts/marketplace/marketFilters';
 import { mapResolutionTypeLabel } from './useAppSessionData';
 import TradeRoomPage from './contexts/trade-room/TradeRoomPage';
 import ThemeToggle from './shell/ThemeToggle';
 import { isViewInNav, NAV_ORDER, VIEW_REGISTRY } from './viewRegistry';
 import {
-  Banknote, ChevronDown, CircleCheck, CirclePause, Clock, Droplets, Flame, Handshake, History, Hourglass, Layers, ListPlus, LoaderCircle, Lock, Menu, Paperclip, Plus, Search, Settings, ShieldOff, Store, Swords,
-  TriangleAlert, Undo2, Unplug, Wallet, X, Info, Maximize2, Minimize2, Download, Share,
+  Banknote, ChevronDown, CircleCheck, CirclePause, Clock, Droplets, Flame, Handshake, History, Hourglass, Layers, ListPlus, LoaderCircle, Lock, Menu, Paperclip, Plus, RotateCcw, Search, Settings, Store, Swords,
+  TriangleAlert, Undo2, Unplug, Wallet, X, EyeOff, Info, Maximize2, Minimize2, Download, Share,
 } from 'lucide-react';
 import { buildTradeRoomPanelCallbacks, getBurnExpiredDeadlinePassed, getPaymentWindowExpired, PAYMENT_WINDOW_MS } from './contexts/trade-room/tradeRoomPanelActions';
 
@@ -51,14 +52,10 @@ export const buildAppViews = (ctx) => {
     setSidebarOpen,
     setExpandedStatus,
     expandedStatus,
-    filterTier1,
-    setFilterTier1,
-    filterToken,
-    setFilterToken,
-    marketSide = 'ALL',
-    setMarketSide,
-    searchAmount,
-    setSearchAmount,
+    marketFilters = MARKET_FILTER_DEFAULTS,
+    setMarketFilter,
+    resetMarketFilters,
+    marketOrdersTotal = null,
     filteredOrders,
     orders,
     ordersFeedError,
@@ -190,14 +187,14 @@ export const buildAppViews = (ctx) => {
     const tr = lang === 'TR';
     const settlementCounts = activeEscrowCounts?.settlement || {};
     // [TR] Akış alınamadıysa sayaç "—": "0 emir" yanıltıcı olur.
-    const orderCount = (list) => (ordersFeedError ? '—' : list.length);
+    const orderCount = (list, total = null) => (ordersFeedError ? '—' : Number.isFinite(total) ? total : list.length);
     const proposedEscrows = activeEscrows.filter((escrow) => normalizeSettlementState(escrow?.rawTrade?.settlementProposal?.state) === 'PROPOSED');
     const goToRoom = (escrow) => buildGoToTradeRoomAction({
       escrow, setActiveTrade, setUserRole, setTradeState, setChargebackAccepted, setCurrentView, setSidebarOpen,
     });
     // [TR] Tek satır bileşeni: ikon + etiket + sayaç. Tüm drawer aynı ritimde görünür.
     // [EN] One row primitive (icon + label + count) so every drawer row shares one rhythm.
-    const Row = ({ icon, label, count, active, tone = 'default', onClick, trailing }) => (
+    const Row = ({ icon, label, count, active, tone = 'default', onClick }) => (
       <button
         type="button"
         onClick={onClick}
@@ -206,7 +203,6 @@ export const buildAppViews = (ctx) => {
       >
         <span className={`shrink-0 flex items-center justify-center w-5 ${tone === 'danger' ? 'text-danger' : active ? 'text-textPrimary' : 'text-textMuted'}`}>{icon}</span>
         <span className="min-w-0 flex-1 truncate text-left">{label}</span>
-        {trailing}
         {count != null && (
           <span className={`min-w-[1.5rem] h-5 px-1.5 rounded-md text-[11px] font-semibold tabular-nums flex items-center justify-center ${typeof count === 'number' && count > 0 ? (tone === 'danger' ? 'bg-danger/15 text-danger' : 'bg-elevated text-textPrimary') : 'text-textMuted'}`}>{count}</span>
         )}
@@ -234,24 +230,23 @@ export const buildAppViews = (ctx) => {
             </button>
           </div>
 
-          <div className="relative mb-5 px-1">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-textMuted" strokeWidth={1.8} aria-hidden="true" />
-            <input type="number" inputMode="decimal" value={searchAmount} onChange={e => setSearchAmount(e.target.value)} placeholder={tr ? 'Tutara göre ara' : 'Search by amount'} aria-label={tr ? 'Tutara göre ara' : 'Search by amount'} className="w-full h-10 bg-surface text-textPrimary pl-9 pr-3 rounded-lg border border-borderSubtle outline-none focus:border-brand/50 text-sm transition" />
-          </div>
-
           <nav className="mb-5">
             <SectionLabel>{tr ? 'PAZAR' : 'MARKET'}</SectionLabel>
-            <Row icon={ico(Layers)} label={tr ? 'Tüm emirler' : 'All orders'} count={orderCount(orders)} active={filterToken === 'ALL' && currentView === 'market'} onClick={() => { setFilterToken('ALL'); setCurrentView('market'); }} />
-            <Row icon={tokenMark('T', 'bg-emerald-600')} label="USDT" count={orderCount(orders.filter(o => o.crypto === 'USDT'))} active={filterToken === 'USDT' && currentView === 'market'} onClick={() => { setFilterToken('USDT'); setCurrentView('market'); }} />
-            <Row icon={tokenMark('C', 'bg-blue-600')} label="USDC" count={orderCount(orders.filter(o => o.crypto === 'USDC'))} active={filterToken === 'USDC' && currentView === 'market'} onClick={() => { setFilterToken('USDC'); setCurrentView('market'); }} />
-            {/* [TR] Filtre yalnız Tier 0 (teminatsız) emirleri gösterir; anahtar görünümü açık/kapalı durumu söyler. */}
-            <Row
-              icon={ico(ShieldOff)}
-              label={tr ? 'Teminatsız (Tier 0)' : 'No bond (Tier 0)'}
-              active={filterTier1}
-              onClick={() => setFilterTier1(!filterTier1)}
-              trailing={<span className={`shrink-0 w-8 h-[18px] rounded-full p-0.5 transition ${filterTier1 ? 'bg-brand' : 'bg-borderStrong'}`} aria-hidden="true"><span className={`block w-3.5 h-3.5 rounded-full bg-white transition ${filterTier1 ? 'translate-x-3.5' : ''}`} /></span>}
-            />
+            {/* [TR] Sayaç yalnız seçili varlıkta gösterilir: sunucu yalnız o varlığın emirlerini döndürür. */}
+            {[
+              { value: 'ALL', icon: ico(Layers), label: tr ? 'Tüm emirler' : 'All orders' },
+              { value: 'USDT', icon: tokenMark('T', 'bg-emerald-600'), label: 'USDT' },
+              { value: 'USDC', icon: tokenMark('C', 'bg-blue-600'), label: 'USDC' },
+            ].map((row) => (
+              <Row
+                key={row.value}
+                icon={row.icon}
+                label={row.label}
+                count={marketFilters.token === row.value ? orderCount(orders, marketOrdersTotal) : undefined}
+                active={marketFilters.token === row.value && currentView === 'market'}
+                onClick={() => { setMarketFilter('token', row.value); setCurrentView('market'); }}
+              />
+            ))}
           </nav>
 
           {navUnlocked ? (
@@ -481,11 +476,34 @@ export const buildAppViews = (ctx) => {
     const tr = lang === 'TR';
     const locale = tr ? 'tr-TR' : 'en-US';
     const fmt = (n, digits = 2) => Number(n || 0).toLocaleString(locale, { maximumFractionDigits: digits });
-    const side = marketSide || 'ALL';
-    const visibleOrders = (filteredOrders || []).filter((o) => (
-      side === 'BUY' ? o.side === 'SELL_CRYPTO' : side === 'SELL' ? o.side === 'BUY_CRYPTO' : true
-    ));
-    const hasAnyOrders = (filteredOrders || []).length > 0;
+    const filters = { ...MARKET_FILTER_DEFAULTS, ...marketFilters };
+    const side = filters.side;
+    const setFilter = (key, value) => setMarketFilter?.(key, value);
+    const visibleOrders = filteredOrders || [];
+    const activeFilterCount = countActiveMarketFilters(filters);
+    const isNarrowed = activeFilterCount > 0 || side !== 'ALL';
+    const viewerTier = isAuthenticated && Number.isInteger(userReputation?.effectiveTier) ? userReputation.effectiveTier : null;
+    // [TR] Taraf seçili değilken "en iyi kur" anlamsızdır (alış/satış kurları ters yönlü); varsayılan en yüksek miktardır.
+    // [EN] Without a side "best rate" is ambiguous (buy/sell rates point opposite ways); the default is largest amount.
+    const sortOptions = side !== 'ALL'
+      ? [{ value: 'AUTO', label: tr ? 'En iyi kur' : 'Best rate' }, { value: 'AMOUNT', label: tr ? 'En yüksek miktar' : 'Largest amount' }, { value: 'NEWEST', label: tr ? 'En yeni' : 'Newest' }]
+      : [{ value: 'AUTO', label: tr ? 'En yüksek miktar' : 'Largest amount' }, { value: 'NEWEST', label: tr ? 'En yeni' : 'Newest' }];
+    const sortValue = side === 'ALL' && filters.sort === 'AMOUNT' ? 'AUTO' : filters.sort;
+    const shownCount = visibleOrders.length;
+    // [TR] İlk sayfa 50 emirle sınırlı; sunucu toplamı daha büyükse ayrıca gösterilir. [EN] Show the server total when it exceeds the first page.
+    const loadedCount = (orders || []).length;
+    const totalCount = Number.isFinite(marketOrdersTotal) ? marketOrdersTotal : loadedCount;
+    const fieldClass = 'h-9 w-full min-w-0 bg-surface text-textPrimary rounded-lg border border-borderSubtle outline-none focus:border-brand/50 text-sm transition';
+    // [TR] Bileşen değil fonksiyon: her render'da yeni tip oluşup odak kaybolmasın. [EN] Plain call keeps focus across renders.
+    const selectField = ({ value, onChange, label, options, className = '' }) => (
+      <label key={label} className={`relative min-w-0 ${className}`}>
+        <span className="sr-only">{label}</span>
+        <select value={value} onChange={(e) => onChange(e.target.value)} className={`${fieldClass} appearance-none cursor-pointer pl-3 pr-8`}>
+          {options.map((o) => <option key={o.value} value={o.value} disabled={o.disabled}>{o.label}</option>)}
+        </select>
+        <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-textMuted" strokeWidth={1.8} aria-hidden="true" />
+      </label>
+    );
     const Segmented = ({ items, value, onChange, label }) => (
       <div role="tablist" aria-label={label} className="flex min-w-0 bg-surface border border-borderSubtle rounded-lg p-1">
         {items.map((it) => (
@@ -515,7 +533,7 @@ export const buildAppViews = (ctx) => {
           <Segmented
             label={tr ? 'İşlem yönü' : 'Trade side'}
             value={side}
-            onChange={(v) => setMarketSide?.(v)}
+            onChange={(v) => setFilter('side', v)}
             items={[
               { value: 'ALL', label: tr ? 'Tümü' : 'All' },
               { value: 'BUY', label: tr ? 'Al' : 'Buy', activeClass: 'bg-emerald-600 text-white shadow-sm' },
@@ -524,10 +542,79 @@ export const buildAppViews = (ctx) => {
           />
           <Segmented
             label={tr ? 'Varlık' : 'Asset'}
-            value={filterToken || 'ALL'}
-            onChange={(v) => setFilterToken(v)}
+            value={filters.token}
+            onChange={(v) => setFilter('token', v)}
             items={[{ value: 'ALL', label: tr ? 'Hepsi' : 'Any' }, { value: 'USDT', label: 'USDT' }, { value: 'USDC', label: 'USDC' }]}
           />
+        </div>
+
+        {/* [TR] Gelişmiş filtreler: tutar tek işleme sığan emirleri, para birimi, teminat/tier ve sıralama.
+             Tümü sunucuda uygulanır; "kendi emirlerimi gizle" yalnız istemcide. */}
+        <div role="search" aria-label={tr ? 'Pazar filtreleri' : 'Market filters'} className="mb-2 grid grid-cols-2 md:flex md:flex-wrap md:items-center gap-2">
+          <div className="relative col-span-2 md:w-56">
+            <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-textMuted" strokeWidth={1.8} aria-hidden="true" />
+            <input
+              type="number"
+              inputMode="decimal"
+              min="0"
+              value={filters.amount}
+              onChange={(e) => setFilter('amount', e.target.value)}
+              placeholder={tr ? 'İşlem tutarı' : 'Trade amount'}
+              aria-label={tr ? 'İşlem tutarı' : 'Trade amount'}
+              className={`${fieldClass} pl-9 pr-16 [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none`}
+            />
+            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-textMuted">{filters.token === 'ALL' ? 'USD₮/C' : filters.token}</span>
+          </div>
+          {selectField({
+            className: 'md:w-44',
+            label: tr ? 'Para birimi' : 'Currency',
+            value: filters.fiat,
+            onChange: (v) => setFilter('fiat', v),
+            options: [{ value: 'ALL', label: tr ? 'Tüm dövizler' : 'All currencies' }, ...MARKET_FIAT_OPTIONS.map((c) => ({ value: c, label: c }))],
+          })}
+          {selectField({
+            className: 'md:w-48',
+            label: tr ? 'Teminat' : 'Bond',
+            value: filters.tier,
+            onChange: (v) => setFilter('tier', v),
+            options: [
+              { value: 'ALL', label: tr ? 'Tüm tier’lar' : 'All tiers' },
+              { value: 'NO_BOND', label: tr ? 'Teminatsız (Tier 0)' : 'No bond (Tier 0)' },
+              { value: 'ELIGIBLE', label: viewerTier != null ? (tr ? `Girebildiklerim (≤ T${viewerTier})` : `I can take (≤ T${viewerTier})`) : (tr ? 'Girebildiklerim (giriş gerekli)' : 'I can take (sign in)'), disabled: viewerTier == null },
+            ],
+          })}
+          {selectField({
+            className: address ? 'md:w-44' : 'col-span-2 md:col-span-1 md:w-44',
+            label: tr ? 'Sıralama' : 'Sort',
+            value: sortValue,
+            onChange: (v) => setFilter('sort', v),
+            options: sortOptions,
+          })}
+          {address && (
+            <button
+              type="button"
+              aria-pressed={filters.hideOwn}
+              onClick={() => setFilter('hideOwn', !filters.hideOwn)}
+              className={`h-9 min-w-0 inline-flex items-center justify-center gap-1.5 px-3 rounded-lg border text-sm font-medium transition ${filters.hideOwn ? 'border-brand/50 bg-brand/10 text-textPrimary' : 'border-borderSubtle bg-surface text-textSecondary hover:text-textPrimary'}`}
+            >
+              <EyeOff className="w-4 h-4 shrink-0" strokeWidth={1.8} aria-hidden="true" />
+              <span className="truncate">{tr ? 'Emirlerimi gizle' : 'Hide mine'}</span>
+            </button>
+          )}
+        </div>
+
+        <div className="mb-3 flex min-h-[1.75rem] items-center justify-between gap-2 text-xs text-textMuted">
+          <p aria-live="polite" className="tabular-nums">
+            {loading || ordersFeedError ? '\u00a0' : totalCount > loadedCount
+              ? (tr ? `${shownCount} emir · toplam ${totalCount}` : `${shownCount} ${shownCount === 1 ? 'order' : 'orders'} · ${totalCount} total`)
+              : (tr ? `${shownCount} emir` : `${shownCount} ${shownCount === 1 ? 'order' : 'orders'}`)}
+          </p>
+          {activeFilterCount > 0 && (
+            <button type="button" onClick={() => resetMarketFilters?.()} className="inline-flex items-center gap-1 h-7 px-2 rounded-md font-semibold text-textSecondary hover:text-textPrimary hover:bg-elevated">
+              <RotateCcw className="w-3.5 h-3.5" strokeWidth={1.8} aria-hidden="true" />
+              {tr ? `Filtreleri temizle (${activeFilterCount})` : `Clear filters (${activeFilterCount})`}
+            </button>
+          )}
         </div>
 
         {isFaucetEnabled && (
@@ -658,10 +745,15 @@ export const buildAppViews = (ctx) => {
               <p className="text-sm text-textMuted mb-4">
                 {ordersFeedError
                   ? (tr ? 'Pazar verisi alınamadı. Bağlantı düzelince liste otomatik yenilenecek.' : 'Market data unavailable. The list refreshes automatically.')
-                  : hasAnyOrders
+                  : isNarrowed
                     ? (tr ? 'Bu filtreye uyan emir yok.' : 'No orders match this filter.')
                     : (tr ? 'Henüz açık emir yok.' : 'No open orders yet.')}
               </p>
+              {!ordersFeedError && activeFilterCount > 0 && (
+                <button type="button" onClick={() => resetMarketFilters?.()} className="mb-3 mx-auto flex items-center gap-1.5 h-9 px-4 rounded-lg border border-borderSubtle bg-surface text-sm font-semibold text-textPrimary hover:bg-elevated">
+                  <RotateCcw className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />{tr ? 'Filtreleri temizle' : 'Clear filters'}
+                </button>
+              )}
               {!isPaused && !ordersFeedError && (
                 <button onClick={openCreateOrder} className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-brand text-black text-sm font-semibold hover:opacity-90">
                   <Plus className="w-4 h-4" strokeWidth={2} aria-hidden="true" />{tr ? 'İlk emri oluştur' : 'Create the first order'}
