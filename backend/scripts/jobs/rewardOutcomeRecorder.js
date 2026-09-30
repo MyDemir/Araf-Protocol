@@ -11,9 +11,9 @@
  * Bu görev:
  *   1. Son kayıt penceresine düşen, ödül ağırlığı üretebilecek (temiz release / partial settlement,
  *      Tier >= 1) trade'leri mirror'dan aday olarak çıkarır
- *   2. Her aday için kontrattan recordedTrade(tradeId) okur (mirror stale olabilir)
- *   3. Kaydedilmemiş olanları tek bir recordTradeOutcomes([...]) çağrısıyla gönderir; kontrat
- *      kaydedilemeyenleri (pencere kapalı vb.) revert etmeden atlar
+ *   2. Mirror'da reward_recorded_at işareti olmayanları tek bir recordTradeOutcomes([...]) çağrısıyla
+ *      gönderir (trade başına RPC okuması yok); kontrat kaydedilmiş/kaydedilemeyenleri revert etmeden atlar
+ *   3. Gönderilenleri işaretler; TradeOutcomeRecorded event'i de aynı işareti yazar
  *
  * [EN] Triggers Proof of Peace weight recording with the relayer. The contract derives everything
  *      from getRewardableTrade(); the backend only makes sure the permissionless call happens in time.
@@ -25,7 +25,6 @@ const logger = require("../utils/logger");
 
 const REWARDS_RECORDER_ABI = [
   "function recordTradeOutcomes(uint256[] tradeIds)",
-  "function recordedTrade(uint256 tradeId) view returns (bool)",
   "function epochDuration() view returns (uint256)",
   "function claimDelay() view returns (uint256)",
 ];
@@ -93,6 +92,7 @@ async function runRewardOutcomeRecorder({ contract = getRewardsContract() } = {}
     resolution_type: { $in: REWARDABLE_RESOLUTION_TYPES },
     tier: { $gte: 1 },
     "timers.resolved_at": { $gte: since },
+    "timers.reward_recorded_at": null,
     onchain_escrow_id: { $ne: null },
   })
     .select("onchain_escrow_id")
@@ -102,21 +102,22 @@ async function runRewardOutcomeRecorder({ contract = getRewardsContract() } = {}
 
   if (candidates.length === 0) return { success: true, candidates: 0, recorded: 0 };
 
-  let hadErrors = false;
+  // [TR] Trade başına recordedTrade() RPC okuması yapılmaz: kontratın toplu kaydı zaten kaydedilmiş veya
+  //      kaydedilemeyen id'leri revert etmeden atlar (kayıtlı id başına ~2k gas). Tekrar göndermeyi mirror'daki
+  //      reward_recorded_at işareti önler.
+  // [EN] No per-trade recordedTrade() RPC read: the batch already skips recorded/unrecordable ids without
+  //      reverting (~2k gas each). The mirror's reward_recorded_at marker prevents resending.
   const pending = [];
+  const pendingRaw = [];
   for (const trade of candidates) {
     const id = String(trade.onchain_escrow_id || "");
     if (!/^[1-9]\d*$/.test(id)) continue;
-    try {
-      if (!(await contract.recordedTrade(BigInt(id)))) pending.push(BigInt(id));
-    } catch (err) {
-      logger.warn(`[RewardRecorder] recordedTrade(${id}) okunamadı: ${err.message}`);
-      hadErrors = true;
-    }
+    pending.push(BigInt(id));
+    pendingRaw.push(trade.onchain_escrow_id);
     if (pending.length >= DEFAULT_BATCH_LIMIT) break;
   }
 
-  if (pending.length === 0) return { success: !hadErrors, candidates: candidates.length, recorded: 0 };
+  if (pending.length === 0) return { success: true, candidates: candidates.length, recorded: 0 };
 
   try {
     const tx = await contract.recordTradeOutcomes(pending);
@@ -127,7 +128,17 @@ async function runRewardOutcomeRecorder({ contract = getRewardsContract() } = {}
     return { success: false, candidates: candidates.length, recorded: 0 };
   }
 
-  return { success: !hadErrors, candidates: candidates.length, recorded: pending.length };
+  try {
+    await Trade.updateMany(
+      { onchain_escrow_id: { $in: pendingRaw }, "timers.reward_recorded_at": null },
+      { $set: { "timers.reward_recorded_at": new Date() } }
+    );
+  } catch (err) {
+    // [TR] İşaret yazılamazsa bir sonraki tur aynı id'leri tekrar gönderir; kontrat onları atlar.
+    logger.warn(`[RewardRecorder] reward_recorded_at işareti yazılamadı: ${err.message}`);
+  }
+
+  return { success: true, candidates: candidates.length, recorded: pending.length };
 }
 
 module.exports = { runRewardOutcomeRecorder, REWARDABLE_RESOLUTION_TYPES };

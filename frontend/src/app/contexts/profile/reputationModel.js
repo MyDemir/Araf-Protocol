@@ -7,6 +7,9 @@
 //      backend event mirror; constructor defaults are used (and flagged) until an event is seen.
 
 export const MIN_ACTIVE_PERIOD_SEC = 15 * 24 * 3600;
+// [TR] ArafEscrow.MIN_REPUTATION_NOTIONAL (6 ondalık, 20 USD): altındaki trade'ler başarılı işlem sayılmaz.
+// [EN] ArafEscrow.MIN_REPUTATION_NOTIONAL (20 USD): smaller trades do not count as successful trades.
+export const MIN_REPUTATION_NOTIONAL_USD = 20;
 
 export const DEFAULT_REPUTATION_POLICY = Object.freeze({
   cleanPeriodSec: 90 * 24 * 3600,

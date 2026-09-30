@@ -39,9 +39,8 @@ describe("eventListener finality depth safe-checkpoint behavior", () => {
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce("0");
     worker.provider = { getBlockNumber: jest.fn().mockResolvedValue(100) };
-    worker.contract = {
-      queryFilter: jest.fn().mockResolvedValue([]),
-    };
+    worker.contract = {};
+    worker._fetchRangeEvents = jest.fn().mockResolvedValue([]);
     worker._processEvent = jest.fn().mockResolvedValue();
 
     await worker._replayMissedEvents();
@@ -57,7 +56,8 @@ describe("eventListener finality depth safe-checkpoint behavior", () => {
 
     mockRedis.get.mockResolvedValueOnce("500");
     worker.provider = { getBlockNumber: jest.fn().mockResolvedValue(500) };
-    worker.contract = { queryFilter: jest.fn().mockResolvedValue([]) };
+    worker.contract = {};
+    worker._fetchRangeEvents = jest.fn().mockResolvedValue([]);
 
     await worker._replayMissedEvents();
 
@@ -71,7 +71,8 @@ describe("eventListener finality depth safe-checkpoint behavior", () => {
 
     mockRedis.get.mockResolvedValueOnce("invalid");
     worker.provider = { getBlockNumber: jest.fn().mockResolvedValue(100) };
-    worker.contract = { queryFilter: jest.fn().mockResolvedValue([]) };
+    worker.contract = {};
+    worker._fetchRangeEvents = jest.fn().mockResolvedValue([]);
 
     await expect(worker._replayMissedEvents()).rejects.toThrow("Geçersiz checkpoint değeri");
   });
@@ -85,10 +86,11 @@ describe("eventListener finality depth safe-checkpoint behavior", () => {
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(null);
     worker.provider = { getBlockNumber: jest.fn().mockResolvedValue(100) };
-    worker.contract = { queryFilter: jest.fn().mockResolvedValue([]) };
+    worker.contract = {};
+    worker._fetchRangeEvents = jest.fn().mockResolvedValue([]);
 
     await expect(worker._replayMissedEvents()).resolves.toBeUndefined();
-    expect(worker.contract.queryFilter).not.toHaveBeenCalled();
+    expect(worker._fetchRangeEvents).not.toHaveBeenCalled();
     expect(mockRedis.set).not.toHaveBeenCalled();
   });
 

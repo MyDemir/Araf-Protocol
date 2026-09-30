@@ -61,6 +61,7 @@ describe('Profile panels (ported from the removed profile modal)', () => {
     const decayReputation = vi.fn().mockResolvedValue(undefined);
     render(<ReputationPanel lang="EN" address="0xabc" decayReputation={decayReputation} userReputation={rep({ effectiveTier: 1, successful: 58, consecutiveBans: 1, bannedUntil: Math.floor(Date.now() / 1000) - 100 * DAY, authorityCounters: { riskPoints: 20, partialSettlementCount: 2 } })} />);
     expect(screen.getByText('Path to Tier 2')).toBeInTheDocument();
+    expect(screen.getByTestId('reputation-min-notional')).toHaveTextContent('Trades under 20 USD');
     expect(screen.getByText(/not a penalty/)).toBeInTheDocument();
     expect(screen.getByText(/contract defaults/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Clear my record' }));

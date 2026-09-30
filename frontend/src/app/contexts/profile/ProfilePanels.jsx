@@ -5,7 +5,8 @@ import {
 import React from 'react';
 import { formatUnits } from 'viem';
 import { mapOffchainHealthToUi } from '../../orderUiModel';
-import { deriveReputationView } from './reputationModel';
+import { deriveReputationView, MIN_REPUTATION_NOTIONAL_USD } from './reputationModel';
+import { WALLET_AGE_MIN_DAYS } from '../../walletAge';
 
 export const profileTabs = [
   { key: 'account', icon: UserRound, label: { TR: 'Hesap', EN: 'Account' } },
@@ -146,7 +147,7 @@ export const AccountPanel = ({
           <CheckRow
             pending={!sybilStatus}
             ok={Boolean(sybilStatus?.aged)}
-            label={tx(lang, 'Cüzdan yaşı (7 gün)', 'Wallet age (7 days)')}
+            label={tx(lang, `Cüzdan yaşı (${WALLET_AGE_MIN_DAYS} gün)`, `Wallet age (${WALLET_AGE_MIN_DAYS} days)`)}
             detail={!sybilStatus ? '…' : sybilStatus.aged ? tx(lang, 'Tamam', 'OK') : (walletAgeRemainingDays != null ? tx(lang, `${walletAgeRemainingDays} gün kaldı`, `${walletAgeRemainingDays} days left`) : tx(lang, 'Kayıt gerekli', 'Registration needed'))}
           />
           <CheckRow
@@ -299,6 +300,9 @@ export const ReputationPanel = ({
               <Bar pct={rep.nextTier.progressPct} />
             </div>
             <CheckRow ok={rep.nextTier.needTrades === 0} label={tx(lang, `${rep.nextTier.minTrades} başarılı işlem`, `${rep.nextTier.minTrades} successful trades`)} detail={rep.nextTier.needTrades === 0 ? tx(lang, 'Tamam', 'Done') : tx(lang, `${rep.nextTier.needTrades} kaldı`, `${rep.nextTier.needTrades} to go`)} />
+            <p className="text-[11px] text-textMuted" data-testid="reputation-min-notional">
+              {tx(lang, `${MIN_REPUTATION_NOTIONAL_USD} USD altındaki işlemler başarılı işlem sayısına eklenmez (cezalar yine uygulanır).`, `Trades under ${MIN_REPUTATION_NOTIONAL_USD} USD are not counted as successful trades (penalties still apply).`)}
+            </p>
             <CheckRow ok={rep.nextTier.riskOk} label={tx(lang, `Risk puanı ≤ ${rep.nextTier.riskCap}`, `Risk points ≤ ${rep.nextTier.riskCap}`)} detail={rep.nextTier.riskOk ? tx(lang, 'Tamam', 'OK') : tx(lang, `Şu an ${rep.riskPoints}`, `Now ${rep.riskPoints}`)} />
             <CheckRow
               ok={!rep.activePeriodPending && rep.activeUntil > 0}

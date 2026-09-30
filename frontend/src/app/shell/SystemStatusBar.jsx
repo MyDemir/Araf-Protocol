@@ -1,5 +1,6 @@
 import { LoaderCircle } from 'lucide-react';
 import React from 'react';
+import { WALLET_AGE_MIN_DAYS } from '../walletAge';
 
 const t = (lang, tr, en) => (lang === 'TR' ? tr : en);
 
@@ -65,7 +66,7 @@ export const resolveSystemStatuses = ({
       key: 'wallet_unregistered',
       tone: 'warning',
       title: t(lang, 'Cüzdan On-Chain Kayıtlı Değil', 'Wallet Not Registered'),
-      message: t(lang, 'Anti-Sybil 7 gün kontrolü için cüzdanınızı kaydedin.', 'Register your wallet for the 7-day Anti-Sybil check.'),
+      message: t(lang, `Anti-Sybil ${WALLET_AGE_MIN_DAYS} gün kontrolü için cüzdanınızı kaydedin.`, `Register your wallet for the ${WALLET_AGE_MIN_DAYS}-day Anti-Sybil check.`),
       action: 'register_wallet',
       isActionLoading: isRegisteringWallet,
     });
@@ -78,8 +79,8 @@ export const resolveSystemStatuses = ({
       title: t(lang, 'Cüzdan Yaşı Bekleniyor', 'Wallet Age Pending'),
       message: t(
         lang,
-        `Cüzdan kayıtlı ancak 7 günlük yaş şartı henüz dolmadı. Kalan süre: ~${walletAgeRemainingDays ?? '?'} gün.`,
-        `Wallet is registered but the 7-day age requirement is not met yet. Remaining: ~${walletAgeRemainingDays ?? '?'} day(s).`,
+        `Cüzdan kayıtlı ancak ${WALLET_AGE_MIN_DAYS} günlük yaş şartı henüz dolmadı. Kalan süre: ~${walletAgeRemainingDays ?? '?'} gün.`,
+        `Wallet is registered but the ${WALLET_AGE_MIN_DAYS}-day age requirement is not met yet. Remaining: ~${walletAgeRemainingDays ?? '?'} day(s).`,
       ),
     });
   }

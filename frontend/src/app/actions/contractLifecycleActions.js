@@ -1,6 +1,7 @@
 import { buildApiUrl } from '../apiConfig';
 import { resolveValidatedFillAmountRaw } from '../fillAmountPolicy';
 import { normalizeOrderSide, removeOrderByOnchainId, resolveOrderActionFns } from '../orderUiModel';
+import { WALLET_AGE_MIN_DAYS } from '../walletAge';
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
@@ -622,7 +623,7 @@ export const buildProfileActions = ({
       showToast(lang === 'TR' ? 'Cüzdan kaydediliyor... Cüzdanınızdan onaylayın.' : 'Registering wallet... Confirm in wallet.', 'info');
       await registerWallet();
       setIsWalletRegistered(true);
-      showToast(lang === 'TR' ? 'Cüzdan kaydedildi! 7 gün sonra Taker olarak işlem başlatabilirsiniz.' : 'Wallet registered! You can start as Taker after 7 days.', 'success');
+      showToast(lang === 'TR' ? `Cüzdan kaydedildi! ${WALLET_AGE_MIN_DAYS} gün sonra Taker olarak işlem başlatabilirsiniz.` : `Wallet registered! You can start as Taker after ${WALLET_AGE_MIN_DAYS} days.`, 'success');
     } catch (err) {
       console.error('handleRegisterWallet error:', err);
       const errorMessage = getTxErrorMessage(err, lang === 'TR' ? 'Kayıt başarısız.' : 'Registration failed.');

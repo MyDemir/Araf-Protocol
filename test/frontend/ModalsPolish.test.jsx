@@ -23,6 +23,14 @@ describe('SettlementPreviewModal', () => {
     expect(screen.getByText('12 USDT')).toBeInTheDocument();
     expect(screen.getByText('YOU')).toBeInTheDocument();
     expect(screen.queryByText('makerShareBps')).not.toBeInTheDocument();
+    expect(screen.getByTestId('settlement-decay-note')).toBeInTheDocument();
+  });
+
+  it('omits the decay note before bleeding starts', () => {
+    render(<SettlementPreviewModal isOpen lang="EN" userRole="maker" tokenSymbol="USDT" decimals={6} makerShareBps={5000} takerShareBps={5000}
+      previewData={{ pool: '500000000', makerPayout: '249750000', takerPayout: '249750000', decayedAmount: '0' }}
+      confirmLabel="Submit" onConfirm={vi.fn()} onClose={vi.fn()} />);
+    expect(screen.queryByTestId('settlement-decay-note')).not.toBeInTheDocument();
   });
 });
 

@@ -91,6 +91,18 @@ const ESCROW_EVENT_NAMES = [
 const VAULT_EVENT_NAMES = ["EscrowRevenueReceived", "ExternalRewardFunded", "ProductRewardFunded"];
 const REWARDS_EVENT_NAMES = ["EpochRewardAllocated", "TradeOutcomeRecorded", "RewardClaimed"];
 const EVENT_NAMES = [...ESCROW_EVENT_NAMES, ...VAULT_EVENT_NAMES, ...REWARDS_EVENT_NAMES];
+const EVENT_NAME_SET = new Set(EVENT_NAMES);
+
+// [TR] ethers v6 Log/EventLog nesnelerinde log sırası `index` alanındadır; `logIndex` yoktur. Eskiden
+//      `event.logIndex` her zaman undefined olduğu için aynı tx'teki event'lerin idempotency anahtarları
+//      çakışıyordu. DLQ kayıtları ve testler `logIndex` taşıyabildiği için ikisi de desteklenir.
+// [EN] ethers v6 logs carry their position in `index`, not `logIndex`. `event.logIndex` used to be undefined,
+//      so events in the same tx collided on their idempotency keys. Both spellings are accepted.
+function _logIndexOf(event) {
+  if (Number.isInteger(event?.logIndex)) return event.logIndex;
+  if (Number.isInteger(event?.index)) return event.index;
+  return undefined;
+}
 
 const ARAF_ABI = [
   "event WalletRegistered(address indexed wallet, uint256 timestamp)",
@@ -130,8 +142,8 @@ const ARAF_ABI = [
   "event EpochRewardAllocated(uint256 indexed epoch, address indexed token, uint256 amount)",
   "event TradeOutcomeRecorded(uint256 indexed tradeId, uint256 indexed epoch, address indexed maker, address taker, uint256 makerWeight, uint256 takerWeight, uint8 outcome)",
   "event RewardClaimed(uint256 indexed epoch, address indexed user, address indexed token, uint256 amount, uint256 userWeight, uint256 totalWeight)",
-  "function getTrade(uint256 _tradeId) view returns ((uint256 id,uint256 parentOrderId,address maker,address taker,address tokenAddress,uint256 cryptoAmount,uint256 makerBond,uint256 takerBond,uint16 takerFeeBpsSnapshot,uint16 makerFeeBpsSnapshot,uint8 tier,uint8 paymentRiskLevelSnapshot,uint8 state,uint256 lockedAt,uint256 paidAt,uint256 challengedAt,string ipfsReceiptHash,bool cancelProposedByMaker,bool cancelProposedByTaker,uint256 pingedAt,bool pingedByTaker,uint256 challengePingedAt,bool challengePingedByMaker))",
-  "function getOrder(uint256 _orderId) view returns ((uint256 id,address owner,uint8 side,address tokenAddress,uint256 totalAmount,uint256 remainingAmount,uint256 minFillAmount,uint256 remainingMakerBondReserve,uint256 remainingTakerBondReserve,uint16 takerFeeBpsSnapshot,uint16 makerFeeBpsSnapshot,uint8 tier,uint8 paymentRiskLevel,uint8 state,bytes32 orderRef))",
+  "function getTrade(uint256 _tradeId) view returns ((uint64 id,uint64 parentOrderId,address maker,address taker,address tokenAddress,uint256 cryptoAmount,uint256 makerBond,uint256 takerBond,uint16 takerFeeBpsSnapshot,uint16 makerFeeBpsSnapshot,uint8 tier,uint8 paymentRiskLevelSnapshot,uint8 state,uint64 lockedAt,uint64 paidAt,uint64 challengedAt,bool cancelProposedByMaker,bool cancelProposedByTaker,uint64 pingedAt,bool pingedByTaker,uint64 challengePingedAt,bool challengePingedByMaker))",
+  "function getOrder(uint256 _orderId) view returns ((uint64 id,address owner,uint8 side,address tokenAddress,uint256 totalAmount,uint256 remainingAmount,uint256 minFillAmount,uint256 remainingMakerBondReserve,uint256 remainingTakerBondReserve,uint16 takerFeeBpsSnapshot,uint16 makerFeeBpsSnapshot,uint8 tier,uint8 paymentRiskLevel,uint8 state,bytes32 orderRef))",
   // [TR] getReputation getter tuple sırası frontend + contract ile lock-step kalmalıdır.
   // [EN] Keep getReputation tuple order in lock-step with frontend + contract.
   "function getReputation(address _wallet) view returns (uint256 successful,uint256 failed,uint256 bannedUntil,uint256 consecutiveBans,uint8 effectiveTier,uint256 manualReleaseCount,uint256 autoReleaseCount,uint256 mutualCancelCount,uint256 disputedResolvedCount,uint256 burnCount,uint256 disputeWinCount,uint256 disputeLossCount,uint256 partialSettlementCount,uint256 riskPoints,uint256 lastPositiveEventAt,uint256 lastNegativeEventAt)",
@@ -604,20 +616,16 @@ class EventWorker {
 
     for (let from = fromBlock; from <= finalizedToBlock; from += BLOCK_BATCH_SIZE) {
       const to = Math.min(from + BLOCK_BATCH_SIZE - 1, finalizedToBlock);
-      const allEvents = [];
-
-      for (const eventName of EVENT_NAMES) {
-        const source = this._contractForEvent(eventName);
-        if (!source) continue;
-        try {
-          const filtered = await source.queryFilter(eventName, from, to);
-          if (Array.isArray(filtered)) allEvents.push(...filtered);
-        } catch (err) {
-          logger.warn(`[Worker] Replay: ${eventName} sorgusu başarısız (${from}-${to}): ${err.message}`);
-        }
+      let allEvents;
+      try {
+        allEvents = await this._fetchRangeEvents(from, to);
+      } catch (err) {
+        // [TR] Aralık okunamadıysa checkpoint ilerletilmez; bir sonraki replay aynı aralığı yeniden dener.
+        //      (Eskiden tek bir event sorgusu düşerse o event tipi sessizce atlanıp checkpoint ilerliyordu.)
+        // [EN] If the range cannot be read the checkpoint does not move; the next replay retries it.
+        logger.warn(`[Worker] Replay: log sorgusu başarısız (${from}-${to}): ${err.message}`);
+        return;
       }
-
-      allEvents.sort((a, b) => a.blockNumber - b.blockNumber || a.logIndex - b.logIndex);
 
       let batchSuccess = true;
       for (const event of allEvents) {
@@ -688,6 +696,42 @@ class EventWorker {
     this._setState("live", "canlı block-range listener bağlandı");
   }
 
+  /**
+   * [TR] Bir blok aralığındaki tüm izlenen event'leri TEK eth_getLogs çağrısıyla okur (escrow + vault +
+   *      rewards adresleri tek filtrede). Eskiden her event tipi için ayrı sorgu (~33/aralık) atılıyordu ve
+   *      canlı dinleyici bunu her blokta yapıyordu. Her log yalnız kendi kaynak kontratının izlenen event'i
+   *      ise kabul edilir; sıralama blok + log index'e göredir.
+   * [EN] Reads every watched event in a block range with ONE eth_getLogs call (escrow + vault + rewards
+   *      addresses in one filter) instead of one query per event type (~33 per range, on every block).
+   *      A log is accepted only if it is a watched event of the contract that emitted it.
+   */
+  async _fetchRangeEvents(fromBlock, toBlock) {
+    const sources = new Map();
+    for (const source of [this.contract, this.vaultContract, this.rewardsContract]) {
+      const address = typeof source?.target === "string" ? source.target.toLowerCase() : null;
+      if (address) sources.set(address, source);
+    }
+    if (sources.size === 0) return [];
+
+    const logs = await this.provider.getLogs({ address: [...sources.keys()], fromBlock, toBlock });
+    const events = [];
+    for (const log of logs || []) {
+      const source = sources.get(String(log.address || "").toLowerCase());
+      if (!source || !log.topics?.length) continue;
+      let fragment = null;
+      try {
+        fragment = source.interface.getEvent(log.topics[0]);
+      } catch (_) {
+        fragment = null;
+      }
+      if (!fragment || !EVENT_NAME_SET.has(fragment.name)) continue;
+      if (this._contractForEvent(fragment.name) !== source) continue;
+      events.push(new ethers.EventLog(log, source.interface, fragment));
+    }
+    events.sort((a, b) => a.blockNumber - b.blockNumber || a.index - b.index);
+    return events;
+  }
+
   async _pollLiveRange(fromBlock, toBlock) {
     if (!this.contract || fromBlock > toBlock) return;
 
@@ -695,16 +739,7 @@ class EventWorker {
       const to = Math.min(from + BLOCK_BATCH_SIZE - 1, toBlock);
 
       try {
-        const allEvents = [];
-
-        for (const eventName of EVENT_NAMES) {
-          const source = this._contractForEvent(eventName);
-          if (!source) continue;
-          const filtered = await source.queryFilter(eventName, from, to);
-          if (Array.isArray(filtered)) allEvents.push(...filtered);
-        }
-
-        allEvents.sort((a, b) => a.blockNumber - b.blockNumber || a.logIndex - b.logIndex);
+        const allEvents = await this._fetchRangeEvents(from, to);
         this._seedAckStateForRange(from, to);
 
         for (const event of allEvents) {
@@ -792,7 +827,7 @@ class EventWorker {
   }
 
   _getEventId(event) {
-    return `${event?.transactionHash || "unknown_tx"}:${Number.isInteger(event?.logIndex) ? event.logIndex : -1}`;
+    return `${event?.transactionHash || "unknown_tx"}:${Number.isInteger(_logIndexOf(event)) ? _logIndexOf(event) : -1}`;
   }
 
   _trackLiveEventSeen(event) {
@@ -911,7 +946,7 @@ class EventWorker {
     const entry = JSON.stringify({
       eventName: event.eventName,
       txHash: event.transactionHash,
-      logIndex: event.logIndex ?? null,
+      logIndex: _logIndexOf(event) ?? null,
       idempotencyKey: this._getEventId(event),
       blockNumber: event.blockNumber,
       namedArgs: Object.fromEntries(
@@ -1107,7 +1142,8 @@ class EventWorker {
     };
 
     if (opts.listingRef) setPayload["canonical_refs.listing_ref"] = opts.listingRef;
-    if (tradeData.ipfsReceiptHash) setPayload["evidence.ipfs_receipt_hash"] = tradeData.ipfsReceiptHash;
+    // [TR] Dekont hash'i kontrat storage'ında tutulmaz; PaymentReported event'inden aynalanır.
+    // [EN] The receipt hash is not in contract storage; it is mirrored from the PaymentReported event.
 
     // [TR] Parent order'daki maker kur/fiat bilgisi (UI enrichment) child trade'e fill anında kopyalanır.
     // [EN] Copy the maker's fiat/rate enrichment from the parent order into the child trade at fill time.
@@ -2041,12 +2077,12 @@ class EventWorker {
   async _onProtocolRevenueSent(event) {
     const { token, amount, kind, tradeId } = event.args;
     await RevenueEvent.findOneAndUpdate(
-      { tx_hash: event.transactionHash, log_index: Number(event.logIndex) },
+      { tx_hash: event.transactionHash, log_index: Number(_logIndexOf(event)) },
       {
         $setOnInsert: {
           tx_hash: event.transactionHash,
           block_number: Number(event.blockNumber || 0),
-          log_index: Number(event.logIndex || 0),
+          log_index: Number(_logIndexOf(event) || 0),
           token: token?.toLowerCase?.() || null,
           amount: _toStr(amount),
           kind: _toNum(kind),
@@ -2062,12 +2098,12 @@ class EventWorker {
   async _onEscrowRevenueReceived(event) {
     const { token, amount, rewardShare, treasuryShare, kind, tradeId } = event.args;
     await RevenueEvent.findOneAndUpdate(
-      { tx_hash: event.transactionHash, log_index: Number(event.logIndex) },
+      { tx_hash: event.transactionHash, log_index: Number(_logIndexOf(event)) },
       {
         $setOnInsert: {
           tx_hash: event.transactionHash,
           block_number: Number(event.blockNumber || 0),
-          log_index: Number(event.logIndex || 0),
+          log_index: Number(_logIndexOf(event) || 0),
           token: token?.toLowerCase?.() || null,
           amount: _toStr(amount),
           reward_share: _toStr(rewardShare),
@@ -2085,11 +2121,11 @@ class EventWorker {
   async _onExternalRewardFunded(event) {
     const { funder, token, amount, targetEpoch, fundingRef } = event.args;
     await RewardFunding.findOneAndUpdate(
-      { tx_hash: event.transactionHash, log_index: Number(event.logIndex) },
+      { tx_hash: event.transactionHash, log_index: Number(_logIndexOf(event)) },
       { $setOnInsert: {
         tx_hash: event.transactionHash,
         block_number: Number(event.blockNumber || 0),
-        log_index: Number(event.logIndex || 0),
+        log_index: Number(_logIndexOf(event) || 0),
         funder: funder?.toLowerCase?.() || null,
         token: token?.toLowerCase?.() || null,
         amount: _toStr(amount),
@@ -2105,11 +2141,11 @@ class EventWorker {
   async _onProductRewardFunded(event) {
     const { funder, productId, token, amount, targetEpoch, fundingRef } = event.args;
     await RewardFunding.findOneAndUpdate(
-      { tx_hash: event.transactionHash, log_index: Number(event.logIndex) },
+      { tx_hash: event.transactionHash, log_index: Number(_logIndexOf(event)) },
       { $setOnInsert: {
         tx_hash: event.transactionHash,
         block_number: Number(event.blockNumber || 0),
-        log_index: Number(event.logIndex || 0),
+        log_index: Number(_logIndexOf(event) || 0),
         funder: funder?.toLowerCase?.() || null,
         token: token?.toLowerCase?.() || null,
         amount: _toStr(amount),
@@ -2125,7 +2161,7 @@ class EventWorker {
   async _onEpochRewardAllocated(event) {
     const { epoch, token, amount } = event.args;
     const tx_hash = event.transactionHash;
-    const log_index = Number(event.logIndex || 0);
+    const log_index = Number(_logIndexOf(event) || 0);
     const insertResult = await RewardEpochAllocationEvent.findOneAndUpdate(
       { tx_hash, log_index },
       { $setOnInsert: { tx_hash, log_index, epoch: _toStr(epoch), token: token?.toLowerCase?.() || null, amount: _toStr(amount) } },
@@ -2158,19 +2194,24 @@ class EventWorker {
   }
 
   async _onTradeOutcomeRecorded(event) {
-    const { epoch, maker, taker, makerWeight, takerWeight } = event.args;
-    void epoch; void maker; void taker; void makerWeight; void takerWeight;
-    // Read-model only: canonical weights are on-chain and NOT persisted as authority.
+    // [TR] Ağırlıklar authority olarak saklanmaz (kanonik değer zincirde); yalnız recorder'ın aynı trade'i
+    //      tekrar göndermemesi için kayıt anı işaretlenir.
+    // [EN] Weights are not persisted as authority; only the record time is marked so the recorder skips it.
+    const { tradeId } = event.args;
+    await Trade.updateOne(
+      { ..._buildIdentityLookup("onchain_escrow_id", tradeId), "timers.reward_recorded_at": null },
+      { $set: { "timers.reward_recorded_at": await this._getEventDate(event) } }
+    );
   }
 
   async _onRewardClaimed(event) {
     const { epoch, user, token, amount, userWeight, totalWeight } = event.args;
     await RewardClaim.findOneAndUpdate(
-      { tx_hash: event.transactionHash, log_index: Number(event.logIndex) },
+      { tx_hash: event.transactionHash, log_index: Number(_logIndexOf(event)) },
       { $setOnInsert: {
         tx_hash: event.transactionHash,
         block_number: Number(event.blockNumber || 0),
-        log_index: Number(event.logIndex || 0),
+        log_index: Number(_logIndexOf(event) || 0),
         epoch: _toStr(epoch),
         user: user?.toLowerCase?.() || null,
         token: token?.toLowerCase?.() || null,
@@ -2392,5 +2433,7 @@ worker.getDiagnostics = function getDiagnostics() {
     reconciliationNeeded: ignoredTotal > 0 || (worker._retryFailureCount || 0) > 0 || unsafeAckBlocks.length > 0,
   };
 };
+
+worker._ARAF_ABI_FOR_TESTS = ARAF_ABI;
 
 module.exports = worker;

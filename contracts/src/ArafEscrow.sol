@@ -177,11 +177,19 @@ contract ArafEscrow is ReentrancyGuard, Ownable, Pausable {
         BURN_RESIDUAL
     }
 
+    // [TR] Storage düzeni gas için paketlenmiştir; alan sırası (ve getTrade ABI word sırası) korunur:
+    //      id+parentOrderId | maker | taker | token | cryptoAmount | makerBond | takerBond |
+    //      snapshot'lar+state+lockedAt+paidAt+challengedAt | cancel+ping+challengePing (9 slot, eskiden 18).
+    //      Ödeme bildirimi ve itiraz yeni slot açmaz. Dekont hash'i storage'da tutulmaz; kanonik kaydı
+    //      PaymentReported event'idir (hiçbir kontrat kararı onu okumaz).
+    // [EN] Storage is packed for gas; field order (and getTrade ABI word order) is unchanged (9 slots, was 18).
+    //      Reporting payment and challenging open no new slot. The receipt hash is not stored; its canonical
+    //      record is the PaymentReported event (no contract decision reads it).
     struct Trade {
-        uint256 id;
+        uint64  id;
         // [TR] V3'te her child trade bir parent order fill'inden doğar; bu alan artık nullable semantik taşımaz.
         // [EN] In V3 every child trade is born from a parent order fill; this field no longer carries nullable semantics.
-        uint256 parentOrderId;
+        uint64  parentOrderId;
         address maker;
         address taker;
         address tokenAddress;
@@ -193,22 +201,22 @@ contract ArafEscrow is ReentrancyGuard, Ownable, Pausable {
         uint8   tier;
         PaymentRiskLevel paymentRiskLevelSnapshot;
         TradeState state;
-        uint256 lockedAt;
-        uint256 paidAt;
-        uint256 challengedAt;
-        string  ipfsReceiptHash;
+        uint64  lockedAt;
+        uint64  paidAt;
+        uint64  challengedAt;
         bool    cancelProposedByMaker;
         bool    cancelProposedByTaker;
-        uint256 pingedAt;
+        uint64  pingedAt;
         bool    pingedByTaker;
-        uint256 challengePingedAt;
+        uint64  challengePingedAt;
         bool    challengePingedByMaker;
     }
 
     // [TR] Parent Order — public emir katmanı
     // [EN] Parent Order — public order layer
+    // [TR] id, owner+side ile aynı slotta (alan sırası korunur). [EN] id shares the owner+side slot.
     struct Order {
-        uint256 id;
+        uint64  id;
         address owner;
         OrderSide side;
         address tokenAddress;
@@ -260,11 +268,12 @@ contract ArafEscrow is ReentrancyGuard, Ownable, Pausable {
 
     // [TR] Terminalized trade için minimal fee/outcome snapshot.
     // [EN] Minimal fee/outcome snapshot for terminalized trades.
+    // [TR] 3 slot: outcome+terminalAt | takerFeePaid | makerFeePaid. [EN] outcome and terminalAt share a slot.
     struct TerminalTradeSnapshot {
         TerminalOutcome outcome;
+        uint64  terminalAt;
         uint256 takerFeePaid;
         uint256 makerFeePaid;
-        uint256 terminalAt;
     }
 
     struct RewardableTradeView {
@@ -334,12 +343,14 @@ contract ArafEscrow is ReentrancyGuard, Ownable, Pausable {
     uint256 public constant PAYMENT_WINDOW       =  48 hours;
     uint256 public constant USDT_DECAY_START     =  96 hours;
     uint256 public constant MAX_BLEEDING         = 240 hours;
-    uint256 internal constant WALLET_AGE_MIN       =   7 days;
+    uint256 internal constant WALLET_AGE_MIN       =   2 days;
     uint256 internal constant DEFAULT_TIER0_TRADE_COOLDOWN = 4 hours;
     uint256 internal constant DEFAULT_TIER1_TRADE_COOLDOWN = 4 hours;
     uint256 internal constant MAX_CANCEL_DEADLINE  =   7 days;
     uint256 internal constant MIN_SETTLEMENT_EXPIRY = 10 minutes;
     uint256 public constant MIN_ACTIVE_PERIOD    =  15 days;
+    // [TR] Reputation'a sayılan en küçük trade (6 ondalığa normalize, 20 USD). [EN] Smallest trade counted for reputation.
+    uint256 internal constant MIN_REPUTATION_NOTIONAL = 20e6;
 
     uint256 internal constant TAKER_BOND_DECAY_BPS_H = 42;
     uint256 internal constant MAKER_BOND_DECAY_BPS_H = 26;
@@ -653,7 +664,9 @@ contract ArafEscrow is ReentrancyGuard, Ownable, Pausable {
         _safeTransferExactIn(IERC20(o.tokenAddress), msg.sender, takerBond);
 
         tradeId = _spawnTrade(o, _orderId, o.owner, msg.sender, _fillAmount, makerBondSlice, takerBond, _childListingRef);
-        lastTradeAt[msg.sender] = block.timestamp;
+        // [TR] Cooldown yalnız Tier 0/1 order'larında uygulanır; Tier 2+ fill'i gereksiz storage yazmaz.
+        // [EN] Cooldown only applies to Tier 0/1 orders; a Tier 2+ fill skips the needless storage write.
+        if (o.tier < 2) lastTradeAt[msg.sender] = block.timestamp;
     }
 
     /**
@@ -723,7 +736,7 @@ contract ArafEscrow is ReentrancyGuard, Ownable, Pausable {
         _safeTransferExactIn(IERC20(o.tokenAddress), msg.sender, _fillAmount + makerBond);
 
         tradeId = _spawnTrade(o, _orderId, msg.sender, o.owner, _fillAmount, makerBond, takerBondSlice, _childListingRef);
-        lastTradeAt[o.owner] = block.timestamp;
+        if (o.tier < 2) lastTradeAt[o.owner] = block.timestamp;
     }
 
     /**
@@ -762,7 +775,7 @@ contract ArafEscrow is ReentrancyGuard, Ownable, Pausable {
 
         orderId = ++orderCounter;
         Order storage o = orders[orderId];
-        o.id                        = orderId;
+        o.id                        = uint64(orderId);
         o.owner                     = msg.sender;
         o.side                      = _side;
         o.tokenAddress              = _token;
@@ -856,8 +869,8 @@ contract ArafEscrow is ReentrancyGuard, Ownable, Pausable {
     ) internal returns (uint256 tradeId) {
         tradeId = ++tradeCounter;
         Trade storage t = trades[tradeId];
-        t.id                       = tradeId;
-        t.parentOrderId            = _orderId;
+        t.id                       = uint64(tradeId);
+        t.parentOrderId            = uint64(_orderId);
         t.maker                    = _maker;
         t.taker                    = _taker;
         t.tokenAddress             = o.tokenAddress;
@@ -869,7 +882,7 @@ contract ArafEscrow is ReentrancyGuard, Ownable, Pausable {
         t.tier                     = o.tier;
         t.paymentRiskLevelSnapshot = o.paymentRiskLevel;
         t.state                    = TradeState.LOCKED;
-        t.lockedAt                 = block.timestamp;
+        t.lockedAt                 = uint64(block.timestamp);
 
         emit OrderFilled(_orderId, tradeId, msg.sender, _fillAmount, o.remainingAmount, o.paymentRiskLevel, _childListingRef);
     }
@@ -895,8 +908,7 @@ contract ArafEscrow is ReentrancyGuard, Ownable, Pausable {
         if (bytes(_ipfsHash).length == 0) revert EmptyIpfsHash();
 
         t.state           = TradeState.PAID;
-        t.paidAt          = block.timestamp;
-        t.ipfsReceiptHash = _ipfsHash;
+        t.paidAt          = uint64(block.timestamp);
         // [TR] Önceki state'te verilen iptal onayı yeni ekonomik duruma taşınmaz (ödeme sonrası bayat onay istismarı).
         // [EN] Cancel consent given in a previous state does not carry into the new economic state.
         t.cancelProposedByMaker = false;
@@ -980,10 +992,10 @@ contract ArafEscrow is ReentrancyGuard, Ownable, Pausable {
         if (makerOpenedDispute) {
             // [TR] CHALLENGED→RESOLVED yolu maker'ın challenge iddiasının başarısızlığı olarak sınıflanır.
             // [EN] CHALLENGED→RESOLVED path is classified as maker challenge-loss semantics.
-            _recordDisputeResolution(t.maker, t.taker, false);
+            _recordDisputeResolution(t, false);
             _recordTerminalOutcome(_tradeId, TerminalOutcome.DISPUTED_RELEASE, takerFee, actualMakerFee);
         } else {
-            _recordManualRelease(t.maker, t.taker);
+            _recordManualRelease(t);
             _recordTerminalOutcome(_tradeId, TerminalOutcome.CLEAN_RELEASE, takerFee, actualMakerFee);
         }
 
@@ -1008,7 +1020,7 @@ contract ArafEscrow is ReentrancyGuard, Ownable, Pausable {
         if (t.pingedByTaker) revert ConflictingPingPath();
 
         t.challengePingedByMaker = true;
-        t.challengePingedAt      = block.timestamp;
+        t.challengePingedAt      = uint64(block.timestamp);
         emit MakerPinged(_tradeId, msg.sender, block.timestamp);
     }
 
@@ -1029,7 +1041,7 @@ contract ArafEscrow is ReentrancyGuard, Ownable, Pausable {
         if (block.timestamp < t.challengePingedAt + 24 hours) revert ResponseWindowActive();
 
         t.state        = TradeState.CHALLENGED;
-        t.challengedAt = block.timestamp;
+        t.challengedAt = uint64(block.timestamp);
         t.cancelProposedByMaker = false;
         t.cancelProposedByTaker = false;
         emit DisputeOpened(_tradeId, msg.sender, block.timestamp);
@@ -1108,7 +1120,7 @@ contract ArafEscrow is ReentrancyGuard, Ownable, Pausable {
         if (t.challengePingedByMaker) revert ConflictingPingPath();
 
         t.pingedByTaker = true;
-        t.pingedAt      = block.timestamp;
+        t.pingedAt      = uint64(block.timestamp);
         emit MakerPinged(_tradeId, msg.sender, block.timestamp);
     }
 
@@ -1146,7 +1158,7 @@ contract ArafEscrow is ReentrancyGuard, Ownable, Pausable {
         );
 
         _recordTerminalOutcome(_tradeId, TerminalOutcome.AUTO_RELEASE, takerPenalty, makerPenalty);
-        _recordAutoRelease(t.maker, t.taker);
+        _recordAutoRelease(t);
 
         // Event payload order must stay aligned with EscrowReleased(takerFee, makerFee)
         // so off-chain listeners book penalties to the correct party.
@@ -1278,7 +1290,7 @@ contract ArafEscrow is ReentrancyGuard, Ownable, Pausable {
         _payout(t, _tradeId, makerPayout, takerPayout, decayed + makerFee + takerFee, decayed, RevenueKind.PARTIAL_SETTLEMENT_FEE);
 
         _recordTerminalOutcome(_tradeId, TerminalOutcome.PARTIAL_SETTLEMENT, takerFee, makerFee);
-        _recordPartialSettlement(t.maker, t.taker);
+        _recordPartialSettlement(t);
 
         emit SettlementFinalized(_tradeId, sp.id, makerPayout, takerPayout, takerFee, makerFee);
     }
@@ -1444,9 +1456,9 @@ contract ArafEscrow is ReentrancyGuard, Ownable, Pausable {
         if (snapshot.terminalAt != 0) return;
 
         snapshot.outcome = _outcome;
+        snapshot.terminalAt = uint64(block.timestamp);
         snapshot.takerFeePaid = _takerFeePaid;
         snapshot.makerFeePaid = _makerFeePaid;
-        snapshot.terminalAt = block.timestamp;
     }
 
     /**
@@ -1499,30 +1511,43 @@ contract ArafEscrow is ReentrancyGuard, Ownable, Pausable {
         }
     }
 
-    function _recordManualRelease(address _maker, address _taker) internal {
+    // [TR] Mikro işlem koruması: MIN_REPUTATION_NOTIONAL altındaki trade'ler başarılı işlem sayısına ve
+    //      risk puanı iyileşmesine katkı vermez (tier şişirme maliyetsiz olmasın). Ceza sinyalleri her
+    //      büyüklükte uygulanır; ödül ağırlığı ise hacme göre ayrıca hesaplanır.
+    // [EN] Micro-trade guard: trades below MIN_REPUTATION_NOTIONAL add no successful-trade count and no
+    //      risk-point recovery, so tier inflation is not free. Penalties apply at any size; reward weight
+    //      is volume-based and computed separately.
+    function _repUnit(Trade storage t) internal view returns (bool) {
+        return _toStableUnits(t.cryptoAmount, tokenConfigs[t.tokenAddress].decimals) >= MIN_REPUTATION_NOTIONAL;
+    }
+
+    function _recordManualRelease(Trade storage t) internal {
+        address _maker = t.maker;
+        address _taker = t.taker;
+        bool q = _repUnit(t);
         Reputation storage makerRep = reputation[_maker];
         Reputation storage takerRep = reputation[_taker];
-        makerRep.successfulTrades++;
-        takerRep.successfulTrades++;
         makerRep.manualReleaseCount++;
         takerRep.manualReleaseCount++;
 
-        _applyPositiveSignal(_maker, makerRep, manualReleaseRewardPts);
-        _applyPositiveSignal(_taker, takerRep, manualReleaseRewardPts);
+        _applyPositiveSignal(_maker, makerRep, manualReleaseRewardPts, q);
+        _applyPositiveSignal(_taker, takerRep, manualReleaseRewardPts, q);
         _emitReputationUpdated(_maker, makerRep);
         _emitReputationUpdated(_taker, takerRep);
     }
 
-    function _recordAutoRelease(address _maker, address _taker) internal {
+    function _recordAutoRelease(Trade storage t) internal {
+        address _maker = t.maker;
+        address _taker = t.taker;
+        bool q = _repUnit(t);
         Reputation storage makerRep = reputation[_maker];
         Reputation storage takerRep = reputation[_taker];
-        takerRep.successfulTrades++;
         makerRep.autoReleaseCount++;
         takerRep.autoReleaseCount++;
         makerRep.failedDisputes++;
 
         _applyNegativeSignal(_maker, makerRep, autoReleasePenaltyPts);
-        _applyPositiveSignal(_taker, takerRep, manualReleaseRewardPts);
+        _applyPositiveSignal(_taker, takerRep, manualReleaseRewardPts, q);
         _emitReputationUpdated(_maker, makerRep);
         _emitReputationUpdated(_taker, takerRep);
     }
@@ -1539,25 +1564,26 @@ contract ArafEscrow is ReentrancyGuard, Ownable, Pausable {
         _emitReputationUpdated(_taker, takerRep);
     }
 
-    function _recordDisputeResolution(address _maker, address _taker, bool makerWon) internal {
+    function _recordDisputeResolution(Trade storage t, bool makerWon) internal {
+        address _maker = t.maker;
+        address _taker = t.taker;
+        bool q = _repUnit(t);
         Reputation storage makerRep = reputation[_maker];
         Reputation storage takerRep = reputation[_taker];
         makerRep.disputedResolvedCount++;
         takerRep.disputedResolvedCount++;
 
         if (makerWon) {
-            makerRep.successfulTrades++;
             makerRep.disputeWinCount++;
             takerRep.disputeLossCount++;
             takerRep.failedDisputes++;
-            _applyPositiveSignal(_maker, makerRep, disputeWinRewardPts);
+            _applyPositiveSignal(_maker, makerRep, disputeWinRewardPts, q);
             _applyNegativeSignal(_taker, takerRep, disputeLossPenaltyPts);
         } else {
-            takerRep.successfulTrades++;
             takerRep.disputeWinCount++;
             makerRep.disputeLossCount++;
             makerRep.failedDisputes++;
-            _applyPositiveSignal(_taker, takerRep, disputeWinRewardPts);
+            _applyPositiveSignal(_taker, takerRep, disputeWinRewardPts, q);
             _applyNegativeSignal(_maker, makerRep, disputeLossPenaltyPts);
         }
 
@@ -1579,11 +1605,12 @@ contract ArafEscrow is ReentrancyGuard, Ownable, Pausable {
         _emitReputationUpdated(_taker, takerRep);
     }
 
-    function _recordPartialSettlement(address _maker, address _taker) internal {
+    function _recordPartialSettlement(Trade storage t) internal {
+        address _maker = t.maker;
+        address _taker = t.taker;
+        bool q = _repUnit(t);
         Reputation storage makerRep = reputation[_maker];
         Reputation storage takerRep = reputation[_taker];
-        makerRep.successfulTrades++;
-        takerRep.successfulTrades++;
         makerRep.partialSettlementCount++;
         takerRep.partialSettlementCount++;
 
@@ -1591,13 +1618,17 @@ contract ArafEscrow is ReentrancyGuard, Ownable, Pausable {
         //      sinyal yalnız firstSuccessfulTradeAt/lastPositiveEventAt alanlarını tutarlı başlatır.
         // [EN] Partial settlement is non-penal. The zero-point positive signal only keeps
         //      firstSuccessfulTradeAt/lastPositiveEventAt consistent with successfulTrades.
-        _applyPositiveSignal(_maker, makerRep, 0);
-        _applyPositiveSignal(_taker, takerRep, 0);
+        _applyPositiveSignal(_maker, makerRep, 0, q);
+        _applyPositiveSignal(_taker, takerRep, 0, q);
         _emitReputationUpdated(_maker, makerRep);
         _emitReputationUpdated(_taker, takerRep);
     }
 
-    function _applyPositiveSignal(address _wallet, Reputation storage rep, uint32 rewardPts) internal {
+    // [TR] Başarılı işlem sayacı yalnız burada artar; `qualifies` false ise (mikro işlem) sinyal yok sayılır.
+    // [EN] The successful-trade counter only grows here; a non-qualifying (micro) trade is ignored.
+    function _applyPositiveSignal(address _wallet, Reputation storage rep, uint32 rewardPts, bool qualifies) internal {
+        if (!qualifies) return;
+        rep.successfulTrades++;
         uint64 nowTs = uint64(block.timestamp);
         rep.lastPositiveEventAt = nowTs;
 
@@ -1838,6 +1869,16 @@ contract ArafEscrow is ReentrancyGuard, Ownable, Pausable {
         return trades[_tradeId];
     }
 
+    // [TR] Ödül ağırlığı token'lar arası karşılaştırılabilir olsun diye notional 6 ondalığa normalize edilir;
+    //      aksi halde 18 ondalıklı bir stable aynı dolar hacmi için 1e12 kat ağırlık alırdı.
+    // [EN] Normalizes notional to 6 decimals so reward weight is comparable across tokens; otherwise an
+    //      18-decimal stable would earn 1e12x the weight for the same dollar volume.
+    function _toStableUnits(uint256 _amount, uint8 _decimals) internal pure returns (uint256) {
+        if (_decimals > 6) return _amount / (10 ** (_decimals - 6));
+        if (_decimals < 6) return _amount * (10 ** (6 - _decimals));
+        return _amount;
+    }
+
     /**
      * @notice Reward motoru için trade'in contract-authoritative terminal görünümünü döndürür.
      * @dev    Backend/admin kaynaklarından türetilmez; yalnız kontrat state/snapshot'larından beslenir.
@@ -1852,7 +1893,7 @@ contract ArafEscrow is ReentrancyGuard, Ownable, Pausable {
             maker: t.maker,
             taker: t.taker,
             token: t.tokenAddress,
-            stableNotional: t.cryptoAmount,
+            stableNotional: _toStableUnits(t.cryptoAmount, tokenConfigs[t.tokenAddress].decimals),
             takerFeePaid: terminalSnapshot.takerFeePaid,
             makerFeePaid: terminalSnapshot.makerFeePaid,
             tier: t.tier,

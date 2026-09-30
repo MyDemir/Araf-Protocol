@@ -3,6 +3,7 @@ import { formatUnits } from 'viem';
 import { useCountdown } from '../hooks/useCountdown';
 import { mapApiOrderToUi } from './orderUiModel';
 import { buildApiUrl } from './apiConfig';
+import { WALLET_AGE_MIN_SEC } from './walletAge';
 
 const DEFAULT_TOKEN_DECIMALS = 6;
 
@@ -769,7 +770,7 @@ export function useAppSessionData({
         setIsWalletRegistered(regAt > 0n);
         if (regAt > 0n) {
           const nowSec = Math.floor(Date.now() / 1000);
-          const remainingSec = Math.max(0, Number(regAt) + 7 * 24 * 3600 - nowSec);
+          const remainingSec = Math.max(0, Number(regAt) + WALLET_AGE_MIN_SEC - nowSec);
           setWalletAgeRemainingDays(Math.ceil(remainingSec / (24 * 3600)));
         } else {
           setWalletAgeRemainingDays(null);
