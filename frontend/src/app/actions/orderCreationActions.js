@@ -6,7 +6,6 @@ export const MAKER_ORDER_DEFAULTS = {
   makerAmount: '',
   makerRate: '',
   makerMinLimit: '',
-  makerMaxLimit: '',
   makerFiat: 'TRY',
   makerToken: 'USDT',
   makerSide: 'SELL_CRYPTO',
@@ -44,7 +43,6 @@ export const getMakerOrderValidationError = ({
   makerTier,
   makerRate,
   makerMinLimit,
-  makerMaxLimit,
   makerFiat,
   makerSide = 'SELL_CRYPTO',
   makerToken = 'USDT',
@@ -55,7 +53,6 @@ export const getMakerOrderValidationError = ({
   const cryptoAmtNum = parseFloat(makerAmount) || 0;
   const rateNum = parseFloat(makerRate) || 0;
   const minLimNum = parseFloat(makerMinLimit) || 0;
-  const maxLimNum = parseFloat(makerMaxLimit) || 0;
   const totalFiatValue = cryptoAmtNum * rateNum;
   const tierMax = tierMaxAmounts?.[makerTier];
 
@@ -78,8 +75,6 @@ export const getMakerOrderValidationError = ({
   //      validated for consistency when provided.
   if (makerMinLimit && minLimNum <= 0) return lang === 'TR' ? 'Minimum limit sıfırdan büyük olmalı.' : 'Min limit must be greater than zero.';
   if (makerMinLimit && minLimNum > totalFiatValue) return lang === 'TR' ? `Min limit toplam değeri (${totalFiatValue.toFixed(2)} ${makerFiat}) aşamaz.` : `Min limit exceeds total fiat (${totalFiatValue.toFixed(2)} ${makerFiat}).`;
-  if (makerMaxLimit && maxLimNum > 0 && minLimNum > maxLimNum) return lang === 'TR' ? 'Min limit, Max limitten büyük olamaz.' : 'Min limit cannot exceed Max.';
-  if (makerMaxLimit && maxLimNum > totalFiatValue) return lang === 'TR' ? `Max limit toplam değeri (${totalFiatValue.toFixed(2)} ${makerFiat}) aşamaz.` : `Max limit exceeds total fiat (${totalFiatValue.toFixed(2)} ${makerFiat}).`;
   return null;
 };
 

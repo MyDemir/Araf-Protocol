@@ -8,6 +8,7 @@
  */
 
 const express = require("express");
+const { parsePositiveOnchainId: _parsePositiveOnchainId } = require("../utils/onchain");
 const multer = require("multer");
 const crypto = require("crypto");
 const path = require("path");
@@ -48,13 +49,7 @@ const MAGIC_BYTES_BY_MIME = {
   "application/pdf": [(buf) => buf.length >= 5 && buf.subarray(0, 5).toString("ascii") === "%PDF-"],
 };
 
-const POSITIVE_NUMERIC_ID_RE = /^[1-9]\d*$/;
 
-function _parsePositiveOnchainId(rawId) {
-  const normalized = String(rawId ?? "").trim();
-  if (!POSITIVE_NUMERIC_ID_RE.test(normalized)) return null;
-  return normalized;
-}
 
 function _buildIdentityLookup(idString) {
   return { onchain_escrow_id: idString };

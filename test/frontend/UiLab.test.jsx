@@ -1,9 +1,9 @@
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import DevScenarioController from '../../frontend/src/dev/ui-lab/DevScenarioController';
-import { isUiLabEnabled } from '../../frontend/src/dev/ui-lab/isUiLabEnabled';
-import { scenarioRegistry } from '../../frontend/src/dev/ui-lab/scenarioRegistry';
+import DevScenarioController from '../ui-lab/controller/DevScenarioController';
+import { isUiLabEnabled } from '../../frontend/src/app/uiLab';
+import { scenarioRegistry } from '../ui-lab/controller/scenarioRegistry';
 
 afterEach(() => {
   cleanup();

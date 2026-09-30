@@ -1,5 +1,6 @@
 import React from 'react';
 import { getStateLabel } from '../../copy/states';
+import { normalizeSettlementState } from '../settlement/settlementActionModel';
 
 const roleCopy = {
   maker: { TR: 'Satıcı', EN: 'Maker' },
@@ -31,10 +32,6 @@ const getRoleLabel = (role, lang = 'EN') => {
   return row[pickLang(lang)] || row.EN || row.TR || role;
 };
 
-const normalizeSettlementState = (state) => {
-  const normalized = String(state || '').toUpperCase();
-  return normalized || 'NONE';
-};
 
 const safeFiatEstimate = (rawTrade) => {
   if (rawTrade?.max === null || rawTrade?.max === undefined) return null;

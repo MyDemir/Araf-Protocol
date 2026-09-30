@@ -8,7 +8,9 @@ import { orderSide as orderSideCopy } from './copy';
 
 const DEFAULT_TOKEN_DECIMALS = 6;
 const VALID_ORDER_SIDES = new Set(['SELL_CRYPTO', 'BUY_CRYPTO']);
-const SEPA_COUNTRIES = new Set(['DE', 'FR', 'NL', 'BE', 'ES', 'IT', 'AT', 'PT', 'IE', 'LU', 'FI', 'GR']);
+// [TR] SEPA ülke listesinin tek kaynağı (profil formu ve rail doğrulaması). [EN] Single source for SEPA countries.
+export const SEPA_COUNTRY_CODES = ['DE', 'FR', 'NL', 'BE', 'ES', 'IT', 'AT', 'PT', 'IE', 'LU', 'FI', 'GR'];
+const SEPA_COUNTRIES = new Set(SEPA_COUNTRY_CODES);
 
 export const getOrderSideCopy = (side, variant = 'display', lang = 'TR') => {
   const suffixByVariant = {
@@ -74,11 +76,25 @@ export const resolveOrderActionFns = (side, fns) => {
   };
 };
 
-const rawToNumber = (raw, decimals = DEFAULT_TOKEN_DECIMALS) => {
+// [TR] Ham taban birim → token birimi; uygulamadaki tek dönüştürücü (UI/analitik, enforcement değil).
+// [EN] Raw base units → token units; the app's single converter (UI/analytics only, never enforcement).
+const validDecimals = (decimals) => Number.isInteger(decimals) && decimals >= 0 && decimals <= 36;
+
+export const tokenToNumber = (raw, decimals = DEFAULT_TOKEN_DECIMALS) => {
+  if (!validDecimals(decimals)) return 0;
   try {
     return Number(formatUnits(BigInt(raw ?? 0), decimals));
   } catch {
     return 0;
+  }
+};
+
+export const formatTokenAmount = (raw, decimals = DEFAULT_TOKEN_DECIMALS, maxFractionDigits = 4) => {
+  if (!validDecimals(decimals)) return '—';
+  try {
+    return Number(formatUnits(BigInt(raw ?? 0), decimals)).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: maxFractionDigits });
+  } catch {
+    return '—';
   }
 };
 
@@ -341,14 +357,14 @@ export const mapApiOrderToUi = ({ order, lang = 'TR', bondMap = {}, tokenMap = {
   const minFillAmountRaw = order?.amounts?.min_fill_amount;
   const remainingAmountRaw = order?.amounts?.remaining_amount;
   const minFillAmount = minFillAmountRaw != null
-    ? rawToNumber(minFillAmountRaw, tokenDecimals)
+    ? tokenToNumber(minFillAmountRaw, tokenDecimals)
     : Number(order?.amounts?.min_fill_amount_num ?? 0);
   const remainingAmount = remainingAmountRaw != null
-    ? rawToNumber(remainingAmountRaw, tokenDecimals)
+    ? tokenToNumber(remainingAmountRaw, tokenDecimals)
     : Number(order?.amounts?.remaining_amount_num ?? 0);
   const totalAmountRaw = order?.amounts?.total_amount;
   const totalAmount = totalAmountRaw != null
-    ? rawToNumber(totalAmountRaw, tokenDecimals)
+    ? tokenToNumber(totalAmountRaw, tokenDecimals)
     : Number(order?.amounts?.total_amount_num ?? 0);
 
   const tier = order?.tier ?? 0;

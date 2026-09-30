@@ -455,16 +455,4 @@ module.exports = {
   CACHE_KEYS,
   refreshReferenceTicker,
   getReferenceTickerPayload,
-  _private: {
-    parseCoinbaseTickerPrice,
-    buildCryptoItems,
-    buildFiatAndStableItems,
-    fetchFiatRates,
-    toTickerPayload,
-    markStale,
-    parsePositiveRate,
-    __setMemoryCache(nextCache) {
-      memoryCache = nextCache;
-    },
-  },
 };

@@ -88,7 +88,7 @@ describe('live wiring regressions', () => {
 
   it('order creation publishes the maker rate/fiat to the backend after the contract tx', async () => {
     const authenticatedFetch = vi.fn().mockResolvedValue({ ok: true });
-    const state = { makerTier: 1, makerAmount: '100', makerRate: '34', makerMinLimit: '', makerMaxLimit: '', makerFiat: 'TRY', makerToken: 'USDT', makerSide: 'SELL_CRYPTO' };
+    const state = { makerTier: 1, makerAmount: '100', makerRate: '34', makerMinLimit: '', makerFiat: 'TRY', makerToken: 'USDT', makerSide: 'SELL_CRYPTO' };
     await buildCreateOrderAction({
       getFormState: () => state,
       resetForm: vi.fn(),

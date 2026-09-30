@@ -22,6 +22,7 @@
  *   - User.js ve Trade.js içindeki banka profil riski snapshot alanları
  */
 const { ethers } = require("ethers");
+const { isConfiguredAddress: _isConfiguredAddress } = require("../utils/onchain");
 const mongoose = require("mongoose");
 const { getRedisClient } = require("../config/redis");
 const Trade = require("../models/Trade");
@@ -172,11 +173,6 @@ const CLEARED_CANCEL_PROPOSAL = Object.freeze({
   "cancel_proposal.taker_signed": false,
 });
 
-function _isConfiguredAddress(addr) {
-  return typeof addr === "string"
-    && /^0x[a-fA-F0-9]{40}$/.test(addr)
-    && addr !== "0x0000000000000000000000000000000000000000";
-}
 
 const EVENT_ARG_KEYS = {
   WalletRegistered: ["wallet", "timestamp"],

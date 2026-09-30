@@ -15,7 +15,6 @@
  *
  * Kullanım (App.jsx'te):
  *   <PIIDisplay tradeId={activeTrade.id} lang={lang}
- *               getSafeTelegramUrl={getSafeTelegramUrl}
  *               authenticatedFetch={authenticatedFetch} />
  */
 
@@ -28,10 +27,9 @@ import { getPiiCopy } from '../app/copy';
 /**
  * @param {string}   tradeId             Backend trade ID (Trade koleksiyonunun MongoDB _id'si)
  * @param {string}   lang                'TR' veya 'EN'
- * @param {Function} getSafeTelegramUrl  App.jsx'ten gelen memoize edilmiş URL yardımcısı
  * @param {Function} authenticatedFetch  App.jsx'ten gelen JWT yönetimli fetch (YÜKS-06)
  */
-export default function PIIDisplay({ tradeId, lang = 'tr', getSafeTelegramUrl, authenticatedFetch }) {
+export default function PIIDisplay({ tradeId, lang = 'tr', authenticatedFetch }) {
   const normalizedLang = (lang || 'tr').toLowerCase();
   const t = getPiiCopy(normalizedLang);
 
@@ -96,9 +94,7 @@ export default function PIIDisplay({ tradeId, lang = 'tr', getSafeTelegramUrl, a
 
   const buildTelegramUrl = (handle) => {
     if (!handle) return '#';
-    return getSafeTelegramUrl
-      ? getSafeTelegramUrl(handle)
-      : `https://t.me/${handle.replace(/[^a-zA-Z0-9_]/g, '')}`;
+    return `https://t.me/${handle.replace(/[^a-zA-Z0-9_]/g, '')}`;
   };
   const buildContactHref = (channel, value) => {
     if (!channel || !value) return null;

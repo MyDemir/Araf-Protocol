@@ -1,22 +1,15 @@
 import React from 'react';
 import { buildApiUrl } from '../../apiConfig';
-import { REVENUE_KIND_LABELS } from './adminChainConfig';
+import { REVENUE_KIND_LABELS, shortId as short } from './adminChainConfig';
+import { formatTokenAmount } from '../../orderUiModel';
+
+const fmtUnits = (raw, decimals = 6) => formatTokenAmount(raw, decimals, 2);
 
 // [TR] Gelir & Ödül sekmesi: backend'in zaten sunduğu /admin/revenue (kontrat RevenueEvent aynası) ve
 //      /admin/rewards/health uçlarını gösterir. Önceden bu veriler hiçbir ekranda görünmüyordu.
 // [EN] Revenue & Rewards tab: surfaces /admin/revenue and /admin/rewards/health, previously shown nowhere.
 
 const t = (lang, tr, en) => (lang === 'TR' ? tr : en);
-const short = (v) => { const s = String(v || ''); return s.length > 12 ? `${s.slice(0, 6)}…${s.slice(-4)}` : (s || '—'); };
-const fmtUnits = (raw, decimals = 6) => {
-  try {
-    const n = BigInt(raw ?? 0);
-    const base = 10n ** BigInt(decimals);
-    const whole = n / base;
-    const frac = (n % base).toString().padStart(decimals, '0').slice(0, 2);
-    return `${whole.toLocaleString('en-US')}.${frac}`;
-  } catch { return '—'; }
-};
 
 export default function AdminRevenuePanel({ lang = 'EN', authenticatedFetch, tokenSymbols = {} }) {
   const [state, setState] = React.useState({ loading: true, error: '', unauthorized: false, rows: [], rewards: null });

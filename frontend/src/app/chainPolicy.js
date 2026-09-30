@@ -29,3 +29,21 @@ export const isSupportedChainId = (chainId, isProd = import.meta.env.PROD) =>
 
 export const isMintTokenEnabled = (isProd = import.meta.env.PROD) => !isProd;
 
+
+// [TR] Deploy uyumu: frontend ile backend aynı escrow kontratına ve desteklenen bir zincire bakmalı.
+//      Backend değerleri /api/orders/config -> deployment alanından gelir. Uyumsuzlukta uyarı metinleri döner.
+// [EN] Deploy alignment: frontend and backend must point at the same escrow and a supported chain.
+export const checkDeploymentAlignment = ({ frontendEscrowAddress, backendDeployment, isProd = import.meta.env.PROD } = {}) => {
+  if (!backendDeployment) return [];
+  const issues = [];
+  const fe = String(frontendEscrowAddress || '').toLowerCase();
+  const be = String(backendDeployment.escrowAddress || '').toLowerCase();
+  if (fe && be && fe !== be) {
+    issues.push(`Escrow adresi uyuşmuyor: frontend ${fe.slice(0, 10)}… / backend ${be.slice(0, 10)}… — işlemler yanlış kontrata gidebilir.`);
+  }
+  const chainId = Number(backendDeployment.chainId);
+  if (chainId && !getSupportedChainIds(isProd).includes(chainId)) {
+    issues.push(`Backend zinciri (${chainId}) frontend'in desteklediği zincirler arasında değil.`);
+  }
+  return issues;
+};

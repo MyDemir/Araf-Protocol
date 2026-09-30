@@ -12,7 +12,6 @@ const makeDeps = (overrides = {}) => {
     makerAmount: '100',
     makerRate: '34',
     makerMinLimit: '100',
-    makerMaxLimit: '1000',
     makerFiat: 'TRY',
     makerToken: 'USDT',
     makerSide: 'SELL_CRYPTO',
@@ -76,23 +75,18 @@ describe('order creation actions', () => {
   });
 
   it('preserves tier validation thresholds including unrestricted tier 4 behavior', () => {
-    expect(getMakerOrderValidationError({ makerTier: 0, makerAmount: '151', makerRate: '1', makerMinLimit: '1', makerMaxLimit: '1', makerFiat: 'TRY' })).toBe('Tier 0 max order limit is 150 USDT.');
-    expect(getMakerOrderValidationError({ makerTier: 1, makerAmount: '1501', makerRate: '1', makerMinLimit: '1', makerMaxLimit: '1', makerFiat: 'TRY' })).toBe('Tier 1 max order limit is 1,500 USDT.');
-    expect(getMakerOrderValidationError({ makerTier: 2, makerAmount: '7501', makerRate: '1', makerMinLimit: '1', makerMaxLimit: '1', makerFiat: 'TRY' })).toBe('Tier 2 max order limit is 7,500 USDT.');
-    expect(getMakerOrderValidationError({ makerTier: 3, makerAmount: '30001', makerRate: '1', makerMinLimit: '1', makerMaxLimit: '1', makerFiat: 'TRY' })).toBe('Tier 3 max order limit is 30,000 USDT.');
-    expect(getMakerOrderValidationError({ makerTier: 4, makerAmount: '30001', makerRate: '1', makerMinLimit: '1', makerMaxLimit: '1', makerFiat: 'TRY' })).toBeNull();
+    expect(getMakerOrderValidationError({ makerTier: 0, makerAmount: '151', makerRate: '1', makerMinLimit: '1', makerFiat: 'TRY' })).toBe('Tier 0 max order limit is 150 USDT.');
+    expect(getMakerOrderValidationError({ makerTier: 1, makerAmount: '1501', makerRate: '1', makerMinLimit: '1', makerFiat: 'TRY' })).toBe('Tier 1 max order limit is 1,500 USDT.');
+    expect(getMakerOrderValidationError({ makerTier: 2, makerAmount: '7501', makerRate: '1', makerMinLimit: '1', makerFiat: 'TRY' })).toBe('Tier 2 max order limit is 7,500 USDT.');
+    expect(getMakerOrderValidationError({ makerTier: 3, makerAmount: '30001', makerRate: '1', makerMinLimit: '1', makerFiat: 'TRY' })).toBe('Tier 3 max order limit is 30,000 USDT.');
+    expect(getMakerOrderValidationError({ makerTier: 4, makerAmount: '30001', makerRate: '1', makerMinLimit: '1', makerFiat: 'TRY' })).toBeNull();
   });
 
-  it('blocks invalid min/max limits before contract calls', async () => {
-    const minOverMax = makeDeps({ state: { makerMinLimit: '2000', makerMaxLimit: '1000' } });
-    await runAction(minOverMax);
-    expect(minOverMax.createSellOrder).not.toHaveBeenCalled();
-    expect(minOverMax.showToast).toHaveBeenCalledWith('Min limit cannot exceed Max.', 'error');
-
-    const maxOverTotal = makeDeps({ state: { makerAmount: '10', makerRate: '10', makerMinLimit: '10', makerMaxLimit: '101' } });
-    await runAction(maxOverTotal);
-    expect(maxOverTotal.createSellOrder).not.toHaveBeenCalled();
-    expect(maxOverTotal.showToast).toHaveBeenCalledWith('Max limit exceeds total fiat (100.00 TRY).', 'error');
+  it('blocks a min limit above the total fiat value before contract calls', async () => {
+    const minOverTotal = makeDeps({ state: { makerAmount: '10', makerRate: '10', makerMinLimit: '101' } });
+    await runAction(minOverTotal);
+    expect(minOverTotal.createSellOrder).not.toHaveBeenCalled();
+    expect(minOverTotal.showToast).toHaveBeenCalledWith('Min limit exceeds total fiat (100.00 TRY).', 'error');
   });
 
   it('blocks restricted payment risk availability without treating it as contract authority', async () => {

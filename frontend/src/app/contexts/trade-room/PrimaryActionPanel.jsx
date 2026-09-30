@@ -1,7 +1,5 @@
 import React from 'react';
 
-const t = (lang, tr, en) => (lang === 'TR' ? tr : en);
-
 const EXECUTABLE_ACTION_TYPES = new Set(['contract', 'conditional']);
 
 const resolveActionConfig = (action, actionCallbacks) => {
@@ -46,7 +44,7 @@ export const ActionGuidanceButton = ({ action, actionCallbacks, disabledReasons 
 // [TR] Tek birincil aksiyon kartı: (varsa) kısa açıklama, gerekli girdiler (dekont, isim kontrolü, onay) ve tek buton.
 //      "Şimdi yapılacak" / "Önce gerekli" kutuları aynı bilgiyi tekrar ettiği için kaldırıldı.
 // [EN] Single primary action card: optional one-liner, required inputs (receipt, name check, acknowledgement) and one button.
-export const PrimaryActionPanel = ({ primaryAction, disabledReasons = [], actionCallbacks, lang = 'EN', children = null }) => {
+export const PrimaryActionPanel = ({ primaryAction, disabledReasons = [], actionCallbacks, children = null }) => {
   if (!primaryAction && !disabledReasons.length && !children) return null;
   const isExecutable = EXECUTABLE_ACTION_TYPES.has(primaryAction?.type) && Boolean(resolveActionConfig(primaryAction, actionCallbacks));
   return (

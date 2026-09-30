@@ -69,6 +69,24 @@ describe("GET /api/orders/config", () => {
     ]);
   });
 
+  it("orders_config_exposes_deployment_alignment_fields", async () => {
+    const prev = { a: process.env.ARAF_ESCROW_ADDRESS, c: process.env.EXPECTED_CHAIN_ID };
+    process.env.ARAF_ESCROW_ADDRESS = "0xABCDEFabcdefABCDEFabcdefABCDEFabcdefABCD";
+    process.env.EXPECTED_CHAIN_ID = "8453";
+    try {
+      const router = require("../../backend/scripts/routes/orders");
+      const app = express();
+      app.use("/api/orders", router);
+      const res = await request(app).get("/api/orders/config").expect(200);
+      expect(res.body.deployment).toEqual({ escrowAddress: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd", chainId: 8453 });
+    } finally {
+      process.env.ARAF_ESCROW_ADDRESS = prev.a;
+      process.env.EXPECTED_CHAIN_ID = prev.c;
+      if (prev.a === undefined) delete process.env.ARAF_ESCROW_ADDRESS;
+      if (prev.c === undefined) delete process.env.EXPECTED_CHAIN_ID;
+    }
+  });
+
   it("orders_payment_risk_config_endpoint_returns_privacy_safe_config_only", async () => {
     const router = require("../../backend/scripts/routes/orders");
     const app = express();

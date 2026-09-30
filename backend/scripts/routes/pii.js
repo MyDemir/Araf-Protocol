@@ -340,4 +340,3 @@ router.get(
 );
 
 module.exports = router;
-module.exports._ensureIdentityNormalizedForPIIRoutes = ensureIdentityNormalizedForPIIRoutes;

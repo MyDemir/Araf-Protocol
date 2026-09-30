@@ -1,10 +1,11 @@
 import React from 'react';
+import { shortId } from './adminChainConfig';
 
 // [TR] Kontrat sekmesi: owner ayarları zincirden, salt okunur. Owner EOA ise mainnet uyarısı gösterir.
 // [EN] On-chain tab: owner settings straight from chain, read-only; warns when an owner is an EOA.
 
 const t = (lang, tr, en) => (lang === 'TR' ? tr : en);
-const short = (v) => { const s = String(v || ''); return s.length > 12 ? `${s.slice(0, 6)}…${s.slice(-4)}` : (s || '—'); };
+const short = shortId;
 const bps = (v) => (v == null ? '—' : `${(Number(v) / 100).toFixed(2)}% (${v} bps)`);
 const dur = (sec, lang) => {
   if (sec == null) return '—';

@@ -10,6 +10,7 @@
  */
 
 const express = require("express");
+const { parsePositiveOnchainId: _parsePositiveOnchainId } = require("../utils/onchain");
 const Joi = require("joi");
 const router = express.Router();
 
@@ -42,6 +43,35 @@ const SAFE_ORDER_PROJECTION = [
   "stats",
   "timers",
 ].join(" ");
+const SAFE_ORDER_PROJECTION_FIELDS = Object.fromEntries(SAFE_ORDER_PROJECTION.split(" ").map((f) => [f, 1]));
+
+// [TR] min_amount token birimindedir; her token için kendi ondalığıyla ham birime çevrilir.
+//      Ondalık bilinmiyorsa null döner (filtre güvenle uygulanamaz).
+// [EN] min_amount is in token units, converted per token with its own decimals; null if unknown.
+function _buildMinRemainingClauses(minAmount, tokenAddress) {
+  let tokenMap;
+  try {
+    tokenMap = getConfig().tokenMap || {};
+  } catch (_) {
+    return null;
+  }
+  const byAddress = Object.fromEntries(Object.entries(tokenMap).map(([addr, cfg]) => [addr.toLowerCase(), cfg]));
+  const tokens = tokenAddress ? [tokenAddress.toLowerCase()] : Object.keys(byAddress);
+  const clauses = [];
+  for (const token of tokens) {
+    const decimals = Number(byAddress[token]?.decimals);
+    if (!Number.isInteger(decimals) || decimals < 0) continue;
+    // [TR] Tutar bu emirle tek fill'de alınabilmeli: kalan >= tutar ve (min fill <= tutar ya da tutar kalanın tamamı).
+    // [EN] The amount must be fillable in one go: remaining >= amount and (min fill <= amount or it is the remainder).
+    const raw = minAmount * 10 ** decimals;
+    clauses.push({
+      token_address: token,
+      "amounts.remaining_amount_num": { $gte: raw },
+      $or: [{ "amounts.min_fill_amount_num": { $lte: raw } }, { "amounts.remaining_amount_num": raw }],
+    });
+  }
+  return clauses.length ? clauses : null;
+}
 
 // [TR] Order sahibine ait child trade listesinde veri minimizasyonu.
 //      Backend bu endpoint'te hakemlik üretmez; yalnız UI için gereken alanları döner.
@@ -74,7 +104,6 @@ const SAFE_ORDER_TRADES_PROJECTION = [
   "chargeback_ack.acknowledged_at",
 ].join(" ");
 
-const POSITIVE_NUMERIC_ID_RE = /^[1-9]\d*$/;
 const DEFAULT_MY_ORDERS_LIMIT = 20;
 const MAX_MY_ORDERS_LIMIT = 50;
 const LOCK_OR_SNAPSHOT_CAPTURED_MATCH = {
@@ -129,6 +158,11 @@ async function _attachMarketTrustVisibilitySummary(orders = []) {
     User.find({ wallet_address: { $in: makerAddresses } })
       .select("wallet_address profileVersion payout_profile reputation_cache is_banned banned_until consecutive_bans")
       .lean(),
+    // [TR] Güven sinyali trade'den yalnız payout_snapshot (maker özeti) okur. Tam belge ($$ROOT) yerine yalnız
+    //      bu alanlar taşınır; şifreli ödeme alanları hiç çekilmez. Sıralama {maker_address, created_at}
+    //      indeksine uyar, böylece $group her maker'ın ilk belgesini indeks sırasıyla alır.
+    // [EN] The trust signal only reads payout_snapshot (maker summary). Carry just those fields (never the
+    //      encrypted payout fields) instead of $$ROOT; the sort matches the {maker_address, created_at} index.
     Trade.aggregate([
       {
         $match: {
@@ -136,7 +170,9 @@ async function _attachMarketTrustVisibilitySummary(orders = []) {
           ...LOCK_OR_SNAPSHOT_CAPTURED_MATCH,
         },
       },
-      { $sort: { created_at: -1, _id: -1 } },
+      { $sort: { maker_address: 1, created_at: -1, _id: -1 } },
+      { $project: { maker_address: 1, "payout_snapshot.is_complete": 1, "payout_snapshot.maker": 1 } },
+      { $unset: ["payout_snapshot.maker.payout_details_enc", "payout_snapshot.maker.contact_value_enc"] },
       { $group: { _id: "$maker_address", trade: { $first: "$$ROOT" } } },
     ]),
   ]);
@@ -160,11 +196,6 @@ async function _attachMarketTrustVisibilitySummary(orders = []) {
   });
 }
 
-function _parsePositiveOnchainId(rawId) {
-  const normalized = String(rawId ?? "").trim();
-  if (!POSITIVE_NUMERIC_ID_RE.test(normalized)) return null;
-  return normalized;
-}
 
 function _buildIdentityLookup(field, idString) {
   return { [field]: idString };
@@ -180,6 +211,12 @@ router.get("/config", marketReadLimiter, async (_req, res, next) => {
       tokenMap: config.tokenMap || {},
       paymentRiskConfig: config.paymentRiskConfig || {},
       reputationPolicy: config.reputationPolicy || null,
+      // [TR] Frontend kendi escrow adresi/zinciriyle karşılaştırır; farklıysa uyarı gösterir (deploy uyumu).
+      // [EN] The frontend compares these with its own escrow/chain and warns on drift (deploy alignment).
+      deployment: {
+        escrowAddress: (process.env.ARAF_ESCROW_ADDRESS || "").toLowerCase() || null,
+        chainId: Number(process.env.EXPECTED_CHAIN_ID) || null,
+      },
       selectedOrderRiskLevel: {
         source: "onchain_order_snapshot",
         nonAuthoritative: true,
@@ -207,8 +244,39 @@ router.get("/payment-risk-config", marketReadLimiter, async (_req, res, next) =>
   }
 });
 
+// [TR] Pazar yanıtı herkese açık ve tüm ziyaretçilerde aynıdır; istemciler 30 sn'de bir yokladığı için
+//      aynı sorgu kısa süre bellekte tutulur (varsayılan 10 sn). Her istekte 4 Mongo sorgusu yerine
+//      TTL başına bir kez çalışır. Testlerde varsayılan kapalıdır.
+// [EN] The market response is public and identical for every visitor; clients poll every 30 s, so the
+//      same query is kept in memory briefly (10 s default): 4 Mongo queries once per TTL instead of per request.
+const MARKET_CACHE_TTL_MS = Number(process.env.MARKET_CACHE_TTL_MS ?? (process.env.NODE_ENV === "test" ? 0 : 10_000));
+const MARKET_CACHE_MAX_ENTRIES = 200;
+const marketCache = new Map();
+
+function _marketCacheGet(key) {
+  const hit = marketCache.get(key);
+  if (!hit) return null;
+  if (hit.expiresAt <= Date.now()) {
+    marketCache.delete(key);
+    return null;
+  }
+  return hit.body;
+}
+
+function _marketCacheSet(key, body) {
+  if (!(MARKET_CACHE_TTL_MS > 0)) return;
+  if (marketCache.size >= MARKET_CACHE_MAX_ENTRIES) marketCache.delete(marketCache.keys().next().value);
+  marketCache.set(key, { body, expiresAt: Date.now() + MARKET_CACHE_TTL_MS });
+}
+
 router.get("/", marketReadLimiter, async (req, res, next) => {
   try {
+    const cacheKey = req.originalUrl;
+    const cached = _marketCacheGet(cacheKey);
+    if (cached) {
+      res.set("X-Cache", "HIT");
+      return res.json(cached);
+    }
     const schema = Joi.object({
       side: Joi.string().valid("SELL_CRYPTO", "BUY_CRYPTO").optional(),
       // [TR] ACTIVE = fill edilebilir (OPEN + PARTIALLY_FILLED). Pazar yeri bunu kullanır;
@@ -216,8 +284,16 @@ router.get("/", marketReadLimiter, async (req, res, next) => {
       // [EN] ACTIVE = fillable (OPEN + PARTIALLY_FILLED), used by the marketplace feed.
       status: Joi.string().valid("ACTIVE", "OPEN", "PARTIALLY_FILLED", "FILLED", "CANCELED").optional(),
       tier: Joi.number().valid(0, 1, 2, 3, 4).optional(),
+      // [TR] Kullanıcının girebileceği emirler: tier <= max_tier. [EN] Orders the viewer can enter: tier <= max_tier.
+      max_tier: Joi.number().valid(0, 1, 2, 3, 4).optional(),
       token_address: Joi.string().pattern(/^0x[a-fA-F0-9]{40}$/).optional(),
       owner_address: Joi.string().pattern(/^0x[a-fA-F0-9]{40}$/).optional(),
+      // [TR] Sunucu tarafı pazar araması: fiat, token biriminde minimum kalan tutar ve en iyi kur sıralaması.
+      //      İstemci yalnız ilk sayfayı çektiği için filtreler sunucuda uygulanmazsa sayfa dışı emirler kaybolur.
+      // [EN] Server-side market search: fiat, minimum remaining amount (token units) and best-rate sort.
+      fiat: Joi.string().valid("TRY", "USD", "EUR").optional(),
+      min_amount: Joi.number().positive().optional(),
+      sort: Joi.string().valid("default", "best_rate", "newest").default("default"),
       page: Joi.number().integer().min(1).default(1),
       limit: Joi.number().integer().min(1).max(50).default(20),
     });
@@ -229,17 +305,47 @@ router.get("/", marketReadLimiter, async (req, res, next) => {
     if (value.status === "ACTIVE") filter.status = { $in: FILLABLE_ORDER_STATUSES };
     else if (value.status) filter.status = value.status;
     if (value.tier !== undefined) filter.tier = value.tier;
+    else if (value.max_tier !== undefined) filter.tier = { $lte: value.max_tier };
     if (value.token_address) filter.token_address = value.token_address.toLowerCase();
     if (value.owner_address) filter.owner_address = value.owner_address.toLowerCase();
+    if (value.fiat) filter["market.fiat_currency"] = value.fiat;
+    if (value.min_amount !== undefined) {
+      const minClauses = _buildMinRemainingClauses(value.min_amount, filter.token_address);
+      if (minClauses === null) return res.status(503).json({ error: "Token decimals unavailable for min_amount filter." });
+      filter.$or = minClauses;
+    }
 
     const skip = (value.page - 1) * value.limit;
+    if (value.sort === "best_rate") {
+      // [TR] En iyi kur: kripto satan emirlerde (alıcı için) en düşük, kripto alanlarda en yüksek kur önce.
+      //      Kuru olmayan emirler sona düşer; tie-break deterministic _id.
+      // [EN] Best rate: lowest first for SELL_CRYPTO (buyer's view), highest first for BUY_CRYPTO.
+      //      Orders without a rate go last; deterministic _id tie-break.
+      const dir = value.side === "BUY_CRYPTO" ? -1 : 1;
+      const [orders, total] = await Promise.all([
+        Order.aggregate([
+          { $match: filter },
+          { $addFields: { _rateMissing: { $cond: [{ $gt: ["$market.exchange_rate", 0] }, 0, 1] } } },
+          { $sort: { _rateMissing: 1, "market.exchange_rate": dir, _id: -1 } },
+          { $skip: skip },
+          { $limit: value.limit },
+          { $project: SAFE_ORDER_PROJECTION_FIELDS },
+        ]),
+        Order.countDocuments(filter),
+      ]);
+      const ordersWithTrustSummary = await _attachMarketTrustVisibilitySummary(orders);
+      const body = { orders: ordersWithTrustSummary, total, page: value.page, limit: value.limit };
+      _marketCacheSet(cacheKey, body);
+      return res.json(body);
+    }
+
     const [orders, total] = await Promise.all([
       Order.find(filter)
         .select(SAFE_ORDER_PROJECTION)
         // [TR] onchain_order_id string olduğu için lexicographic drift'i önlemek adına
         //      tie-break'i deterministic _id ile yapıyoruz.
         // [EN] Use deterministic _id tie-break to avoid lexicographic drift on string IDs.
-        .sort({ status: 1, "amounts.remaining_amount_num": -1, _id: -1 })
+        .sort(value.sort === "newest" ? { created_at: -1, _id: -1 } : { status: 1, "amounts.remaining_amount_num": -1, _id: -1 })
         .skip(skip)
         .limit(value.limit)
         .lean(),
@@ -247,7 +353,9 @@ router.get("/", marketReadLimiter, async (req, res, next) => {
     ]);
 
     const ordersWithTrustSummary = await _attachMarketTrustVisibilitySummary(orders);
-    return res.json({ orders: ordersWithTrustSummary, total, page: value.page, limit: value.limit });
+    const body = { orders: ordersWithTrustSummary, total, page: value.page, limit: value.limit };
+    _marketCacheSet(cacheKey, body);
+    return res.json(body);
   } catch (err) { next(err); }
 });
 

@@ -28,12 +28,9 @@ const baseCtx = {
   setSidebarOpen: vi.fn(),
   setExpandedStatus: vi.fn(),
   expandedStatus: null,
-  filterTier1: false,
-  setFilterTier1: vi.fn(),
-  filterToken: 'ALL',
-  setFilterToken: vi.fn(),
-  searchAmount: '',
-  setSearchAmount: vi.fn(),
+  marketFilters: { side: 'ALL', token: 'ALL', amount: '', fiat: 'ALL', tier: 'ALL', sort: 'AUTO', hideOwn: false },
+  setMarketFilter: vi.fn(),
+  resetMarketFilters: vi.fn(),
   filteredOrders: [],
   orders: [],
   activeEscrows: [],
@@ -97,7 +94,6 @@ const baseCtx = {
   rawTokenToDisplayNumber: () => 0,
   fetchMyTrades: vi.fn(),
   setIsContractLoading: vi.fn(),
-  getSafeTelegramUrl: () => '#',
   authenticatedFetch: vi.fn(),
   showToast: vi.fn(),
 };
@@ -631,5 +627,45 @@ describe('AppViews market side-aware rendering', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Exit full screen' }));
     expect(toggle).toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Install app' })).toBeInTheDocument();
+  });
+
+  it('market filter bar wires fiat, tier, sort, amount and hide-mine to setMarketFilter', () => {
+    const setMarketFilter = vi.fn();
+    const views = buildAppViews({ ...baseCtx, address: '0x' + '1'.repeat(40), isAuthenticated: true, userReputation: { effectiveTier: 2 }, setMarketFilter });
+    render(<div>{views.renderMarket()}</div>);
+    fireEvent.change(screen.getByLabelText('Currency'), { target: { value: 'TRY' } });
+    fireEvent.change(screen.getByLabelText('Bond'), { target: { value: 'ELIGIBLE' } });
+    fireEvent.change(screen.getByLabelText('Sort'), { target: { value: 'NEWEST' } });
+    fireEvent.change(screen.getByLabelText('Trade amount'), { target: { value: '250' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Hide mine' }));
+    expect(setMarketFilter.mock.calls).toEqual([['fiat', 'TRY'], ['tier', 'ELIGIBLE'], ['sort', 'NEWEST'], ['amount', '250'], ['hideOwn', true]]);
+    expect(screen.getByRole('option', { name: 'I can take (≤ T2)' })).not.toBeDisabled();
+    // Without a side "best rate" is ambiguous, so the sort list starts at largest amount.
+    expect(screen.queryByRole('option', { name: 'Best rate' })).not.toBeInTheDocument();
+  });
+
+  it('market filter bar shows the active filter count, reset and the server total', () => {
+    const resetMarketFilters = vi.fn();
+    const views = buildAppViews({
+      ...baseCtx,
+      isAuthenticated: false,
+      marketFilters: { ...baseCtx.marketFilters, side: 'BUY', fiat: 'TRY', tier: 'NO_BOND' },
+      resetMarketFilters,
+      marketOrdersTotal: 120,
+      filteredOrders: [{ id: '1', side: 'SELL_CRYPTO', crypto: 'USDT', tier: 0, fiat: 'TRY', rate: 40, remainingAmount: 10, minFillAmount: 1, maker: '0x12…34', makerFull: '0x' + '3'.repeat(40) }],
+    });
+    render(<div>{views.renderMarket()}</div>);
+    expect(screen.getByText('1 order · 120 total')).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Best rate' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /sign in/ })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters (2)' }));
+    expect(resetMarketFilters).toHaveBeenCalled();
+  });
+
+  it('empty filtered market offers a reset instead of "no orders yet"', () => {
+    const views = buildAppViews({ ...baseCtx, marketFilters: { ...baseCtx.marketFilters, fiat: 'EUR' }, filteredOrders: [] });
+    render(<div>{views.renderMarket()}</div>);
+    expect(screen.getByText('No orders match this filter.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Clear filters' })).toBeInTheDocument();
   });
 });

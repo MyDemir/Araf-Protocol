@@ -6,6 +6,9 @@ import { parseAbi } from 'viem';
 // [EN] Admin "On-chain" tab: read-only view of owner-controlled settings, straight from the contracts.
 //      No write actions on purpose; parameter changes belong behind a multisig/Timelock.
 
+// [TR] Adres/hash kısaltma (admin panelleri ortak). [EN] Address/hash shortener shared by admin panels.
+export const shortId = (v) => { const s = String(v || ''); return s.length > 12 ? `${s.slice(0, 6)}…${s.slice(-4)}` : (s || '—'); };
+
 export const ESCROW_ADMIN_ABI = parseAbi([
   'function owner() view returns (address)',
   'function paused() view returns (bool)',

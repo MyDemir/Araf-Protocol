@@ -165,7 +165,7 @@ import App from '../../frontend/src/App.jsx';
 const renderApp = () => render(<AppProviders><App /></AppProviders>);
 
 const applyAdminScenario = async (label) => {
-  fireEvent.click(screen.getByRole('button', { name: /Open dev scenario controller/i }));
+  fireEvent.click(await screen.findByRole('button', { name: /Open dev scenario controller/i }));
   fireEvent.click(screen.getByRole('button', { name: 'Admin' }));
   fireEvent.click(screen.getByRole('button', { name: label }));
   fireEvent.click(screen.getByRole('button', { name: 'Apply to real App view' }));

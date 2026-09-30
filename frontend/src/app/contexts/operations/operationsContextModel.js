@@ -1,3 +1,5 @@
+import { normalizeSettlementState } from '../settlement/settlementActionModel';
+
 // [TR] Operations Center lane modeli mevcut session verisinden türetilir.
 // [EN] Operations Center lane model is derived from existing session state.
 export const LANE_DEFS = [
@@ -11,10 +13,6 @@ export const LANE_DEFS = [
 ];
 
 
-const normalizeSettlementState = (state) => {
-  const normalized = String(state || '').toUpperCase();
-  return normalized || 'NONE';
-};
 
 const normalizeAddress = (value) => String(value || '').toLowerCase() || null;
 

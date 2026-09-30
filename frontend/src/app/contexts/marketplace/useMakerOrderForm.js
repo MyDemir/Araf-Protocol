@@ -37,7 +37,6 @@ export const useMakerOrderForm = ({
   const [makerAmount, setMakerAmount] = React.useState(MAKER_ORDER_DEFAULTS.makerAmount);
   const [makerRate, setMakerRate] = React.useState(MAKER_ORDER_DEFAULTS.makerRate);
   const [makerMinLimit, setMakerMinLimit] = React.useState(MAKER_ORDER_DEFAULTS.makerMinLimit);
-  const [makerMaxLimit, setMakerMaxLimit] = React.useState(MAKER_ORDER_DEFAULTS.makerMaxLimit);
   const [makerFiat, setMakerFiat] = React.useState(MAKER_ORDER_DEFAULTS.makerFiat);
   const [makerToken, setMakerToken] = React.useState(MAKER_ORDER_DEFAULTS.makerToken);
   const [makerSide, setMakerSide] = React.useState(MAKER_ORDER_DEFAULTS.makerSide);
@@ -47,17 +46,15 @@ export const useMakerOrderForm = ({
     makerAmount,
     makerRate,
     makerMinLimit,
-    makerMaxLimit,
     makerFiat,
     makerToken,
     makerSide,
-  }), [makerTier, makerAmount, makerRate, makerMinLimit, makerMaxLimit, makerFiat, makerToken, makerSide]);
+  }), [makerTier, makerAmount, makerRate, makerMinLimit, makerFiat, makerToken, makerSide]);
 
   const resetMakerOrderForm = React.useCallback(() => {
     setMakerAmount(MAKER_ORDER_DEFAULTS.makerAmount);
     setMakerRate(MAKER_ORDER_DEFAULTS.makerRate);
     setMakerMinLimit(MAKER_ORDER_DEFAULTS.makerMinLimit);
-    setMakerMaxLimit(MAKER_ORDER_DEFAULTS.makerMaxLimit);
     setMakerFiat(MAKER_ORDER_DEFAULTS.makerFiat);
     setMakerSide(MAKER_ORDER_DEFAULTS.makerSide);
   }, []);
@@ -161,7 +158,6 @@ export const useMakerOrderForm = ({
     setMakerAmount,
     setMakerRate,
     setMakerMinLimit,
-    setMakerMaxLimit,
     setMakerFiat,
     setMakerToken,
     setMakerSide,

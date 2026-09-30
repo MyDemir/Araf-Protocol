@@ -2,10 +2,8 @@ const { expect } = require('chai');
 const path = require('path');
 const fs = require('fs');
 
-const verify = require('../../contracts/scripts/verifyRewardsDeployment');
-const configure = require('../../contracts/scripts/configureRewards');
+const ops = require('../../contracts/scripts/rewardsOps');
 const deploy = require('../../contracts/scripts/deployRewards');
-const sw = require('../../contracts/scripts/switchRewardsTreasury');
 const { runAbiDriftCheck } = require('../../contracts/scripts/checkAbiDrift');
 
 const A = {
@@ -17,30 +15,33 @@ const A = {
 };
 
 describe('rewards go-live readiness hardening', function () {
-  it('verifyRewardsDeployment fails if vault address is missing', function () {
-    expect(() => verify.resolveAddressesFromEnvOrManifest({}, { ...A, vault: undefined })).to.throw(/ARAF_REVENUE_VAULT_ADDRESS missing/);
+  it('verify op fails if vault address is missing', function () {
+    expect(() => ops.resolveAddresses({}, { ...A, vault: undefined })).to.throw(/ARAF_REVENUE_VAULT_ADDRESS missing/);
   });
-  it('verifyRewardsDeployment fails if rewards address is missing', function () {
-    expect(() => verify.resolveAddressesFromEnvOrManifest({}, { ...A, rewards: undefined })).to.throw(/ARAF_REWARDS_ADDRESS missing/);
+  it('verify op fails if rewards address is missing', function () {
+    expect(() => ops.resolveAddresses({}, { ...A, rewards: undefined })).to.throw(/ARAF_REWARDS_ADDRESS missing/);
   });
-  it('verifyRewardsDeployment fails if escrow address is missing', function () {
-    expect(() => verify.resolveAddressesFromEnvOrManifest({}, { ...A, escrow: undefined })).to.throw(/ARAF_ESCROW_ADDRESS missing/);
+  it('verify op fails if escrow address is missing', function () {
+    expect(() => ops.resolveAddresses({}, { ...A, escrow: undefined })).to.throw(/ARAF_ESCROW_ADDRESS missing/);
   });
-  it('verifyRewardsDeployment validates supported token config includes USDT/USDC inputs', function () {
-    const out = verify.resolveAddressesFromEnvOrManifest({}, A);
+  it('verify op validates supported token config includes USDT/USDC inputs', function () {
+    const out = ops.resolveAddresses({}, A);
     expect(out.usdt).to.equal(A.usdt);
     expect(out.usdc).to.equal(A.usdc);
   });
 
-  it('configureRewards refuses zero/invalid addresses', function () {
-    expect(() => configure.resolveConfigureInputs({ ARAF_REVENUE_VAULT_ADDRESS: '0x0' }, A)).to.throw();
-    expect(() => configure.resolveConfigureInputs({ USDT_ADDRESS: 'not-an-address' }, A)).to.throw(/USDT_ADDRESS/);
+  it('configure op refuses zero/invalid addresses', function () {
+    expect(() => ops.resolveAddresses({ ARAF_REVENUE_VAULT_ADDRESS: '0x0' }, A)).to.throw();
+    expect(() => ops.resolveAddresses({ USDT_ADDRESS: 'not-an-address' }, A)).to.throw(/USDT_ADDRESS/);
   });
 
-  it('configureRewards refuses treasury switch in standard configure path (source guard)', function () {
-    const source = fs.readFileSync(path.resolve(__dirname, '../../contracts/scripts/configureRewards.js'), 'utf8');
+  it('configure op refuses treasury switch and never calls setTreasury', async function () {
+    const source = ops.configure.toString();
     expect(source).to.contain('Treasury switch is intentionally separated');
     expect(source).to.not.contain('setTreasury(');
+    let err;
+    try { await ops.configure({ CONFIRM_SWITCH_TREASURY_TO_VAULT: 'true' }); } catch (e) { err = e; }
+    expect(err?.message).to.match(/intentionally separated/);
   });
 
   it('deployRewards does not switch escrow treasury', function () {
@@ -58,13 +59,16 @@ describe('rewards go-live readiness hardening', function () {
   });
 
   it('manifest validation is deterministic and critical keys are fixed', function () {
-    const first = sw.resolveSwitchInputs({}, A);
-    const second = sw.resolveSwitchInputs({}, { ...A });
+    const first = ops.resolveAddresses({}, A);
+    const second = ops.resolveAddresses({}, { ...A });
     expect(first).to.deep.equal(second);
   });
 
-  it('switchRewardsTreasury requires explicit confirmation and validates wiring preconditions via source', function () {
-    const source = fs.readFileSync(path.resolve(__dirname, '../../contracts/scripts/switchRewardsTreasury.js'), 'utf8');
+  it('switch-treasury op requires explicit confirmation and validates wiring preconditions', async function () {
+    let err;
+    try { await ops.switchTreasury({}); } catch (e) { err = e; }
+    expect(err?.message).to.match(/Set CONFIRM_TREASURY_SWITCH=true/);
+    const source = ops.switchTreasury.toString();
     expect(source).to.contain("CONFIRM_TREASURY_SWITCH !== 'true'");
     expect(source).to.contain('rewardBps must be 4000');
     expect(source).to.contain('USDT not supported');
@@ -77,15 +81,15 @@ describe('rewards go-live readiness hardening', function () {
   });
 
   it('verify script enforces rewardBps target 4000 and wiring checks (source)', function () {
-    const source = fs.readFileSync(path.resolve(__dirname, '../../contracts/scripts/verifyRewardsDeployment.js'), 'utf8');
+    const source = ops.verify.toString();
     expect(source).to.contain('rewardBps=4000');
-    expect(source).to.contain('Vault.escrow mismatch');
-    expect(source).to.contain('Rewards.revenueVault mismatch');
+    expect(source).to.contain("'Vault.escrow'");
+    expect(source).to.contain("'Rewards.revenueVault'");
   });
 
   it('verify script rejects empty supported token set inputs', function () {
-    expect(() => verify.resolveAddressesFromEnvOrManifest({}, { ...A, usdt: undefined })).to.throw(/USDT_ADDRESS missing/);
-    expect(() => verify.resolveAddressesFromEnvOrManifest({}, { ...A, usdc: undefined })).to.throw(/USDC_ADDRESS missing/);
+    expect(() => ops.resolveAddresses({}, { ...A, usdt: undefined })).to.throw(/USDT_ADDRESS missing/);
+    expect(() => ops.resolveAddresses({}, { ...A, usdc: undefined })).to.throw(/USDC_ADDRESS missing/);
   });
 
   it('contracts env example uses canonical script-consumed variable names', function () {

@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { deriveEpochReward, REWARD_STATUS, summarizeRewards } from '../../frontend/src/app/contexts/profile/rewardsModel';
 import RewardsPanel from '../../frontend/src/app/contexts/profile/RewardsPanel';
-import { buildLabRewards } from '../../frontend/src/dev/fixtures/profileFixtures';
+import { buildLabRewards } from '../ui-lab/fixtures/profileFixtures';
 
 vi.mock('../../frontend/src/hooks/useRewardsContract', () => ({ useRewardsContract: () => ({ isConfigured: false, isSupportedChain: true }) }));
 

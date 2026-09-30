@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import AdminChainPanel from '../../frontend/src/app/contexts/admin/AdminChainPanel';
 import AdminRevenuePanel from '../../frontend/src/app/contexts/admin/AdminRevenuePanel';
-import { createMockAdminFetch, createMockProtocolConfigReader } from '../../frontend/src/dev/mocks/mockAdminFetch';
-import { labTokenSymbols } from '../../frontend/src/dev/fixtures/adminFixtures';
+import { createMockAdminFetch, createMockProtocolConfigReader } from '../ui-lab/mocks/mockAdminFetch';
+import { labTokenSymbols } from '../ui-lab/fixtures/adminFixtures';
 
 describe('Admin surfaces for contract + backend data that were not shown before', () => {
   it('On-chain tab shows owner settings read-only and warns about EOA owners', async () => {

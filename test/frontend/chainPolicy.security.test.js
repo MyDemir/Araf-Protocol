@@ -3,6 +3,7 @@ import {
   getSupportedChainIds,
   isSupportedChainId,
   isMintTokenEnabled,
+  checkDeploymentAlignment,
 } from '../../frontend/src/app/chainPolicy';
 
 describe('frontend chain policy security', () => {
@@ -25,3 +26,21 @@ describe('frontend chain policy security', () => {
   });
 });
 
+describe('deploy alignment (frontend vs backend /orders/config)', () => {
+  const escrow = '0x1111111111111111111111111111111111111111';
+  it('passes when escrow addresses match (case-insensitive) and the chain is supported', () => {
+    expect(checkDeploymentAlignment({ frontendEscrowAddress: escrow.toUpperCase().replace('0X', '0x'), backendDeployment: { escrowAddress: escrow, chainId: 8453 }, isProd: true })).toEqual([]);
+  });
+  it('flags an escrow address drift', () => {
+    const issues = checkDeploymentAlignment({ frontendEscrowAddress: escrow, backendDeployment: { escrowAddress: '0x2222222222222222222222222222222222222222', chainId: 8453 }, isProd: true });
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatch(/Escrow adresi uyuşmuyor/);
+  });
+  it('flags a backend chain outside the frontend policy (prod is Base mainnet only)', () => {
+    expect(checkDeploymentAlignment({ frontendEscrowAddress: escrow, backendDeployment: { escrowAddress: escrow, chainId: 84532 }, isProd: true })[0]).toMatch(/84532/);
+    expect(checkDeploymentAlignment({ frontendEscrowAddress: escrow, backendDeployment: { escrowAddress: escrow, chainId: 84532 }, isProd: false })).toEqual([]);
+  });
+  it('stays silent until the backend reports its deployment', () => {
+    expect(checkDeploymentAlignment({ frontendEscrowAddress: escrow, backendDeployment: null })).toEqual([]);
+  });
+});

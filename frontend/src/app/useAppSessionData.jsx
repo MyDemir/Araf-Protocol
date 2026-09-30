@@ -1,11 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { formatUnits } from 'viem';
 import { useCountdown } from '../hooks/useCountdown';
-import { mapApiOrderToUi } from './orderUiModel';
+import { buildMarketOrdersQuery, MARKET_FILTER_DEFAULTS, matchesMarketFilters } from './contexts/marketplace/marketFilters';
+import { mapApiOrderToUi, formatTokenAmount as formatTokenAmountFromRaw, tokenToNumber as rawTokenToDisplayNumber } from './orderUiModel';
 import { buildApiUrl } from './apiConfig';
 import { WALLET_AGE_MIN_SEC } from './walletAge';
 
 const DEFAULT_TOKEN_DECIMALS = 6;
+
+// [TR] Arka plandaki sekmede yoklama yapılmaz (boşa RPC/backend isteği). [EN] Never poll from a hidden tab.
+const whenVisible = (fn) => () => {
+  if (typeof document === 'undefined' || !document.hidden) fn();
+};
 
 const MY_ITEMS_PAGE_LIMIT = 50;
 const MAX_MY_ITEMS_PAGE_FETCHES = 100;
@@ -42,26 +47,6 @@ const fetchAllMyPages = async ({ authenticatedFetch, endpoint, collectionKey, en
 
   console.warn(`${endpointLabel} pagination stopped after ${MAX_MY_ITEMS_PAGE_FETCHES} pages to avoid an infinite loop.`);
   return allItems;
-};
-
-const formatTokenAmountFromRaw = (rawAmount, decimals = DEFAULT_TOKEN_DECIMALS, maxFractionDigits = 4) => {
-  try {
-    const normalized = formatUnits(BigInt(rawAmount ?? 0), decimals);
-    return Number(normalized).toLocaleString('en-US', {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: maxFractionDigits,
-    });
-  } catch {
-    return '0';
-  }
-};
-
-const rawTokenToDisplayNumber = (rawAmount, decimals = DEFAULT_TOKEN_DECIMALS) => {
-  try {
-    return Number(formatUnits(BigInt(rawAmount ?? 0), decimals));
-  } catch {
-    return 0;
-  }
 };
 
 export function mapSettlementProposalFromApi(settlementProposal) {
@@ -203,9 +188,7 @@ export function useAppSessionData({
   getCooldownRemaining,
   getPaused,
   SUPPORTED_TOKEN_ADDRESSES,
-  filterTier1,
-  filterToken,
-  searchAmount,
+  marketFilters = MARKET_FILTER_DEFAULTS,
   devScenarioActive = false,
 }) {
   const [tradeState, setTradeState] = useState('LOCKED');
@@ -264,10 +247,13 @@ export function useAppSessionData({
   const [protocolFeeConfig, setProtocolFeeConfig] = useState(null);
   // [TR] Kontrat itibar politikası (tier eşikleri, temiz sayfa süresi); getter olmadığından backend event aynası.
   const [reputationPolicy, setReputationPolicy] = useState(null);
+  const [backendDeployment, setBackendDeployment] = useState(null);
   const [tokenDecimalsMap, setTokenDecimalsMap] = useState({ USDT: DEFAULT_TOKEN_DECIMALS, USDC: DEFAULT_TOKEN_DECIMALS });
   const [bleedingAmounts, setBleedingAmounts] = useState(null);
 
   const [orders, setOrders] = useState([]);
+  // [TR] Sunucudaki eşleşen emir sayısı (ilk sayfa 50 ile sınırlı olduğundan ayrı tutulur). [EN] Server-side match count.
+  const [marketOrdersTotal, setMarketOrdersTotal] = useState(null);
   // [TR] Pazar akışı alınamazsa sayaçlar "0" yerine "—" göstermeli; boş pazar ile ulaşılamayan sunucu ayırt edilir.
   // [EN] Distinguish an unreachable feed from an empty market.
   const [ordersFeedError, setOrdersFeedError] = useState(false);
@@ -561,6 +547,7 @@ export function useAppSessionData({
         if (data.tokenMap) setOnchainTokenMap(data.tokenMap);
         if (data.feeConfig) setProtocolFeeConfig(data.feeConfig);
         if (data.reputationPolicy) setReputationPolicy(data.reputationPolicy);
+        if (data.deployment) setBackendDeployment(data.deployment);
         if (data.paymentRiskConfig) setPaymentRiskConfig(data.paymentRiskConfig);
       })
       .catch((err) => console.error('[ProtocolConfig] fetch failed:', err));
@@ -605,7 +592,7 @@ export function useAppSessionData({
       if (result) setBleedingAmounts(result);
     };
     fetchAmounts();
-    const interval = setInterval(fetchAmounts, 30000);
+    const interval = setInterval(whenVisible(fetchAmounts), 30000);
     return () => clearInterval(interval);
   }, [resolvedTradeState, activeTrade?.onchainId, getCurrentAmounts]);
 
@@ -688,6 +675,22 @@ export function useAppSessionData({
     };
   }, [isConnected, connectedWallet, clearLocalSessionState, bestEffortBackendLogout]);
 
+  // [TR] Tutar araması her tuşta istek atmasın diye 400 ms geciktirilir. [EN] Debounce the amount search.
+  const searchAmount = marketFilters.amount;
+  const [debouncedSearchAmount, setDebouncedSearchAmount] = useState(searchAmount);
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearchAmount(searchAmount), 400);
+    return () => clearTimeout(t);
+  }, [searchAmount]);
+  const viewerTier = Number.isInteger(userReputation?.effectiveTier) ? userReputation.effectiveTier : null;
+  const marketViewOpen = currentView === 'market';
+  const ordersLoadedRef = React.useRef(false);
+  const marketOrdersQuery = buildMarketOrdersQuery({
+    filters: { ...marketFilters, amount: debouncedSearchAmount },
+    tokenAddresses: SUPPORTED_TOKEN_ADDRESSES,
+    userTier: viewerTier,
+  });
+
   useEffect(() => {
     const mapOrders = (apiOrders = []) => apiOrders.map((o) => mapApiOrderToUi({
       order: o,
@@ -705,12 +708,14 @@ export function useAppSessionData({
     const fetchOrders = async () => {
       try {
         if (initialLoad) setLoading(true);
-        const res = await fetch(buildApiUrl('orders?status=ACTIVE&limit=50'), { credentials: 'include' });
+        const res = await fetch(buildApiUrl(marketOrdersQuery), { credentials: 'include' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (!Array.isArray(data.orders)) throw new Error('Malformed orders payload');
         setOrders(mapOrders(data.orders));
+        setMarketOrdersTotal(Number.isFinite(data.total) ? data.total : null);
         setOrdersFeedError(false);
+        ordersLoadedRef.current = true;
       } catch (err) {
         console.error('Order fetch error:', err);
         setOrdersFeedError(true);
@@ -719,12 +724,14 @@ export function useAppSessionData({
         initialLoad = false;
       }
     };
-    fetchOrders();
-    const interval = setInterval(() => {
-      if (typeof document === 'undefined' || !document.hidden) fetchOrders();
-    }, 30000);
+    // [TR] Pazardan çıkarken tekrar çekilmez; yalnız ilk yüklemede ya da Pazar açıkken. [EN] No refetch on leaving Market.
+    if (marketViewOpen || !ordersLoadedRef.current) fetchOrders();
+    // [TR] Liste yalnız Pazar ekranı açıkken yenilenir; diğer ekranlarda ilk yükleme yeterlidir.
+    // [EN] Refresh only while the Market view is open; other views keep the initial load.
+    if (!marketViewOpen) return undefined;
+    const interval = setInterval(whenVisible(fetchOrders), 30000);
     return () => clearInterval(interval);
-  }, [lang, onchainBondMap, onchainTokenMap, paymentRiskConfig]);
+  }, [lang, onchainBondMap, onchainTokenMap, paymentRiskConfig, marketOrdersQuery, marketViewOpen]);
 
   useEffect(() => {
     if (!isAuthenticated || !isConnected) {
@@ -823,7 +830,7 @@ export function useAppSessionData({
       }
     };
     fetchSybil();
-    const interval = setInterval(fetchSybil, 30000);
+    const interval = setInterval(whenVisible(fetchSybil), 60000);
     return () => clearInterval(interval);
   }, [isConnected, address, antiSybilCheck, getCooldownRemaining]);
 
@@ -838,7 +845,7 @@ export function useAppSessionData({
       }
     };
     fetchPausedStatus();
-    const interval = setInterval(fetchPausedStatus, 60000);
+    const interval = setInterval(whenVisible(fetchPausedStatus), 120000);
     return () => clearInterval(interval);
   }, [getPaused]);
 
@@ -1070,12 +1077,7 @@ export function useAppSessionData({
     };
   }, [connector, connectedWallet, isAuthenticated, authenticatedWallet, lang, bestEffortBackendLogout, clearLocalSessionState, showToast]);
 
-  const filteredOrders = orders.filter((order) => {
-    const amountMatch = searchAmount === '' || Number(searchAmount) <= Number(order.remainingAmount || 0);
-    const tierMatch = filterTier1 ? order.tier === 0 : true;
-    const tokenMatch = filterToken === 'ALL' || order.crypto === filterToken;
-    return amountMatch && tierMatch && tokenMatch;
-  });
+  const filteredOrders = orders.filter((order) => matchesMarketFilters(order, marketFilters, { viewerAddress: connectedWallet, userTier: viewerTier }));
 
   const activeEscrowCounts = {
     LOCKED: activeEscrows.filter((e) => e.state === 'LOCKED').length,
@@ -1092,7 +1094,6 @@ export function useAppSessionData({
   const principalProtectionTimer = useCountdown(principalProtectionEndDate);
   const makerPingEndDate = useMemo(() => activeTrade?.paidAt ? new Date(new Date(activeTrade.paidAt).getTime() + 48 * 3600 * 1000) : null, [activeTrade?.paidAt]);
   const makerPingTimer = useCountdown(makerPingEndDate);
-  const canMakerPing = makerPingTimer.isFinished;
   const makerChallengePingEndDate = useMemo(() => activeTrade?.paidAt ? new Date(new Date(activeTrade.paidAt).getTime() + 24 * 3600 * 1000) : null, [activeTrade?.paidAt]);
   const makerChallengePingTimer = useCountdown(makerChallengePingEndDate);
   const canMakerStartChallengeFlow = makerChallengePingTimer.isFinished;
@@ -1137,6 +1138,7 @@ export function useAppSessionData({
     onchainTokenMap,
     protocolFeeConfig,
     reputationPolicy,
+    backendDeployment,
     paymentRiskConfig,
     takerFeeBps,
     tokenDecimalsMap,
@@ -1167,12 +1169,12 @@ export function useAppSessionData({
     setChargebackAccepted,
     formatAddress,
     filteredOrders,
+    marketOrdersTotal,
     activeEscrowCounts,
     gracePeriodTimer,
     bleedingTimer,
     principalProtectionTimer,
     makerPingTimer,
-    canMakerPing,
     makerChallengePingTimer,
     canMakerStartChallengeFlow,
     makerChallengeTimer,

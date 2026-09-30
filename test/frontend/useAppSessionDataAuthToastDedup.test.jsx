@@ -29,9 +29,6 @@ const baseProps = {
   getCooldownRemaining: undefined,
   getPaused: undefined,
   SUPPORTED_TOKEN_ADDRESSES: { USDT: '', USDC: '' },
-  filterTier1: false,
-  filterToken: 'ALL',
-  searchAmount: '',
 };
 
 function Harness({ showToast }) {

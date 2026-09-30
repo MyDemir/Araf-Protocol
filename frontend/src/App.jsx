@@ -1,40 +1,35 @@
 import { CircleCheck, Info, MessageSquare, TriangleAlert, Wallet } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 import { useAccount, useConnect, useDisconnect, useSignMessage, useChainId, usePublicClient } from 'wagmi';
-import { formatUnits } from 'viem';
+import { formatTokenAmount as formatTokenAmountFromRaw, SEPA_COUNTRY_CODES, tokenToNumber as rawTokenToDisplayNumber } from './app/orderUiModel';
 import { useArafContract } from './hooks/useArafContract';
-import PIIDisplay from './components/PIIDisplay';
 import { buildAppViews } from './app/AppViews';
 import { buildAppModals } from './app/AppModals';
 import AppShell from './app/shell/AppShell';
 import { useSessionActions } from './app/providers/SessionProvider';
 import { useAppSessionData } from './app/useAppSessionData';
-import AdminPanel from './AdminPanel';
-import DevScenarioController from './dev/ui-lab/DevScenarioController';
+// [TR] Admin paneli yalnız yöneticiler içindir; ayrı chunk olarak ilk ihtiyaçta yüklenir.
+// [EN] The admin panel is for admins only; loaded as a separate chunk on first use.
+const AdminPanel = React.lazy(() => import('./AdminPanel'));
 import useFullscreen from './app/shell/useFullscreen';
 import { deriveTradeTimeline, estimateBleeding } from './app/contexts/trade-room/tradeTimeline';
-import { readProtocolConfig } from './app/contexts/admin/adminChainConfig';
-import { createMockProtocolConfigReader } from './dev/mocks/mockAdminFetch';
-import { labTokenSymbols } from './dev/fixtures/adminFixtures';
-import { LAB_TOKEN_ADDRESSES, LAB_BOND_MAP, LAB_FEE_CONFIG } from './dev/fixtures/makerOrderFixtures';
-import { buildLabRewards } from './dev/fixtures/profileFixtures';
-import { isUiLabEnabled } from './dev/ui-lab/isUiLabEnabled';
-import { createMockAdminFetch } from './dev/mocks/mockAdminFetch';
-import { createSetterAction, createSettlementContractMocks, createTradeRoomFetch, createTradeRoomHandlers } from './dev/mocks/mockActions';
+import { isUiLabEnabled, loadUiLab } from './app/uiLab';
+import { SESSION_ONLY_VIEWS } from './app/viewRegistry';
 import { getInitialLang, APP_LANG_STORAGE_KEY } from './app/bootstrapState';
 import { markTermsAcceptedLocally } from './app/legal/terms';
 import { buildApiUrl, resolveApiPolicyDiagnostics } from './app/apiConfig';
-import { getSupportedChainsMap, isMintTokenEnabled, isSupportedChainId } from './app/chainPolicy';
+import { checkDeploymentAlignment, getSupportedChainsMap, isMintTokenEnabled, isSupportedChainId } from './app/chainPolicy';
 import { useMakerOrderForm } from './app/contexts/marketplace/useMakerOrderForm';
+import { useMarketFilters } from './app/contexts/marketplace/marketFilters';
 import { buildMintAction, buildOrderActions, buildProfileActions, buildStartTradeAction, buildTradeRoomActions } from './app/actions/contractLifecycleActions';
 import { buildNextActiveTrade, findEscrowByRouteTradeId, getEscrowRouteId, parseAppHashRoute, writeAppHashRoute } from './app/actions/tradeNavigationActions';
 
 // [TR] Uygulama başlangıcında kritik env değişkenlerini doğrula
 // [EN] Validate critical env variables on app start
 
-const createDevScenarioFetch = (categoryKey, scenario, fallbackFetch) => {
-  if (categoryKey === 'admin') return createMockAdminFetch(scenario);
-  if (categoryKey === 'tradeRoom') return createTradeRoomFetch({ trade: scenario?.decisionInput?.trade, estimate: estimateBleeding, fallbackFetch });
+const createDevScenarioFetch = (uiLab, categoryKey, scenario, fallbackFetch) => {
+  if (categoryKey === 'admin') return uiLab.createMockAdminFetch(scenario);
+  if (categoryKey === 'tradeRoom') return uiLab.createTradeRoomFetch({ trade: scenario?.decisionInput?.trade, estimate: estimateBleeding, fallbackFetch });
   return fallbackFetch;
 };
 
@@ -50,7 +45,6 @@ const buildDevScenarioEscrowCounts = (activeEscrows = []) => ({
   },
 });
 
-const SESSION_ONLY_VIEWS = new Set(['tradeRoom', 'operations', 'profile', 'admin']);
 
 const ENV_ERRORS = [];
 const { errors: API_POLICY_ERRORS } = resolveApiPolicyDiagnostics(import.meta.env);
@@ -62,21 +56,14 @@ if (!import.meta.env.VITE_ESCROW_ADDRESS ||
 
 // [TR] İstatistik kartlarındaki 30 günlük değişim yüzdesi göstergesi
 // [EN] 30-day change percentage indicator for stat cards
-const StatChange = ({ value }) => {
-  if (value == null) return null;
-  const isPositive = value >= 0;
-  return <span className={`text-[10px] ml-2 font-bold ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>{isPositive ? '▲' : '▼'}{Math.abs(value).toFixed(1)}%</span>;
-};
-
 const DEFAULT_TOKEN_DECIMALS = null;
-const SEPA_COUNTRIES = ['DE', 'FR', 'NL', 'BE', 'ES', 'IT', 'AT', 'PT', 'IE', 'LU', 'FI', 'GR'];
 const RAIL_DEFAULT_COUNTRY = { TR_IBAN: 'TR', US_ACH: 'US', SEPA_IBAN: 'DE' };
 // [TR] Frontend payload canonicalizer — backend authority korunur, kirli veri minimize edilir.
 // [EN] Frontend payload canonicalizer — backend stays authoritative, payload quality is improved.
 const canonicalizePayoutProfileDraft = (draft = {}) => {
   const rail = String(draft.rail || 'TR_IBAN').toUpperCase();
   const allowedCountries = rail === 'SEPA_IBAN'
-    ? SEPA_COUNTRIES
+    ? SEPA_COUNTRY_CODES
     : [RAIL_DEFAULT_COUNTRY[rail] || 'TR'];
   const requestedCountry = String(draft.country || '').toUpperCase();
   const country = allowedCountries.includes(requestedCountry)
@@ -113,36 +100,20 @@ const canonicalizePayoutProfileDraft = (draft = {}) => {
 
 // [TR] Otoritatif raw base-unit değerini UI için normalize eder (display-only).
 // [EN] Normalizes authoritative raw base-unit values for UI display only.
-const formatTokenAmountFromRaw = (rawAmount, decimals = DEFAULT_TOKEN_DECIMALS, maxFractionDigits = 4) => {
-  if (!Number.isInteger(decimals) || decimals <= 0 || decimals > 18) return '—';
-  try {
-    const normalized = formatUnits(BigInt(rawAmount ?? 0), decimals);
-    return Number(normalized).toLocaleString('en-US', {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: maxFractionDigits,
-    });
-  } catch {
-    return '0';
-  }
-};
-
-// [TR] UI/analytics hesapları için Number cache; enforcement için kullanılmaz.
-// [EN] Number cache for UI/analytics math; never used for enforcement.
-const rawTokenToDisplayNumber = (rawAmount, decimals = DEFAULT_TOKEN_DECIMALS) => {
-  if (!Number.isInteger(decimals) || decimals <= 0 || decimals > 18) return 0;
-  try {
-    return Number(formatUnits(BigInt(rawAmount ?? 0), decimals));
-  } catch {
-    return 0;
-  }
-};
-
 function App() {
   // ═══════════════════════════════════════════
   // 1. EKRAN VE UI STATE YÖNETİMİ
   //    View routing + modal open/close flags
   // ═══════════════════════════════════════════
   const uiLabEnabled = isUiLabEnabled();
+  // [TR] Lab kodu yalnız etkinse ve ilk ihtiyaçta yüklenir. [EN] Lab code loads only when enabled.
+  const [uiLab, setUiLab] = useState(null);
+  useEffect(() => {
+    if (!uiLabEnabled) return undefined;
+    let alive = true;
+    loadUiLab().then((mod) => { if (alive) setUiLab(mod); }).catch(() => {});
+    return () => { alive = false; };
+  }, [uiLabEnabled]);
   const fullscreen = useFullscreen();
   const initialView = 'home';
   const [currentView, setCurrentView] = useState(initialView);
@@ -164,10 +135,7 @@ function App() {
   const [lang, setLang] = useState(getInitialLang);
   const [loadingText, setLoadingText] = useState('');
   const [isContractLoading, setIsContractLoading] = useState(false);
-  const [filterTier1, setFilterTier1] = useState(false);
-  const [filterToken, setFilterToken] = useState('ALL');
-  const [marketSide, setMarketSide] = useState('ALL');
-  const [searchAmount, setSearchAmount] = useState('');
+  const { marketFilters, setMarketFilter, resetMarketFilters } = useMarketFilters();
   const [toast, setToast] = useState(null);
   const [termsPromptWallet, setTermsPromptWallet] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
@@ -297,6 +265,7 @@ function App() {
     onchainTokenMap,
     protocolFeeConfig,
     reputationPolicy,
+    backendDeployment,
     paymentRiskConfig,
     takerFeeBps,
     tokenDecimalsMap,
@@ -309,7 +278,6 @@ function App() {
     activeEscrows,
     setActiveEscrows,
     loading,
-    setLoading,
     clearLocalSessionState,
     bestEffortBackendLogout,
     authenticatedFetch,
@@ -320,19 +288,18 @@ function App() {
     userRole,
     setUserRole,
     isBanned,
-    setIsBanned,
     cancelStatus,
     setCancelStatus,
     chargebackAccepted,
     setChargebackAccepted,
     formatAddress,
     filteredOrders,
+    marketOrdersTotal,
     activeEscrowCounts,
     gracePeriodTimer,
     bleedingTimer,
     principalProtectionTimer,
     makerPingTimer,
-    canMakerPing,
     makerChallengePingTimer,
     canMakerStartChallengeFlow,
     makerChallengeTimer,
@@ -360,23 +327,21 @@ function App() {
     getCooldownRemaining,
     getPaused,
     SUPPORTED_TOKEN_ADDRESSES,
-    filterTier1,
-    filterToken,
-    searchAmount,
+    marketFilters,
     devScenarioActive,
   });
 
   const devScenarioActions = React.useMemo(() => {
     if (!devScenario) return null;
     const appendLog = devScenario.appendLog;
-    const setter = (key) => createSetterAction({ scenarioId: devScenario.scenario.id, appendLog, actionKey: key });
+    const setter = (key) => uiLab.createSetterAction({ scenarioId: devScenario.scenario.id, appendLog, actionKey: key });
     return {
-      tradeRoomHandlers: createTradeRoomHandlers({ scenarioId: devScenario.scenario.id, appendLog }),
-      settlementFns: createSettlementContractMocks({ scenarioId: devScenario.scenario.id, appendLog }),
+      tradeRoomHandlers: uiLab.createTradeRoomHandlers({ scenarioId: devScenario.scenario.id, appendLog }),
+      settlementFns: uiLab.createSettlementContractMocks({ scenarioId: devScenario.scenario.id, appendLog }),
       setter,
       noop: (actionKey) => (...args) => setter(actionKey)(...args),
     };
-  }, [devScenario]);
+  }, [devScenario, uiLab]);
 
   const activeScenarioCategory = devScenarioActive ? devScenario?.categoryKey : null;
   const activeScenarioPayload = devScenario?.scenario || null;
@@ -443,24 +408,24 @@ function App() {
 
   const effectiveAuthenticatedFetch = React.useMemo(() => (
     devScenarioActive
-      ? createDevScenarioFetch(devScenario.categoryKey, devScenario.scenario, authenticatedFetch)
+      ? createDevScenarioFetch(uiLab, devScenario.categoryKey, devScenario.scenario, authenticatedFetch)
       : authenticatedFetch
-  ), [devScenarioActive, devScenario, authenticatedFetch]);
+  ), [devScenarioActive, devScenario, authenticatedFetch, uiLab]);
   const activeAdminFetch = effectiveAuthenticatedFetch;
 
   // [TR] Admin "Kontrat" sekmesi zincirden okur; lab'da sahte okuyucu kullanılır.
   const adminProtocolReader = React.useCallback(() => (
     activeScenarioCategory === 'admin'
-      ? createMockProtocolConfigReader(devScenario?.scenario)()
-      : readProtocolConfig({
+      ? uiLab.createMockProtocolConfigReader(devScenario?.scenario)()
+      : import('./app/contexts/admin/adminChainConfig').then(({ readProtocolConfig }) => readProtocolConfig({
         publicClient,
         escrowAddress: import.meta.env.VITE_ESCROW_ADDRESS,
         vaultAddress: import.meta.env.VITE_REVENUE_VAULT_ADDRESS || import.meta.env.VITE_REWARDS_VAULT_ADDRESS,
         rewardsAddress: import.meta.env.VITE_REWARDS_ADDRESS,
         tokens: SUPPORTED_TOKEN_ADDRESSES,
-      })
+      }))
   ), [activeScenarioCategory, devScenario, publicClient]); // eslint-disable-line react-hooks/exhaustive-deps
-  const adminTokenSymbols = React.useMemo(() => (activeScenarioCategory === 'admin' ? labTokenSymbols : Object.fromEntries(
+  const adminTokenSymbols = React.useMemo(() => (activeScenarioCategory === 'admin' ? uiLab.labTokenSymbols : Object.fromEntries(
     Object.entries(SUPPORTED_TOKEN_ADDRESSES).filter(([, a]) => a).map(([sym, a]) => [String(a).toLowerCase(), sym])
   )), [activeScenarioCategory]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -652,7 +617,6 @@ function App() {
     handleAuthAction,
     handleLogoutAndDisconnect,
     requireSignedSessionForActiveWallet,
-    hasSignedSessionForActiveWallet,
   } = useSessionActions({
     address,
     connectedWallet,
@@ -689,19 +653,11 @@ function App() {
     handleLogoutAndDisconnect();
   }, [handleLogoutAndDisconnect]);
 
-  const sessionActions = React.useMemo(() => ({
-    loginWithSIWE,
-    handleAuthAction,
-    handleLogoutAndDisconnect,
-    requireSignedSessionForActiveWallet,
-    hasSignedSessionForActiveWallet,
-  }), [loginWithSIWE, handleAuthAction, handleLogoutAndDisconnect, requireSignedSessionForActiveWallet, hasSignedSessionForActiveWallet]);
-
   const labMakerScenario = activeScenarioCategory === 'makerOrder' ? activeScenarioPayload : null;
   // [TR] Lab "Profil Merkezi": kontrat itibarı ve backend kayıtları senaryodan gelir; sayaçlar seçim anına göre.
   const labProfile = React.useMemo(() => (
     activeScenarioCategory === 'profile' && activeScenarioPayload
-      ? { ...activeScenarioPayload, userReputation: activeScenarioPayload.build?.() || null, labRewards: activeScenarioPayload.labRewards ? buildLabRewards(activeScenarioPayload.labRewards) : null }
+      ? { ...activeScenarioPayload, userReputation: activeScenarioPayload.build?.() || null, labRewards: activeScenarioPayload.labRewards ? uiLab.buildLabRewards(activeScenarioPayload.labRewards) : null }
       : null
   ), [activeScenarioCategory, activeScenarioPayload]);
 
@@ -718,8 +674,6 @@ function App() {
     setMakerRate,
     makerMinLimit,
     setMakerMinLimit,
-    makerMaxLimit,
-    setMakerMaxLimit,
     makerFiat,
     setMakerFiat,
     validationError: makerValidationError,
@@ -732,7 +686,7 @@ function App() {
     requireSignedSessionForActiveWallet,
     setShowMakerModal,
     showToast,
-    supportedTokens: labMakerScenario ? { USDT: { address: LAB_TOKEN_ADDRESSES.USDT }, USDC: { address: LAB_TOKEN_ADDRESSES.USDC } } : SUPPORTED_TOKENS,
+    supportedTokens: labMakerScenario ? { USDT: { address: uiLab.LAB_TOKEN_ADDRESSES.USDT }, USDC: { address: uiLab.LAB_TOKEN_ADDRESSES.USDC } } : SUPPORTED_TOKENS,
     address,
     lang,
     isContractLoading,
@@ -763,44 +717,6 @@ function App() {
     setShowMakerModal(true);
   }, [labMakerScenario]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const orderForm = React.useMemo(() => ({
-    makerTier,
-    setMakerTier,
-    makerToken,
-    setMakerToken,
-    makerSide,
-    setMakerSide,
-    makerAmount,
-    setMakerAmount,
-    makerRate,
-    setMakerRate,
-    makerMinLimit,
-    setMakerMinLimit,
-    makerMaxLimit,
-    setMakerMaxLimit,
-    makerFiat,
-    setMakerFiat,
-    makerValidationError,
-    makerPayoutRiskEntry,
-    isCreateTemporarilyDisabledByRisk,
-    handleCreateOrder,
-    handleOpenMakerModal,
-  }), [
-    makerTier,
-    makerToken,
-    makerSide,
-    makerAmount,
-    makerRate,
-    makerMinLimit,
-    makerMaxLimit,
-    makerFiat,
-    makerValidationError,
-    makerPayoutRiskEntry,
-    isCreateTemporarilyDisabledByRisk,
-    handleCreateOrder,
-    handleOpenMakerModal,
-  ]);
-
   // [TR] Cüzdanın kendi logosu (EIP-6963 connector.icon) kullanılır; yoksa nötr cüzdan ikonu.
   // [EN] Use the wallet's own logo (EIP-6963 connector.icon); fall back to a neutral wallet icon.
   const getWalletIcon = (connectorOrName) => {
@@ -821,8 +737,6 @@ function App() {
     withdrawSettlement,
     expireSettlement,
   }), [proposeSettlement, acceptSettlement, rejectSettlement, withdrawSettlement, expireSettlement]);
-  const settlementActions = React.useMemo(() => ({ settlementContractFns }), [settlementContractFns]);
-
   const handleMint = React.useMemo(() => buildMintAction({
     lang,
     isConnected,
@@ -913,7 +827,6 @@ function App() {
     setCancelStatus,
     setChargebackAccepted,
     setCurrentView,
-    setLoadingText,
   }), [
     lang,
     activeTrade,
@@ -978,7 +891,6 @@ function App() {
 
   const orderActions = React.useMemo(() => buildOrderActions({
     lang,
-    address,
     isContractLoading,
     requireSignedSessionForActiveWallet,
     fillSellOrder: devScenarioActive ? devScenarioActions?.noop('fill_sell_order') : fillSellOrder,
@@ -1022,20 +934,13 @@ function App() {
     handleBurnExpired,
   } = tradeRoomActions;
   const { handleUpdatePII, handleRegisterWallet } = profileActions;
-  const { handleDeleteOrder } = orderActions;
-
-  const shellState = React.useMemo(() => ({
-    currentView,
-    setCurrentView,
-    sidebarOpen,
-    setSidebarOpen,
-    toggleSidebar,
-    expandedStatus,
-    setExpandedStatus,
-  }), [currentView, sidebarOpen, toggleSidebar, expandedStatus]);
+  const envErrors = React.useMemo(() => [
+    ...ENV_ERRORS,
+    ...checkDeploymentAlignment({ frontendEscrowAddress: import.meta.env.VITE_ESCROW_ADDRESS, backendDeployment }),
+  ], [backendDeployment]);
 
   const systemStatus = React.useMemo(() => ({
-    envErrors: ENV_ERRORS,
+    envErrors,
     isPaused,
     isConnected,
     isAuthenticated,
@@ -1051,13 +956,7 @@ function App() {
     activeTrade,
     ordersFeedError,
     lang,
-  }), [ordersFeedError, isPaused, isConnected, isAuthenticated, authChecked, chainId, isSupportedChain, supportedChains, isWalletRegistered, isRegisteringWallet, handleRegisterWallet, sybilStatus, walletAgeRemainingDays, activeTrade, lang]);
-
-  const getSafeTelegramUrl = React.useCallback((handle) => {
-    if (!handle) return '#';
-    const safeHandle = handle.replace(/[^a-zA-Z0-9_]/g, '');
-    return `https://t.me/${safeHandle}`;
-  }, []);
+  }), [envErrors, ordersFeedError, isPaused, isConnected, isAuthenticated, authChecked, chainId, isSupportedChain, supportedChains, isWalletRegistered, isRegisteringWallet, handleRegisterWallet, sybilStatus, walletAgeRemainingDays, activeTrade, lang]);
 
   const FEEDBACK_MIN_LENGTH = 12;
 
@@ -1191,13 +1090,8 @@ function App() {
     renderFooter,
   } = buildAppViews({
     lang,
-    sessionActions,
-    orderForm,
     orderActions,
     tradeRoomActions,
-    settlementActions,
-    shellState,
-    systemStatus,
     t,
     setLang,
     isConnected,
@@ -1218,24 +1112,17 @@ function App() {
     setSidebarOpen,
     setExpandedStatus,
     expandedStatus,
-    filterTier1,
-    setFilterTier1,
-    filterToken,
-    setFilterToken,
-    marketSide,
-    setMarketSide,
-    searchAmount,
-    setSearchAmount,
+    marketFilters,
+    setMarketFilter,
+    resetMarketFilters,
+    marketOrdersTotal,
     filteredOrders,
     orders,
     ordersFeedError,
     fullscreen,
     activeEscrows: effectiveActiveEscrows,
-    setActiveEscrows,
     loading,
     SUPPORTED_TOKEN_ADDRESSES,
-    onchainTokenMap,
-    paymentRiskConfig,
     handleStartTrade,
     handleMint,
     isFaucetEnabled,
@@ -1253,7 +1140,6 @@ function App() {
     statsLoading,
     statsError,
     fetchStats,
-    StatChange,
     userReputation,
     sybilStatus,
     walletAgeRemainingDays,
@@ -1270,7 +1156,6 @@ function App() {
     setCancelStatus,
     setChargebackAccepted,
     paymentIpfsHash: effectivePaymentIpfsHash,
-    setPaymentIpfsHash,
     handleFileUpload,
     handleReportPayment,
     handleProposeCancel,
@@ -1282,7 +1167,6 @@ function App() {
     handlePingMaker,
     handleAutoRelease,
     handleBurnExpired,
-    canMakerPing,
     makerPingTimer: effectiveTradeTimers.makerPing || makerPingTimer,
     canMakerStartChallengeFlow,
     makerChallengePingTimer: effectiveTradeTimers.makerChallengePing || makerChallengePingTimer,
@@ -1301,11 +1185,9 @@ function App() {
     fetchMyTrades,
     setIsContractLoading,
     setLoadingText,
-    getSafeTelegramUrl,
     authenticatedFetch: effectiveAuthenticatedFetch,
     showToast,
     settlementContractFns: activeScenarioCategory === 'tradeRoom' ? devScenarioActions?.settlementFns : settlementContractFns,
-    uiLabEnabled,
     devScenarioCategory: activeScenarioCategory,
     devTradeDecisionInput: effectiveTradeDecisionInput,
     devTradeHandlers: effectiveTradeHandlers,
@@ -1313,7 +1195,6 @@ function App() {
     payoutProfileDraft,
     setPayoutProfileDraft,
     canonicalizePayoutProfileDraft,
-    SEPA_COUNTRIES,
     myOrders,
     confirmDeleteId,
     tradeHistory,
@@ -1339,11 +1220,6 @@ function App() {
   } = buildAppModals({
     lang,
     onRequestSignIn: handleAuthAction,
-    sessionActions,
-    orderForm,
-    orderActions,
-    profileActions,
-    systemStatus,
     t,
     showWalletModal,
     setShowWalletModal,
@@ -1377,68 +1253,27 @@ function App() {
     setMakerRate,
     makerMinLimit,
     setMakerMinLimit,
-    makerMaxLimit,
-    setMakerMaxLimit,
     makerFiat,
     setMakerFiat,
     // [TR] Lab "Emir oluşturma" senaryosunda kontrat verileri senaryodan gelir; gönderim yalnız günlüğe yazılır.
-    onchainBondMap: labMakerScenario ? LAB_BOND_MAP : onchainBondMap,
+    onchainBondMap: labMakerScenario ? uiLab.LAB_BOND_MAP : onchainBondMap,
     onchainTokenMap: labMakerScenario ? labMakerScenario.tokenMap : onchainTokenMap,
-    protocolFeeConfig: labMakerScenario ? LAB_FEE_CONFIG : protocolFeeConfig,
-    paymentRiskConfig,
+    protocolFeeConfig: labMakerScenario ? uiLab.LAB_FEE_CONFIG : protocolFeeConfig,
     userReputation: labMakerScenario ? labMakerScenario.reputation : userReputation,
-    SUPPORTED_TOKEN_ADDRESSES: labMakerScenario ? LAB_TOKEN_ADDRESSES : SUPPORTED_TOKEN_ADDRESSES,
+    SUPPORTED_TOKEN_ADDRESSES: labMakerScenario ? uiLab.LAB_TOKEN_ADDRESSES : SUPPORTED_TOKEN_ADDRESSES,
     handleCreateOrder: labMakerScenario ? devScenarioActions?.setter('create_order') : handleCreateOrder,
     makerValidationError,
     makerPayoutRiskEntry,
     isCreateTemporarilyDisabledByRisk,
     isContractLoading,
-    setIsContractLoading,
     loadingText,
-    isBanned,
-    tradeHistory,
-    historyLoading,
-    tradeHistoryPage,
-    setTradeHistoryPage,
-    tradeHistoryTotal,
-    tradeHistoryLimit,
-    orders,
-    myOrders,
     address,
-    confirmDeleteId,
-    setConfirmDeleteId,
-    handleDeleteOrder,
-    activeTradesFilter,
-    setActiveTradesFilter,
-    activeEscrows: effectiveActiveEscrows,
-    setActiveTrade,
-    setUserRole,
-    setTradeState,
-    setChargebackAccepted,
-    setCurrentView,
-    handleUpdatePII,
-    payoutProfileDraft,
-    setPayoutProfileDraft,
-    canonicalizePayoutProfileDraft,
-    SEPA_COUNTRIES,
-    getSafeTelegramUrl,
-    handleLogoutAndDisconnect,
     isConnected,
     isAuthenticated: effectiveIsAuthenticated,
     termsAccepted,
     onAcceptTerms: handleAcceptTerms,
     onDeclineTerms: handleDeclineTerms,
     connector,
-    isRegisteringWallet,
-    handleRegisterWallet,
-    isWalletRegistered,
-    sybilStatus,
-    walletAgeRemainingDays,
-    decayReputation,
-    tokenDecimalsMap,
-    DEFAULT_TOKEN_DECIMALS,
-    formatTokenAmountFromRaw,
-    showToast,
   });
 
   // ═══════════════════════════════════════════
@@ -1465,6 +1300,7 @@ function App() {
                     ? renderProfileContext()
                     : currentView === 'admin'
                     ? (
+                      <React.Suspense fallback={<div className="p-8 text-sm text-textMuted" role="status">{lang === 'TR' ? 'Yükleniyor…' : 'Loading…'}</div>}>
                       <AdminPanel
                         // [TR] Lab'da senaryo değişince panel yeniden kurulur; aksi halde önceki 403 durumu kalıyordu.
                         key={devScenarioActive && devScenario.categoryKey === 'admin' ? `lab-${devScenario.scenario.id}` : 'admin'}
@@ -1477,6 +1313,7 @@ function App() {
                         readProtocolConfig={adminProtocolReader}
                         tokenSymbols={adminTokenSymbols}
                       />
+                      </React.Suspense>
                     )
                     : renderTradeRoom()}
               {currentView === 'home' && renderFooter()}
@@ -1493,8 +1330,8 @@ function App() {
         )}
       />
 
-      {uiLabEnabled && (
-        <DevScenarioController
+      {uiLab && (
+        <uiLab.DevScenarioController
           activeScenario={devScenario}
           onApplyScenario={applyDevScenario}
           onClearScenario={clearDevScenario}

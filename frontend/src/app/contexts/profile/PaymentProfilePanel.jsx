@@ -1,7 +1,7 @@
 import { Lock } from 'lucide-react';
 import React from 'react';
 
-const DEFAULT_SEPA_COUNTRIES = ['DE', 'FR', 'NL', 'BE', 'ES', 'IT', 'AT', 'PT', 'IE', 'LU', 'FI', 'GR'];
+import { SEPA_COUNTRY_CODES } from '../../orderUiModel';
 const RAIL_LABELS = {
   TR_IBAN: { TR: 'Türkiye (IBAN)', EN: 'Turkey (IBAN)' },
   SEPA_IBAN: { TR: 'Avrupa (SEPA)', EN: 'Europe (SEPA)' },
@@ -22,7 +22,6 @@ export const PaymentProfilePanel = ({
   setPayoutProfileDraft,
   handleUpdatePII,
   canonicalizePayoutProfileDraft = identity,
-  SEPA_COUNTRIES = DEFAULT_SEPA_COUNTRIES,
   isContractLoading = false,
 }) => {
   const draft = payoutProfileDraft || {};
@@ -34,7 +33,7 @@ export const PaymentProfilePanel = ({
 
   const update = (patch) => setPayoutProfileDraft((prev) => canonicalizePayoutProfileDraft({ ...prev, ...patch }));
   const updateField = (key, value) => setPayoutProfileDraft((prev) => ({ ...prev, fields: { ...(prev?.fields || {}), [key]: value } }));
-  const countryOptions = rail === 'TR_IBAN' ? ['TR'] : rail === 'US_ACH' ? ['US'] : SEPA_COUNTRIES;
+  const countryOptions = rail === 'TR_IBAN' ? ['TR'] : rail === 'US_ACH' ? ['US'] : SEPA_COUNTRY_CODES;
 
   return (
     <form onSubmit={handleUpdatePII} className="space-y-3 bg-surface border border-borderSubtle rounded-xl p-4 max-w-xl">

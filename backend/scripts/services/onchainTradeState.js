@@ -13,6 +13,7 @@
 
 const { ethers } = require("ethers");
 const logger = require("../utils/logger");
+const { isConfiguredAddress } = require("../utils/onchain");
 
 const GET_TRADE_ABI = [
   "function getTrade(uint256 _tradeId) view returns ((uint64 id,uint64 parentOrderId,address maker,address taker,address tokenAddress,uint256 cryptoAmount,uint256 makerBond,uint256 takerBond,uint16 takerFeeBpsSnapshot,uint16 makerFeeBpsSnapshot,uint8 tier,uint8 paymentRiskLevelSnapshot,uint8 state,uint64 lockedAt,uint64 paidAt,uint64 challengedAt,bool cancelProposedByMaker,bool cancelProposedByTaker,uint64 pingedAt,bool pingedByTaker,uint64 challengePingedAt,bool challengePingedByMaker))",
@@ -34,7 +35,7 @@ function getContract() {
   contractResolved = true;
   const rpcUrl = process.env.BASE_RPC_URL;
   const address = process.env.ARAF_ESCROW_ADDRESS;
-  if (!rpcUrl || !/^0x[a-fA-F0-9]{40}$/.test(address || "") || /^0x0{40}$/.test(address)) return null;
+  if (!rpcUrl || !isConfiguredAddress(address)) return null;
   contract = new ethers.Contract(address, GET_TRADE_ABI, new ethers.JsonRpcProvider(rpcUrl));
   return contract;
 }

@@ -76,7 +76,7 @@ describe('PIIDisplay role-aware and rail-aware copy', () => {
       fields: { account_holder_name: 'Contact User', iban: 'TR00 1111' },
     });
 
-    render(<PIIDisplay tradeId={`trade-${channel}`} lang="EN" getSafeTelegramUrl={(handle) => `https://t.me/${handle}`} />);
+    render(<PIIDisplay tradeId={`trade-${channel}`} lang="EN" />);
     await reveal();
 
     await waitFor(() => expect(screen.getByText('Contact User')).toBeInTheDocument());

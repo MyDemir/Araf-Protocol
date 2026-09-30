@@ -20,6 +20,7 @@
  */
 
 const { ethers } = require("ethers");
+const { isConfiguredAddress: _isConfiguredAddress } = require("../utils/onchain");
 const Trade = require("../models/Trade");
 const logger = require("../utils/logger");
 
@@ -40,11 +41,6 @@ const FALLBACK_CLAIM_DELAY_SECONDS = 24 * 3600;
 
 let rewardsContract = null;
 
-function _isConfiguredAddress(addr) {
-  return typeof addr === "string"
-    && /^0x[a-fA-F0-9]{40}$/.test(addr)
-    && addr !== "0x0000000000000000000000000000000000000000";
-}
 
 function getRewardsContract() {
   if (rewardsContract) return rewardsContract;
