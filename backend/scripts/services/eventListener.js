@@ -472,6 +472,10 @@ class EventWorker {
     this._retryFailureCount = 0;
     this._blockAcks = new Map();
     this._lastSeenBlock = 0;
+    this._lastBlockSeenAt = 0;
+    this._watchdogTimer = null;
+    this._staleReconnects = 0;
+    this._exitProcess = (code) => process.exit(code);
     this._lastSafeCheckpointBlock = 0;
     this._replayInProgress = false;
     this._replayFailureCount = 0;
@@ -505,8 +509,23 @@ class EventWorker {
     logger.info("[Worker] V3 event listener aktif.");
   }
 
+  /**
+   * [TR] B19: start() (bağlan + replay) HTTP dinlemesini bloklamasın diye arka planda çalıştırılır. Replay
+   *      sürerken /ready state="replaying" raporlar. Başlatma hatası onFatal'a iletilir.
+   * [EN] B19: runs start() (connect + replay) in the background so it cannot block the HTTP listener. While the
+   *      replay runs /ready reports state="replaying". A start failure is handed to onFatal.
+   */
+  startInBackground({ onFatal } = {}) {
+    this._startPromise = this.start().catch((err) => {
+      logger.error(`[Worker] Arka plan başlatma hatası: ${err.message}`);
+      if (typeof onFatal === "function") onFatal(err);
+    });
+    return this._startPromise;
+  }
+
   async stop() {
     this.isRunning = false;
+    this._stopWatchdog();
     if (this.provider) this.provider.removeAllListeners();
     this._listenersAttached = false;
     this._livePollInProgress = false;
@@ -586,6 +605,7 @@ class EventWorker {
     if (wsRpcUrl && wsRpcUrl.startsWith("wss://")) {
       try {
         this.provider = new ethers.WebSocketProvider(wsRpcUrl);
+        this._watchWebSocketClose(this.provider);
         logger.info("[Worker] WebSocket RPC bağlandı.");
       } catch (err) {
         logger.warn(`[Worker] WebSocket başarısız, HTTP fallback: ${err.message}`);
@@ -801,7 +821,14 @@ class EventWorker {
   _attachLiveListeners() {
     if (!this.contract || this._listenersAttached) return;
 
+    this._lastBlockSeenAt = Date.now();
+    this._startWatchdog();
+
     this.provider.on("block", async (blockNumber) => {
+      // [TR] B6: watchdog için "son blok görülme" zamanı (poll meşgul olsa bile güncellenir).
+      // [EN] B6: "last block seen" time for the watchdog (updated even when a poll is in flight).
+      this._lastBlockSeenAt = Date.now();
+      this._staleReconnects = 0;
       if (this._livePollInProgress) return;
 
       this._livePollInProgress = true;
@@ -831,13 +858,100 @@ class EventWorker {
       }
     });
 
-    this.provider.on("error", async (err) => {
-      logger.error(`[Worker] Provider hatası: ${err.message}. Yeniden bağlanılıyor...`);
-      await this._reconnect();
+    this.provider.on("error", (err) => {
+      logger.error(`[Worker] Provider hatası: ${err?.message}. Yeniden bağlanılıyor...`);
+      this._recoverOrExit("provider error");
     });
 
     this._listenersAttached = true;
     this._setState("live", "canlı block-range listener bağlandı");
+  }
+
+  /**
+   * [TR] B6: ethers v6 WebSocketProvider soket kapanınca "error" yaymaz; worker sessizce dururdu. Ham soketin
+   *      close/error olayları dinlenir. Eski (yok edilmiş) provider'ın kapanışı yok sayılır.
+   * [EN] B6: ethers v6 WebSocketProvider emits no "error" when the socket closes, so the worker silently stalled.
+   *      The raw socket's close/error events are listened to. Closes of a superseded provider are ignored.
+   */
+  _watchWebSocketClose(provider) {
+    const socket = provider?.websocket;
+    if (!socket) return;
+    const onClose = (reason) => {
+      if (this.provider !== provider || !this.isRunning) return;
+      logger.error(`[Worker] WebSocket kapandı/hata verdi (${reason?.code ?? reason?.message ?? "unknown"}).`);
+      this._recoverOrExit("websocket close");
+    };
+    if (typeof socket.addEventListener === "function") {
+      socket.addEventListener("close", onClose);
+      socket.addEventListener("error", onClose);
+    } else if (typeof socket.on === "function") {
+      socket.on("close", onClose);
+      socket.on("error", onClose);
+    }
+  }
+
+  // [TR] Yeniden bağlanmayı dener; başarısızsa süreç çıkar (Fly yeniden başlatır).
+  // [EN] Tries to reconnect; on failure the process exits (Fly restarts it).
+  _recoverOrExit(reason) {
+    return this._reconnect().catch((err) => {
+      logger.error(`[Worker] Yeniden bağlanma başarısız (${reason}): ${err?.message}`);
+      this._fatalExit(`reconnect failed after ${reason}`);
+    });
+  }
+
+  _fatalExit(reason) {
+    logger.error(`[Worker] KRİTİK: ${reason}. process.exit(1).`);
+    this._exitProcess(1);
+  }
+
+  _startWatchdog() {
+    if (this._watchdogTimer) return;
+    this._watchdogTimer = setInterval(() => {
+      this._watchdogTick().catch((err) => logger.error(`[Worker] Watchdog hatası: ${err.message}`));
+    }, WATCHDOG_INTERVAL_MS);
+    if (typeof this._watchdogTimer.unref === "function") this._watchdogTimer.unref();
+  }
+
+  _stopWatchdog() {
+    if (this._watchdogTimer) clearInterval(this._watchdogTimer);
+    this._watchdogTimer = null;
+  }
+
+  /**
+   * [TR] B6 "son blok görülme" watchdog'u: BLOCK_STALE_MS boyunca blok yoksa bir kez _reconnect dener; reconnect
+   *      sonrası da blok gelmezse (ya da reconnect patlarsa) process.exit(1).
+   * [EN] B6 "last block seen" watchdog: with no block for BLOCK_STALE_MS it tries one _reconnect; if still no
+   *      block afterwards (or the reconnect fails) it calls process.exit(1).
+   */
+  async _watchdogTick() {
+    if (!this.isRunning || this._state === "stopped" || this._reconnectPromise) return;
+    if (!this._lastBlockSeenAt) return;
+
+    const idleMs = Date.now() - this._lastBlockSeenAt;
+    if (idleMs < BLOCK_STALE_MS) return;
+
+    if (this._staleReconnects >= 1) {
+      this._fatalExit(`yeniden bağlanmaya rağmen ${Math.round(idleMs / 1000)} sn blok görülmedi`);
+      return;
+    }
+
+    this._staleReconnects += 1;
+    logger.error(`[Worker] ${Math.round(idleMs / 1000)} sn'dir yeni blok yok; yeniden bağlanılıyor.`);
+    await this._recoverOrExit("block stall");
+    this._lastBlockSeenAt = Date.now();
+  }
+
+  // [TR] /health için bellek içi canlılık özeti (RPC çağırmaz).
+  // [EN] In-memory liveness summary for /health (no RPC calls).
+  getLivenessSnapshot() {
+    const ageMs = this._lastBlockSeenAt ? Date.now() - this._lastBlockSeenAt : null;
+    const watching = this.isRunning && this._state !== "replaying" && ageMs !== null;
+    return {
+      isRunning: this.isRunning,
+      state: this._state,
+      lastBlockAgeMs: ageMs,
+      stale: Boolean(watching && ageMs > LIVENESS_STALE_MS),
+    };
   }
 
   /**
@@ -1100,13 +1214,18 @@ class EventWorker {
     this._reconnectPromise = (async () => {
       this._setState("reconnecting", "provider error sonrası yeniden bağlanma");
 
-      if (this.provider) {
-        try {
-          this.provider.removeAllListeners();
-          if (this.provider.destroy) await this.provider.destroy();
-        } catch (_) {}
+      const oldProvider = this.provider;
+      if (oldProvider) {
+        // [TR] Önce referansı bırak: yok edilen soketin close olayı yeni reconnect tetiklemesin.
+        // [EN] Drop the reference first so the destroyed socket's close event cannot trigger another reconnect.
         this.provider = null;
+        try {
+          oldProvider.removeAllListeners();
+          if (oldProvider.destroy) await oldProvider.destroy();
+        } catch (_) {}
         this.contract = null;
+        this.vaultContract = null;
+        this.rewardsContract = null;
         this._listenersAttached = false;
         this._livePollInProgress = false;
         this._blockTimestampCache.clear();
@@ -1117,6 +1236,7 @@ class EventWorker {
       await this._replayMissedEvents();
 
       this._lastLivePolledBlock = this._lastSafeCheckpointBlock;
+      this._lastBlockSeenAt = Date.now();
       if (this.contract) this._attachLiveListeners();
     })();
 
