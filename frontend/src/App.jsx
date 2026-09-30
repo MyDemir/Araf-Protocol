@@ -9,10 +9,11 @@ import { buildAppModals } from './app/AppModals';
 import AppShell from './app/shell/AppShell';
 import { useSessionActions } from './app/providers/SessionProvider';
 import { useAppSessionData } from './app/useAppSessionData';
-import AdminPanel from './AdminPanel';
+// [TR] Admin paneli yalnız yöneticiler içindir; ayrı chunk olarak ilk ihtiyaçta yüklenir.
+// [EN] The admin panel is for admins only; loaded as a separate chunk on first use.
+const AdminPanel = React.lazy(() => import('./AdminPanel'));
 import useFullscreen from './app/shell/useFullscreen';
 import { deriveTradeTimeline, estimateBleeding } from './app/contexts/trade-room/tradeTimeline';
-import { readProtocolConfig } from './app/contexts/admin/adminChainConfig';
 import { isUiLabEnabled, loadUiLab } from './app/uiLab';
 import { SESSION_ONLY_VIEWS } from './app/viewRegistry';
 import { getInitialLang, APP_LANG_STORAGE_KEY } from './app/bootstrapState';
@@ -431,13 +432,13 @@ function App() {
   const adminProtocolReader = React.useCallback(() => (
     activeScenarioCategory === 'admin'
       ? uiLab.createMockProtocolConfigReader(devScenario?.scenario)()
-      : readProtocolConfig({
+      : import('./app/contexts/admin/adminChainConfig').then(({ readProtocolConfig }) => readProtocolConfig({
         publicClient,
         escrowAddress: import.meta.env.VITE_ESCROW_ADDRESS,
         vaultAddress: import.meta.env.VITE_REVENUE_VAULT_ADDRESS || import.meta.env.VITE_REWARDS_VAULT_ADDRESS,
         rewardsAddress: import.meta.env.VITE_REWARDS_ADDRESS,
         tokens: SUPPORTED_TOKEN_ADDRESSES,
-      })
+      }))
   ), [activeScenarioCategory, devScenario, publicClient]); // eslint-disable-line react-hooks/exhaustive-deps
   const adminTokenSymbols = React.useMemo(() => (activeScenarioCategory === 'admin' ? uiLab.labTokenSymbols : Object.fromEntries(
     Object.entries(SUPPORTED_TOKEN_ADDRESSES).filter(([, a]) => a).map(([sym, a]) => [String(a).toLowerCase(), sym])
@@ -1449,6 +1450,7 @@ function App() {
                     ? renderProfileContext()
                     : currentView === 'admin'
                     ? (
+                      <React.Suspense fallback={<div className="p-8 text-sm text-textMuted" role="status">{lang === 'TR' ? 'Yükleniyor…' : 'Loading…'}</div>}>
                       <AdminPanel
                         // [TR] Lab'da senaryo değişince panel yeniden kurulur; aksi halde önceki 403 durumu kalıyordu.
                         key={devScenarioActive && devScenario.categoryKey === 'admin' ? `lab-${devScenario.scenario.id}` : 'admin'}
@@ -1461,6 +1463,7 @@ function App() {
                         readProtocolConfig={adminProtocolReader}
                         tokenSymbols={adminTokenSymbols}
                       />
+                      </React.Suspense>
                     )
                     : renderTradeRoom()}
               {currentView === 'home' && renderFooter()}
