@@ -74,7 +74,7 @@ const BLOCK_TIMESTAMP_CACHE_LIMIT = 2_048;
 
 const ESCROW_EVENT_NAMES = [
   "WalletRegistered",
-  "EscrowCreated", "EscrowLocked", "PaymentReported",
+  "PaymentReported",
   "EscrowReleased", "DisputeOpened",
   "CancelProposed", "EscrowCanceled", "PaymentWindowExpired",
   "MakerPinged", "ReputationUpdated",
@@ -107,10 +107,10 @@ function _logIndexOf(event) {
 
 const ARAF_ABI = [
   "event WalletRegistered(address indexed wallet, uint256 timestamp)",
-  // Deprecated direct-escrow mirror events. Kept for compatibility with historical deployments;
-  // canonical V3 child trades are mirrored from OrderFilled + getTrade().
-  "event EscrowCreated(uint256 indexed tradeId, address indexed maker, address token, uint256 amount, uint8 tier, bytes32 listingRef)",
-  "event EscrowLocked(uint256 indexed tradeId, address indexed taker, uint256 takerBond)",
+  // [TR] Kanonik V3 child trade'ler OrderFilled + getTrade() ile aynalanır. Kontrat EscrowCreated /
+  //      EscrowLocked event'lerini yayınlamaz (B36: ölü handler'lar kaldırıldı).
+  // [EN] Canonical V3 child trades are mirrored from OrderFilled + getTrade(). The contract never emits
+  //      EscrowCreated / EscrowLocked (B36: dead handlers removed).
   "event PaymentReported(uint256 indexed tradeId, string ipfsHash, uint256 timestamp)",
   "event EscrowReleased(uint256 indexed tradeId, address indexed maker, address indexed taker, uint256 takerFee, uint256 makerFee)",
   "event DisputeOpened(uint256 indexed tradeId, address indexed challenger, uint256 timestamp)",
@@ -176,8 +176,6 @@ const CLEARED_CANCEL_PROPOSAL = Object.freeze({
 
 const EVENT_ARG_KEYS = {
   WalletRegistered: ["wallet", "timestamp"],
-  EscrowCreated: ["tradeId", "maker", "token", "amount", "tier", "listingRef"],
-  EscrowLocked: ["tradeId", "taker", "takerBond"],
   PaymentReported: ["tradeId", "ipfsHash", "timestamp"],
   // [TR] EscrowReleased payload sırası kontrat ABI ile birebir eşleşmelidir:
   //      4. argüman takerFee/takerPenalty, 5. argüman makerFee/makerPenalty.
@@ -345,7 +343,6 @@ const TRADE_STATE_ORDER = {
 };
 
 const TERMINAL_TRADE_STATES = new Set(["RESOLVED", "CANCELED", "BURNED"]);
-const LOCKABLE_TRADE_STATES = new Set(["OPEN", "LOCKED"]);
 
 function _getTradeStateOrder(state) {
   return TRADE_STATE_ORDER[state] ?? -1;
@@ -1253,8 +1250,6 @@ class EventWorker {
     }
     const handlers = {
       WalletRegistered: this._onWalletRegistered.bind(this),
-      EscrowCreated: this._onEscrowCreated.bind(this),
-      EscrowLocked: this._onEscrowLocked.bind(this),
       PaymentReported: this._onPaymentReported.bind(this),
       EscrowReleased: this._onEscrowReleased.bind(this),
       DisputeOpened: this._onDisputeOpened.bind(this),
@@ -1452,55 +1447,6 @@ class EventWorker {
     const canceledAt = await this._getEventDate(event);
     const orderData = await this._fetchOrderFromChain(orderId);
     await this._upsertOrderMirror(orderData, { canceledAt });
-  }
-
-  // Deprecated compatibility handler for historical direct-escrow events.
-  // Canonical V3 order-first flow uses _onOrderFilled as contract-authoritative mirror input.
-  async _onEscrowCreated(event) {
-    const { tradeId, listingRef } = event.args;
-    const createdAt = await this._getEventDate(event);
-    const tradeData = await this._fetchTradeFromChain(tradeId);
-    const parentOrderId = _toIdentityString(tradeData.parentOrderId, { allowZero: true });
-    const parentOrder = parentOrderId !== "0" ? await this._fetchOrderFromChain(parentOrderId) : null;
-    const normalizedListingRef = listingRef ? _toStr(listingRef).toLowerCase() : null;
-
-    await this._upsertTradeMirror(tradeData, {
-      parentOrder,
-      createdAt,
-      listingRef: normalizedListingRef,
-    });
-  }
-
-  async _onEscrowLocked(event, attempt = 1) {
-    const { tradeId, taker } = event.args;
-    const lockedAt = await this._getEventDate(event);
-    const tradeIdNum = _toIdentityString(tradeId);
-
-    const trade = await Trade.findOne(_buildIdentityLookup("onchain_escrow_id", tradeIdNum))
-      .select("maker_address taker_address status")
-      .lean();
-
-    if (!trade) {
-      if (attempt < MAX_RETRIES) {
-        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * attempt));
-        return this._onEscrowLocked(event, attempt + 1);
-      }
-      await this._addToDLQ(event, "EscrowLocked geldi ama trade mirror bulunamadı.");
-      throw new Error("EscrowLocked geldi ama trade mirror bulunamadı.");
-    }
-
-    if (!LOCKABLE_TRADE_STATES.has(trade.status)) {
-      logger.warn(
-        `[Worker] EscrowLocked monotonic-skip: trade=${tradeIdNum} current_status=${trade.status}`
-      );
-      return;
-    }
-    await this._captureLockedTradeSnapshot({
-      tradeId: tradeIdNum,
-      lockedAt,
-      makerAddress: trade.maker_address,
-      takerAddress: taker.toLowerCase(),
-    });
   }
 
   async _captureLockedTradeSnapshot({
