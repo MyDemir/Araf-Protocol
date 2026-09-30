@@ -6,6 +6,11 @@ import { WALLET_AGE_MIN_SEC } from './walletAge';
 
 const DEFAULT_TOKEN_DECIMALS = 6;
 
+// [TR] Arka plandaki sekmede yoklama yapılmaz (boşa RPC/backend isteği). [EN] Never poll from a hidden tab.
+const whenVisible = (fn) => () => {
+  if (typeof document === 'undefined' || !document.hidden) fn();
+};
+
 const MY_ITEMS_PAGE_LIMIT = 50;
 const MAX_MY_ITEMS_PAGE_FETCHES = 100;
 
@@ -587,7 +592,7 @@ export function useAppSessionData({
       if (result) setBleedingAmounts(result);
     };
     fetchAmounts();
-    const interval = setInterval(fetchAmounts, 30000);
+    const interval = setInterval(whenVisible(fetchAmounts), 30000);
     return () => clearInterval(interval);
   }, [resolvedTradeState, activeTrade?.onchainId, getCurrentAmounts]);
 
@@ -676,6 +681,8 @@ export function useAppSessionData({
     const t = setTimeout(() => setDebouncedSearchAmount(searchAmount), 400);
     return () => clearTimeout(t);
   }, [searchAmount]);
+  const marketViewOpen = currentView === 'market';
+  const ordersLoadedRef = React.useRef(false);
   const marketOrdersQuery = buildMarketOrdersQuery({
     marketSide, filterTier1, filterToken, searchAmount: debouncedSearchAmount, tokenAddresses: SUPPORTED_TOKEN_ADDRESSES,
   });
@@ -703,6 +710,7 @@ export function useAppSessionData({
         if (!Array.isArray(data.orders)) throw new Error('Malformed orders payload');
         setOrders(mapOrders(data.orders));
         setOrdersFeedError(false);
+        ordersLoadedRef.current = true;
       } catch (err) {
         console.error('Order fetch error:', err);
         setOrdersFeedError(true);
@@ -711,12 +719,14 @@ export function useAppSessionData({
         initialLoad = false;
       }
     };
-    fetchOrders();
-    const interval = setInterval(() => {
-      if (typeof document === 'undefined' || !document.hidden) fetchOrders();
-    }, 30000);
+    // [TR] Pazardan çıkarken tekrar çekilmez; yalnız ilk yüklemede ya da Pazar açıkken. [EN] No refetch on leaving Market.
+    if (marketViewOpen || !ordersLoadedRef.current) fetchOrders();
+    // [TR] Liste yalnız Pazar ekranı açıkken yenilenir; diğer ekranlarda ilk yükleme yeterlidir.
+    // [EN] Refresh only while the Market view is open; other views keep the initial load.
+    if (!marketViewOpen) return undefined;
+    const interval = setInterval(whenVisible(fetchOrders), 30000);
     return () => clearInterval(interval);
-  }, [lang, onchainBondMap, onchainTokenMap, paymentRiskConfig, marketOrdersQuery]);
+  }, [lang, onchainBondMap, onchainTokenMap, paymentRiskConfig, marketOrdersQuery, marketViewOpen]);
 
   useEffect(() => {
     if (!isAuthenticated || !isConnected) {
@@ -815,7 +825,7 @@ export function useAppSessionData({
       }
     };
     fetchSybil();
-    const interval = setInterval(fetchSybil, 30000);
+    const interval = setInterval(whenVisible(fetchSybil), 60000);
     return () => clearInterval(interval);
   }, [isConnected, address, antiSybilCheck, getCooldownRemaining]);
 
@@ -830,7 +840,7 @@ export function useAppSessionData({
       }
     };
     fetchPausedStatus();
-    const interval = setInterval(fetchPausedStatus, 60000);
+    const interval = setInterval(whenVisible(fetchPausedStatus), 120000);
     return () => clearInterval(interval);
   }, [getPaused]);
 

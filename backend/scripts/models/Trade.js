@@ -365,6 +365,8 @@ const tradeSchema = new mongoose.Schema(
 // ── Indexes ───────────────────────────────────────────────────────────────────
 tradeSchema.index({ parent_order_id: 1, status: 1 });
 tradeSchema.index({ maker_address: 1, status: 1 });
+// [TR] Pazar güven özeti: maker başına en son trade. [EN] Market trust summary: latest trade per maker.
+tradeSchema.index({ maker_address: 1, created_at: -1 });
 tradeSchema.index({ taker_address: 1, status: 1 });
 tradeSchema.index({ trade_origin: 1, status: 1 });
 tradeSchema.index({ parent_order_side: 1, status: 1 });

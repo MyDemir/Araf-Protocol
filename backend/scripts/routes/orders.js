@@ -151,6 +151,11 @@ async function _attachMarketTrustVisibilitySummary(orders = []) {
     User.find({ wallet_address: { $in: makerAddresses } })
       .select("wallet_address profileVersion payout_profile reputation_cache is_banned banned_until consecutive_bans")
       .lean(),
+    // [TR] Güven sinyali trade'den yalnız payout_snapshot (maker özeti) okur. Tam belge ($$ROOT) yerine yalnız
+    //      bu alanlar taşınır; şifreli ödeme alanları hiç çekilmez. Sıralama {maker_address, created_at}
+    //      indeksine uyar, böylece $group her maker'ın ilk belgesini indeks sırasıyla alır.
+    // [EN] The trust signal only reads payout_snapshot (maker summary). Carry just those fields (never the
+    //      encrypted payout fields) instead of $$ROOT; the sort matches the {maker_address, created_at} index.
     Trade.aggregate([
       {
         $match: {
@@ -158,7 +163,9 @@ async function _attachMarketTrustVisibilitySummary(orders = []) {
           ...LOCK_OR_SNAPSHOT_CAPTURED_MATCH,
         },
       },
-      { $sort: { created_at: -1, _id: -1 } },
+      { $sort: { maker_address: 1, created_at: -1, _id: -1 } },
+      { $project: { maker_address: 1, "payout_snapshot.is_complete": 1, "payout_snapshot.maker": 1 } },
+      { $unset: ["payout_snapshot.maker.payout_details_enc", "payout_snapshot.maker.contact_value_enc"] },
       { $group: { _id: "$maker_address", trade: { $first: "$$ROOT" } } },
     ]),
   ]);
@@ -230,8 +237,39 @@ router.get("/payment-risk-config", marketReadLimiter, async (_req, res, next) =>
   }
 });
 
+// [TR] Pazar yanıtı herkese açık ve tüm ziyaretçilerde aynıdır; istemciler 30 sn'de bir yokladığı için
+//      aynı sorgu kısa süre bellekte tutulur (varsayılan 10 sn). Her istekte 4 Mongo sorgusu yerine
+//      TTL başına bir kez çalışır. Testlerde varsayılan kapalıdır.
+// [EN] The market response is public and identical for every visitor; clients poll every 30 s, so the
+//      same query is kept in memory briefly (10 s default): 4 Mongo queries once per TTL instead of per request.
+const MARKET_CACHE_TTL_MS = Number(process.env.MARKET_CACHE_TTL_MS ?? (process.env.NODE_ENV === "test" ? 0 : 10_000));
+const MARKET_CACHE_MAX_ENTRIES = 200;
+const marketCache = new Map();
+
+function _marketCacheGet(key) {
+  const hit = marketCache.get(key);
+  if (!hit) return null;
+  if (hit.expiresAt <= Date.now()) {
+    marketCache.delete(key);
+    return null;
+  }
+  return hit.body;
+}
+
+function _marketCacheSet(key, body) {
+  if (!(MARKET_CACHE_TTL_MS > 0)) return;
+  if (marketCache.size >= MARKET_CACHE_MAX_ENTRIES) marketCache.delete(marketCache.keys().next().value);
+  marketCache.set(key, { body, expiresAt: Date.now() + MARKET_CACHE_TTL_MS });
+}
+
 router.get("/", marketReadLimiter, async (req, res, next) => {
   try {
+    const cacheKey = req.originalUrl;
+    const cached = _marketCacheGet(cacheKey);
+    if (cached) {
+      res.set("X-Cache", "HIT");
+      return res.json(cached);
+    }
     const schema = Joi.object({
       side: Joi.string().valid("SELL_CRYPTO", "BUY_CRYPTO").optional(),
       // [TR] ACTIVE = fill edilebilir (OPEN + PARTIALLY_FILLED). Pazar yeri bunu kullanır;
@@ -286,7 +324,9 @@ router.get("/", marketReadLimiter, async (req, res, next) => {
         Order.countDocuments(filter),
       ]);
       const ordersWithTrustSummary = await _attachMarketTrustVisibilitySummary(orders);
-      return res.json({ orders: ordersWithTrustSummary, total, page: value.page, limit: value.limit });
+      const body = { orders: ordersWithTrustSummary, total, page: value.page, limit: value.limit };
+      _marketCacheSet(cacheKey, body);
+      return res.json(body);
     }
 
     const [orders, total] = await Promise.all([
@@ -303,7 +343,9 @@ router.get("/", marketReadLimiter, async (req, res, next) => {
     ]);
 
     const ordersWithTrustSummary = await _attachMarketTrustVisibilitySummary(orders);
-    return res.json({ orders: ordersWithTrustSummary, total, page: value.page, limit: value.limit });
+    const body = { orders: ordersWithTrustSummary, total, page: value.page, limit: value.limit };
+    _marketCacheSet(cacheKey, body);
+    return res.json(body);
   } catch (err) { next(err); }
 });
 

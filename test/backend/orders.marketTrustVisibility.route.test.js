@@ -98,7 +98,9 @@ describe("orders route market trust visibility summary", () => {
           ],
         },
       },
-      { $sort: { created_at: -1, _id: -1 } },
+      { $sort: { maker_address: 1, created_at: -1, _id: -1 } },
+      { $project: { maker_address: 1, "payout_snapshot.is_complete": 1, "payout_snapshot.maker": 1 } },
+      { $unset: ["payout_snapshot.maker.payout_details_enc", "payout_snapshot.maker.contact_value_enc"] },
       { $group: { _id: "$maker_address", trade: { $first: "$$ROOT" } } },
     ]);
     expect(res.body.orders).toHaveLength(1);

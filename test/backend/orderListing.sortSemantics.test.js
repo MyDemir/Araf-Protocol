@@ -138,6 +138,47 @@ describe("orders and trades routes use deterministic _id tie-break sort semantic
     expect(buy.Order.find).not.toHaveBeenCalled();
   });
 
+  it("market responses are cached briefly: repeated identical queries hit Mongo once", async () => {
+    process.env.MARKET_CACHE_TTL_MS = "10000";
+    try {
+      const { app, Order } = buildOrdersApp();
+      const first = await request(app).get("/api/orders?status=ACTIVE&limit=50").expect(200);
+      const second = await request(app).get("/api/orders?status=ACTIVE&limit=50").expect(200);
+      expect(Order.find).toHaveBeenCalledTimes(1);
+      expect(second.headers["x-cache"]).toBe("HIT");
+      expect(second.body).toEqual(first.body);
+      await request(app).get("/api/orders?status=ACTIVE&limit=20").expect(200);
+      expect(Order.find).toHaveBeenCalledTimes(2);
+    } finally {
+      delete process.env.MARKET_CACHE_TTL_MS;
+    }
+  });
+
+  it("trust summary aggregate carries only the maker snapshot, never encrypted payout fields", async () => {
+    const trustTrade = { find: jest.fn(), aggregate: jest.fn().mockResolvedValue([]) };
+    const findChain = {
+      select: jest.fn().mockReturnThis(), sort: jest.fn().mockReturnThis(), skip: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(), lean: jest.fn().mockResolvedValue([{ owner_address: "0xmaker" }]),
+    };
+    let router;
+    jest.isolateModules(() => {
+      jest.doMock("../../backend/scripts/middleware/auth", () => ({ requireAuth: (_q, _s, n) => n(), requireSessionWalletMatch: (_q, _s, n) => n() }));
+      jest.doMock("../../backend/scripts/middleware/rateLimiter", () => ({ marketReadLimiter: (_q, _s, n) => n(), ordersReadLimiter: (_q, _s, n) => n(), ordersWriteLimiter: (_q, _s, n) => n() }));
+      jest.doMock("../../backend/scripts/models/Order", () => ({ find: jest.fn(() => findChain), countDocuments: jest.fn().mockResolvedValue(1) }));
+      jest.doMock("../../backend/scripts/models/Trade", () => trustTrade);
+      jest.doMock("../../backend/scripts/models/User", () => ({ find: jest.fn().mockReturnValue({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([]) }) }) }));
+      jest.doMock("../../backend/scripts/services/protocolConfig", () => ({ getConfig: jest.fn(() => ({ tokenMap: {} })) }));
+      router = require("../../backend/scripts/routes/orders");
+    });
+    const app = express();
+    app.use("/api/orders", router);
+    await request(app).get("/api/orders").expect(200);
+    const pipeline = trustTrade.aggregate.mock.calls[0][0];
+    expect(pipeline.find((st) => st.$sort).$sort).toEqual({ maker_address: 1, created_at: -1, _id: -1 });
+    expect(pipeline.find((st) => st.$project).$project).toEqual({ maker_address: 1, "payout_snapshot.is_complete": 1, "payout_snapshot.maker": 1 });
+    expect(pipeline.find((st) => st.$unset).$unset).toEqual(["payout_snapshot.maker.payout_details_enc", "payout_snapshot.maker.contact_value_enc"]);
+  });
+
   it("trades history route uses _id tie-break instead of onchain_escrow_id lexicographic sort", async () => {
     const findChain = {
       select: jest.fn().mockReturnThis(),
