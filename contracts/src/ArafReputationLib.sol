@@ -192,9 +192,9 @@ library ArafReputationLib {
      */
     function decayReputation(Store storage s, address _wallet) external {
         Reputation storage rep = s.reputation[_wallet];
-        if (rep.bannedUntil == 0) revert NoPriorBanHistory();
-        if (block.timestamp <= rep.bannedUntil + s.cleanPeriod) revert CleanPeriodNotElapsed();
-        if (rep.consecutiveBans == 0) revert NoBansToReset();
+        if (rep.bannedUntil == 0) revert IArafEscrowErrors.NoPriorBanHistory();
+        if (block.timestamp <= rep.bannedUntil + s.cleanPeriod) revert IArafEscrowErrors.CleanPeriodNotElapsed();
+        if (rep.consecutiveBans == 0) revert IArafEscrowErrors.NoBansToReset();
 
         rep.consecutiveBans = 0;
         rep.riskPoints = 0;
@@ -219,12 +219,12 @@ library ArafReputationLib {
         uint32 _baseBanDuration,
         uint32 _banRiskPointsThreshold
     ) external {
-        if (_cleanPeriod < 7 days) revert InvalidState();
-        if (_cleanPeriod > MAX_REPUTATION_DECAY_PERIOD) revert DecayTooHigh();
-        if (_baseBanDuration == 0) revert ZeroAmount();
-        if (_baseBanDuration > MAX_BAN_DURATION) revert BanTooHigh();
-        if (_banRiskPointsThreshold == 0) revert ZeroAmount();
-        if (_banRiskPointsThreshold > s.tierMaxRiskPoints[0]) revert InvalidTier();
+        if (_cleanPeriod < 7 days) revert IArafEscrowErrors.InvalidState();
+        if (_cleanPeriod > MAX_REPUTATION_DECAY_PERIOD) revert IArafEscrowErrors.DecayTooHigh();
+        if (_baseBanDuration == 0) revert IArafEscrowErrors.ZeroAmount();
+        if (_baseBanDuration > MAX_BAN_DURATION) revert IArafEscrowErrors.BanTooHigh();
+        if (_banRiskPointsThreshold == 0) revert IArafEscrowErrors.ZeroAmount();
+        if (_banRiskPointsThreshold > s.tierMaxRiskPoints[0]) revert IArafEscrowErrors.InvalidTier();
         // [TR] Ödül/ceza delta'ları ban eşiğini aşmamalı. [EN] Reward/penalty deltas must stay within ban threshold.
         if (
             _manualReleaseRewardPts > _banRiskPointsThreshold ||
@@ -233,7 +233,7 @@ library ArafReputationLib {
             _disputeLossPenaltyPts > _banRiskPointsThreshold ||
             _burnPenaltyPts > _banRiskPointsThreshold ||
             _mutualCancelPenaltyPts > _banRiskPointsThreshold
-        ) revert InvalidState();
+        ) revert IArafEscrowErrors.InvalidState();
 
         s.cleanPeriod = _cleanPeriod;
         s.manualReleaseRewardPts = _manualReleaseRewardPts;
@@ -264,11 +264,11 @@ library ArafReputationLib {
         uint32[5] calldata _maxRiskPoints
     ) external {
         for (uint256 i = 1; i < 5; ) {
-            if (_minSuccessfulTrades[i] < _minSuccessfulTrades[i - 1]) revert InvalidTier();
-            if (_maxRiskPoints[i] > _maxRiskPoints[i - 1]) revert InvalidTier();
+            if (_minSuccessfulTrades[i] < _minSuccessfulTrades[i - 1]) revert IArafEscrowErrors.InvalidTier();
+            if (_maxRiskPoints[i] > _maxRiskPoints[i - 1]) revert IArafEscrowErrors.InvalidTier();
             unchecked { ++i; }
         }
-        if (_maxRiskPoints[0] < s.banRiskPointsThreshold) revert InvalidTier();
+        if (_maxRiskPoints[0] < s.banRiskPointsThreshold) revert IArafEscrowErrors.InvalidTier();
 
         s.tierMinSuccessfulTrades = _minSuccessfulTrades;
         s.tierMaxRiskPoints = _maxRiskPoints;

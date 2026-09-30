@@ -24,6 +24,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./ArafErrors.sol";
 import "./ArafReputationLib.sol";
+import "./ArafSettlementLib.sol";
 
 
 interface IArafRevenueReceiver {
@@ -42,7 +43,7 @@ interface IArafRevenueReceiver {
     ) external;
 }
 
-contract ArafEscrow is ReentrancyGuard, Ownable, Pausable {
+contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
     using SafeERC20 for IERC20;
 
     // ═══════════════════════════════════════════════════
@@ -1074,7 +1075,7 @@ contract ArafEscrow is ReentrancyGuard, Ownable, Pausable {
 
         t.state = TradeState.BURNED;
 
-        _sendProtocolRevenue(t.tokenAddress, totalBurn, RevenueKind.BURN_RESIDUAL, _tradeId);
+        _payout(t, _tradeId, 0, 0, totalBurn, 0, RevenueKind.BURN_RESIDUAL);
 
         _recordTerminalOutcome(_tradeId, TerminalOutcome.BURNED, 0, 0);
         _recordReputation(t, ArafReputationLib.Outcome.BURN);
@@ -1160,40 +1161,16 @@ contract ArafEscrow is ReentrancyGuard, Ownable, Pausable {
         uint16 _makerShareBps,
         uint64 _expiresAt
     ) external nonReentrant {
-        Trade storage t = trades[_tradeId];
-        // [TR] Split/partial settlement yalnız aktif uyuşmazlık (CHALLENGED) safhasında mümkündür.
-        // [EN] Split/partial settlement is only possible during an active dispute (CHALLENGED).
-        if (t.state != TradeState.CHALLENGED) revert SettlementNotAllowedInState();
-        if (msg.sender != t.maker && msg.sender != t.taker) revert NotTradeParty();
-
-        // [TR] Süresi dolmuş teklif yenisiyle doğrudan üzerine yazılır (FINALIZED burada ulaşılamaz: trade RESOLVED olur).
-        // [EN] An expired proposal is simply overwritten (FINALIZED is unreachable here: the trade is RESOLVED).
-        SettlementProposal storage current = settlementProposalsByTrade[_tradeId];
-        if (current.state == SettlementProposalState.PROPOSED && block.timestamp <= current.expiresAt) {
-            revert ActiveSettlementProposalExists();
-        }
-
-        if (_makerShareBps > BPS_DENOMINATOR) revert InvalidSettlementSplit();
-        uint16 takerShareBps = uint16(BPS_DENOMINATOR - _makerShareBps);
-
-        uint256 nowTs = block.timestamp;
-        if (_expiresAt <= nowTs) revert InvalidSettlementDeadline();
-        if (_expiresAt < nowTs + MIN_SETTLEMENT_EXPIRY) revert InvalidSettlementDeadline();
-        if (_expiresAt > nowTs + MAX_CANCEL_DEADLINE) revert InvalidSettlementDeadline();
-
-        uint256 proposalId = ++settlementProposalNonceByTrade[_tradeId];
-        settlementProposalsByTrade[_tradeId] = SettlementProposal({
-            id: proposalId,
-            tradeId: _tradeId,
-            proposer: msg.sender,
-            makerShareBps: _makerShareBps,
-            takerShareBps: takerShareBps,
-            proposedAt: uint64(nowTs),
-            expiresAt: _expiresAt,
-            state: SettlementProposalState.PROPOSED
-        });
-
-        emit SettlementProposed(_tradeId, proposalId, msg.sender, _makerShareBps, takerShareBps, _expiresAt);
+        // [TR] Doğrulama + kayıt + SettlementProposed ArafSettlementLib'de (DELEGATECALL, escrow storage/adresi).
+        // [EN] Validation + storage + SettlementProposed live in ArafSettlementLib (DELEGATECALL).
+        ArafSettlementLib.propose(
+            trades[_tradeId],
+            settlementProposalsByTrade[_tradeId],
+            settlementProposalNonceByTrade,
+            _tradeId,
+            _makerShareBps,
+            _expiresAt
+        );
     }
 
     /**
@@ -1201,9 +1178,7 @@ contract ArafEscrow is ReentrancyGuard, Ownable, Pausable {
      * @notice Counterparty rejects an active settlement proposal.
      */
     function rejectSettlement(uint256 _tradeId) external nonReentrant {
-        SettlementProposal storage sp = _counterpartyProposal(_tradeId);
-        sp.state = SettlementProposalState.REJECTED;
-        emit SettlementRejected(_tradeId, sp.id, msg.sender);
+        _closeProposal(_tradeId, ArafSettlementLib.OP_REJECT);
     }
 
     /**
@@ -1211,11 +1186,7 @@ contract ArafEscrow is ReentrancyGuard, Ownable, Pausable {
      * @notice Proposal owner withdraws an active settlement proposal.
      */
     function withdrawSettlement(uint256 _tradeId) external nonReentrant {
-        SettlementProposal storage sp = _liveProposal(_tradeId);
-        if (sp.proposer != msg.sender) revert OnlySettlementProposer();
-
-        sp.state = SettlementProposalState.WITHDRAWN;
-        emit SettlementWithdrawn(_tradeId, sp.id, msg.sender);
+        _closeProposal(_tradeId, ArafSettlementLib.OP_WITHDRAW);
     }
 
     /**
@@ -1223,13 +1194,11 @@ contract ArafEscrow is ReentrancyGuard, Ownable, Pausable {
      * @notice Anyone can expire a settlement proposal once its deadline passes.
      */
     function expireSettlement(uint256 _tradeId) external nonReentrant {
-        SettlementProposal storage sp = settlementProposalsByTrade[_tradeId];
-        if (trades[_tradeId].state != TradeState.CHALLENGED) revert SettlementNotAllowedInState();
-        if (sp.state != SettlementProposalState.PROPOSED) revert NoActiveSettlementProposal();
-        if (block.timestamp <= sp.expiresAt) revert SettlementProposalNotExpired();
+        _closeProposal(_tradeId, ArafSettlementLib.OP_EXPIRE);
+    }
 
-        sp.state = SettlementProposalState.EXPIRED;
-        emit SettlementExpired(_tradeId, sp.id);
+    function _closeProposal(uint256 _tradeId, uint8 _op) internal {
+        ArafSettlementLib.close(trades[_tradeId], settlementProposalsByTrade[_tradeId], _tradeId, _op);
     }
 
     /**
@@ -1338,10 +1307,18 @@ contract ArafEscrow is ReentrancyGuard, Ownable, Pausable {
         uint256 _decayed,
         RevenueKind _kind
     ) internal {
-        if (_decayed > 0) emit BleedingDecayed(_tradeId, _decayed, block.timestamp);
-        _sendProtocolRevenue(t.tokenAddress, _toTreasury, _kind, _tradeId);
-        if (_toMaker > 0) IERC20(t.tokenAddress).safeTransfer(t.maker, _toMaker);
-        if (_toTaker > 0) IERC20(t.tokenAddress).safeTransfer(t.taker, _toTaker);
+        ArafSettlementLib.payout(
+            t.tokenAddress,
+            t.maker,
+            t.taker,
+            treasury,
+            _tradeId,
+            _toMaker,
+            _toTaker,
+            _toTreasury,
+            _decayed,
+            uint8(_kind)
+        );
     }
 
     /**
@@ -1391,47 +1368,6 @@ contract ArafEscrow is ReentrancyGuard, Ownable, Pausable {
         totalDecayed  = makerBondDecayed + takerBondDecayed + cryptoDecayed;
     }
 
-    /**
-     * @notice Protokol gelirini treasury'ye gönderir ve sınıfını yayınlar.
-     * @dev    Transferden sonra treasury kontrat ise revenue hook tetiklenir.
-     *         Hook revert ederse tüm işlem RevenueHookFailed ile geri alınır.
-     */
-    function _sendProtocolRevenue(
-        address _token,
-        uint256 _amount,
-        RevenueKind _kind,
-        uint256 _tradeId
-    ) internal {
-        if (_amount == 0) return;
-
-        // [TR] G4: treasury ve code.length tek kez okunur (SLOAD + EXTCODESIZE önbelleği). Treasury yalnız owner
-        //      setter'ıyla değişir; bu çağrı sırasında (nonReentrant) değişemez.
-        // [EN] G4: treasury and its code length are read once; treasury cannot change mid-call (nonReentrant).
-        address to = treasury;
-        bool isContract = to.code.length > 0;
-
-        // [TR] Treasury vault destekliyorsa same-path exact-in doğrulaması için niyet kaydı bırakılır.
-        // [EN] If treasury vault supports it, register intent for same-path exact-in verification.
-        if (isContract) {
-            try IArafRevenueReceiver(to).noteEscrowRevenueIntent(_token, _amount, uint8(_kind), _tradeId) {
-                // no-op
-            } catch {
-                // Backward compatibility: legacy treasury receivers may not implement intent hook.
-            }
-        }
-
-        IERC20(_token).safeTransfer(to, _amount);
-
-        if (isContract) {
-            try IArafRevenueReceiver(to).onArafRevenue(_token, _amount, uint8(_kind), _tradeId) {
-                // no-op
-            } catch {
-                revert RevenueHookFailed();
-            }
-        }
-
-        emit ProtocolRevenueSent(_token, _amount, _kind, _tradeId, to);
-    }
 
     /**
      * @notice Terminal outcome + fee snapshot bilgisini trade bazında sabitler.
@@ -2016,24 +1952,17 @@ contract ArafEscrow is ReentrancyGuard, Ownable, Pausable {
         }
     }
 
-    /**
-     * @notice CHALLENGED trade'in canlı (PROPOSED + süresi dolmamış) settlement teklifini döndürür.
-     * @notice Returns the live (PROPOSED and unexpired) settlement proposal of a CHALLENGED trade.
-     */
-    function _liveProposal(uint256 _tradeId) internal view returns (SettlementProposal storage sp) {
-        if (trades[_tradeId].state != TradeState.CHALLENGED) revert SettlementNotAllowedInState();
-        sp = settlementProposalsByTrade[_tradeId];
-        if (sp.state != SettlementProposalState.PROPOSED) revert NoActiveSettlementProposal();
-        if (block.timestamp > sp.expiresAt) revert SettlementProposalExpired();
-    }
 
     /**
      * @notice Canlı teklifi yalnız karşı taraf (teklif sahibi olmayan trade tarafı) için döndürür.
      * @notice Returns the live proposal only for the counterparty (the non-proposing trade party).
      */
     function _counterpartyProposal(uint256 _tradeId) internal view returns (SettlementProposal storage sp) {
-        sp = _liveProposal(_tradeId);
         Trade storage t = trades[_tradeId];
+        if (t.state != TradeState.CHALLENGED) revert SettlementNotAllowedInState();
+        sp = settlementProposalsByTrade[_tradeId];
+        if (sp.state != SettlementProposalState.PROPOSED) revert NoActiveSettlementProposal();
+        if (block.timestamp > sp.expiresAt) revert SettlementProposalExpired();
         if (msg.sender != t.maker && msg.sender != t.taker) revert NotTradeParty();
         if (msg.sender == sp.proposer) revert OnlySettlementCounterparty();
     }
