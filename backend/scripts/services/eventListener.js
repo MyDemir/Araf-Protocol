@@ -48,6 +48,7 @@ const { readPendingMarketMeta } = require("./orderMarketMeta");
 const CHECKPOINT_KEY = "worker:last_block";
 const LAST_SAFE_BLOCK_KEY = "worker:last_safe_block";
 const DLQ_KEY = "worker:dlq";
+const APPLIED_ORDER_KEY_PREFIX = "worker:applied_order:";
 const RETRY_DELAY_MS = 2_000;
 const MAX_RETRIES = 5;
 /**
@@ -71,6 +72,15 @@ const CHECKPOINT_INTERVAL_BLOCKS = _getPositiveIntEnv("WORKER_CHECKPOINT_INTERVA
 const DEFAULT_WORKER_FINALITY_DEPTH = process.env.NODE_ENV === "production" ? 6 : 1;
 const WORKER_FINALITY_DEPTH = _getPositiveIntEnv("WORKER_FINALITY_DEPTH", DEFAULT_WORKER_FINALITY_DEPTH);
 const BLOCK_TIMESTAMP_CACHE_LIMIT = 2_048;
+const REPLAY_BACKOFF_BASE_MS = _getPositiveIntEnv("WORKER_REPLAY_BACKOFF_BASE_MS", 5_000);
+const REPLAY_BACKOFF_MAX_MS = _getPositiveIntEnv("WORKER_REPLAY_BACKOFF_MAX_MS", 5 * 60 * 1000);
+// [TR] B6: bu süre boyunca yeni blok görülmezse watchdog reconnect dener; reconnect sonrası da blok yoksa çıkar.
+// [EN] B6: when no new block is seen for this long the watchdog reconnects; still nothing afterwards -> exit.
+const BLOCK_STALE_MS = _getPositiveIntEnv("WORKER_BLOCK_STALE_MS", 75_000);
+const WATCHDOG_INTERVAL_MS = _getPositiveIntEnv("WORKER_WATCHDOG_INTERVAL_MS", 15_000);
+// [TR] /health liveness eşiği: watchdog'un iki penceresini kapsar (arka plan güvence).
+// [EN] /health liveness threshold: covers two watchdog windows (backstop).
+const LIVENESS_STALE_MS = _getPositiveIntEnv("WORKER_LIVENESS_STALE_MS", BLOCK_STALE_MS * 2 + 30_000);
 
 const ESCROW_EVENT_NAMES = [
   "WalletRegistered",
@@ -234,6 +244,73 @@ function _toNum(v) {
 }
 function _toStr(v) { return v?.toString?.() ?? String(v); }
 
+/**
+ * [TR] DLQ/JSON için event argümanı serileştirici: bigint -> string, dizi -> dizi (uint32[5] vb.),
+ *      bool/string/number aynen. Handler'lar string biçimini (BigInt/Number/toString) zaten kabul eder.
+ * [EN] Event-arg serializer for DLQ/JSON: bigint -> string, arrays stay arrays, primitives unchanged.
+ */
+function _serializeArgValue(v) {
+  if (v === null || v === undefined) return null;
+  if (typeof v === "bigint") return v.toString();
+  if (typeof v === "boolean" || typeof v === "string" || typeof v === "number") return v;
+  if (Array.isArray(v)) return Array.from(v, _serializeArgValue);
+  return _toStr(v);
+}
+
+/**
+ * [TR] Event'in isimli argümanlarını güvenilir kurar. ethers v6 Result'ta isimli alanlar own property
+ *      değildir (Object.entries yalnız indeks döner); bu yüzden önce event.fragment.inputs kullanılır.
+ *      Düz nesne args (sentetik event) ve konumsal EVENT_ARG_KEYS eşlemesi yedek yoldur.
+ * [EN] Reliably builds named event args. Named fields of an ethers v6 Result are not own properties
+ *      (Object.entries only yields indices), so event.fragment.inputs is used first. Plain-object args
+ *      and the positional EVENT_ARG_KEYS map are fallbacks.
+ */
+function _namedArgsFromEvent(event) {
+  const args = event?.args;
+  if (!args || typeof args !== "object") return {};
+  const out = {};
+
+  const inputs = event?.fragment?.inputs;
+  if (Array.isArray(inputs)) {
+    inputs.forEach((input, i) => {
+      if (input?.name && args[i] !== undefined) out[input.name] = _serializeArgValue(args[i]);
+    });
+    if (Object.keys(out).length) return out;
+  }
+
+  for (const [key, value] of Object.entries(args)) {
+    if (Number.isNaN(Number(key))) out[key] = _serializeArgValue(value);
+  }
+  if (Object.keys(out).length) return out;
+
+  const keys = EVENT_ARG_KEYS[event?.eventName] || [];
+  keys.forEach((key, i) => {
+    if (args[i] !== undefined) out[key] = _serializeArgValue(args[i]);
+  });
+  return out;
+}
+
+function _positionalArgsFromEvent(event) {
+  const args = event?.args;
+  if (!args || typeof args !== "object") return [];
+  return Array.isArray(args) ? Array.from(args, _serializeArgValue) : Object.values(args).map(_serializeArgValue);
+}
+
+/**
+ * [TR] Zorunlu sayısal event alanı: undefined/null/boş ya da NaN ise throw eder (sessiz NaN yazımı yok).
+ * [EN] Required numeric event field: throws on undefined/null/empty or NaN (no silent NaN writes).
+ */
+function _requireFiniteNumber(value, fieldName, eventName) {
+  if (value === undefined || value === null || value === "") {
+    throw new Error(`[Worker] ${eventName}: '${fieldName}' alanı eksik.`);
+  }
+  const n = Number(value);
+  if (!Number.isFinite(n)) {
+    throw new Error(`[Worker] ${eventName}: '${fieldName}' geçerli bir sayı değil (${String(value)}).`);
+  }
+  return n;
+}
+
 function _toIdentityString(v, { allowZero = false } = {}) {
   const normalized = _toStr(v).trim();
   const pattern = allowZero ? /^(0|[1-9]\d*)$/ : /^[1-9]\d*$/;
@@ -344,6 +421,14 @@ const TRADE_STATE_ORDER = {
 
 const TERMINAL_TRADE_STATES = new Set(["RESOLVED", "CANCELED", "BURNED"]);
 
+// [TR] Terminal geçiş uygulandı mı? (terminal status + timers.resolved_at dolu). resolved_at boşsa
+//      mirror status'u getTrade ile terminale çekilmiş olsa bile geçiş (alanlar + sayaç) henüz uygulanmamıştır.
+// [EN] Was the terminal transition applied? (terminal status + timers.resolved_at set). With resolved_at empty
+//      the transition (fields + counters) is still pending even if the getTrade backfill already set the status.
+function _isTerminalApplied(tradeDoc) {
+  return TERMINAL_TRADE_STATES.has(tradeDoc?.status) && Boolean(tradeDoc?.timers?.resolved_at);
+}
+
 function _getTradeStateOrder(state) {
   return TRADE_STATE_ORDER[state] ?? -1;
 }
@@ -389,6 +474,8 @@ class EventWorker {
     this._lastSeenBlock = 0;
     this._lastSafeCheckpointBlock = 0;
     this._replayInProgress = false;
+    this._replayFailureCount = 0;
+    this._replayNextAttemptAt = 0;
     this._livePollInProgress = false;
     this._lastLivePolledBlock = 0;
     this._blockTimestampCache = new Map();
@@ -603,40 +690,112 @@ class EventWorker {
 
     const fromBlock = this._resolveReplayStartBlock(savedBlock, currentHead);
 
-    if (fromBlock > finalizedToBlock) return;
-
-    this._setState("replaying", `replay aralığı: ${fromBlock}-${finalizedToBlock}`);
-
-    for (let from = fromBlock; from <= finalizedToBlock; from += BLOCK_BATCH_SIZE) {
-      const to = Math.min(from + BLOCK_BATCH_SIZE - 1, finalizedToBlock);
-      let allEvents;
-      try {
-        allEvents = await this._fetchRangeEvents(from, to);
-      } catch (err) {
-        // [TR] Aralık okunamadıysa checkpoint ilerletilmez; bir sonraki replay aynı aralığı yeniden dener.
-        //      (Eskiden tek bir event sorgusu düşerse o event tipi sessizce atlanıp checkpoint ilerliyordu.)
-        // [EN] If the range cannot be read the checkpoint does not move; the next replay retries it.
-        logger.warn(`[Worker] Replay: log sorgusu başarısız (${from}-${to}): ${err.message}`);
-        return;
-      }
-
-      let batchSuccess = true;
-      for (const event of allEvents) {
-        try {
-          await this._processEvent(event);
-        } catch (err) {
-          logger.error(`[Worker] Replay event işleme hatası: ${event.eventName} - ${err.message}`);
-          await this._addToDLQ(event, err.message);
-          batchSuccess = false;
-        }
-      }
-
-      if (batchSuccess) {
-        await this._updateSafeCheckpointIfHigher(to);
-      }
+    if (fromBlock > finalizedToBlock) {
+      // [TR] B3: başlangıç bloğu finalized head'in üstündeyse replay ertelenir, ama bellekteki checkpoint
+      //      max(başlangıç-1, mevcut) olur. Aksi halde start() canlı poll'u checkpoint 0'dan başlatır ve
+      //      blok 1'den itibaren devasa bir aralık taranırdı.
+      // [EN] B3: when the start block is above the finalized head the replay is deferred, but the in-memory
+      //      checkpoint becomes max(start-1, current). Otherwise start() would begin the live poll from
+      //      checkpoint 0 and scan a huge range from block 1.
+      this._lastSafeCheckpointBlock = Math.max(this._lastSafeCheckpointBlock, fromBlock - 1);
+      return;
     }
 
-    logger.info("[Worker] Replay tamamlandı.");
+    const previousState = this._state;
+    this._setState("replaying", `replay aralığı: ${fromBlock}-${finalizedToBlock}`);
+
+    try {
+      for (let from = fromBlock; from <= finalizedToBlock; from += BLOCK_BATCH_SIZE) {
+        const to = Math.min(from + BLOCK_BATCH_SIZE - 1, finalizedToBlock);
+        let allEvents;
+        try {
+          allEvents = await this._fetchRangeEvents(from, to);
+        } catch (err) {
+          // [TR] Aralık okunamadıysa checkpoint ilerletilmez; bir sonraki replay aynı aralığı yeniden dener.
+          //      (Eskiden tek bir event sorgusu düşerse o event tipi sessizce atlanıp checkpoint ilerliyordu.)
+          // [EN] If the range cannot be read the checkpoint does not move; the next replay retries it.
+          logger.warn(`[Worker] Replay: log sorgusu başarısız (${from}-${to}): ${err.message}`);
+          this._noteReplayFailure();
+          return;
+        }
+
+        let failedEvents = 0;
+        for (const event of allEvents) {
+          try {
+            await this._processEvent(event);
+          } catch (err) {
+            logger.error(`[Worker] Replay event işleme hatası: ${event.eventName} - ${err.message}`);
+            await this._addToDLQ(event, err.message);
+            failedEvents += 1;
+          }
+        }
+
+        if (failedEvents > 0) {
+          // [TR] B2: İlk başarısız batch'te DUR. Döngü devam ederse sonraki batch'in checkpoint'i başarısız
+          //      batch'i de geçerek ileri taşırdı ve o batch'in event'leri bir daha replay edilmezdi.
+          //      Checkpoint, başarısız batch'in başından önce kalır.
+          // [EN] B2: stop at the FIRST failed batch. Continuing would let a later batch move the checkpoint
+          //      past the failed one so its events would never be replayed. The checkpoint stays before the
+          //      start of the failed batch.
+          logger.error(
+            `[Worker] Replay durduruldu: ${from}-${to} aralığında ${failedEvents} event başarısız. ` +
+            `Checkpoint ilerletilmedi (safe=${this._lastSafeCheckpointBlock}).`
+          );
+          this._noteReplayFailure();
+          return;
+        }
+
+        await this._updateSafeCheckpointIfHigher(to);
+      }
+
+      this._noteReplaySuccess();
+      logger.info("[Worker] Replay tamamlandı.");
+    } finally {
+      // [TR] Replay bittiğinde durum "replaying"de takılı kalmamalı (canlı periyodik replay sonrası /ready
+      //      sonsuza dek 503 dönerdi).
+      // [EN] The state must not stay stuck at "replaying" (after a periodic live replay /ready would be 503 forever).
+      if (this._state === "replaying") {
+        this._setState(previousState === "replaying" ? "connected" : previousState, "replay bitti");
+      }
+    }
+  }
+
+  // [TR] Replay başarısızlıklarında üstel geri çekilme (B9): canlı dinleyici her blokta (~2 sn) aynı başarısız
+  //      aralığı yeniden replay edip DLQ/RPC'yi doldurmasın.
+  // [EN] Exponential backoff on replay failures (B9): the live listener must not re-replay the same failing
+  //      range every block (~2s) and hammer the DLQ/RPC.
+  _noteReplayFailure() {
+    this._replayFailureCount += 1;
+    const delay = Math.min(
+      REPLAY_BACKOFF_BASE_MS * 2 ** (this._replayFailureCount - 1),
+      REPLAY_BACKOFF_MAX_MS
+    );
+    this._replayNextAttemptAt = Date.now() + delay;
+  }
+
+  _noteReplaySuccess() {
+    this._replayFailureCount = 0;
+    this._replayNextAttemptAt = 0;
+  }
+
+  _shouldTriggerLiveReplay(blockNumber) {
+    return (
+      !this._replayInProgress &&
+      blockNumber - this._lastSafeCheckpointBlock >= CHECKPOINT_INTERVAL_BLOCKS &&
+      Date.now() >= this._replayNextAttemptAt
+    );
+  }
+
+  async _runLiveReplay() {
+    this._replayInProgress = true;
+    try {
+      await this._replayMissedEvents();
+    } catch (err) {
+      this._noteReplayFailure();
+      throw err;
+    } finally {
+      this._replayInProgress = false;
+    }
   }
 
   _attachLiveListeners() {
@@ -662,16 +821,8 @@ class EventWorker {
           await this._advanceSafeCheckpointFromAcks(finalizedUpTo);
         }
 
-        if (
-          !this._replayInProgress &&
-          (blockNumber - this._lastSafeCheckpointBlock >= CHECKPOINT_INTERVAL_BLOCKS)
-        ) {
-          this._replayInProgress = true;
-          try {
-            await this._replayMissedEvents();
-          } finally {
-            this._replayInProgress = false;
-          }
+        if (this._shouldTriggerLiveReplay(blockNumber)) {
+          await this._runLiveReplay();
         }
       } catch (err) {
         logger.error(`[Worker] Live block-range poll hatası: ${err.message}`);
@@ -739,7 +890,7 @@ class EventWorker {
           this._trackLiveEventSeen(event);
           const success = await this._processEventWithRetry(event);
           if (success) this._trackLiveEventAck(event);
-          else this._markBlockUnsafe(event.blockNumber);
+          else this._markBlockUnsafe(event.blockNumber, this._getEventId(event));
         }
       } catch (err) {
         this._seedAckStateForRange(from, to);
@@ -753,7 +904,9 @@ class EventWorker {
     const existing = this._blockAcks.get(blockNumber);
     if (existing) return existing;
 
-    const state = { seen: new Set(), acked: new Set(), unsafe: false };
+    // [TR] failed: bu bloktaki başarısız event kimlikleri; rangeUnsafe: log aralığı okunamadı (event'e bağlı değil).
+    // [EN] failed: ids of failed events in this block; rangeUnsafe: the log range itself could not be read.
+    const state = { seen: new Set(), acked: new Set(), failed: new Set(), unsafe: false, rangeUnsafe: false };
     this._blockAcks.set(blockNumber, state);
     return state;
   }
@@ -778,6 +931,11 @@ class EventWorker {
       await redis.set(LAST_SAFE_BLOCK_KEY, blockNumber.toString());
       await redis.set(CHECKPOINT_KEY, blockNumber.toString());
       this._lastSafeCheckpointBlock = blockNumber;
+      // [TR] Checkpoint geçilen bloklar artık kalıcı; bellekteki ack/unsafe kayıtları da temizlenir.
+      // [EN] Blocks behind the checkpoint are durable now; drop their in-memory ack/unsafe records too.
+      for (const block of [...this._blockAcks.keys()]) {
+        if (block <= blockNumber) this._blockAcks.delete(block);
+      }
     }
   }
 
@@ -833,14 +991,82 @@ class EventWorker {
     state.acked.add(this._getEventId(event));
   }
 
-  _markBlockUnsafe(blockNumber) {
+  _markBlockUnsafe(blockNumber, eventId = null) {
     const state = this._ensureBlockAckState(blockNumber);
     state.unsafe = true;
+    if (eventId) {
+      if (!state.failed) state.failed = new Set();
+      state.failed.add(eventId);
+    } else {
+      state.rangeUnsafe = true;
+    }
+  }
+
+  /**
+   * [TR] DLQ re-drive başarılı olunca event ack'lenir ve blok, yalnızca bu event yüzünden unsafe ise
+   *      tekrar güvenli sayılır (aksi halde checkpoint sonsuza dek o blokta takılırdı).
+   * [EN] A successful DLQ re-drive acks the event and clears the block's unsafe flag when this event
+   *      was the only reason for it (otherwise the checkpoint would stay stuck on that block forever).
+   */
+  _clearEventUnsafe(event) {
+    const state = this._blockAcks.get(event?.blockNumber);
+    if (!state) return;
+    const eventId = this._getEventId(event);
+    state.seen.add(eventId);
+    state.acked.add(eventId);
+    if (state.failed) state.failed.delete(eventId);
+    if (!state.rangeUnsafe && (!state.failed || state.failed.size === 0)) {
+      state.unsafe = false;
+    }
   }
 
   _computeFinalizedUpTo(blockNumber) {
     if (!Number.isInteger(blockNumber)) return 0;
     return blockNumber - WORKER_FINALITY_DEPTH;
+  }
+
+  /**
+   * [TR] Sıralama koruması (B20): mutable mirror'lar (itibar, fee/cooldown/policy config) için scope başına
+   *      son uygulanan (blockNumber, logIndex) Redis'te tutulur; daha eski bir event (replay / DLQ re-drive /
+   *      canlı-poll çakışması) yeni değeri ezemez. Model şemasına dokunmadan Redis kullanılır.
+   *      Eşit konum (aynı event'in tekrarı) idempotent olarak yeniden uygulanır.
+   * [EN] Ordering guard (B20): for mutable mirrors (reputation, fee/cooldown/policy config) the last applied
+   *      (blockNumber, logIndex) per scope lives in Redis; an older event (replay / DLQ re-drive / live-poll
+   *      overlap) cannot overwrite a newer value. Redis is used so the model schema stays untouched.
+   *      An equal position (the same event again) is re-applied idempotently.
+   */
+  _eventOrderOf(event) {
+    const block = Number(event?.blockNumber);
+    if (!Number.isInteger(block) || block < 0) return null;
+    const index = _logIndexOf(event);
+    return { block, index: Number.isInteger(index) && index > 0 ? index : 0 };
+  }
+
+  async _isStaleOrderedEvent(scope, event) {
+    const order = this._eventOrderOf(event);
+    if (!order) return false;
+
+    const raw = await getRedisClient().get(`${APPLIED_ORDER_KEY_PREFIX}${scope}`);
+    if (raw === null || raw === undefined || raw === "") return false;
+
+    const [appliedBlock, appliedIndex] = String(raw).split(":").map(Number);
+    if (!Number.isInteger(appliedBlock) || !Number.isInteger(appliedIndex)) return false;
+
+    const stale =
+      order.block < appliedBlock || (order.block === appliedBlock && order.index < appliedIndex);
+    if (stale) {
+      logger.info(
+        `[Worker] Eski event yok sayıldı (sıralama koruması): scope=${scope} ` +
+        `event=${order.block}:${order.index} applied=${appliedBlock}:${appliedIndex}`
+      );
+    }
+    return stale;
+  }
+
+  async _markOrderedEventApplied(scope, event) {
+    const order = this._eventOrderOf(event);
+    if (!order) return;
+    await getRedisClient().set(`${APPLIED_ORDER_KEY_PREFIX}${scope}`, `${order.block}:${order.index}`);
   }
 
   _countIgnoredEvent(reason) {
@@ -932,22 +1158,43 @@ class EventWorker {
     }
   }
 
+  /**
+   * [TR] Başarısız event'i DLQ'ya yazar. Kayıt idempotencyKey (txHash:logIndex) ile tekildir: aynı poison
+   *      event her replay'de yeniden eklenmez (eskiden DLQ kopyalarla dolup gerçek girdiler arşive itiliyordu).
+   *      namedArgs, ethers v6 Result'ın isimli alanları own property olmadığı için event.fragment.inputs
+   *      üzerinden kurulur. Yeni kayıt yazıldıysa true, zaten varsa false döner.
+   * [EN] Writes a failed event to the DLQ. Entries are unique per idempotencyKey (txHash:logIndex) so a
+   *      poison event is not re-appended on every replay. namedArgs are built from event.fragment.inputs
+   *      because named fields of an ethers v6 Result are not own properties. Returns true when a new
+   *      entry was written, false when one already existed.
+   */
   async _addToDLQ(event, errorMsg) {
     const redis = getRedisClient();
     const nowIso = new Date().toISOString();
+    const idempotencyKey = this._getEventId(event);
+
+    const existing = (await redis.lRange(DLQ_KEY, 0, -1)) || [];
+    for (const raw of existing) {
+      let parsedKey = null;
+      try {
+        parsedKey = JSON.parse(raw)?.idempotencyKey;
+      } catch (_) {
+        parsedKey = null;
+      }
+      if (parsedKey === idempotencyKey) {
+        logger.debug(`[Worker] DLQ kaydı zaten var, tekrar eklenmedi: ${idempotencyKey}`);
+        return false;
+      }
+    }
 
     const entry = JSON.stringify({
       eventName: event.eventName,
       txHash: event.transactionHash,
       logIndex: _logIndexOf(event) ?? null,
-      idempotencyKey: this._getEventId(event),
+      idempotencyKey,
       blockNumber: event.blockNumber,
-      namedArgs: Object.fromEntries(
-        Object.entries(event.args || {}).filter(([k]) => Number.isNaN(Number(k)))
-      ),
-      args: Array.isArray(event.args)
-        ? event.args.map((a) => _toStr(a))
-        : Object.values(event.args || {}).map((a) => _toStr(a)),
+      namedArgs: _namedArgsFromEvent(event),
+      args: _positionalArgsFromEvent(event),
       attempt: 0,
       next_retry_at: nowIso,
       first_seen_at: nowIso,
@@ -955,19 +1202,25 @@ class EventWorker {
     });
 
     await redis.rPush(DLQ_KEY, entry);
+    return true;
   }
 
+  /**
+   * [TR] DLQ kaydını sentetik event'e çevirip (buildSyntheticEventFromDLQEntry) işler. Eskiden yalnız
+   *      `entry.namedArgs || {}` kullanılıyordu; namedArgs boş olduğu için handler'lar boş args ile çalışıyordu.
+   *      Başarıda ack kaydı/unsafe bayrağı temizlenir, başarısızlıkta blok unsafe kalır.
+   * [EN] Re-drives a DLQ entry through the synthetic-event builder. Success clears the ack/unsafe record,
+   *      failure keeps the block unsafe.
+   */
   async reDriveEvent(entry) {
-    const event = {
-      eventName: entry.eventName,
-      transactionHash: entry.txHash,
-      logIndex: entry.logIndex ?? -1,
-      blockNumber: entry.blockNumber,
-      args: entry.namedArgs || {},
-    };
+    const event = this.buildSyntheticEventFromDLQEntry(entry);
 
     const result = await this._processEventWithRetryNoDLQ(event);
-    if (!result.success) this._markBlockUnsafe(event.blockNumber);
+    if (result.success) {
+      this._clearEventUnsafe(event);
+    } else {
+      this._markBlockUnsafe(event.blockNumber, this._getEventId(event));
+    }
     return result;
   }
 
@@ -985,13 +1238,12 @@ class EventWorker {
 
   async _fetchTerminalResolutionType(tradeId) {
     if (!this.contract?.getRewardableTrade) return null;
-    try {
-      const view = await this.contract.getRewardableTrade(tradeId);
-      return TERMINAL_OUTCOME_TO_RESOLUTION[_toNum(view?.outcome ?? view?.[9])] || null;
-    } catch (err) {
-      logger.warn(`[Worker] terminal outcome okunamadı: trade=${tradeId} err=${err.message}`);
-      return null;
-    }
+    // [TR] B13: okuma hatası YUTULMAZ. Eskiden null dönüp trade kalıcı "UNKNOWN" yazılıyordu; artık handler
+    //      throw eder ve event standart retry/DLQ akışına girer.
+    // [EN] B13: read errors are NOT swallowed. Previously null was returned and the trade was permanently
+    //      written as "UNKNOWN"; now the handler throws and the event goes through the retry/DLQ flow.
+    const view = await this.contract.getRewardableTrade(tradeId);
+    return TERMINAL_OUTCOME_TO_RESOLUTION[_toNum(view?.outcome ?? view?.[9])] || null;
   }
 
   async _upsertOrderMirror(orderData, opts = {}) {
@@ -1129,7 +1381,11 @@ class EventWorker {
       "financials.taker_bond_num": _toSafeNum(tradeData.takerBond),
       "financials.crypto_asset": _inferCryptoAssetFromToken(tradeData.tokenAddress),
       tier: _toNum(tradeData.tier),
-      status: _normalizeTradeState(tradeData.state),
+      // [TR] B5: status burada $set EDİLMEZ. Insert'te $setOnInsert, güncellemede geriye gitmeyen koşullu
+      //      ilerletme (_advanceTradeStatus) kullanılır; getTrade (head) eski/lag'li bir RPC'den geri kalırsa
+      //      mirror'daki daha ileri durum ezilmez.
+      // [EN] B5: status is NOT $set here. Insert uses $setOnInsert, updates use a monotonic conditional advance
+      //      (_advanceTradeStatus) so a lagging RPC cannot overwrite a further-along mirror state.
       pinged_by_taker: Boolean(tradeData.pingedByTaker),
       challenge_pinged_by_maker: Boolean(tradeData.challengePingedByMaker),
     };
@@ -1169,9 +1425,11 @@ class EventWorker {
       setPayload["fill_metadata.remaining_amount_after_fill_num"] = _toSafeNum(opts.remainingAmountAfterFill ?? 0);
     }
 
+    const nextStatus = _normalizeTradeState(tradeData.state);
+
     const result = await Trade.findOneAndUpdate(
       _buildIdentityLookup("onchain_escrow_id", tradeId),
-      { $set: setPayload },
+      { $set: setPayload, $setOnInsert: { status: nextStatus } },
       {
         upsert: true,
         new: true,
@@ -1185,10 +1443,41 @@ class EventWorker {
       result?.lastErrorObject?.upserted !== undefined ||
       result?.lastErrorObject?.updatedExisting === false;
 
+    if (!inserted) {
+      await this._advanceTradeStatus(tradeId, nextStatus, opts.session);
+    }
+
     return {
       inserted,
       doc: result?.value || null,
     };
+  }
+
+  /**
+   * [TR] Trade status'unu yalnız ileri (ya da aynı) yönde ve terminal olmayan bir durumdan ilerletir.
+   *      Terminal durum (RESOLVED/CANCELED/BURNED) asla değiştirilmez; geriye gidiş (_isTradeStateRegression)
+   *      engellenir.
+   * [EN] Advances trade status only forward and only from a non-terminal state. Terminal states are never
+   *      changed; regressions (_isTradeStateRegression) are blocked.
+   */
+  async _advanceTradeStatus(tradeId, nextStatus, session) {
+    if (!Object.prototype.hasOwnProperty.call(TRADE_STATE_ORDER, nextStatus)) return;
+    const advanceFrom = Object.keys(TRADE_STATE_ORDER).filter(
+      (state) =>
+        state !== nextStatus &&
+        !TERMINAL_TRADE_STATES.has(state) &&
+        !_isTradeStateRegression(state, nextStatus)
+    );
+    if (advanceFrom.length === 0) return;
+
+    await Trade.updateOne(
+      {
+        ..._buildIdentityLookup("onchain_escrow_id", tradeId),
+        status: { $in: advanceFrom },
+      },
+      { $set: { status: nextStatus } },
+      { session }
+    );
   }
 
   async _incrementOrderFillStatsAtomically(orderId, fillAmount, session) {
@@ -1292,21 +1581,38 @@ class EventWorker {
 
   async runReconciliationReport({ limit = 100 } = {}) {
     const max = Math.max(1, Number(limit) || 100);
-    const terminalTrades = await Trade.find({ status: { $in: ["RESOLVED", "CANCELED", "BURNED"] } })
+    const terminalStatuses = [...TERMINAL_TRADE_STATES];
+
+    // [TR] B22: resolved_at'i eksik terminal trade'ler DOĞRUDAN sorgulanır. Eskiden sıralamasız limit(100)
+    //      terminal trade çekilip yalnız o örneklemde eksik aranıyordu; eski/yeni sorunlu kayıtlar kaçabiliyordu.
+    // [EN] B22: terminal trades missing resolved_at are queried DIRECTLY. Previously an unsorted limit(100) sample
+    //      of terminal trades was fetched and only that sample was checked, so problem rows could be missed.
+    const missingFilter = { status: { $in: terminalStatuses }, "timers.resolved_at": null };
+    const missingTerminalTimestamp = await Trade.find(missingFilter)
       .select("onchain_escrow_id status timers.resolved_at")
+      .sort({ _id: -1 })
       .limit(max)
       .lean();
 
-    const missingTerminalTimestamp = [];
+    let missingTerminalCount = missingTerminalTimestamp.length;
+    try {
+      missingTerminalCount = Math.max(missingTerminalCount, Number(await Trade.countDocuments(missingFilter)) || 0);
+    } catch (_) {
+      // [TR] Sayım başarısızsa örneklem uzunluğu kullanılır.
+      // [EN] If counting fails the sample length is used.
+    }
+
+    // [TR] Tekrar projeksiyonu kontrolü son terminal trade'lerin en yeni örnekleminde yapılır.
+    // [EN] The duplicate-projection check runs on the newest sample of terminal trades.
+    const terminalTrades = await Trade.find({ status: { $in: terminalStatuses } })
+      .select("onchain_escrow_id status timers.resolved_at")
+      .sort({ _id: -1 })
+      .limit(max)
+      .lean();
     const seenByEscrowId = new Map();
     for (const t of terminalTrades) {
       const key = String(t.onchain_escrow_id || "").trim();
-      if (key) {
-        seenByEscrowId.set(key, (seenByEscrowId.get(key) || 0) + 1);
-      }
-      // [TR] Tüm terminal handler'lar timers.resolved_at yazar; şemada released_at/canceled_at/burned_at yoktur.
-      // [EN] Every terminal handler writes timers.resolved_at; released_at/canceled_at/burned_at do not exist.
-      if (!t?.timers?.resolved_at) missingTerminalTimestamp.push(t);
+      if (key) seenByEscrowId.set(key, (seenByEscrowId.get(key) || 0) + 1);
     }
 
     const duplicateProjection = [...seenByEscrowId.entries()]
@@ -1330,9 +1636,9 @@ class EventWorker {
     const ignoredTotal = Object.values(ignoredHistogram).reduce((a, b) => a + Number(b || 0), 0);
 
     const categories = {
-      terminal_trade_drift: missingTerminalTimestamp.length,
+      terminal_trade_drift: missingTerminalCount,
       duplicate_projection: duplicateProjection.length,
-      missing_terminal_timestamp: missingTerminalTimestamp.length,
+      missing_terminal_timestamp: missingTerminalCount,
       dlq_pending: Number(dlqPending || 0),
       unsafe_ack_block: unsafeAckBlocks.length,
       ignored_event_total: ignoredTotal,
@@ -1545,12 +1851,63 @@ class EventWorker {
     }
   }
 
+  // ── Trade lifecycle handlers (B5 / B13 / B15) ───────────────────────────────
+
+  /**
+   * [TR] B15: "trade mirror yok" ile "zaten işlenmiş / durum ileride" ayrımı. Mirror yoksa throw eder
+   *      (retry/DLQ akışı); varsa mevcut belgeyi döner ve çağıran idempotent olarak sessizce geçer.
+   * [EN] B15: separates "trade mirror missing" from "already processed / state is further along". Throws when
+   *      the mirror is missing (retry/DLQ flow); otherwise returns the doc so the caller skips idempotently.
+   */
+  async _requireTradeMirror(tradeId, eventName) {
+    const existing = await Trade.findOne(_buildIdentityLookup("onchain_escrow_id", tradeId))
+      .select("status")
+      .lean();
+    if (!existing) {
+      throw new Error(`${eventName} geldi ama trade mirror bulunamadı.`);
+    }
+    return existing;
+  }
+
+  /**
+   * [TR] B5: Terminal geçiş, mirror durumu ne olursa olsun (getTrade backfill'i status'u zaten RESOLVED/CANCELED/
+   *      BURNED yapmış olabilir) resolved_at / resolution_type / receipt_delete_at alanlarını idempotent yazar.
+   *      "Uygulanmış" işareti timers.resolved_at'tir: null ise geçiş henüz uygulanmamıştır. Order sayaçları da
+   *      bu işarete bağlı olarak tam bir kez düşülür (insert +1 active ile dengeli).
+   * [EN] B5: A terminal transition idempotently writes resolved_at / resolution_type / receipt_delete_at no
+   *      matter what the mirror status is (the getTrade backfill may already have set RESOLVED/CANCELED/BURNED).
+   *      The "applied" marker is timers.resolved_at: null means not applied yet. Order counters are decremented
+   *      exactly once based on that marker (balanced with the insert-time +1 active).
+   */
+  async _applyTerminalTransition({ tradeIdNum, fromStates, terminalStatus, set, statsField, session }) {
+    const trade = await Trade.findOneAndUpdate(
+      {
+        ..._buildIdentityLookup("onchain_escrow_id", tradeIdNum),
+        status: { $in: [...fromStates, terminalStatus] },
+        "timers.resolved_at": null,
+      },
+      { $set: { status: terminalStatus, ...set } },
+      { new: true, session }
+    );
+
+    if (!trade) return null;
+
+    if (trade.parent_order_id) {
+      await Order.findOneAndUpdate(
+        _buildIdentityLookup("onchain_order_id", trade.parent_order_id),
+        { $inc: { "stats.active_child_trade_count": -1, [statsField]: 1 } },
+        { session }
+      );
+    }
+    return trade;
+  }
+
   async _onPaymentReported(event) {
     const { tradeId, ipfsHash, timestamp } = event.args;
     const reportedAt = await this._getEventDate(event, timestamp);
     const canonicalHash = _toStr(ipfsHash);
 
-    await Trade.findOneAndUpdate(
+    const updated = await Trade.findOneAndUpdate(
       {
         ..._buildIdentityLookup("onchain_escrow_id", tradeId),
         status: { $in: ["LOCKED", "PAID"] },
@@ -1567,6 +1924,11 @@ class EventWorker {
         },
       }
     );
+
+    if (!updated) {
+      const existing = await this._requireTradeMirror(tradeId, "PaymentReported");
+      logger.info(`[Worker] PaymentReported idempotent-skip: trade=${_toStr(tradeId)} status=${existing.status}`);
+    }
   }
 
   async _onEscrowReleased(event) {
@@ -1580,57 +1942,56 @@ class EventWorker {
 
     try {
       const existingTrade = await Trade.findOne(_buildIdentityLookup("onchain_escrow_id", tradeIdNum))
-        .select("status")
+        .select("status timers.resolved_at")
         .lean();
+
+      if (!existingTrade) {
+        throw new Error("EscrowReleased geldi ama trade mirror bulunamadı.");
+      }
+
+      // [TR] Zaten uygulanmış terminal geçiş: idempotent no-op (RPC'ye bile gitmez).
+      // [EN] Terminal transition already applied: idempotent no-op (does not even hit the RPC).
+      if (_isTerminalApplied(existingTrade)) {
+        logger.info(`[Worker] EscrowReleased idempotent-skip: trade=${tradeIdNum} status=${existingTrade.status}`);
+        await session.abortTransaction();
+        return;
+      }
 
       // [TR] CHALLENGED, zincirde mirror edilen yaşam döngüsü durumudur; EscrowReleased'in CHALLENGED'dan
       //      gelmesi DISPUTED_RESOLUTION sınıflandırmasını deterministik yapar, backend otoritesi oluşturmaz.
       // [EN] CHALLENGED is an on-chain mirrored lifecycle state, so mapping EscrowReleased from CHALLENGED
       //      to DISPUTED_RESOLUTION is deterministic read-model classification, not backend authority.
-      if (existingTrade?.status === "CHALLENGED") {
+      if (existingTrade.status === "CHALLENGED") {
         releaseResolutionType = "DISPUTED_RESOLUTION";
       } else {
         // [TR] Manuel/otomatik ayrımı heuristikle değil, kontratın terminal snapshot'ından okunur.
-        // [EN] Manual vs auto is read from the contract's terminal snapshot, never inferred.
+        //      Okuma hatası throw eder (B13): kalıcı "UNKNOWN" yazılmaz, event retry/DLQ'ya gider.
+        // [EN] Manual vs auto is read from the contract's terminal snapshot, never inferred. A read error
+        //      throws (B13): no permanent "UNKNOWN" is written, the event goes to retry/DLQ.
         releaseResolutionType = await this._fetchTerminalResolutionType(tradeIdNum) || "UNKNOWN";
       }
 
-      const trade = await Trade.findOneAndUpdate(
-        {
-          ..._buildIdentityLookup("onchain_escrow_id", tradeIdNum),
-          status: { $in: ["LOCKED", "PAID", "CHALLENGED"] },
+      const trade = await this._applyTerminalTransition({
+        tradeIdNum,
+        fromStates: ["LOCKED", "PAID", "CHALLENGED"],
+        terminalStatus: "RESOLVED",
+        set: {
+          // [TR] EscrowReleased event'i release yolunu (manual vs auto) tek başına ayırt etmiyor.
+          //      Backend heuristik yapmaz; outcome read-model alanını UNKNOWN olarak mirror eder.
+          // [EN] EscrowReleased alone does not safely distinguish manual vs auto release.
+          //      We do not infer heuristically; mirror as UNKNOWN.
+          resolution_type: releaseResolutionType,
+          "timers.resolved_at": resolvedAt,
+          "evidence.receipt_delete_at": new Date(resolvedAt.getTime() + 24 * 3600 * 1000),
         },
-        {
-          $set: {
-            status: "RESOLVED",
-            // [TR] EscrowReleased event'i release yolunu (manual vs auto) tek başına ayırt etmiyor.
-            //      Backend heuristik yapmaz; outcome read-model alanını UNKNOWN olarak mirror eder.
-            // [EN] EscrowReleased alone does not safely distinguish manual vs auto release.
-            //      We do not infer heuristically; mirror as UNKNOWN.
-            resolution_type: releaseResolutionType,
-            "timers.resolved_at": resolvedAt,
-            "evidence.receipt_delete_at": new Date(resolvedAt.getTime() + 24 * 3600 * 1000),
-          },
-        },
-        { new: true, session }
-      );
+        statsField: "stats.resolved_child_trade_count",
+        session,
+      });
 
       if (!trade) {
+        logger.warn(`[Worker] EscrowReleased uygulanmadı (durum çelişkisi): trade=${tradeIdNum} status=${existingTrade.status}`);
         await session.abortTransaction();
         return;
-      }
-
-      if (trade.parent_order_id) {
-        await Order.findOneAndUpdate(
-          _buildIdentityLookup("onchain_order_id", trade.parent_order_id),
-          {
-            $inc: {
-              "stats.active_child_trade_count": -1,
-              "stats.resolved_child_trade_count": 1,
-            },
-          },
-          { session }
-        );
       }
 
       await session.commitTransaction();
@@ -1646,7 +2007,7 @@ class EventWorker {
     const { tradeId, timestamp } = event.args;
     const challengedAt = await this._getEventDate(event, timestamp);
 
-    await Trade.findOneAndUpdate(
+    const updated = await Trade.findOneAndUpdate(
       {
         ..._buildIdentityLookup("onchain_escrow_id", tradeId),
         status: { $in: ["LOCKED", "PAID", "CHALLENGED"] },
@@ -1659,6 +2020,11 @@ class EventWorker {
         },
       }
     );
+
+    if (!updated) {
+      const existing = await this._requireTradeMirror(tradeId, "DisputeOpened");
+      logger.info(`[Worker] DisputeOpened idempotent-skip: trade=${_toStr(tradeId)} status=${existing.status}`);
+    }
   }
 
   async _onEscrowCanceled(event) {
@@ -1679,33 +2045,24 @@ class EventWorker {
     const session = await mongoose.startSession();
     session.startTransaction();
     try {
-      const trade = await Trade.findOneAndUpdate(
-        {
-          ..._buildIdentityLookup("onchain_escrow_id", tradeIdNum),
-          status: { $in: ["OPEN", "LOCKED", "PAID", "CHALLENGED"] },
+      const trade = await this._applyTerminalTransition({
+        tradeIdNum,
+        fromStates: ["OPEN", "LOCKED", "PAID", "CHALLENGED"],
+        terminalStatus: "CANCELED",
+        set: {
+          resolution_type: resolutionType,
+          "timers.resolved_at": canceledAt,
+          "evidence.receipt_delete_at": new Date(canceledAt.getTime() + 24 * 3600 * 1000),
         },
-        {
-          $set: {
-            status: "CANCELED",
-            resolution_type: resolutionType,
-            "timers.resolved_at": canceledAt,
-            "evidence.receipt_delete_at": new Date(canceledAt.getTime() + 24 * 3600 * 1000),
-          },
-        },
-        { new: true, session }
-      );
+        statsField: "stats.canceled_child_trade_count",
+        session,
+      });
 
       if (!trade) {
+        const existing = await this._requireTradeMirror(tradeIdNum, event.eventName || "EscrowCanceled");
+        logger.info(`[Worker] ${event.eventName || "EscrowCanceled"} idempotent-skip: trade=${tradeIdNum} status=${existing.status}`);
         await session.abortTransaction();
         return;
-      }
-
-      if (trade.parent_order_id) {
-        await Order.findOneAndUpdate(
-          _buildIdentityLookup("onchain_order_id", trade.parent_order_id),
-          { $inc: { "stats.active_child_trade_count": -1, "stats.canceled_child_trade_count": 1 } },
-          { session }
-        );
       }
 
       await session.commitTransaction();
@@ -1726,32 +2083,28 @@ class EventWorker {
     session.startTransaction();
 
     try {
-      const trade = await Trade.findOneAndUpdate(
-        {
-          ..._buildIdentityLookup("onchain_escrow_id", tradeIdNum),
-          status: { $in: ["LOCKED", "PAID", "CHALLENGED"] },
+      const trade = await this._applyTerminalTransition({
+        tradeIdNum,
+        fromStates: ["LOCKED", "PAID", "CHALLENGED"],
+        terminalStatus: "BURNED",
+        set: {
+          resolution_type: "BURNED",
+          "timers.resolved_at": burnedAt,
+          // [TR] burnExpired BleedingDecayed yaymaz; yakılan toplam yalnız bu event'te gelir.
+          // [EN] burnExpired emits no BleedingDecayed; the burned total only arrives here.
+          "financials.burned_amount": _toStr(burnedAmount ?? 0),
+          "financials.burned_amount_num": _toSafeNum(burnedAmount ?? 0),
+          "evidence.receipt_delete_at": new Date(burnedAt.getTime() + 30 * 24 * 3600 * 1000),
         },
-        {
-          $set: {
-            status: "BURNED",
-            resolution_type: "BURNED",
-            "timers.resolved_at": burnedAt,
-            // [TR] burnExpired BleedingDecayed yaymaz; yakılan toplam yalnız bu event'te gelir.
-            // [EN] burnExpired emits no BleedingDecayed; the burned total only arrives here.
-            "financials.burned_amount": _toStr(burnedAmount ?? 0),
-            "financials.burned_amount_num": _toSafeNum(burnedAmount ?? 0),
-            "evidence.receipt_delete_at": new Date(burnedAt.getTime() + 30 * 24 * 3600 * 1000),
-          },
-        },
-        { new: true, session }
-      );
+        statsField: "stats.burned_child_trade_count",
+        session,
+      });
 
-      if (trade?.parent_order_id) {
-        await Order.findOneAndUpdate(
-          _buildIdentityLookup("onchain_order_id", trade.parent_order_id),
-          { $inc: { "stats.active_child_trade_count": -1, "stats.burned_child_trade_count": 1 } },
-          { session }
-        );
+      if (!trade) {
+        const existing = await this._requireTradeMirror(tradeIdNum, "EscrowBurned");
+        logger.info(`[Worker] EscrowBurned idempotent-skip: trade=${tradeIdNum} status=${existing.status}`);
+        await session.abortTransaction();
+        return;
       }
 
       await session.commitTransaction();
@@ -1771,7 +2124,7 @@ class EventWorker {
     const decayedAmountStr = _toStr(decayedAmount);
     const decayedAmountNum = _toSafeNum(decayedAmount);
 
-    await Trade.updateOne(
+    const decayResult = await Trade.updateOne(
       { ..._buildIdentityLookup("onchain_escrow_id", tradeIdNum), "financials.decay_tx_hashes": { $ne: eventId } },
       [
         {
@@ -1798,6 +2151,12 @@ class EventWorker {
         },
       ]
     );
+
+    // [TR] B15: eşleşme yoksa ya event zaten uygulanmıştır (idempotent) ya da mirror yoktur; ikincisi throw eder.
+    // [EN] B15: no match means either the event was already applied (idempotent) or the mirror is missing.
+    if (decayResult?.matchedCount === 0) {
+      await this._requireTradeMirror(tradeIdNum, "BleedingDecayed");
+    }
   }
 
   async _onCancelProposed(event) {
@@ -1825,10 +2184,16 @@ class EventWorker {
       update["cancel_proposal.approved_by"] = proposerAddress;
     }
 
-    await Trade.findOneAndUpdate(
+    const updated = await Trade.findOneAndUpdate(
       { ..._buildIdentityLookup("onchain_escrow_id", tradeId) },
       { $set: update }
     );
+
+    // [TR] B15: mirror yoksa sessizce yok sayma; throw et (retry/DLQ).
+    // [EN] B15: do not silently ignore a missing mirror; throw (retry/DLQ).
+    if (!updated) {
+      throw new Error("CancelProposed geldi ama trade mirror bulunamadı.");
+    }
   }
 
   async _onSettlementProposed(event) {
@@ -1874,27 +2239,34 @@ class EventWorker {
     }
   }
 
+  // [TR] B15: FINALIZED'a takılan filtre "zaten işlenmiş"tir (idempotent); trade mirror hiç yoksa throw edilir.
+  // [EN] B15: being filtered out by FINALIZED means "already processed" (idempotent); a missing trade mirror throws.
+  async _updateSettlementProposalMirror(eventName, tradeId, set) {
+    const updated = await Trade.findOneAndUpdate(
+      {
+        ..._buildIdentityLookup("onchain_escrow_id", tradeId),
+        "settlement_proposal.state": { $ne: "FINALIZED" },
+      },
+      { $set: set }
+    );
+    if (!updated) {
+      await this._requireTradeMirror(tradeId, eventName);
+    }
+  }
+
   async _onSettlementRejected(event) {
     const { tradeId, proposalId, rejecter } = event.args;
     void rejecter;
     await this._getEventDate(event);
     const txHash = event?.transactionHash || null;
 
-    await Trade.findOneAndUpdate(
-      {
-        ..._buildIdentityLookup("onchain_escrow_id", tradeId),
-        "settlement_proposal.state": { $ne: "FINALIZED" },
-      },
-      {
-        $set: {
-          "settlement_proposal.proposal_id": _toStr(proposalId),
-          "settlement_proposal.state": "REJECTED",
-          "settlement_proposal.tx_hash": txHash,
-          "settlement_proposal.last_event_name": "SettlementRejected",
-          "settlement_proposal.finalized_at": null,
-        },
-      }
-    );
+    await this._updateSettlementProposalMirror("SettlementRejected", tradeId, {
+      "settlement_proposal.proposal_id": _toStr(proposalId),
+      "settlement_proposal.state": "REJECTED",
+      "settlement_proposal.tx_hash": txHash,
+      "settlement_proposal.last_event_name": "SettlementRejected",
+      "settlement_proposal.finalized_at": null,
+    });
   }
 
   async _onSettlementWithdrawn(event) {
@@ -1903,21 +2275,13 @@ class EventWorker {
     await this._getEventDate(event);
     const txHash = event?.transactionHash || null;
 
-    await Trade.findOneAndUpdate(
-      {
-        ..._buildIdentityLookup("onchain_escrow_id", tradeId),
-        "settlement_proposal.state": { $ne: "FINALIZED" },
-      },
-      {
-        $set: {
-          "settlement_proposal.proposal_id": _toStr(proposalId),
-          "settlement_proposal.state": "WITHDRAWN",
-          "settlement_proposal.tx_hash": txHash,
-          "settlement_proposal.last_event_name": "SettlementWithdrawn",
-          "settlement_proposal.finalized_at": null,
-        },
-      }
-    );
+    await this._updateSettlementProposalMirror("SettlementWithdrawn", tradeId, {
+      "settlement_proposal.proposal_id": _toStr(proposalId),
+      "settlement_proposal.state": "WITHDRAWN",
+      "settlement_proposal.tx_hash": txHash,
+      "settlement_proposal.last_event_name": "SettlementWithdrawn",
+      "settlement_proposal.finalized_at": null,
+    });
   }
 
   async _onSettlementExpired(event) {
@@ -1925,24 +2289,16 @@ class EventWorker {
     const expiredAt = await this._getEventDate(event);
     const txHash = event?.transactionHash || null;
 
-    await Trade.findOneAndUpdate(
-      {
-        ..._buildIdentityLookup("onchain_escrow_id", tradeId),
-        "settlement_proposal.state": { $ne: "FINALIZED" },
-      },
-      {
-        $set: {
-          "settlement_proposal.proposal_id": _toStr(proposalId),
-          "settlement_proposal.state": "EXPIRED",
-          // [TR] expires_at deadline alanıdır; event zamanı ayrı expired_at alanına yazılır.
-          // [EN] Keep expires_at as proposal deadline; store event time separately at expired_at.
-          "settlement_proposal.expired_at": expiredAt,
-          "settlement_proposal.finalized_at": null,
-          "settlement_proposal.tx_hash": txHash,
-          "settlement_proposal.last_event_name": "SettlementExpired",
-        },
-      }
-    );
+    await this._updateSettlementProposalMirror("SettlementExpired", tradeId, {
+      "settlement_proposal.proposal_id": _toStr(proposalId),
+      "settlement_proposal.state": "EXPIRED",
+      // [TR] expires_at deadline alanıdır; event zamanı ayrı expired_at alanına yazılır.
+      // [EN] Keep expires_at as proposal deadline; store event time separately at expired_at.
+      "settlement_proposal.expired_at": expiredAt,
+      "settlement_proposal.finalized_at": null,
+      "settlement_proposal.tx_hash": txHash,
+      "settlement_proposal.last_event_name": "SettlementExpired",
+    });
   }
 
   async _onSettlementFinalized(event) {
@@ -1954,57 +2310,35 @@ class EventWorker {
     const session = await mongoose.startSession();
     session.startTransaction();
     try {
-      const trade = await Trade.findOneAndUpdate(
-        {
-          ..._buildIdentityLookup("onchain_escrow_id", tradeIdNum),
-          status: { $ne: "RESOLVED" },
+      const trade = await this._applyTerminalTransition({
+        tradeIdNum,
+        fromStates: ["OPEN", "LOCKED", "PAID", "CHALLENGED"],
+        terminalStatus: "RESOLVED",
+        set: {
+          resolution_type: "PARTIAL_SETTLEMENT",
+          "timers.resolved_at": finalizedAt,
+          "settlement_proposal.proposal_id": _toStr(proposalId),
+          "settlement_proposal.state": "FINALIZED",
+          "settlement_proposal.finalized_at": finalizedAt,
+          "settlement_proposal.maker_payout": _toStr(makerPayout),
+          "settlement_proposal.taker_payout": _toStr(takerPayout),
+          "settlement_proposal.taker_fee": _toStr(takerFee),
+          "settlement_proposal.maker_fee": _toStr(makerFee),
+          "settlement_proposal.tx_hash": txHash,
+          "settlement_proposal.last_event_name": "SettlementFinalized",
+          "evidence.receipt_delete_at": new Date(finalizedAt.getTime() + 24 * 3600 * 1000),
         },
-        {
-          $set: {
-            status: "RESOLVED",
-            resolution_type: "PARTIAL_SETTLEMENT",
-            "timers.resolved_at": finalizedAt,
-            "settlement_proposal.proposal_id": _toStr(proposalId),
-            "settlement_proposal.state": "FINALIZED",
-            "settlement_proposal.finalized_at": finalizedAt,
-            "settlement_proposal.maker_payout": _toStr(makerPayout),
-            "settlement_proposal.taker_payout": _toStr(takerPayout),
-            "settlement_proposal.taker_fee": _toStr(takerFee),
-            "settlement_proposal.maker_fee": _toStr(makerFee),
-            "settlement_proposal.tx_hash": txHash,
-            "settlement_proposal.last_event_name": "SettlementFinalized",
-            "evidence.receipt_delete_at": new Date(finalizedAt.getTime() + 24 * 3600 * 1000),
-          },
-        },
-        { new: true, session }
-      );
+        statsField: "stats.resolved_child_trade_count",
+        session,
+      });
 
       if (!trade) {
-        const existingTrade = await Trade.findOne(_buildIdentityLookup("onchain_escrow_id", tradeIdNum))
-          .select("status")
-          .lean();
-        if (!existingTrade) {
-          throw new Error("SettlementFinalized geldi ama trade mirror bulunamadı.");
-        }
-        if (existingTrade.status === "RESOLVED") {
-          // [TR] Replay/idempotent durum: trade zaten terminal mirror'da, order stats tekrar düşülmez.
-          // [EN] Replay/idempotent case: trade already terminal; skip duplicate order-stats decrement.
-          await session.commitTransaction();
-          return;
-        }
-      }
-
-      if (trade?.parent_order_id) {
-        await Order.findOneAndUpdate(
-          _buildIdentityLookup("onchain_order_id", trade.parent_order_id),
-          {
-            $inc: {
-              "stats.active_child_trade_count": -1,
-              "stats.resolved_child_trade_count": 1,
-            },
-          },
-          { session }
-        );
+        // [TR] Replay/idempotent durum: geçiş zaten uygulanmış; order stats tekrar düşülmez. Mirror yoksa throw.
+        // [EN] Replay/idempotent case: transition already applied; order stats are not decremented again.
+        //      A missing mirror throws.
+        await this._requireTradeMirror(tradeIdNum, "SettlementFinalized");
+        await session.commitTransaction();
+        return;
       }
 
       await session.commitTransaction();
@@ -2016,8 +2350,27 @@ class EventWorker {
     }
   }
 
+
   async _onProtocolRevenueSent(event) {
-    const { token, amount, kind, tradeId } = event.args;
+    const { token, amount, kind, tradeId, treasury } = event.args;
+
+    // [TR] B16: Escrow'un ProtocolRevenueSent'i treasury = ArafRevenueVault olduğunda AYNI transferin vault
+    //      tarafındaki EscrowRevenueReceived event'i ile birebir çift kayıttır (ikisi de source ESCROW_REVENUE;
+    //      admin toplamı 2x çıkıyordu). Vault izleniyorsa vault event'i birincildir (reward/treasury payı da onda);
+    //      escrow event'i vault'a gidiyorsa atlanır. Vault izlenmiyorsa ya da treasury başka bir adresse
+    //      (eski/harici treasury) escrow event'i tek kayıt olarak yazılır.
+    // [EN] B16: when escrow's ProtocolRevenueSent targets the ArafRevenueVault it is an exact duplicate of the
+    //      vault's EscrowRevenueReceived for the same transfer (both source ESCROW_REVENUE; the admin total was
+    //      doubled). With the vault watched, the vault event is primary (it also carries the reward/treasury
+    //      split) and the escrow event is skipped when it goes to the vault. With no vault watched, or a
+    //      different (legacy/external) treasury, the escrow event is written as the single row.
+    const vaultAddress =
+      typeof this.vaultContract?.target === "string" ? this.vaultContract.target.toLowerCase() : null;
+    if (vaultAddress && String(treasury || "").toLowerCase() === vaultAddress) {
+      logger.debug(`[Worker] ProtocolRevenueSent vault'a gidiyor; EscrowRevenueReceived birincil kayıt (tx=${event.transactionHash}).`);
+      return;
+    }
+
     await RevenueEvent.findOneAndUpdate(
       { tx_hash: event.transactionHash, log_index: Number(_logIndexOf(event)) },
       {
@@ -2209,6 +2562,11 @@ class EventWorker {
     } = event.args;
     const syncAt = await this._getEventDate(event);
 
+    // [TR] B20: cüzdan başına son uygulanan (blockNumber, logIndex)'ten eski ReputationUpdated yok sayılır.
+    // [EN] B20: a ReputationUpdated older than the wallet's last applied (blockNumber, logIndex) is ignored.
+    const orderScope = `ReputationUpdated:${String(wallet).toLowerCase()}`;
+    if (await this._isStaleOrderedEvent(orderScope, event)) return;
+
     const totalTrades = _toNum(successful) + _toNum(failed);
     const successRate =
       totalTrades > 0 ? Math.round((_toNum(successful) / totalTrades) * 100) : 100;
@@ -2269,39 +2627,65 @@ class EventWorker {
       },
       { upsert: true }
     );
+    await this._markOrderedEventApplied(orderScope, event);
   }
 
+  // [TR] Config event'lerinde eksik/NaN alan sessizce NaN yazıp "başarılı" dönmemeli; throw edilir
+  //      (retry/DLQ'ya gider). Sıralama koruması: son uygulanan (blockNumber, logIndex)'ten eski event yok sayılır.
+  // [EN] A missing/NaN field in a config event must not silently write NaN and report success; it throws
+  //      (retry/DLQ). Ordering guard: an event older than the last applied (blockNumber, logIndex) is ignored.
   async _onFeeConfigUpdated(event) {
-    const { takerFeeBps, makerFeeBps } = event.args;
+    const takerFeeBps = _requireFiniteNumber(event.args?.takerFeeBps, "takerFeeBps", "FeeConfigUpdated");
+    const makerFeeBps = _requireFiniteNumber(event.args?.makerFeeBps, "makerFeeBps", "FeeConfigUpdated");
+
+    if (await this._isStaleOrderedEvent("FeeConfigUpdated", event)) return;
     await updateCachedFeeConfig(takerFeeBps, makerFeeBps);
+    await this._markOrderedEventApplied("FeeConfigUpdated", event);
   }
 
   async _onCooldownConfigUpdated(event) {
-    const { tier0TradeCooldown, tier1TradeCooldown } = event.args;
+    const tier0TradeCooldown = _requireFiniteNumber(event.args?.tier0TradeCooldown, "tier0TradeCooldown", "CooldownConfigUpdated");
+    const tier1TradeCooldown = _requireFiniteNumber(event.args?.tier1TradeCooldown, "tier1TradeCooldown", "CooldownConfigUpdated");
+
+    if (await this._isStaleOrderedEvent("CooldownConfigUpdated", event)) return;
     await updateCachedCooldownConfig(tier0TradeCooldown, tier1TradeCooldown);
+    await this._markOrderedEventApplied("CooldownConfigUpdated", event);
   }
 
   async _onReputationPolicyUpdated(event) {
-    const a = event.args;
-    await updateCachedReputationPolicy({
-      cleanPeriodSec: Number(a.cleanPeriod),
-      manualReleaseRewardPts: Number(a.manualReleaseRewardPts),
-      autoReleasePenaltyPts: Number(a.autoReleasePenaltyPts),
-      disputeWinRewardPts: Number(a.disputeWinRewardPts),
-      disputeLossPenaltyPts: Number(a.disputeLossPenaltyPts),
-      burnPenaltyPts: Number(a.burnPenaltyPts),
-      mutualCancelPenaltyPts: Number(a.mutualCancelPenaltyPts),
-      baseBanDurationSec: Number(a.baseBanDuration),
-      banRiskPointsThreshold: Number(a.banRiskPointsThreshold),
-    });
+    const a = event.args || {};
+    const name = "ReputationPolicyUpdated";
+    const patch = {
+      cleanPeriodSec: _requireFiniteNumber(a.cleanPeriod, "cleanPeriod", name),
+      manualReleaseRewardPts: _requireFiniteNumber(a.manualReleaseRewardPts, "manualReleaseRewardPts", name),
+      autoReleasePenaltyPts: _requireFiniteNumber(a.autoReleasePenaltyPts, "autoReleasePenaltyPts", name),
+      disputeWinRewardPts: _requireFiniteNumber(a.disputeWinRewardPts, "disputeWinRewardPts", name),
+      disputeLossPenaltyPts: _requireFiniteNumber(a.disputeLossPenaltyPts, "disputeLossPenaltyPts", name),
+      burnPenaltyPts: _requireFiniteNumber(a.burnPenaltyPts, "burnPenaltyPts", name),
+      mutualCancelPenaltyPts: _requireFiniteNumber(a.mutualCancelPenaltyPts, "mutualCancelPenaltyPts", name),
+      baseBanDurationSec: _requireFiniteNumber(a.baseBanDuration, "baseBanDuration", name),
+      banRiskPointsThreshold: _requireFiniteNumber(a.banRiskPointsThreshold, "banRiskPointsThreshold", name),
+    };
+
+    if (await this._isStaleOrderedEvent(name, event)) return;
+    await updateCachedReputationPolicy(patch);
+    await this._markOrderedEventApplied(name, event);
   }
 
   async _onReputationTierThresholdsUpdated(event) {
-    const { minSuccessfulTrades, maxRiskPoints } = event.args;
-    await updateCachedReputationPolicy({
-      tierMinSuccessfulTrades: Array.from(minSuccessfulTrades || []).map(Number),
-      tierMaxRiskPoints: Array.from(maxRiskPoints || []).map(Number),
-    });
+    const name = "ReputationTierThresholdsUpdated";
+    const { minSuccessfulTrades, maxRiskPoints } = event.args || {};
+    if (!minSuccessfulTrades || !maxRiskPoints) {
+      throw new Error(`[Worker] ${name}: eşik dizileri eksik.`);
+    }
+    const patch = {
+      tierMinSuccessfulTrades: Array.from(minSuccessfulTrades).map((v) => _requireFiniteNumber(v, "minSuccessfulTrades", name)),
+      tierMaxRiskPoints: Array.from(maxRiskPoints).map((v) => _requireFiniteNumber(v, "maxRiskPoints", name)),
+    };
+
+    if (await this._isStaleOrderedEvent(name, event)) return;
+    await updateCachedReputationPolicy(patch);
+    await this._markOrderedEventApplied(name, event);
   }
 
   async _onTokenConfigUpdated(event) {

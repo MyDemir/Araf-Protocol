@@ -123,6 +123,14 @@ async function archiveOverflow(redis, length) {
 
 async function processDLQ() {
   try {
+    // [TR] Worker henüz bağlanmadıysa (arka plan start) re-drive zincir okuyamaz; deneme hakkı yakılmaz.
+    // [EN] While the worker is still connecting (background start) a re-drive cannot read the chain; do not
+    //      burn attempts.
+    if (!eventWorker.isRunning || !eventWorker.contract) {
+      logger.debug("[DLQ] Worker hazır değil; re-drive sonraki tura ertelendi.");
+      return;
+    }
+
     const redis = getRedisClient();
     let length = await redis.lLen(DLQ_KEY);
 
