@@ -4,7 +4,7 @@ import { render, screen } from '@testing-library/react';
 import { orderSide as orderSideCopy } from '../../frontend/src/app/copy';
 import { buildAppModals } from '../../frontend/src/app/AppModals';
 import MyOrdersPanel from '../../frontend/src/app/contexts/profile/MyOrdersPanel';
-import { getOrderSideCopy, mapApiOrderToUi } from '../../frontend/src/app/orderUiModel';
+import { buildMarketOrdersQuery, getOrderSideCopy, mapApiOrderToUi } from '../../frontend/src/app/orderUiModel';
 
 const makeMakerCtx = (overrides = {}) => ({
   lang: 'EN',
@@ -110,5 +110,25 @@ describe('order side copy', () => {
     expect(buy.ctaLabel).toBe('Sat');
     expect(sell.ownerSideHint).toContain('Kripto Satıyor');
     expect(buy.ownerSideHint).toContain('Kripto Alıyor');
+  });
+});
+
+describe('market orders query (server-side filters)', () => {
+  const tokenAddresses = { USDT: '0x' + 'a'.repeat(40), USDC: '0x' + 'c'.repeat(40) };
+  const parse = (q) => Object.fromEntries(new URLSearchParams(q.split('?')[1]));
+  it('defaults to active orders without side or sort', () => {
+    expect(parse(buildMarketOrdersQuery())).toEqual({ status: 'ACTIVE', limit: '50' });
+  });
+  it('maps the Buy tab to SELL_CRYPTO with best-rate sort, and applies tier/token/amount server-side', () => {
+    expect(parse(buildMarketOrdersQuery({ marketSide: 'BUY', filterTier1: true, filterToken: 'USDC', searchAmount: '250', tokenAddresses }))).toEqual({
+      status: 'ACTIVE', limit: '50', side: 'SELL_CRYPTO', sort: 'best_rate', tier: '0', token_address: tokenAddresses.USDC, min_amount: '250',
+    });
+    expect(parse(buildMarketOrdersQuery({ marketSide: 'SELL' })).side).toBe('BUY_CRYPTO');
+  });
+  it('ignores empty, zero or invalid amounts and unknown tokens', () => {
+    for (const searchAmount of ['', '0', 'abc', '-5']) {
+      expect(parse(buildMarketOrdersQuery({ searchAmount })).min_amount).toBeUndefined();
+    }
+    expect(parse(buildMarketOrdersQuery({ filterToken: 'DAI', tokenAddresses })).token_address).toBeUndefined();
   });
 });

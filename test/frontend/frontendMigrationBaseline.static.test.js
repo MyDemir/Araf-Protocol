@@ -333,7 +333,7 @@ describe('frontend migration scaffold baseline', () => {
     expect(appSource).toContain('mobileBottom={renderMobileNav()}');
     expect(appSource).toContain('status={systemStatus}');
     expect(appSource).toContain('const systemStatus = React.useMemo(() => ({');
-    expect(appSource).toContain('envErrors: ENV_ERRORS');
+    expect(appSource).toContain('...ENV_ERRORS,');
     expect(appSource).toContain('supportedChains');
     expect(appSource).toContain('onRegisterWallet: handleRegisterWallet');
 

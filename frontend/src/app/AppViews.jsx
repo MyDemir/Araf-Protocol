@@ -14,6 +14,7 @@ import { getOrderSideCopy } from './orderUiModel';
 import { mapResolutionTypeLabel } from './useAppSessionData';
 import TradeRoomPage from './contexts/trade-room/TradeRoomPage';
 import ThemeToggle from './shell/ThemeToggle';
+import { isViewInNav, NAV_ORDER, VIEW_REGISTRY } from './viewRegistry';
 import {
   Banknote, Briefcase, ChevronDown, CircleCheck, CirclePause, Clock, Compass, Droplets, Flame, Handshake, History, Hourglass, House,
   Layers, ListPlus, LoaderCircle, Lock, Menu, Paperclip, Plus, Radar, Search, Settings, ShieldCheck, ShieldOff, Store, Swords,
@@ -151,34 +152,24 @@ export const buildAppViews = (ctx) => {
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="square" strokeLinejoin="miter" strokeWidth="3" d="M4 4h4v4H4zm12 0h4v4h-4zM4 16h4v4H4zm12 0h4v4h-4zM10 10h4v4h-4z" /></svg>
         </div>
         <button onClick={toggleSidebar} title={lang === 'TR' ? 'Filtreler' : 'Filters'} className={`w-10 h-10 flex items-center justify-center rounded-xl transition ${sidebarOpen ? 'bg-elevated text-textPrimary border border-borderStrong' : 'text-textMuted hover:text-textPrimary hover:bg-elevated'}`}><Menu className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" /></button>
-        <button onClick={() => setCurrentView('home')} title={lang === 'TR' ? 'Ana Sayfa' : 'Home'} className={`w-10 h-10 flex items-center justify-center rounded-xl transition ${currentView === 'home' ? 'bg-elevated text-textPrimary border border-borderStrong' : 'text-textMuted hover:text-textPrimary hover:bg-elevated'}`}><House className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" /></button>
-        <button onClick={() => setCurrentView('market')} title={lang === 'TR' ? 'Pazar Yeri' : 'Marketplace'} className={`w-10 h-10 flex items-center justify-center rounded-xl transition ${currentView === 'market' ? 'bg-elevated text-textPrimary border border-borderStrong' : 'text-textMuted hover:text-textPrimary hover:bg-elevated'}`}><Store className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" /></button>
-        {navUnlocked && (
-          <button onClick={() => setCurrentView('operations')} title={lang === 'TR' ? 'İşlem Takip Merkezi' : 'Operations Center'} className={`w-10 h-10 flex items-center justify-center rounded-xl transition ${currentView === 'operations' ? 'bg-elevated text-info border border-borderStrong' : 'text-textMuted hover:text-textPrimary hover:bg-elevated'}`}><Radar className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" /></button>
-        )}
-        {/* [TR] Admin girişi authenticated kullanıcıya her zaman görünür;
-            VITE_ADMIN_WALLETS yalnızca UX ipucu amaçlıdır.
-            [EN] Admin entry is always visible for authenticated users;
-            VITE_ADMIN_WALLETS is only a UX hint. */}
-        {canSeeAdminEntry && (
-          <button
-            onClick={() => setCurrentView('admin')}
-            title={isLikelyAdminWallet
+        {NAV_ORDER.rail.filter((key) => isViewInNav(key, { navUnlocked, canSeeAdminEntry })).map((key) => {
+          const view = VIEW_REGISTRY[key];
+          const Icon = view.icon;
+          // [TR] Admin başlığı yetki ipucunu taşır; backend yine nihai otoritedir. [EN] Admin title carries the access hint.
+          const title = key === 'admin'
+            ? (isLikelyAdminWallet
               ? (lang === 'TR' ? 'Yönetim Paneli (uzlaşma analitiği: salt okunur)' : 'Admin Panel (Settlement analytics: read-only)')
-              : (lang === 'TR' ? 'Admin Gözlem (sunucu yetkisine bağlı, read-only)' : 'Admin Observability (server-authorized, read-only)')}
-            className={`w-10 h-10 flex items-center justify-center rounded-xl transition ${currentView === 'admin' ? 'bg-elevated text-success border border-borderStrong' : 'text-textMuted hover:text-textPrimary hover:bg-elevated'}`}
-          >
-            <Compass className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" />
-          </button>
-        )}
+              : (lang === 'TR' ? 'Admin Gözlem (sunucu yetkisine bağlı, read-only)' : 'Admin Observability (server-authorized, read-only)'))
+            : view.label[lang === 'TR' ? 'TR' : 'EN'];
+          return (
+            <button key={key} onClick={() => setCurrentView(key)} title={title} className={`w-10 h-10 flex items-center justify-center rounded-xl transition relative ${currentView === key ? `bg-elevated ${view.tone} border border-borderStrong` : 'text-textMuted hover:text-textPrimary hover:bg-elevated'}`}>
+              <Icon className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" />
+              {key === 'tradeRoom' && activeEscrows.length > 0 && <span className="absolute top-2 right-2 w-2 h-2 bg-orange-500 rounded-full animate-pulse"></span>}
+            </button>
+          );
+        })}
         {navUnlocked && (
-          <>
-        <button onClick={() => setCurrentView('tradeRoom')} title={lang === 'TR' ? 'İşlem Odası' : 'Trade Room'} className={`w-10 h-10 flex items-center justify-center rounded-xl transition relative ${currentView === 'tradeRoom' ? 'bg-elevated text-warning border border-borderStrong' : 'text-textMuted hover:text-textPrimary hover:bg-elevated'}`}>
-          <Briefcase className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" /> {activeEscrows.length > 0 && <span className="absolute top-2 right-2 w-2 h-2 bg-orange-500 rounded-full animate-pulse"></span>}
-        </button>
-        <button onClick={() => setCurrentView('profile')} title={lang === 'TR' ? 'Profil Merkezi' : 'Profile Center'} className={`w-10 h-10 flex items-center justify-center rounded-xl transition ${currentView === 'profile' ? 'bg-elevated text-success border border-borderStrong' : 'text-textMuted hover:text-textPrimary hover:bg-elevated'}`}><UserRound className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" /></button>
-        <button onClick={() => { if (!isConnected || !isAuthenticated) { handleAuthAction(); return; } openProfilePage?.('history'); }} title={lang === 'TR' ? 'İşlem Geçmişi' : 'Trade History'} className="w-10 h-10 flex items-center justify-center rounded-xl text-textMuted hover:text-textPrimary hover:bg-elevated transition"><History className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" /></button>
-          </>
+          <button onClick={() => { if (!isConnected || !isAuthenticated) { handleAuthAction(); return; } openProfilePage?.('history'); }} title={lang === 'TR' ? 'İşlem Geçmişi' : 'Trade History'} className="w-10 h-10 flex items-center justify-center rounded-xl text-textMuted hover:text-textPrimary hover:bg-elevated transition"><History className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" /></button>
         )}
       </div>
       <div className="space-y-3 flex flex-col items-center w-full px-2">
@@ -1053,14 +1044,18 @@ export const buildAppViews = (ctx) => {
     const signedIn = isConnected && isAuthenticated;
     return (
       <div className="md:hidden fixed inset-x-0 bottom-0 box-border h-[calc(4rem_+_env(safe-area-inset-bottom))] max-w-full bg-shell border-t border-borderSubtle z-[45] flex items-center justify-around gap-0 overflow-hidden px-[calc(0.25rem_+_env(safe-area-inset-left))] pr-[calc(0.25rem_+_env(safe-area-inset-right))] pb-[env(safe-area-inset-bottom)] shadow-[0_-10px_30px_rgba(0,0,0,0.12)]">
-        {item({ key: 'home', icon: House, label: tr ? 'Ana' : 'Home', active: currentView === 'home', onClick: () => setCurrentView('home') })}
-        {item({ key: 'market', icon: Store, label: tr ? 'Pazar' : 'Market', active: currentView === 'market', onClick: () => setCurrentView('market') })}
-        {navUnlocked && item({ key: 'trade', icon: Briefcase, label: tr ? 'İşlem' : 'Trade', active: currentView === 'tradeRoom', activeClass: 'text-warning', onClick: () => setCurrentView('tradeRoom'), dot: activeEscrows.length > 0 ? 'bg-orange-500 animate-pulse' : null })}
-        {navUnlocked && item({ key: 'ops', icon: Radar, label: tr ? 'Takip' : 'Track', active: currentView === 'operations', activeClass: 'text-info', onClick: () => setCurrentView('operations') })}
-        {/* [TR] Mobil admin girişi authenticated kullanıcıya açık kalır; backend nihai otoritedir.
-            [EN] Mobile admin entry remains reachable for authenticated users; backend is authoritative. */}
-        {canSeeAdminEntry && item({ key: 'admin', icon: Compass, label: 'Admin', active: currentView === 'admin', activeClass: 'text-success', onClick: () => setCurrentView('admin') })}
-        {navUnlocked && item({ key: 'profile', icon: UserRound, label: tr ? 'Profil' : 'Profile', active: currentView === 'profile', activeClass: 'text-success', onClick: () => setCurrentView('profile') })}
+        {NAV_ORDER.mobile.filter((key) => isViewInNav(key, { navUnlocked, canSeeAdminEntry })).map((key) => {
+          const view = VIEW_REGISTRY[key];
+          return item({
+            key,
+            icon: view.icon,
+            label: view.shortLabel[tr ? 'TR' : 'EN'],
+            active: currentView === key,
+            activeClass: view.tone,
+            onClick: () => setCurrentView(key),
+            dot: key === 'tradeRoom' && activeEscrows.length > 0 ? 'bg-orange-500 animate-pulse' : null,
+          });
+        })}
         {item({ key: 'menu', icon: Menu, label: tr ? 'Menü' : 'Menu', active: sidebarOpen, onClick: toggleSidebar })}
         {item({ key: 'wallet', icon: Wallet, label: signedIn ? (tr ? 'Bağlı' : 'Linked') : (tr ? 'Bağlan' : 'Connect'), active: false, onClick: handleAuthAction, dot: signedIn ? 'bg-success' : null })}
       </div>

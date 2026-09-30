@@ -136,6 +136,8 @@ const orderSchema = new mongoose.Schema(
 // ── Indexes ───────────────────────────────────────────────────────────────────
 orderSchema.index({ owner_address: 1, status: 1, side: 1 });
 orderSchema.index({ side: 1, status: 1, tier: 1 });
+// [TR] Pazar yeri "en iyi kur" sıralaması. [EN] Marketplace best-rate sort.
+orderSchema.index({ status: 1, side: 1, "market.exchange_rate": 1 });
 orderSchema.index({ token_address: 1, side: 1, status: 1 });
 orderSchema.index({ "refs.order_ref": 1 }, { unique: true });
 orderSchema.index({ "timers.last_filled_at": -1 });

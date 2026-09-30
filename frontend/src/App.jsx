@@ -14,10 +14,11 @@ import useFullscreen from './app/shell/useFullscreen';
 import { deriveTradeTimeline, estimateBleeding } from './app/contexts/trade-room/tradeTimeline';
 import { readProtocolConfig } from './app/contexts/admin/adminChainConfig';
 import { isUiLabEnabled, loadUiLab } from './app/uiLab';
+import { SESSION_ONLY_VIEWS } from './app/viewRegistry';
 import { getInitialLang, APP_LANG_STORAGE_KEY } from './app/bootstrapState';
 import { markTermsAcceptedLocally } from './app/legal/terms';
 import { buildApiUrl, resolveApiPolicyDiagnostics } from './app/apiConfig';
-import { getSupportedChainsMap, isMintTokenEnabled, isSupportedChainId } from './app/chainPolicy';
+import { checkDeploymentAlignment, getSupportedChainsMap, isMintTokenEnabled, isSupportedChainId } from './app/chainPolicy';
 import { useMakerOrderForm } from './app/contexts/marketplace/useMakerOrderForm';
 import { buildMintAction, buildOrderActions, buildProfileActions, buildStartTradeAction, buildTradeRoomActions } from './app/actions/contractLifecycleActions';
 import { buildNextActiveTrade, findEscrowByRouteTradeId, getEscrowRouteId, parseAppHashRoute, writeAppHashRoute } from './app/actions/tradeNavigationActions';
@@ -43,7 +44,6 @@ const buildDevScenarioEscrowCounts = (activeEscrows = []) => ({
   },
 });
 
-const SESSION_ONLY_VIEWS = new Set(['tradeRoom', 'operations', 'profile', 'admin']);
 
 const ENV_ERRORS = [];
 const { errors: API_POLICY_ERRORS } = resolveApiPolicyDiagnostics(import.meta.env);
@@ -274,6 +274,7 @@ function App() {
     onchainTokenMap,
     protocolFeeConfig,
     reputationPolicy,
+    backendDeployment,
     paymentRiskConfig,
     takerFeeBps,
     tokenDecimalsMap,
@@ -340,6 +341,7 @@ function App() {
     filterTier1,
     filterToken,
     searchAmount,
+    marketSide,
     devScenarioActive,
   });
 
@@ -1011,8 +1013,13 @@ function App() {
     setExpandedStatus,
   }), [currentView, sidebarOpen, toggleSidebar, expandedStatus]);
 
+  const envErrors = React.useMemo(() => [
+    ...ENV_ERRORS,
+    ...checkDeploymentAlignment({ frontendEscrowAddress: import.meta.env.VITE_ESCROW_ADDRESS, backendDeployment }),
+  ], [backendDeployment]);
+
   const systemStatus = React.useMemo(() => ({
-    envErrors: ENV_ERRORS,
+    envErrors,
     isPaused,
     isConnected,
     isAuthenticated,
@@ -1028,7 +1035,7 @@ function App() {
     activeTrade,
     ordersFeedError,
     lang,
-  }), [ordersFeedError, isPaused, isConnected, isAuthenticated, authChecked, chainId, isSupportedChain, supportedChains, isWalletRegistered, isRegisteringWallet, handleRegisterWallet, sybilStatus, walletAgeRemainingDays, activeTrade, lang]);
+  }), [envErrors, ordersFeedError, isPaused, isConnected, isAuthenticated, authChecked, chainId, isSupportedChain, supportedChains, isWalletRegistered, isRegisteringWallet, handleRegisterWallet, sybilStatus, walletAgeRemainingDays, activeTrade, lang]);
 
   const getSafeTelegramUrl = React.useCallback((handle) => {
     if (!handle) return '#';

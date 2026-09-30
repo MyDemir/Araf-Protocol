@@ -43,6 +43,28 @@ const SAFE_ORDER_PROJECTION = [
   "stats",
   "timers",
 ].join(" ");
+const SAFE_ORDER_PROJECTION_FIELDS = Object.fromEntries(SAFE_ORDER_PROJECTION.split(" ").map((f) => [f, 1]));
+
+// [TR] min_amount token birimindedir; her token için kendi ondalığıyla ham birime çevrilir.
+//      Ondalık bilinmiyorsa null döner (filtre güvenle uygulanamaz).
+// [EN] min_amount is in token units, converted per token with its own decimals; null if unknown.
+function _buildMinRemainingClauses(minAmount, tokenAddress) {
+  let tokenMap;
+  try {
+    tokenMap = getConfig().tokenMap || {};
+  } catch (_) {
+    return null;
+  }
+  const byAddress = Object.fromEntries(Object.entries(tokenMap).map(([addr, cfg]) => [addr.toLowerCase(), cfg]));
+  const tokens = tokenAddress ? [tokenAddress.toLowerCase()] : Object.keys(byAddress);
+  const clauses = [];
+  for (const token of tokens) {
+    const decimals = Number(byAddress[token]?.decimals);
+    if (!Number.isInteger(decimals) || decimals < 0) continue;
+    clauses.push({ token_address: token, "amounts.remaining_amount_num": { $gte: minAmount * 10 ** decimals } });
+  }
+  return clauses.length ? clauses : null;
+}
 
 // [TR] Order sahibine ait child trade listesinde veri minimizasyonu.
 //      Backend bu endpoint'te hakemlik üretmez; yalnız UI için gereken alanları döner.
@@ -175,6 +197,12 @@ router.get("/config", marketReadLimiter, async (_req, res, next) => {
       tokenMap: config.tokenMap || {},
       paymentRiskConfig: config.paymentRiskConfig || {},
       reputationPolicy: config.reputationPolicy || null,
+      // [TR] Frontend kendi escrow adresi/zinciriyle karşılaştırır; farklıysa uyarı gösterir (deploy uyumu).
+      // [EN] The frontend compares these with its own escrow/chain and warns on drift (deploy alignment).
+      deployment: {
+        escrowAddress: (process.env.ARAF_ESCROW_ADDRESS || "").toLowerCase() || null,
+        chainId: Number(process.env.EXPECTED_CHAIN_ID) || null,
+      },
       selectedOrderRiskLevel: {
         source: "onchain_order_snapshot",
         nonAuthoritative: true,
@@ -213,6 +241,12 @@ router.get("/", marketReadLimiter, async (req, res, next) => {
       tier: Joi.number().valid(0, 1, 2, 3, 4).optional(),
       token_address: Joi.string().pattern(/^0x[a-fA-F0-9]{40}$/).optional(),
       owner_address: Joi.string().pattern(/^0x[a-fA-F0-9]{40}$/).optional(),
+      // [TR] Sunucu tarafı pazar araması: fiat, token biriminde minimum kalan tutar ve en iyi kur sıralaması.
+      //      İstemci yalnız ilk sayfayı çektiği için filtreler sunucuda uygulanmazsa sayfa dışı emirler kaybolur.
+      // [EN] Server-side market search: fiat, minimum remaining amount (token units) and best-rate sort.
+      fiat: Joi.string().valid("TRY", "USD", "EUR").optional(),
+      min_amount: Joi.number().positive().optional(),
+      sort: Joi.string().valid("default", "best_rate").default("default"),
       page: Joi.number().integer().min(1).default(1),
       limit: Joi.number().integer().min(1).max(50).default(20),
     });
@@ -226,8 +260,35 @@ router.get("/", marketReadLimiter, async (req, res, next) => {
     if (value.tier !== undefined) filter.tier = value.tier;
     if (value.token_address) filter.token_address = value.token_address.toLowerCase();
     if (value.owner_address) filter.owner_address = value.owner_address.toLowerCase();
+    if (value.fiat) filter["market.fiat_currency"] = value.fiat;
+    if (value.min_amount !== undefined) {
+      const minClauses = _buildMinRemainingClauses(value.min_amount, filter.token_address);
+      if (minClauses === null) return res.status(503).json({ error: "Token decimals unavailable for min_amount filter." });
+      filter.$or = minClauses;
+    }
 
     const skip = (value.page - 1) * value.limit;
+    if (value.sort === "best_rate") {
+      // [TR] En iyi kur: kripto satan emirlerde (alıcı için) en düşük, kripto alanlarda en yüksek kur önce.
+      //      Kuru olmayan emirler sona düşer; tie-break deterministic _id.
+      // [EN] Best rate: lowest first for SELL_CRYPTO (buyer's view), highest first for BUY_CRYPTO.
+      //      Orders without a rate go last; deterministic _id tie-break.
+      const dir = value.side === "BUY_CRYPTO" ? -1 : 1;
+      const [orders, total] = await Promise.all([
+        Order.aggregate([
+          { $match: filter },
+          { $addFields: { _rateMissing: { $cond: [{ $gt: ["$market.exchange_rate", 0] }, 0, 1] } } },
+          { $sort: { _rateMissing: 1, "market.exchange_rate": dir, _id: -1 } },
+          { $skip: skip },
+          { $limit: value.limit },
+          { $project: SAFE_ORDER_PROJECTION_FIELDS },
+        ]),
+        Order.countDocuments(filter),
+      ]);
+      const ordersWithTrustSummary = await _attachMarketTrustVisibilitySummary(orders);
+      return res.json({ orders: ordersWithTrustSummary, total, page: value.page, limit: value.limit });
+    }
+
     const [orders, total] = await Promise.all([
       Order.find(filter)
         .select(SAFE_ORDER_PROJECTION)

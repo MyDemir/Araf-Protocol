@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useCountdown } from '../hooks/useCountdown';
-import { mapApiOrderToUi, formatTokenAmount as formatTokenAmountFromRaw, tokenToNumber as rawTokenToDisplayNumber } from './orderUiModel';
+import { buildMarketOrdersQuery, mapApiOrderToUi, formatTokenAmount as formatTokenAmountFromRaw, tokenToNumber as rawTokenToDisplayNumber } from './orderUiModel';
 import { buildApiUrl } from './apiConfig';
 import { WALLET_AGE_MIN_SEC } from './walletAge';
 
@@ -185,6 +185,7 @@ export function useAppSessionData({
   filterTier1,
   filterToken,
   searchAmount,
+  marketSide = 'ALL',
   devScenarioActive = false,
 }) {
   const [tradeState, setTradeState] = useState('LOCKED');
@@ -243,6 +244,7 @@ export function useAppSessionData({
   const [protocolFeeConfig, setProtocolFeeConfig] = useState(null);
   // [TR] Kontrat itibar politikası (tier eşikleri, temiz sayfa süresi); getter olmadığından backend event aynası.
   const [reputationPolicy, setReputationPolicy] = useState(null);
+  const [backendDeployment, setBackendDeployment] = useState(null);
   const [tokenDecimalsMap, setTokenDecimalsMap] = useState({ USDT: DEFAULT_TOKEN_DECIMALS, USDC: DEFAULT_TOKEN_DECIMALS });
   const [bleedingAmounts, setBleedingAmounts] = useState(null);
 
@@ -540,6 +542,7 @@ export function useAppSessionData({
         if (data.tokenMap) setOnchainTokenMap(data.tokenMap);
         if (data.feeConfig) setProtocolFeeConfig(data.feeConfig);
         if (data.reputationPolicy) setReputationPolicy(data.reputationPolicy);
+        if (data.deployment) setBackendDeployment(data.deployment);
         if (data.paymentRiskConfig) setPaymentRiskConfig(data.paymentRiskConfig);
       })
       .catch((err) => console.error('[ProtocolConfig] fetch failed:', err));
@@ -667,6 +670,16 @@ export function useAppSessionData({
     };
   }, [isConnected, connectedWallet, clearLocalSessionState, bestEffortBackendLogout]);
 
+  // [TR] Tutar araması her tuşta istek atmasın diye 400 ms geciktirilir. [EN] Debounce the amount search.
+  const [debouncedSearchAmount, setDebouncedSearchAmount] = useState(searchAmount);
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearchAmount(searchAmount), 400);
+    return () => clearTimeout(t);
+  }, [searchAmount]);
+  const marketOrdersQuery = buildMarketOrdersQuery({
+    marketSide, filterTier1, filterToken, searchAmount: debouncedSearchAmount, tokenAddresses: SUPPORTED_TOKEN_ADDRESSES,
+  });
+
   useEffect(() => {
     const mapOrders = (apiOrders = []) => apiOrders.map((o) => mapApiOrderToUi({
       order: o,
@@ -684,7 +697,7 @@ export function useAppSessionData({
     const fetchOrders = async () => {
       try {
         if (initialLoad) setLoading(true);
-        const res = await fetch(buildApiUrl('orders?status=ACTIVE&limit=50'), { credentials: 'include' });
+        const res = await fetch(buildApiUrl(marketOrdersQuery), { credentials: 'include' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (!Array.isArray(data.orders)) throw new Error('Malformed orders payload');
@@ -703,7 +716,7 @@ export function useAppSessionData({
       if (typeof document === 'undefined' || !document.hidden) fetchOrders();
     }, 30000);
     return () => clearInterval(interval);
-  }, [lang, onchainBondMap, onchainTokenMap, paymentRiskConfig]);
+  }, [lang, onchainBondMap, onchainTokenMap, paymentRiskConfig, marketOrdersQuery]);
 
   useEffect(() => {
     if (!isAuthenticated || !isConnected) {
@@ -1116,6 +1129,7 @@ export function useAppSessionData({
     onchainTokenMap,
     protocolFeeConfig,
     reputationPolicy,
+    backendDeployment,
     paymentRiskConfig,
     takerFeeBps,
     tokenDecimalsMap,

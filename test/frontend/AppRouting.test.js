@@ -47,7 +47,7 @@ describe('App routing side-aware contract selection', () => {
     expect(source).toContain("import AppShell from './app/shell/AppShell';");
     expect(appShellBlock).toContain('status={systemStatus}');
     expect(source).toContain('const systemStatus = React.useMemo(() => ({');
-    expect(source).toContain('envErrors: ENV_ERRORS');
+    expect(source).toContain('...checkDeploymentAlignment({ frontendEscrowAddress: import.meta.env.VITE_ESCROW_ADDRESS, backendDeployment })');
     expect(source).toContain('supportedChains');
     expect(source).toContain('onRegisterWallet: handleRegisterWallet');
     expect(appShellBlock).toContain('navigation={renderSlimRail()}');
@@ -81,4 +81,29 @@ describe('App routing side-aware contract selection', () => {
     expect(appViewsSource).toContain('onClick={() => setSidebarOpen(false)}');
   });
 
+});
+
+describe('view registry (single source for navigation and session gating)', () => {
+  it('every view has an icon, TR/EN labels and a tone; session-only set matches requiresAuth', async () => {
+    const { VIEW_REGISTRY, SESSION_ONLY_VIEWS, NAV_ORDER } = await import('../../frontend/src/app/viewRegistry');
+    for (const [key, view] of Object.entries(VIEW_REGISTRY)) {
+      expect(view.icon, key).toBeTruthy();
+      expect(view.label.TR && view.label.EN && view.shortLabel.TR && view.shortLabel.EN, key).toBeTruthy();
+      expect(view.tone, key).toMatch(/^text-/);
+    }
+    expect([...SESSION_ONLY_VIEWS].sort()).toEqual(['admin', 'operations', 'profile', 'tradeRoom']);
+    for (const surface of Object.values(NAV_ORDER)) {
+      expect([...surface].sort()).toEqual(Object.keys(VIEW_REGISTRY).sort());
+    }
+  });
+
+  it('nav visibility: public views always, session views when unlocked, admin behind its own gate', async () => {
+    const { isViewInNav } = await import('../../frontend/src/app/viewRegistry');
+    expect(isViewInNav('market', { navUnlocked: false })).toBe(true);
+    expect(isViewInNav('profile', { navUnlocked: false })).toBe(false);
+    expect(isViewInNav('profile', { navUnlocked: true })).toBe(true);
+    expect(isViewInNav('admin', { navUnlocked: true, canSeeAdminEntry: false })).toBe(false);
+    expect(isViewInNav('admin', { navUnlocked: false, canSeeAdminEntry: true })).toBe(true);
+    expect(isViewInNav('unknown', { navUnlocked: true })).toBe(false);
+  });
 });
