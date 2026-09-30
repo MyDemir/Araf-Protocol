@@ -94,7 +94,7 @@ export const TERMS_SECTIONS = {
     ] },
     { title: '12. Değişiklikler ve kabul yöntemi', body: [
       'Koşullar sürümlüdür. Yeni bir sürüm yayımlandığında arayüzü kullanmaya devam edebilmek için yeni sürümü cüzdan imzasıyla yeniden kabul etmeniz gerekir.',
-      `Kabul, giriş sırasında cüzdanınızla imzaladığınız mesajdaki beyanla yapılır ("I accept the Araf Terms of Use v${TERMS_VERSION}"). İmzalı mesajın özeti, kabul kanıtı olarak sunucuda saklanır.`,
+      `Kabul, giriş sırasında cüzdanınızla imzaladığınız mesajdaki beyanla yapılır ("I accept the Araf Terms of Use v${TERMS_VERSION}"). İmzalanan mesaj ve imzanın kendisi, cüzdan adresinizle eşleştirilerek kabul kanıtı olarak sunucuda süresiz saklanır; bu imza herkes tarafından bağımsız olarak doğrulanabilir. Koşullar cüzdan başına bir kez sorulur ve kabulünüz tüm cihazlarda geçerlidir; bu nedenle koşulları bilmediğinizi ileri süremezsiniz.`,
     ] },
   ],
   EN: [
@@ -148,7 +148,7 @@ export const TERMS_SECTIONS = {
     ] },
     { title: '12. Changes and how you accept', body: [
       'These terms are versioned. When a new version is published you must accept it again with a wallet signature to keep using the interface.',
-      `You accept by the clause in the message you sign with your wallet at sign-in ("I accept the Araf Terms of Use v${TERMS_VERSION}"). A digest of the signed message is kept on the server as evidence of acceptance.`,
+      `You accept by the clause in the message you sign with your wallet at sign-in ("I accept the Araf Terms of Use v${TERMS_VERSION}"). The signed message and the signature itself are stored on the server indefinitely, matched to your wallet address, as evidence of acceptance; anyone can verify the signature independently. The terms are asked once per wallet and your acceptance applies on every device; you therefore cannot claim to be unaware of them.`,
     ] },
   ],
 };

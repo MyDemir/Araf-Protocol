@@ -22,7 +22,7 @@ import { isUiLabEnabled } from './dev/ui-lab/isUiLabEnabled';
 import { createMockAdminFetch } from './dev/mocks/mockAdminFetch';
 import { createSetterAction, createSettlementContractMocks, createTradeRoomFetch, createTradeRoomHandlers } from './dev/mocks/mockActions';
 import { getInitialLang, APP_LANG_STORAGE_KEY } from './app/bootstrapState';
-import { isTermsAcceptedLocally, markTermsAcceptedLocally } from './app/legal/terms';
+import { useTermsGate } from './app/legal/useTermsGate';
 import { buildApiUrl, resolveApiPolicyDiagnostics } from './app/apiConfig';
 import { getSupportedChainsMap, isMintTokenEnabled, isSupportedChainId } from './app/chainPolicy';
 import { useMakerOrderForm } from './app/contexts/marketplace/useMakerOrderForm';
@@ -169,8 +169,6 @@ function App() {
   const [marketSide, setMarketSide] = useState('ALL');
   const [searchAmount, setSearchAmount] = useState('');
   const [toast, setToast] = useState(null);
-  // [TR] Koşul kabulü cüzdan ve sürüm başına; yerel kayıt yalnız modalı tekrar göstermemek içindir, kanıt imzadır.
-  const [termsTick, setTermsTick] = useState(0);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [activeTradesFilter, setActiveTradesFilter] = useState('ALL');
   const [feedbackRating, setFeedbackRating] = useState(0);
@@ -676,14 +674,15 @@ function App() {
   });
 
 
-  const termsAccepted = React.useMemo(() => isTermsAcceptedLocally(address), [address, termsTick]); // eslint-disable-line react-hooks/exhaustive-deps
-  // [TR] Kabul → yerel işaret + hemen giriş imzası (beyan imzalı mesajda). Oturum zaten açıksa da yeniden
-  //      imzalatılır; böylece koşullar yürürlüğe girmeden açılmış oturumlar da kabulü kayda geçirir.
+  // [TR] Koşullar cüzdan başına bir kez sorulur; kabul backend'de imzalı kanıtla saklanır (TermsAcceptance).
+  //      Kabul → hemen giriş imzası (beyan imzalı mesajda); oturum açıksa da yeniden imzalatılır ki
+  //      koşullardan önce açılmış oturumlar da kanıta geçsin.
+  const termsGate = useTermsGate({ address, isConnected });
+  const termsAccepted = termsGate.accepted || termsGate.checking;
   const handleAcceptTerms = React.useCallback(() => {
-    markTermsAcceptedLocally(address);
-    setTermsTick((t) => t + 1);
+    termsGate.markAccepted();
     loginWithSIWE();
-  }, [address, loginWithSIWE]);
+  }, [termsGate, loginWithSIWE]);
 
   const sessionActions = React.useMemo(() => ({
     loginWithSIWE,

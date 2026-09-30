@@ -65,7 +65,7 @@ function TermsModal({ lang = 'EN', onAcceptTerms, onDeclineTerms }) {
               {isTR ? 'Kabul ediyorum, imzayla onayla' : 'I accept, confirm with signature'}
             </button>
           </div>
-          <p className="text-[11px] text-textMuted text-center">{isTR ? 'Kabulünüz, cüzdanınızla imzaladığınız giriş mesajına eklenir ve kayıt altına alınır.' : 'Your acceptance is included in the sign-in message you sign with your wallet and recorded.'}</p>
+          <p className="text-[11px] text-textMuted text-center">{isTR ? 'Kabulünüz cüzdanınızla imzalanır ve cüzdan adresinizle eşleştirilerek kalıcı olarak kayıt altına alınır.' : 'Your acceptance is signed with your wallet and permanently recorded against your wallet address.'}</p>
         </div>
       </div>
     </div>

@@ -25,6 +25,7 @@ const crypto = require("crypto");
 const { SiweMessage } = require("siwe");
 const { authLimiter, nonceLimiter } = require("../middleware/rateLimiter");
 const { ACCEPTED_TERMS_VERSIONS, CURRENT_TERMS_VERSION, parseTermsAcceptance } = require("../config/terms");
+const TermsAcceptance = require("../models/TermsAcceptance");
 const { requireAuth, requireSessionWalletMatch } = require("../middleware/auth");
 const {
   generateNonce,
@@ -300,6 +301,28 @@ router.get("/nonce", authLimiter, nonceLimiter, async (req, res, next) => {
 });
 
 /**
+ * GET /api/auth/terms-status?wallet=0x...
+ * [TR] Cüzdanın güncel koşul sürümünü daha önce imzayla kabul edip etmediğini söyler; modal cüzdan başına
+ *      bir kez gösterilir (cihaz/tarayıcı değişse de). Yalnız evet/hayır döner; mesaj/imza döndürülmez.
+ * [EN] Whether the wallet already signed the current terms version; used to show the modal once per wallet.
+ */
+router.get("/terms-status", authLimiter, async (req, res, next) => {
+  try {
+    const { wallet } = req.query;
+    if (!wallet || !/^0x[a-fA-F0-9]{40}$/.test(wallet)) {
+      return res.status(400).json({ error: "Geçerli bir Ethereum adresi gir." });
+    }
+    const record = await TermsAcceptance.findOne(
+      { wallet_address: wallet.toLowerCase(), terms_version: CURRENT_TERMS_VERSION },
+      { _id: 1 }
+    ).lean();
+    return res.json({ version: CURRENT_TERMS_VERSION, accepted: Boolean(record) });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+/**
  * POST /api/auth/verify
  * SIWE imzasını doğrular, JWT ve refresh token'ı httpOnly cookie olarak set eder.
  */
@@ -320,8 +343,11 @@ router.post("/verify", authLimiter, async (req, res) => {
     //      (nonce tüketilmez, kullanıcı güncel koşullarla yeniden imzalar).
     // [EN] A session only opens with a signature that accepts the terms (clause inside the signed statement).
     let termsVersion = null;
+    let siweChainId = null;
     try {
-      termsVersion = parseTermsAcceptance(new SiweMessage(value.message).statement);
+      const parsedSiwe = new SiweMessage(value.message);
+      termsVersion = parseTermsAcceptance(parsedSiwe.statement);
+      siweChainId = Number(parsedSiwe.chainId) || null;
     } catch (_) {
       termsVersion = null;
     }
@@ -335,6 +361,32 @@ router.post("/verify", authLimiter, async (req, res) => {
 
     const wallet = await verifySiweSignature(value.message, value.signature);
     const acceptedAt = new Date();
+    const messageSha256 = crypto.createHash("sha256").update(value.message).digest("hex");
+
+    // [TR] Bu cüzdanın bu sürümdeki İLK imzalı kabulü kalıcı kanıt olarak saklanır; sonraki girişler
+    //      kaydı değiştirmez. Kayıt başarısız olursa oturum açılmaz: kanıtsız kabul olmaz.
+    // [EN] First signed acceptance per wallet+version is kept as permanent evidence; later logins never
+    //      overwrite it. If it cannot be stored, no session is opened.
+    try {
+      await TermsAcceptance.updateOne(
+        { wallet_address: wallet, terms_version: termsVersion },
+        {
+          $setOnInsert: {
+            wallet_address: wallet,
+            terms_version: termsVersion,
+            accepted_at: acceptedAt,
+            signed_message: value.message,
+            signature: value.signature,
+            message_sha256: messageSha256,
+            chain_id: siweChainId,
+          },
+        },
+        { upsert: true }
+      );
+    } catch (err) {
+      // Concurrent first logins: the unique index already holds the first acceptance.
+      if (err?.code !== 11000) throw err;
+    }
 
     const user = await User.findOneAndUpdate(
       { wallet_address: wallet },
@@ -343,7 +395,7 @@ router.post("/verify", authLimiter, async (req, res) => {
           last_login: acceptedAt,
           terms_accepted_version: termsVersion,
           terms_accepted_at: acceptedAt,
-          terms_acceptance_message_sha256: crypto.createHash("sha256").update(value.message).digest("hex"),
+          terms_acceptance_message_sha256: messageSha256,
         },
         $setOnInsert: { wallet_address: wallet },
       },

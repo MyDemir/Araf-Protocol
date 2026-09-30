@@ -29,8 +29,11 @@ function loadApp() {
     checkBanExpiry: jest.fn(async () => {}),
     toPublicProfile: () => ({ wallet_address: WALLET }),
   }));
+  const termsUpdateOne = jest.fn(async () => ({ acknowledged: true }));
+  const termsFindOne = jest.fn(() => ({ lean: async () => null }));
   let router;
   jest.isolateModules(() => {
+    jest.doMock("../../backend/scripts/models/TermsAcceptance", () => ({ updateOne: termsUpdateOne, findOne: termsFindOne }));
     jest.doMock("../../backend/scripts/middleware/rateLimiter", () => ({
       authLimiter: (_req, _res, next) => next(),
       nonceLimiter: (_req, _res, next) => next(),
@@ -61,7 +64,7 @@ function loadApp() {
   const app = express();
   app.use(express.json());
   app.use("/api/auth", router);
-  return { app, verifySiweSignature, findOneAndUpdate };
+  return { app, verifySiweSignature, findOneAndUpdate, termsUpdateOne, termsFindOne };
 }
 
 describe("SIWE login requires signed acceptance of the terms", () => {
@@ -94,6 +97,51 @@ describe("SIWE login requires signed acceptance of the terms", () => {
     expect(update.terms_accepted_version).toBe(CURRENT_TERMS_VERSION);
     expect(update.terms_accepted_at).toBeInstanceOf(Date);
     expect(update.terms_acceptance_message_sha256).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("keeps the first signed acceptance per wallet and version as permanent evidence", async () => {
+    const { CURRENT_TERMS_VERSION } = require("../../backend/scripts/config/terms");
+    const { app, termsUpdateOne } = loadApp();
+    const message = buildMessage(`Sign in to Araf Protocol. I accept the Araf Terms of Use v${CURRENT_TERMS_VERSION} and acknowledge that Araf is non-custodial software, not a party to my trades.`);
+    await request(app).post("/api/auth/verify").send({ message, signature: SIG }).expect(200);
+    const [filter, update, opts] = termsUpdateOne.mock.calls[0];
+    expect(filter).toEqual({ wallet_address: WALLET, terms_version: CURRENT_TERMS_VERSION });
+    // $setOnInsert only: later logins never overwrite the first acceptance.
+    expect(Object.keys(update)).toEqual(["$setOnInsert"]);
+    expect(update.$setOnInsert.signed_message).toBe(message);
+    expect(update.$setOnInsert.signature).toBe(SIG);
+    expect(update.$setOnInsert.chain_id).toBe(8453);
+    expect(opts).toEqual({ upsert: true });
+  });
+
+  it("does not open a session when the evidence cannot be stored", async () => {
+    const { CURRENT_TERMS_VERSION } = require("../../backend/scripts/config/terms");
+    const { app, termsUpdateOne, findOneAndUpdate } = loadApp();
+    termsUpdateOne.mockRejectedValueOnce(new Error("db down"));
+    const message = buildMessage(`I accept the Araf Terms of Use v${CURRENT_TERMS_VERSION} and sign in.`);
+    const res = await request(app).post("/api/auth/verify").send({ message, signature: SIG });
+    expect(res.status).toBe(401);
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("tolerates a concurrent first acceptance (duplicate key)", async () => {
+    const { CURRENT_TERMS_VERSION } = require("../../backend/scripts/config/terms");
+    const { app, termsUpdateOne } = loadApp();
+    termsUpdateOne.mockRejectedValueOnce(Object.assign(new Error("E11000"), { code: 11000 }));
+    const message = buildMessage(`I accept the Araf Terms of Use v${CURRENT_TERMS_VERSION} and sign in.`);
+    await request(app).post("/api/auth/verify").send({ message, signature: SIG }).expect(200);
+  });
+
+  it("terms-status answers per wallet for the current version without exposing the evidence", async () => {
+    const { CURRENT_TERMS_VERSION } = require("../../backend/scripts/config/terms");
+    const { app, termsFindOne } = loadApp();
+    let res = await request(app).get(`/api/auth/terms-status?wallet=${WALLET.toUpperCase().replace("0X", "0x")}`).expect(200);
+    expect(res.body).toEqual({ version: CURRENT_TERMS_VERSION, accepted: false });
+    expect(termsFindOne.mock.calls[0][0]).toEqual({ wallet_address: WALLET, terms_version: CURRENT_TERMS_VERSION });
+    termsFindOne.mockReturnValueOnce({ lean: async () => ({ _id: "x" }) });
+    res = await request(app).get(`/api/auth/terms-status?wallet=${WALLET}`).expect(200);
+    expect(res.body).toEqual({ version: CURRENT_TERMS_VERSION, accepted: true });
+    await request(app).get("/api/auth/terms-status?wallet=nope").expect(400);
   });
 
   it("frontend and backend use the same terms version", () => {
