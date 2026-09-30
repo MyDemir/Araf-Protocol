@@ -340,6 +340,19 @@ stateDiagram-v2
 - taker bond decay
 - belirli eşik sonrası crypto side decay
 
+Kesin zaman çizelgesi (tüm süreler `challengedAt`'ten itibaren, `getCurrentAmounts` ile birebir):
+
+| Aralık | Ne erir | Oran | 240. saate kadar toplam |
+|---|---|---|---|
+| 0–48 saat (grace) | hiçbir şey | — | — |
+| 48–240 saat | maker bond | saatte %0,26 | ≈ %49,9 |
+| 48–240 saat | taker bond | saatte %0,42 | ≈ %80,6 |
+| 144–240 saat | ana para (kripto) | saatte %0,68 | ≈ %65,3 |
+| 240. saat | `burnExpired` çağrılabilir; kalan her şey hazineye gider | — | %100 |
+
+`MAX_BLEEDING` (240 saat) challenge'dan itibaren toplam süredir, ana paranın erime süresi değildir: ana para
+yalnız son 96 saatte erir; bu yüzden yakılma anına kadar yaklaşık %34,7'si uzlaşmaya konu olarak durur.
+
 `getCurrentAmounts(tradeId)`, o anki ekonomik bakiyeyi kanonik olarak çıkarır.
 
 ### 7.3 Challenge ve liveness ping semantiği

@@ -343,6 +343,19 @@ stateDiagram-v2
 - taker bond decay
 - post-threshold crypto-side decay
 
+Exact timeline (all times from `challengedAt`, matching `getCurrentAmounts`):
+
+| Window | What decays | Rate | Total by hour 240 |
+|---|---|---|---|
+| 0–48h (grace) | nothing | — | — |
+| 48h–240h | maker bond | 0.26% / hour | ≈ 49.9% |
+| 48h–240h | taker bond | 0.42% / hour | ≈ 80.6% |
+| 144h–240h | principal (crypto) | 0.68% / hour | ≈ 65.3% |
+| 240h | `burnExpired` becomes callable; everything left goes to treasury | — | 100% |
+
+`MAX_BLEEDING` (240h) is the total time from the challenge, not the length of principal decay: the principal
+only decays for the final 96 hours, so ≈ 34.7% of it is still there to settle on until the burn.
+
 `getCurrentAmounts(tradeId)` exposes authoritative real-time economics.
 
 ### 7.3 Challenge and liveness ping semantics

@@ -24,6 +24,7 @@ const User = require("../models/User");
 const { decryptField, decryptPayoutProfile } = require("../services/encryption");
 const { issuePIIToken } = require("../services/siwe");
 const { verifyIdentityNormalization } = require("../services/identityNormalizationGuard");
+const { isTradeActiveOnChain } = require("../services/onchainTradeState");
 const logger = require("../utils/logger");
 
 // [TR] PII erişimine yalnız aktif child trade durumlarında izin verilir.
@@ -52,6 +53,12 @@ function hasMakerPIISnapshot(trade) {
 // [EN] Taker-name route is snapshot-only to keep child-trade visibility stable.
 function hasTakerNameSnapshot(trade) {
   return Boolean(trade?.payout_snapshot?.taker?.payout_details_enc);
+}
+
+// [TR] Mirror aktif dese bile zincir trade'i kapatmışsa PII açılmaz (event gecikmesi penceresi).
+// [EN] Even if the mirror says active, PII stays closed once the chain has closed the trade.
+async function closedOnChain(trade) {
+  return (await isTradeActiveOnChain(trade?.onchain_escrow_id)) === false;
 }
 
 function hasCompletePayoutSnapshot(trade) {
@@ -130,7 +137,7 @@ router.get("/taker-name/:onchainId", requireAuth, requireSessionWalletMatch, pii
     }
 
     const trade = await Trade.findOne({ onchain_escrow_id: onchainId })
-      .select("maker_address taker_address status payout_snapshot")
+      .select("maker_address taker_address status payout_snapshot onchain_escrow_id")
       .lean();
 
     if (!trade) {
@@ -146,6 +153,10 @@ router.get("/taker-name/:onchainId", requireAuth, requireSessionWalletMatch, pii
       return res.status(400).json({
         error: `Taker bilgisi ${trade.status} durumunda alınamaz. Erişim yalnız aktif child trade'lerde geçerlidir.`,
       });
+    }
+
+    if (await closedOnChain(trade)) {
+      return res.status(400).json({ error: "İşlem zincirde kapanmış. Erişim yalnız aktif child trade'lerde geçerlidir." });
     }
 
     if (!trade.taker_address) {
@@ -245,7 +256,7 @@ router.get(
       }
 
       const trade = await Trade.findById(tradeId)
-        .select("maker_address status taker_address payout_snapshot")
+        .select("maker_address status taker_address payout_snapshot onchain_escrow_id")
         .lean();
 
       if (!trade) {
@@ -262,6 +273,10 @@ router.get(
         return res.status(403).json({
           error: `İşlem artık aktif değil (${trade.status}). PII erişimi kaldırıldı.`,
         });
+      }
+
+      if (await closedOnChain(trade)) {
+        return res.status(403).json({ error: "İşlem zincirde kapanmış. PII erişimi kaldırıldı." });
       }
 
       // [TR] V3 güvenlik sınırında current profile fallback kapalıdır.

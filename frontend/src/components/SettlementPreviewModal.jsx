@@ -130,6 +130,14 @@ export default function SettlementPreviewModal({
           )}
         </div>
 
+        {decayed != null && normalizeRawBigInt(decayed) > 0n && (
+          <p className="mt-2 text-[11px] text-warning" data-testid="settlement-decay-note">
+            {isTR
+              ? 'Erime sürüyor: kabul işlemi onaylandığında tutarlar bu önizlemeden biraz düşük olabilir; oran aynı kalır.'
+              : 'Decay is ongoing: amounts at confirmation can be slightly lower than this preview; the split stays the same.'}
+          </p>
+        )}
+
         <p className="mt-3 text-xs text-textSecondary">
           {isTR
             ? 'Araf bu oranı sizin yerinize belirlemez. Karşı taraf kabul ederse işlem bu oranla zincirde kapanır.'
