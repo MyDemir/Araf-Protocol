@@ -30,6 +30,44 @@ const StatChange = ({ value }) => {
   return <span className={`text-[10px] ml-2 font-bold ${isPositive ? 'text-success' : 'text-danger'}`}>{isPositive ? '▲' : '▼'}{Math.abs(value).toFixed(1)}%</span>;
 };
 
+// [TR] Ayarlanmamış sosyal linkler gösterilmez (önceden github.com / x.com ana sayfasına gidiyordu).
+// [EN] Unconfigured social links are hidden (they used to point at bare github.com / x.com).
+const SOCIAL_LINKS = {
+  github: import.meta.env.VITE_SOCIAL_GITHUB || 'https://github.com/MyDemir/Araf-Protokol',
+  twitter: import.meta.env.VITE_SOCIAL_TWITTER || '',
+  farcaster: import.meta.env.VITE_SOCIAL_FARCASTER || '',
+};
+
+// [TR] SSS yanıtları kontrat sabitlerine dayanır (ArafEscrow: 48s ödeme penceresi, 48s+24s otomatik serbest,
+//      itirazda 48s sonra teminat erimesi, 144s sonra ana para erimesi, 240s'te yakım). Ücret kontrattan okunur.
+// [EN] FAQ answers follow contract constants; the fee comes from the contract fee config.
+const buildFaqItems = (lang, protocolFeeConfig) => {
+  const feeText = (() => {
+    const tb = Number(protocolFeeConfig?.takerFeeBps);
+    const mb = Number(protocolFeeConfig?.makerFeeBps);
+    if (!Number.isFinite(tb) || !Number.isFinite(mb)) return null;
+    const f = (b) => (lang === 'TR' ? `%${(b / 100).toLocaleString('tr-TR')}` : `${(b / 100).toLocaleString('en-US')}%`);
+    return lang === 'TR' ? `alıcıdan ${f(tb)}, satıcıdan ${f(mb)}` : `${f(tb)} from the buyer and ${f(mb)} from the seller`;
+  })();
+  return lang === 'TR'
+    ? [
+        { q: 'Araf hakem kullanıyor mu?', a: 'Hayır. Uyuşmazlıkta insan hakem yoktur. Süreç zincirdeki zamanlayıcılar ve ekonomik teşviklerle ilerler; son söz kontratındır.' },
+        { q: 'Platform fonlarıma erişebilir mi?', a: 'Hayır. Fonlar akıllı kontratta kilitlidir. Backend yalnız zinciri yansıtır; serbest bırakma kararı veremez.' },
+        { q: 'Satıcı ödemeyi onaylamazsa ne olur?', a: 'Ödeme bildiriminden 48 saat sonra alıcı satıcıyı uyarır; 24 saat içinde yanıt gelmezse kripto otomatik olarak alıcıya geçer.' },
+        { q: 'Eriyen kasa nedir?', a: 'İtiraz açıldıktan 48 saat sonra iki tarafın teminatı saat saat erimeye başlar; 144. saatten itibaren ana para da erir. 10 gün içinde uzlaşma olmazsa kalan tutar yakılır.' },
+        { q: 'Neden tier ve teminat var?', a: 'Tier sistemi yeni cüzdanların emir büyüklüğünü sınırlar; teminatlar kötü niyeti pahalı hale getirir. Temiz sicil teminatı %1 düşürür, risk puanı %3 artırır.' },
+        { q: 'Ücret ne kadar?', a: feeText ? `Başarılı işlemde kontrat ${feeText} ücret keser.` : 'Ücret oranı kontratta tanımlıdır ve işlem kilitlenirken sabitlenir.' },
+      ]
+    : [
+        { q: 'Does Araf use arbitrators?', a: 'No. There are no human arbitrators. The flow runs on on-chain timers and economic incentives; the contract has the final say.' },
+        { q: 'Can the platform access my funds?', a: 'No. Funds stay locked in the smart contract. The backend only mirrors the chain and cannot release funds.' },
+        { q: 'What if the seller never confirms payment?', a: '48 hours after the payment report the buyer can ping the seller; with no response within 24 hours the crypto is released to the buyer automatically.' },
+        { q: 'What is the bleeding escrow?', a: 'Starting 48 hours after a dispute opens, both bonds decay every hour; from hour 144 the principal decays too. Without a settlement within 10 days the rest is burned.' },
+        { q: 'Why tiers and bonds?', a: 'Tiers cap order size for new wallets; bonds make bad faith expensive. A clean record lowers the bond by 1%, risk points raise it by 3%.' },
+        { q: 'What are the fees?', a: feeText ? `On a successful trade the contract charges ${feeText}.` : 'The fee rate is defined in the contract and fixed when a trade locks.' },
+      ];
+};
+
 export const buildAppViews = (ctx) => {
   const {
     lang,
@@ -80,8 +118,7 @@ export const buildAppViews = (ctx) => {
     sybilStatus,
     walletAgeRemainingDays,
     takerFeeBps,
-    socialLinks,
-    faqItems,
+    protocolFeeConfig,
     activeTrade,
     setActiveTrade,
     userRole,
@@ -112,7 +149,6 @@ export const buildAppViews = (ctx) => {
     bleedingAmounts,
     takerName,
     tokenDecimalsMap,
-    DEFAULT_TOKEN_DECIMALS,
     formatTokenAmountFromRaw,
     rawTokenToDisplayNumber,
     fetchMyTrades,
@@ -452,7 +488,7 @@ export const buildAppViews = (ctx) => {
         <section className="bg-surface border border-borderSubtle rounded-2xl p-5 md:p-6" data-testid="home-faq">
           <p className="text-[11px] tracking-[0.2em] uppercase text-textMuted mb-3">{lang === 'TR' ? 'Sık sorulanlar' : 'FAQ'}</p>
           <div className="min-w-0 divide-y divide-borderSubtle">
-            {faqItems.map((item) => (
+            {buildFaqItems(lang, protocolFeeConfig).map((item) => (
               <details key={item.q} className="group py-3 first:pt-0">
                 <summary className="cursor-pointer list-none text-sm font-semibold text-textPrimary flex items-center justify-between gap-3">
                   {item.q}
@@ -835,7 +871,7 @@ export const buildAppViews = (ctx) => {
     const isTaker = userRole === 'taker';
     const isMaker = userRole === 'maker';
 
-    const tradeTokenDecimals = activeTrade?.tokenDecimals ?? (tokenDecimalsMap[activeTrade?.crypto || 'USDT'] ?? DEFAULT_TOKEN_DECIMALS);
+    const tradeTokenDecimals = activeTrade?.tokenDecimals ?? (tokenDecimalsMap[activeTrade?.crypto || 'USDT'] ?? null);
     const rawCryptoAmt = activeTrade?.cryptoAmountRaw
       ? rawTokenToDisplayNumber(activeTrade.cryptoAmountRaw, tradeTokenDecimals)
       : (Number(activeTrade?.max) > 0 && Number(activeTrade?.rate) > 0 ? Number(activeTrade.max) / Number(activeTrade.rate) : 0);
@@ -1212,9 +1248,9 @@ export const buildAppViews = (ctx) => {
 
   const renderFooter = () => {
     const links = [
-      { k: 'github', label: 'GitHub', href: socialLinks.github },
-      { k: 'twitter', label: 'X', href: socialLinks.twitter },
-      { k: 'farcaster', label: 'Farcaster', href: socialLinks.farcaster },
+      { k: 'github', label: 'GitHub', href: SOCIAL_LINKS.github },
+      { k: 'twitter', label: 'X', href: SOCIAL_LINKS.twitter },
+      { k: 'farcaster', label: 'Farcaster', href: SOCIAL_LINKS.farcaster },
     ].filter((l) => l.href);
     return (
       <footer className="w-full max-w-[1200px] px-4 md:px-8 pb-6 md:pb-8 mt-2" data-testid="app-footer">

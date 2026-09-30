@@ -1,4 +1,3 @@
-import React from 'react';
 
 function normalizeRawBigInt(value) {
   if (value === null || value === undefined || value === '') return null;

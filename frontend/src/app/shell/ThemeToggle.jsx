@@ -1,4 +1,3 @@
-import React from 'react';
 import { Monitor, Moon, Sun } from 'lucide-react';
 import { useThemeMode } from '../providers/ThemeProvider';
 

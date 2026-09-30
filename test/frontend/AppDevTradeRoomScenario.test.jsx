@@ -140,7 +140,6 @@ vi.mock('../../frontend/src/app/useAppSessionData', () => ({
 }));
 
 vi.mock('../../frontend/src/app/AppModals', () => ({
-  EnvWarningBanner: () => null,
   buildAppModals: () => ({
     renderWalletModal: () => null,
     renderFeedbackModal: () => null,

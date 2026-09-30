@@ -36,7 +36,6 @@ describe('start trade action extraction regression', () => {
 
 const baseViewCtx = {
   lang: 'EN',
-  t: {},
   setLang: vi.fn(),
   isConnected: true,
   isAuthenticated: true,
@@ -82,8 +81,6 @@ const baseViewCtx = {
   sybilStatus: { funded: true, cooldownOk: true, cooldownRemaining: 0 },
   walletAgeRemainingDays: null,
   takerFeeBps: 10,
-  socialLinks: {},
-  faqItems: [],
   activeTrade: null,
   setActiveTrade: vi.fn(),
   userRole: 'taker',
@@ -117,7 +114,6 @@ const baseViewCtx = {
   bleedingAmounts: null,
   takerName: '',
   tokenDecimalsMap: { USDT: 6 },
-  DEFAULT_TOKEN_DECIMALS: 6,
   formatTokenAmountFromRaw: () => '0',
   rawTokenToDisplayNumber: () => 0,
   fetchMyTrades: vi.fn(),

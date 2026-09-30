@@ -19,7 +19,7 @@
  */
 
 import { Lock, LockOpen, MessageCircle, ShieldCheck, TriangleAlert } from 'lucide-react';
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { usePII } from '../hooks/usePII';
 import { getPiiCopy } from '../app/copy';
 

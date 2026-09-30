@@ -1,5 +1,4 @@
 import { LoaderCircle } from 'lucide-react';
-import React from 'react';
 import { WALLET_AGE_MIN_DAYS } from '../walletAge';
 
 const t = (lang, tr, en) => (lang === 'TR' ? tr : en);

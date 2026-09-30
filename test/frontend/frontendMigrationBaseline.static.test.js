@@ -248,7 +248,6 @@ describe('frontend migration scaffold baseline', () => {
 
     [
       'profileTabs',
-      'getProfileTabLabel',
       'ProfileNav',
       'AccountPanel',
       'ReputationPanel',
@@ -276,7 +275,7 @@ describe('frontend migration scaffold baseline', () => {
   it('keeps trade-room leaf panels consolidated without moving action behavior', () => {
     expect(tradeRoomPageSource).toContain("import { StateGuidancePanel, TechnicalDetailsDisclosure, TimerStack, TradeSummaryCard } from './TradeRoomPanels';");
     // [TR] İtiraz karar paneli, teminat çubuğu ve "Süreler" kartını tekrar ettiği için sayfadan çıkarıldı.
-    expect(tradeRoomPageSource).not.toContain('<ChallengedDecisionPanel');
+    expect(tradeRoomPanelsSource).not.toContain('ChallengedDecisionPanel');
     expect(tradeRoomPageSource).toContain("import PrimaryActionPanel from './PrimaryActionPanel';");
     expect(tradeRoomPageSource).toContain("import SecondaryActionsPanel from './SecondaryActionsPanel';");
     expect(tradeRoomPageSource).toContain('<>');
@@ -285,7 +284,6 @@ describe('frontend migration scaffold baseline', () => {
 
     [
       'TradeSummaryCard',
-      'ChallengedDecisionPanel',
       'StateGuidancePanel',
       'TimerStack',
       'TechnicalDetailsDisclosure',

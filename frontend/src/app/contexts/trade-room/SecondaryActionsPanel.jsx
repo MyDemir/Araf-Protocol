@@ -1,4 +1,3 @@
-import React from 'react';
 import { ActionGuidanceButton } from './PrimaryActionPanel';
 
 const t = (lang, tr, en) => (lang === 'TR' ? tr : en);

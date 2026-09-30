@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { getPaymentRiskLevelLabel, getPaymentRiskSummaryCopy } from '../app/copy';
 
 const RISK_LEVEL_CLASS = {

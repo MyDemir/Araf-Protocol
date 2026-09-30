@@ -142,7 +142,6 @@ vi.mock('../../frontend/src/app/AppViews', () => ({
 }));
 
 vi.mock('../../frontend/src/app/AppModals', () => ({
-  EnvWarningBanner: () => null,
   buildAppModals: () => ({
     renderWalletModal: () => <div data-testid="wallet-modal-slot">wallet-modal-slot</div>,
     renderFeedbackModal: () => null,

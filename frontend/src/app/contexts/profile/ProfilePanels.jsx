@@ -27,11 +27,6 @@ const fmtDate = (sec, lang, withTime = false) => {
 };
 const daysUntil = (sec, now = Date.now() / 1000) => Math.max(0, Math.ceil((Number(sec) - now) / 86400));
 
-export const getProfileTabLabel = (key, lang = 'EN') => {
-  const tab = profileTabs.find((item) => item.key === key);
-  return tab ? tab.label[lang === 'TR' ? 'TR' : 'EN'] : key;
-};
-
 // [TR] Mobilde 8 sekme sarılıp iki-üç satır kaplıyordu; tek satır yatay kaydırma + ikon.
 // [EN] On mobile the 8 tabs wrapped onto several rows; now a single scrollable row with icons.
 export const ProfileNav = ({ lang = 'EN', activeTab, setActiveTab, badges = {} }) => (

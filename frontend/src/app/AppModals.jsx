@@ -72,32 +72,11 @@ function TermsModal({ lang = 'EN', onAcceptTerms, onDeclineTerms }) {
   );
 }
 
-// [TR] Eksik env değişkenleri için kapatılabilir uyarı şeridi.
-// [EN] Dismissible warning strip for missing env variables.
-export const EnvWarningBanner = ({ envErrors }) => {
-  const [visible, setVisible] = React.useState(true);
-  if (!envErrors?.length || !visible) return null;
-  return (
-    <div className="fixed top-0 left-0 right-0 z-50 bg-red-950/95 border-b border-red-800/60 backdrop-blur-sm flex items-center justify-between px-4 py-1.5 shadow-lg">
-      <span className="text-red-400 text-xs font-mono flex items-center gap-2">
-        <span className="text-red-500"><TriangleAlert className="w-3.5 h-3.5" strokeWidth={1.8} aria-hidden="true" /></span>
-        {envErrors.join(' · ')}
-      </span>
-      <button
-        onClick={() => setVisible(false)}
-        className="ml-4 text-red-500 hover:text-textPrimary transition text-sm leading-none shrink-0"
-        aria-label="Kapat"
-      ><X className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" /></button>
-    </div>
-  );
-};
-
 // [TR] App modal/render katmanı burada tutulur.
 // [EN] App modal/render layer lives here.
 export const buildAppModals = (ctx) => {
   const {
     lang,
-    t,
     showWalletModal,
     setShowWalletModal,
     connectors,
@@ -311,7 +290,7 @@ export const buildAppModals = (ctx) => {
       <div className="fixed inset-0 max-w-full overflow-x-hidden bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center sm:p-4 safe-area-x z-[100]">
         <div className="bg-surface border border-borderSubtle rounded-t-3xl sm:rounded-2xl p-5 sm:p-6 w-full max-w-md shadow-2xl max-h-[calc(100dvh_-_1rem_-_env(safe-area-inset-top))] overflow-x-hidden overflow-y-auto overscroll-contain" data-testid="maker-modal">
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-bold text-textPrimary">{t.createAd}</h2>
+            <h2 className="text-lg font-bold text-textPrimary">{lang === 'TR' ? 'Emir oluştur' : 'Create order'}</h2>
             <button onClick={() => setShowMakerModal(false)} aria-label={tr ? 'Kapat' : 'Close'} className="w-9 h-9 -mr-2 flex items-center justify-center rounded-lg text-textMuted hover:text-textPrimary hover:bg-elevated"><X className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" /></button>
           </div>
 

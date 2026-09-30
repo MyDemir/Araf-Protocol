@@ -1,5 +1,4 @@
 import { ListOrdered } from 'lucide-react';
-import React from 'react';
 import { getOrderSideCopy } from '../../orderUiModel';
 
 const CANCELABLE_STATUSES = new Set(['OPEN', 'PARTIALLY_FILLED']);
