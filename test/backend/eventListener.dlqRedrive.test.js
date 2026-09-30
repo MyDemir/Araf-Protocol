@@ -9,13 +9,17 @@
  * hid B1 for a long time: in ethers v6 the named fields of a Result are not own properties.
  */
 
-const store = { list: [] };
+const store = { list: [], lists: {}, sets: {} };
 const mockRedis = {
   get: jest.fn().mockResolvedValue(null),
   set: jest.fn().mockResolvedValue("OK"),
   rPush: jest.fn(async (_key, value) => { store.list.push(value); return store.list.length; }),
   lRange: jest.fn(async (_key, start, end) => (end === -1 ? [...store.list] : store.list.slice(start, end + 1))),
   lLen: jest.fn(async () => store.list.length),
+  lPush: jest.fn(async (key, value) => { (store.lists[key] = store.lists[key] || []).push(value); }),
+  sIsMember: jest.fn(async (set, member) => (store.sets[set] && store.sets[set].has(member) ? 1 : 0)),
+  sAdd: jest.fn(async (set, member) => { (store.sets[set] = store.sets[set] || new Set()).add(member); }),
+  sRem: jest.fn(async (set, member) => { if (store.sets[set]) store.sets[set].delete(member); }),
   lRem: jest.fn(async (_key, _count, value) => {
     const i = store.list.indexOf(value);
     if (i >= 0) store.list.splice(i, 1);
@@ -78,6 +82,8 @@ describe("DLQ namedArgs from real ethers events (B1)", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     store.list = [];
+    store.lists = {};
+    store.sets = {};
     worker._blockAcks.clear();
     worker._getEventDate = jest.fn().mockResolvedValue(new Date("2026-01-01T00:00:00Z"));
   });
@@ -209,6 +215,8 @@ describe("DLQ uniqueness and unsafe-flag cleanup (B9)", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     store.list = [];
+    store.lists = {};
+    store.sets = {};
     worker._blockAcks.clear();
   });
 

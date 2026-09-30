@@ -1,6 +1,6 @@
 "use strict";
 
-const mockRedis = { get: jest.fn(), set: jest.fn(), rPush: jest.fn(), lRange: jest.fn().mockResolvedValue([]), lLen: jest.fn().mockResolvedValue(0) };
+const mockRedis = { get: jest.fn(), set: jest.fn(), rPush: jest.fn(), lRange: jest.fn().mockResolvedValue([]), sIsMember: jest.fn().mockResolvedValue(0), sAdd: jest.fn(), lLen: jest.fn().mockResolvedValue(0) };
 
 jest.mock("../../backend/scripts/config/redis", () => ({ getRedisClient: jest.fn(() => mockRedis) }));
 jest.mock("../../backend/scripts/utils/logger", () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }));

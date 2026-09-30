@@ -8,6 +8,8 @@ const mockRedis = {
   set: jest.fn(async (k, v) => { kv.set(k, v); return "OK"; }),
   rPush: jest.fn(),
   lRange: jest.fn().mockResolvedValue([]),
+  sIsMember: jest.fn().mockResolvedValue(0),
+  sAdd: jest.fn(),
 };
 jest.mock("../../backend/scripts/config/redis", () => ({ getRedisClient: jest.fn(() => mockRedis) }));
 jest.mock("../../backend/scripts/utils/logger", () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }));

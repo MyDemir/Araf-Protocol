@@ -49,6 +49,13 @@ const CHECKPOINT_KEY = "worker:last_block";
 const LAST_SAFE_BLOCK_KEY = "worker:last_safe_block";
 const DLQ_KEY = "worker:dlq";
 const APPLIED_ORDER_KEY_PREFIX = "worker:applied_order:";
+// [TR] DLQ idempotencyKey indeksleri (Redis SET): canlı DLQ, arşiv (7 gün TTL) ve kalıcı karantina.
+//      Dedupe liste taraması yerine bu setlere bakar; dlqProcessor aynı anahtarları kullanır.
+// [EN] DLQ idempotencyKey indexes (Redis SETs): live DLQ, archive (7-day TTL) and permanent quarantine.
+//      Dedupe checks these sets instead of scanning the list; dlqProcessor uses the same keys.
+const DLQ_LIVE_KEYS_SET = "worker:dlq:keys";
+const DLQ_ARCHIVE_KEYS_SET = "worker:dlq:archive:keys";
+const DLQ_QUARANTINE_KEYS_SET = "worker:dlq:quarantine:keys";
 const RETRY_DELAY_MS = 2_000;
 const MAX_RETRIES = 5;
 /**
@@ -473,6 +480,8 @@ class EventWorker {
     this._blockAcks = new Map();
     this._lastSeenBlock = 0;
     this._lastBlockSeenAt = 0;
+    this._stopRequested = false;
+    this._quarantinedCount = 0;
     this._watchdogTimer = null;
     this._staleReconnects = 0;
     this._exitProcess = (code) => process.exit(code);
@@ -503,7 +512,9 @@ class EventWorker {
     }
 
     this.isRunning = true;
+    this._stopRequested = false;
     await this._replayMissedEvents();
+    if (this._stopRequested) return; // stop() replay sırasında çağrıldı: canlı dinleyici bağlanmaz.
     this._lastLivePolledBlock = this._lastSafeCheckpointBlock;
     this._attachLiveListeners();
     logger.info("[Worker] V3 event listener aktif.");
@@ -525,6 +536,7 @@ class EventWorker {
 
   async stop() {
     this.isRunning = false;
+    this._stopRequested = true;
     this._stopWatchdog();
     if (this.provider) this.provider.removeAllListeners();
     this._listenersAttached = false;
@@ -726,6 +738,9 @@ class EventWorker {
 
     try {
       for (let from = fromBlock; from <= finalizedToBlock; from += BLOCK_BATCH_SIZE) {
+        // [TR] stop() süren replay'i durdurur (kapanış sırasında DB/Redis yazımı sürmesin).
+        // [EN] stop() halts an in-flight replay so writes do not continue during shutdown.
+        if (this._stopRequested) return;
         const to = Math.min(from + BLOCK_BATCH_SIZE - 1, finalizedToBlock);
         let allEvents;
         try {
@@ -741,6 +756,10 @@ class EventWorker {
 
         let failedEvents = 0;
         for (const event of allEvents) {
+          if (this._stopRequested) return;
+          // [TR] Karantinadaki (acked-poison) event atlanır; checkpoint onun yüzünden takılmaz.
+          // [EN] A quarantined (acked-poison) event is skipped so the checkpoint is not stuck on it.
+          if (await this._isQuarantined(event)) continue;
           try {
             await this._processEvent(event);
           } catch (err) {
@@ -1002,7 +1021,9 @@ class EventWorker {
 
         for (const event of allEvents) {
           this._trackLiveEventSeen(event);
-          const success = await this._processEventWithRetry(event);
+          // [TR] Karantinadaki event işlenmez, ack'lenmiş (acked-poison) sayılır.
+          // [EN] A quarantined event is not processed and counts as acked (acked-poison).
+          const success = (await this._isQuarantined(event)) || (await this._processEventWithRetry(event));
           if (success) this._trackLiveEventAck(event);
           else this._markBlockUnsafe(event.blockNumber, this._getEventId(event));
         }
@@ -1293,16 +1314,11 @@ class EventWorker {
     const nowIso = new Date().toISOString();
     const idempotencyKey = this._getEventId(event);
 
-    const existing = (await redis.lRange(DLQ_KEY, 0, -1)) || [];
-    for (const raw of existing) {
-      let parsedKey = null;
-      try {
-        parsedKey = JSON.parse(raw)?.idempotencyKey;
-      } catch (_) {
-        parsedKey = null;
-      }
-      if (parsedKey === idempotencyKey) {
-        logger.debug(`[Worker] DLQ kaydı zaten var, tekrar eklenmedi: ${idempotencyKey}`);
+    // [TR] Tekil kontrol: canlı DLQ + arşiv + karantina indeks setlerine bakılır (liste taraması yok).
+    // [EN] Uniqueness check against the live-DLQ + archive + quarantine index sets (no list scan).
+    for (const set of [DLQ_LIVE_KEYS_SET, DLQ_ARCHIVE_KEYS_SET, DLQ_QUARANTINE_KEYS_SET]) {
+      if (await redis.sIsMember(set, idempotencyKey)) {
+        logger.debug(`[Worker] DLQ kaydı zaten var (${set}), tekrar eklenmedi: ${idempotencyKey}`);
         return false;
       }
     }
@@ -1322,7 +1338,28 @@ class EventWorker {
     });
 
     await redis.rPush(DLQ_KEY, entry);
+    await redis.sAdd(DLQ_LIVE_KEYS_SET, idempotencyKey);
     return true;
+  }
+
+  async _isQuarantined(event) {
+    return Boolean(await getRedisClient().sIsMember(DLQ_QUARANTINE_KEYS_SET, this._getEventId(event)));
+  }
+
+  /**
+   * [TR] MAX_REDRIVE_ATTEMPTS aşılan girdi karantinaya alındığında çağrılır: event "acked-poison" sayılır,
+   *      bloğun unsafe bayrağı kalkar ve checkpoint ilerleyebilir. Alarm: logger.error + sayaç (diagnostics).
+   * [EN] Called when an entry exceeds MAX_REDRIVE_ATTEMPTS and is quarantined: the event becomes "acked-poison",
+   *      the block's unsafe flag clears and the checkpoint may advance. Alarm: logger.error + counter.
+   */
+  markEventQuarantined(entry) {
+    const event = this.buildSyntheticEventFromDLQEntry(entry);
+    this._quarantinedCount += 1;
+    this._clearEventUnsafe(event);
+    logger.error(
+      `[Worker][ALARM] Event karantinaya alındı (acked-poison): ${entry.eventName} key=${this._getEventId(event)} ` +
+      `block=${entry.blockNumber} toplam_karantina=${this._quarantinedCount}`
+    );
   }
 
   /**
@@ -2875,8 +2912,13 @@ worker.getDiagnostics = function getDiagnostics() {
     ignoredEventsByReason: { ...(worker._ignoredEventsByReason || {}) },
     ignoredTotal,
     unsafeAckBlocks,
+    quarantinedEvents: worker._quarantinedCount || 0,
     reconciliation: worker._reconciliation || { lastRunAt: null, lastReport: null },
-    reconciliationNeeded: ignoredTotal > 0 || (worker._retryFailureCount || 0) > 0 || unsafeAckBlocks.length > 0,
+    reconciliationNeeded:
+      ignoredTotal > 0 ||
+      (worker._retryFailureCount || 0) > 0 ||
+      unsafeAckBlocks.length > 0 ||
+      (worker._quarantinedCount || 0) > 0,
   };
 };
 
