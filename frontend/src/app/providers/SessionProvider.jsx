@@ -1,5 +1,8 @@
 import React from 'react';
-import { SiweMessage } from 'siwe';
+// [TR] SIWE (EIP-4361) metni viem ile üretilir; siwe paketi ethers + ABNF parser'ı pakete çekiyordu (~1,3 MB).
+//      Çıktı siwe.prepareMessage ile birebir aynıdır; backend doğrulaması değişmez.
+// [EN] Build the SIWE message with viem; the siwe package pulled ethers + an ABNF parser into the bundle.
+import { createSiweMessage } from 'viem/siwe';
 import { buildApiUrl } from '../apiConfig';
 import { buildTermsStatement, isTermsAcceptedLocally, markTermsAcceptedLocally, TERMS_VERSION } from '../legal/terms';
 
@@ -76,7 +79,7 @@ export const createSessionActions = ({
         throw new Error('Backend SIWE konfigürasyonu eksik');
       }
 
-      const siweMessage = new SiweMessage({
+      const message = createSiweMessage({
         domain: siweDomain,
         address,
         // [TR] Kabul beyanı imzalanan metnin parçasıdır; backend sürümü doğrular ve kaydeder.
@@ -85,9 +88,8 @@ export const createSessionActions = ({
         version: '1',
         chainId,
         nonce,
-        issuedAt: new Date().toISOString(),
+        issuedAt: new Date(),
       });
-      const message = siweMessage.prepareMessage();
       const signature = await signMessageAsync({ message });
 
       const verifyRes = await fetch(buildApiUrl('auth/verify'), {

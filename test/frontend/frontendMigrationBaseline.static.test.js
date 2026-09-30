@@ -124,8 +124,8 @@ describe('frontend migration scaffold baseline', () => {
 
     expect(appSource).toContain('} = useSessionActions({');
     expect(appSource).toContain('handleAuthAction,');
-    expect(appSource).not.toContain('new SiweMessage');
-    expect(providerSources.SessionProvider).toContain('new SiweMessage');
+    expect(appSource).not.toContain('createSiweMessage({');
+    expect(providerSources.SessionProvider).toContain('createSiweMessage({');
     expect(appSource).toContain("from './app/actions/contractLifecycleActions';");
     expect(appSource).toContain('buildStartTradeAction({');
     expect(appSource).toContain('buildTradeRoomActions({');

@@ -18,7 +18,6 @@ export default defineConfig({
       // [EN] Root test/ui-lab (lazy UI Lab) resolves packages from frontend node_modules.
       { find: 'lucide-react', replacement: fromFrontendNodeModules('lucide-react') },
       { find: 'react-dom', replacement: fromFrontendNodeModules('react-dom') },
-      { find: 'siwe', replacement: fromFrontendNodeModules('siwe') },
       { find: 'viem', replacement: fromFrontendNodeModules('viem') },
       { find: 'wagmi', replacement: fromFrontendNodeModules('wagmi') },
       { find: '@tanstack/react-query', replacement: fromFrontendNodeModules('@tanstack/react-query') },
