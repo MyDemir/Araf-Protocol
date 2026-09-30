@@ -18,9 +18,13 @@ const PRODUCT_ID_RE = /^0x[a-fA-F0-9]{64}$/;
 //      Revenue rows live only under the auth + ADMIN_WALLETS gated /api/admin/revenue.
 router.use(marketReadLimiter);
 
+// [TR] ArafRewards.epochDuration varsayılanı (30 gün). Bu uç nokta duvar saati tahminidir; otorite kontrattır.
+// [EN] ArafRewards.epochDuration default (30 days). Wall-clock estimate only; the contract is authoritative.
+const REWARDS_EPOCH_SECONDS = 30 * 24 * 3600;
+
 router.get("/epochs/current", async (_req, res, next) => {
   try {
-    const nowEpoch = Math.floor(Date.now() / 1000 / (7 * 24 * 3600));
+    const nowEpoch = Math.floor(Date.now() / 1000 / REWARDS_EPOCH_SECONDS);
     const rows = await RewardEpoch.find({ epoch: String(nowEpoch) }).lean();
     return res.json({ epoch: String(nowEpoch), rows, source: "WALL_CLOCK_ESTIMATE_NOT_AUTHORITY" });
   } catch (err) { return next(err); }

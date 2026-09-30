@@ -1,6 +1,7 @@
 import React from 'react';
 import { SiweMessage } from 'siwe';
 import { buildApiUrl } from '../apiConfig';
+import { buildTermsStatement, isTermsAcceptedLocally, markTermsAcceptedLocally, TERMS_VERSION } from '../legal/terms';
 
 export const createSessionActions = ({
   address,
@@ -21,6 +22,7 @@ export const createSessionActions = ({
   clearLocalSessionState,
   setShowWalletModal,
   openProfilePage,
+  onTermsRequired,
 }) => {
   const hasSignedSessionForActiveWallet = Boolean(
     isConnected
@@ -57,6 +59,10 @@ export const createSessionActions = ({
 
   const loginWithSIWE = async () => {
     if (!address) return;
+    // [TR] Bu cihazda koşullar kabul edildiyse giriş mesajı kabul beyanını içerir (imza = kanıt). Değilse düz
+    //      giriş imzası istenir; backend, imza doğrulandıktan sonra cüzdanın saklı kabulüne bakar. Kabul yoksa
+    //      modal açılır (cüzdan başına tek sefer). Kabul durumu hiçbir zaman imzasız sorgulanamaz.
+    const acceptsTermsHere = isTermsAcceptedLocally(address);
     try {
       setIsLoggingIn(true);
       showToast(lang === 'TR' ? 'Lütfen cüzdanınızdan imza isteğini onaylayın' : 'Please approve the signature request in your wallet', 'info');
@@ -73,7 +79,8 @@ export const createSessionActions = ({
       const siweMessage = new SiweMessage({
         domain: siweDomain,
         address,
-        statement: 'Sign in to Araf Protocol to manage your trades and secure PII data.',
+        // [TR] Kabul beyanı imzalanan metnin parçasıdır; backend sürümü doğrular ve kaydeder.
+        statement: acceptsTermsHere ? buildTermsStatement(TERMS_VERSION) : 'Sign in to Araf Protocol.',
         uri: siweUri,
         version: '1',
         chainId,
@@ -98,11 +105,23 @@ export const createSessionActions = ({
           clearLocalSessionState();
           throw new Error('Aktif cüzdan ile oturum cüzdanı eşleşmiyor');
         }
+        // [TR] Kabul sunucuda kayıtlı: bu cihazda da işaretlenir, modal bir daha çıkmaz.
+        if (verifyData?.terms?.version === TERMS_VERSION) markTermsAcceptedLocally(verifiedWallet);
         setIsAuthenticated(true);
         setAuthenticatedWallet(verifiedWallet);
         showToast(lang === 'TR' ? 'Sisteme başarıyla giriş yapıldı!' : 'Successfully signed in!', 'success');
       } else {
         const data = await verifyRes.json().catch(() => ({}));
+        if (data.code === 'TERMS_NOT_ACCEPTED') {
+          if (data.reason === 'UNSUPPORTED_VERSION') {
+            // [TR] Arayüz eski bir koşul sürümünü imzalattı (yeni sürüm yayımlandı); yenileme gerekir.
+            showToast(lang === 'TR' ? 'Kullanım koşulları güncellendi. Sayfayı yenileyip yeni koşulları kabul edin.' : 'The terms were updated. Reload the page and accept the new terms.', 'error');
+          } else {
+            // [TR] Bu cüzdanın kayıtlı kabulü yok: modal açılır; kabul edilince beyanlı imza istenir.
+            onTermsRequired?.(address);
+          }
+          return;
+        }
         throw new Error(data.error || 'Doğrulama başarısız');
       }
     } catch (error) {

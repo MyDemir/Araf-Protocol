@@ -128,6 +128,16 @@ const userSchema = new mongoose.Schema(
     max_allowed_tier: { type: Number, default: 4, min: 0, max: 4 },
     last_onchain_sync_at: { type: Date, default: null },
 
+    // ── Kullanım koşulları kabulü ─────────────────────────────────────────────
+    // [TR] Kabul, SIWE imzasının içinde (statement) yapılır; burada imzalanan sürüm, zaman ve imzalanan
+    //      mesajın SHA-256 özeti tutulur. Mesajın kendisi (nonce, zaman, alan adı) kanıt olarak yeniden
+    //      doğrulanabilir; IP gibi ek kişisel veri tutulmaz.
+    // [EN] Terms acceptance is signed inside the SIWE statement; we keep the version, time and a
+    //      SHA-256 digest of the signed message as evidence. No extra personal data such as IP.
+    terms_accepted_version: { type: String, default: null },
+    terms_accepted_at: { type: Date, default: null },
+    terms_acceptance_message_sha256: { type: String, default: null },
+
     // ── Aktivite ──────────────────────────────────────────────────────────────
     last_login: { type: Date, default: null },
   },

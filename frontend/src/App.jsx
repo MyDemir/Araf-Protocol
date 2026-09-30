@@ -17,10 +17,12 @@ import { readProtocolConfig } from './app/contexts/admin/adminChainConfig';
 import { createMockProtocolConfigReader } from './dev/mocks/mockAdminFetch';
 import { labTokenSymbols } from './dev/fixtures/adminFixtures';
 import { LAB_TOKEN_ADDRESSES, LAB_BOND_MAP, LAB_FEE_CONFIG } from './dev/fixtures/makerOrderFixtures';
+import { buildLabRewards } from './dev/fixtures/profileFixtures';
 import { isUiLabEnabled } from './dev/ui-lab/isUiLabEnabled';
 import { createMockAdminFetch } from './dev/mocks/mockAdminFetch';
 import { createSetterAction, createSettlementContractMocks, createTradeRoomFetch, createTradeRoomHandlers } from './dev/mocks/mockActions';
-import { getInitialLang, getInitialTermsAccepted, APP_LANG_STORAGE_KEY } from './app/bootstrapState';
+import { getInitialLang, APP_LANG_STORAGE_KEY } from './app/bootstrapState';
+import { markTermsAcceptedLocally } from './app/legal/terms';
 import { buildApiUrl, resolveApiPolicyDiagnostics } from './app/apiConfig';
 import { getSupportedChainsMap, isMintTokenEnabled, isSupportedChainId } from './app/chainPolicy';
 import { useMakerOrderForm } from './app/contexts/marketplace/useMakerOrderForm';
@@ -167,7 +169,7 @@ function App() {
   const [marketSide, setMarketSide] = useState('ALL');
   const [searchAmount, setSearchAmount] = useState('');
   const [toast, setToast] = useState(null);
-  const [termsAccepted, setTermsAccepted] = useState(getInitialTermsAccepted);
+  const [termsPromptWallet, setTermsPromptWallet] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [activeTradesFilter, setActiveTradesFilter] = useState('ALL');
   const [feedbackRating, setFeedbackRating] = useState(0);
@@ -670,8 +672,22 @@ function App() {
     clearLocalSessionState,
     setShowWalletModal,
     openProfilePage,
+    onTermsRequired: (wallet) => setTermsPromptWallet(String(wallet || '').toLowerCase()),
   });
 
+
+  // [TR] Koşullar cüzdan başına bir kez sorulur: backend, imza doğrulandıktan sonra saklı kabul yoksa
+  //      TERMS_NOT_ACCEPTED döner ve modal yalnız o cüzdan için açılır. Kabul → beyanlı giriş imzası (kanıt).
+  const termsAccepted = !(isConnected && termsPromptWallet && termsPromptWallet === String(address || '').toLowerCase());
+  const handleAcceptTerms = React.useCallback(() => {
+    markTermsAcceptedLocally(address);
+    setTermsPromptWallet(null);
+    loginWithSIWE();
+  }, [address, loginWithSIWE]);
+  const handleDeclineTerms = React.useCallback(() => {
+    setTermsPromptWallet(null);
+    handleLogoutAndDisconnect();
+  }, [handleLogoutAndDisconnect]);
 
   const sessionActions = React.useMemo(() => ({
     loginWithSIWE,
@@ -685,7 +701,7 @@ function App() {
   // [TR] Lab "Profil Merkezi": kontrat itibarı ve backend kayıtları senaryodan gelir; sayaçlar seçim anına göre.
   const labProfile = React.useMemo(() => (
     activeScenarioCategory === 'profile' && activeScenarioPayload
-      ? { ...activeScenarioPayload, userReputation: activeScenarioPayload.build?.() || null }
+      ? { ...activeScenarioPayload, userReputation: activeScenarioPayload.build?.() || null, labRewards: activeScenarioPayload.labRewards ? buildLabRewards(activeScenarioPayload.labRewards) : null }
       : null
   ), [activeScenarioCategory, activeScenarioPayload]);
 
@@ -1410,7 +1426,8 @@ function App() {
     isConnected,
     isAuthenticated: effectiveIsAuthenticated,
     termsAccepted,
-    setTermsAccepted,
+    onAcceptTerms: handleAcceptTerms,
+    onDeclineTerms: handleDeclineTerms,
     connector,
     isRegisteringWallet,
     handleRegisterWallet,

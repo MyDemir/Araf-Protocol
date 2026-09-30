@@ -47,7 +47,7 @@ export const protocolConfigFixture = (ownerKind = 'eoa') => ({
     address: '0x' + 'd'.repeat(40), owner: '0x' + 'f'.repeat(40), ownerKind, paused: false, rewardBps: 3000, finalTreasury: '0x' + '9'.repeat(40), rewards: '0x' + '8'.repeat(40),
     reserves: [{ symbol: 'USDT', treasuryReserve: 129500000n, rewardReserve: 55500000n }, { symbol: 'USDC', treasuryReserve: 1750000n, rewardReserve: 750000n }],
   },
-  rewards: { address: '0x' + '8'.repeat(40), owner: '0x' + '7'.repeat(40), ownerKind: 'contract', paused: false, currentEpoch: 6n, epochDurationSec: 604800, claimDelaySec: 86400, claimWindowSec: 2592000 },
+  rewards: { address: '0x' + '8'.repeat(40), owner: '0x' + '7'.repeat(40), ownerKind: 'contract', paused: false, currentEpoch: 6n, epochDurationSec: 2592000, claimDelaySec: 86400, claimWindowSec: 604800 },
 });
 
 export const feedbackRows = [

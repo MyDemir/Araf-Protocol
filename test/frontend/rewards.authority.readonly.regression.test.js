@@ -4,7 +4,7 @@ import path from 'node:path';
 
 describe('frontend rewards authority regression', () => {
   it('frontend rewards dashboard states non-authoritative policy', () => {
-    const src = fs.readFileSync(path.resolve(process.cwd(), 'src/components/RewardsDashboard.jsx'), 'utf8');
+    const src = fs.readFileSync(path.resolve(process.cwd(), 'src/app/contexts/profile/RewardsPanel.jsx'), 'utf8');
     expect(src).toContain('Sponsors cannot select recipients');
   });
 

@@ -86,9 +86,14 @@ contract ArafRewards is Ownable, ReentrancyGuard, Pausable {
     IArafEscrowRewardView public immutable escrow;
     ArafRevenueVault public immutable revenueVault;
 
-    uint256 public epochDuration = 7 days;
+    // [TR] Aylık dönem, bir haftalık talep penceresi: pencere dönemden kısa olduğu için aynı anda yalnız
+    //      bir dönemin ödülü talep edilebilir; kullanıcıda geçmişten biriken talep hakkı kalmaz.
+    //      Süresi dolan pay sweepEpochDust ile içinde bulunulan döneme devredilir.
+    // [EN] Monthly epochs with a one-week claim window: the window is shorter than an epoch, so only one
+    //      epoch is claimable at a time; expired shares roll into the current epoch via sweepEpochDust.
+    uint256 public epochDuration = 30 days;
     uint256 public claimDelay = 24 hours;
-    uint256 public claimWindow = 30 days;
+    uint256 public claimWindow = 7 days;
 
     mapping(uint256 => uint256) public totalWeight;
     mapping(uint256 => mapping(address => uint256)) public userWeight;

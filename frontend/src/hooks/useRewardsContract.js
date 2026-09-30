@@ -127,6 +127,7 @@ export function useRewardsContract() {
     finalizeEpochToken: (epoch, token) => writeRewards('finalizeEpochToken', [BigInt(epoch), getAddress(token)]),
     epochDuration: () => readRewards('epochDuration'),
     claimDelay: () => readRewards('claimDelay'),
+    claimWindow: () => readRewards('claimWindow'),
     currentEpoch: () => readRewards('currentEpoch'),
     epochTokenFinalized: (epoch, token) => readRewards('epochTokenFinalized', [BigInt(epoch), getAddress(token)]),
     hasClaimed: (epoch, user, token) => readRewards('claimed', [BigInt(epoch), getAddress(user), getAddress(token)]),
