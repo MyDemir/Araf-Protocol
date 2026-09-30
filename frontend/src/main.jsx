@@ -6,7 +6,7 @@ import './index.css'
 
 import { WagmiProvider, createConfig, http } from 'wagmi'
 import { base, baseSepolia, hardhat } from 'wagmi/chains'
-import { coinbaseWallet, injected } from 'wagmi/connectors'
+import { buildRpcTransport } from './app/rpcTransport'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import {
   BASE_MAINNET_CHAIN_ID,
@@ -49,18 +49,26 @@ const CHAIN_BY_ID = {
 
 const wagmiChains = getSupportedChainIds().map((id) => CHAIN_BY_ID[id]).filter(Boolean);
 
-const config = createConfig({
-  chains: wagmiChains,
-  connectors: [
+// [TR] P5 — Bağlayıcılar (coinbaseWallet dahil) ayrı chunk'tan yüklenir; ana paket küçülür.
+// [EN] P5 — Connectors (incl. coinbaseWallet) load from a separate chunk to keep the main bundle small.
+const loadConnectors = async () => {
+  const { coinbaseWallet, injected } = await import('wagmi/connectors')
+  return [
     injected(), // OKX Wallet ve diğer injected cüzdanlar
     coinbaseWallet({ appName: 'Araf Protocol' }),
     // [TR] WalletConnect geçici olarak kapalı (Reown 403 hatasını engellemek için)
-    // walletConnect({ projectId: 'PROJE_ID_BURAYA' }),
-  ],
+  ]
+}
+
+// [TR] P4 — VITE_RPC_URL birincil RPC, herkese açık RPC yedek (fallback). Prod'da Base, dev'de Base Sepolia'ya uygulanır.
+const PRIMARY_RPC = import.meta.env.VITE_RPC_URL
+const buildConfig = (connectors) => createConfig({
+  chains: wagmiChains,
+  connectors,
   transports: {
-    [base.id]:        http(),
+    [base.id]:        buildRpcTransport(import.meta.env.PROD ? PRIMARY_RPC : undefined),
     ...(import.meta.env.PROD ? {} : {
-      [baseSepolia.id]: http(),
+      [baseSepolia.id]: buildRpcTransport(PRIMARY_RPC),
       // [TR] Hardhat yerel ağı — FRONT-05: sadece development'ta aktif
       [hardhat.id]:     http(getCodespacesRPC(8545)),
     }),
@@ -69,6 +77,8 @@ const config = createConfig({
 
 const queryClient = new QueryClient()
 
+const bootstrap = async () => {
+const config = buildConfig(await loadConnectors())
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     {/*
@@ -87,3 +97,6 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     </WagmiProvider>
   </React.StrictMode>,
 )
+}
+
+bootstrap()
