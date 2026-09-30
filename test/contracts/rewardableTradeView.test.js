@@ -23,6 +23,7 @@ describe("ArafEscrow rewardable trade view", function () {
     PARTIAL_SETTLEMENT: 4n,
     DISPUTED_RELEASE: 5n,
     BURNED: 6n,
+    PAYMENT_WINDOW_EXPIRED: 7n,
   };
 
   function makeRef(label) {
@@ -297,5 +298,50 @@ describe("ArafEscrow rewardable trade view", function () {
 
     expect(view.takerFeePaid).to.equal(released.takerFee);
     expect(view.makerFeePaid).to.equal(released.makerFee);
+  });
+  it("test_getRewardableTrade_stableNotional_is_6_decimal_normalized", async function () {
+    const { escrow, token, owner, maker, taker } = await loadFixture(deployFixture);
+    // [TR] 6 ondalıklı token: notional ham tutarla aynı. [EN] 6-decimal token: notional equals raw amount.
+    const usdtTrade = await openLockedTrade({ escrow, maker, taker, token, label: "norm-6" });
+    await escrow.connect(taker).reportPayment(usdtTrade, "Qm-norm-6");
+    await escrow.connect(maker).releaseFunds(usdtTrade);
+    expect((await escrow.getRewardableTrade(usdtTrade)).stableNotional).to.equal(TRADE_AMOUNT);
+
+    // [TR] 18 ondalıklı token: aynı dolar hacmi aynı notional'ı verir. [EN] 18 decimals: same dollars, same notional.
+    const MockERC20 = await ethers.getContractFactory("MockERC20");
+    const dai = await MockERC20.deploy("Mock DAI", "DAI", 18);
+    const daiAddress = await dai.getAddress();
+    await escrow.connect(owner).setTokenConfig(daiAddress, true, true, true, 18, [
+      ethers.parseUnits("150", 18), ethers.parseUnits("1500", 18), ethers.parseUnits("7500", 18), ethers.parseUnits("30000", 18),
+    ]);
+    for (const wallet of [maker, taker]) {
+      await dai.mint(wallet.address, ethers.parseUnits("100000", 18));
+      await dai.connect(wallet).approve(await escrow.getAddress(), ethers.MaxUint256);
+    }
+    const amount = ethers.parseUnits("100", 18);
+    // [TR] Tier 0 taker bekleme süresi. [EN] Tier 0 taker cooldown.
+    await time.increase(2 * 24 * 3600);
+    const created = await firstEventArgs(
+      await (await escrow.connect(maker).createSellOrder(daiAddress, amount, ethers.parseUnits("50", 18), 0, makeRef("norm-18-order"), 1)).wait(),
+      escrow.interface,
+      "OrderCreated"
+    );
+    const filled = await firstEventArgs(
+      await (await escrow.connect(taker).fillSellOrder(created.orderId, amount, makeRef("norm-18-child"))).wait(),
+      escrow.interface,
+      "OrderFilled"
+    );
+    await escrow.connect(taker).reportPayment(filled.tradeId, "Qm-norm-18");
+    await escrow.connect(maker).releaseFunds(filled.tradeId);
+    expect((await escrow.getRewardableTrade(filled.tradeId)).stableNotional).to.equal(TRADE_AMOUNT);
+  });
+
+  it("test_getRewardableTrade_payment_window_expired_outcome", async function () {
+    const { escrow, token, maker, taker } = await loadFixture(deployFixture);
+    const tradeId = await openLockedTrade({ escrow, maker, taker, token, label: "expired" });
+    await time.increase(Number(await escrow.PAYMENT_WINDOW()) + 1);
+    await escrow.connect(maker).expirePaymentWindow(tradeId);
+    const view = await escrow.getRewardableTrade(tradeId);
+    expect(view.outcome).to.equal(TERMINAL_OUTCOME.PAYMENT_WINDOW_EXPIRED);
   });
 });

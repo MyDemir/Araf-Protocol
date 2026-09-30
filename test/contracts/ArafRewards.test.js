@@ -21,6 +21,7 @@ describe("ArafRewards global epoch weight accounting", function () {
     PARTIAL_SETTLEMENT: 4,
     DISPUTED_RELEASE: 5,
     BURNED: 6,
+    PAYMENT_WINDOW_EXPIRED: 7,
   };
 
   // [TR] Kayıt penceresi zamana bağlı (epoch sonu + claimDelay). Statik testlerdeki küçük zaman damgaları
@@ -203,6 +204,34 @@ describe("ArafRewards global epoch weight accounting", function () {
     await rewards.connect(caller).recordTradeOutcome(8);
     const epoch = BigInt(trade.terminalAt) / (EPOCH_N);
     expect(await rewards.totalWeight(epoch)).to.equal(0n);
+  });
+
+  it("test_recordTradeOutcome_payment_window_expired_zero_weight_no_revert", async function () {
+    const { rewards, mockEscrow, caller, maker, taker } = await loadFixture(deployFixture);
+    const trade = mkTrade({ tradeId: 70, maker: maker.address, taker: taker.address, tier: 2, outcome: OUTCOME.PAYMENT_WINDOW_EXPIRED });
+    await setTrade(mockEscrow, trade);
+    await rewards.connect(caller).recordTradeOutcome(70);
+    const epoch = BigInt(trade.terminalAt) / (EPOCH_N);
+    expect(await rewards.totalWeight(epoch)).to.equal(0n);
+    expect(await rewards.recordedTrade(70)).to.equal(true);
+  });
+
+  it("test_recordTradeOutcomes_unknown_future_outcome_does_not_block_batch", async function () {
+    const { rewards, mockEscrow, caller, maker, taker } = await loadFixture(deployFixture);
+    const clean = mkTrade({ tradeId: 71, maker: maker.address, taker: taker.address, tier: 1 });
+    const expired = mkTrade({ tradeId: 72, maker: maker.address, taker: taker.address, tier: 1, outcome: OUTCOME.PAYMENT_WINDOW_EXPIRED });
+    const unknown = mkTrade({ tradeId: 73, maker: maker.address, taker: taker.address, tier: 1, outcome: 200 });
+    for (const t of [clean, expired, unknown]) await setTrade(mockEscrow, t);
+
+    await rewards.connect(caller).recordTradeOutcomes([72, 73, 71]);
+
+    const epoch = BigInt(clean.terminalAt) / (EPOCH_N);
+    expect(await rewards.recordedTrade(71)).to.equal(true);
+    expect(await rewards.recordedTrade(72)).to.equal(true);
+    expect(await rewards.recordedTrade(73)).to.equal(true);
+    // [TR] Yalnız temiz release ağırlık üretir. [EN] Only the clean release earns weight.
+    expect(await rewards.userWeight(epoch, maker.address)).to.be.gt(0n);
+    expect(await rewards.totalWeight(epoch)).to.equal((await rewards.userWeight(epoch, maker.address)) * 2n);
   });
 
   it("test_recordTradeOutcome_disputed_release_zero_weight", async function () {

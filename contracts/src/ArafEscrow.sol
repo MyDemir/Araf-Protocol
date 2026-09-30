@@ -1838,6 +1838,16 @@ contract ArafEscrow is ReentrancyGuard, Ownable, Pausable {
         return trades[_tradeId];
     }
 
+    // [TR] Ödül ağırlığı token'lar arası karşılaştırılabilir olsun diye notional 6 ondalığa normalize edilir;
+    //      aksi halde 18 ondalıklı bir stable aynı dolar hacmi için 1e12 kat ağırlık alırdı.
+    // [EN] Normalizes notional to 6 decimals so reward weight is comparable across tokens; otherwise an
+    //      18-decimal stable would earn 1e12x the weight for the same dollar volume.
+    function _toStableUnits(uint256 _amount, uint8 _decimals) internal pure returns (uint256) {
+        if (_decimals > 6) return _amount / (10 ** (_decimals - 6));
+        if (_decimals < 6) return _amount * (10 ** (6 - _decimals));
+        return _amount;
+    }
+
     /**
      * @notice Reward motoru için trade'in contract-authoritative terminal görünümünü döndürür.
      * @dev    Backend/admin kaynaklarından türetilmez; yalnız kontrat state/snapshot'larından beslenir.
@@ -1852,7 +1862,7 @@ contract ArafEscrow is ReentrancyGuard, Ownable, Pausable {
             maker: t.maker,
             taker: t.taker,
             token: t.tokenAddress,
-            stableNotional: t.cryptoAmount,
+            stableNotional: _toStableUnits(t.cryptoAmount, tokenConfigs[t.tokenAddress].decimals),
             takerFeePaid: terminalSnapshot.takerFeePaid,
             makerFeePaid: terminalSnapshot.makerFeePaid,
             tier: t.tier,

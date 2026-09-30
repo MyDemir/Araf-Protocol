@@ -9,6 +9,12 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./ArafRevenueVault.sol";
 
 interface IArafEscrowRewardView {
+    // [TR] ArafEscrow.TerminalOutcome ile aynı sırada olmalı (test/contracts/terminalOutcomeParity.test.js korur).
+    //      View struct'ında sonuç uint8 taşınır: enum olarak decode edilseydi escrow'a eklenen yeni bir değer
+    //      aralık dışı sayılıp kaydı (ve toplu kaydın tamamını) revert ederdi. Bilinmeyen değer = 0 ağırlık.
+    // [EN] Must match ArafEscrow.TerminalOutcome order (guarded by terminalOutcomeParity.test.js).
+    //      The view carries the outcome as uint8: decoding it as an enum would revert on any value added to
+    //      the escrow later, blocking the record (and the whole batch). Unknown values earn zero weight.
     enum TerminalOutcome {
         NONE,
         CLEAN_RELEASE,
@@ -16,7 +22,8 @@ interface IArafEscrowRewardView {
         MUTUAL_CANCEL,
         PARTIAL_SETTLEMENT,
         DISPUTED_RELEASE,
-        BURNED
+        BURNED,
+        PAYMENT_WINDOW_EXPIRED
     }
 
     struct RewardableTradeView {
@@ -29,7 +36,7 @@ interface IArafEscrowRewardView {
         uint256 takerFeePaid;
         uint256 makerFeePaid;
         uint8 tier;
-        TerminalOutcome outcome;
+        uint8 outcome;
         uint256 lockedAt;
         uint256 paidAt;
         uint256 terminalAt;
@@ -113,7 +120,7 @@ contract ArafRewards is Ownable, ReentrancyGuard, Pausable {
         address taker,
         uint256 makerWeight,
         uint256 takerWeight,
-        IArafEscrowRewardView.TerminalOutcome outcome
+        uint8 outcome
     );
     event EpochRewardAllocated(uint256 indexed epoch, address indexed token, uint256 amount);
     event EpochTokenFinalizedEvent(uint256 indexed epoch, address indexed token);
@@ -176,7 +183,7 @@ contract ArafRewards is Ownable, ReentrancyGuard, Pausable {
         IArafEscrowRewardView.RewardableTradeView memory t = escrow.getRewardableTrade(tradeId);
         uint256 epoch = t.terminalAt / epochDuration;
         bytes4 failure;
-        if (t.outcome == IArafEscrowRewardView.TerminalOutcome.NONE) failure = NonTerminalOutcome.selector;
+        if (t.outcome == uint8(IArafEscrowRewardView.TerminalOutcome.NONE)) failure = NonTerminalOutcome.selector;
         else if (!t.isOrderChild) failure = DirectEscrowNotRewardable.selector;
         else if (t.tier == 0) failure = TierZeroNotRewardable.selector;
         else if (block.timestamp >= _recordingDeadline(epoch)) failure = RecordingWindowClosed.selector;
@@ -320,7 +327,7 @@ contract ArafRewards is Ownable, ReentrancyGuard, Pausable {
         pure
         returns (uint256)
     {
-        if (t.outcome == IArafEscrowRewardView.TerminalOutcome.CLEAN_RELEASE) {
+        if (t.outcome == uint8(IArafEscrowRewardView.TerminalOutcome.CLEAN_RELEASE)) {
             if (t.paidAt > 0 && t.terminalAt >= t.paidAt) {
                 uint256 delta = t.terminalAt - t.paidAt;
                 if (delta <= 1 hours) return CLEAN_FAST_BPS;
@@ -330,7 +337,7 @@ contract ArafRewards is Ownable, ReentrancyGuard, Pausable {
             return CLEAN_SLOW_BPS;
         }
 
-        if (t.outcome == IArafEscrowRewardView.TerminalOutcome.PARTIAL_SETTLEMENT) {
+        if (t.outcome == uint8(IArafEscrowRewardView.TerminalOutcome.PARTIAL_SETTLEMENT)) {
             return PARTIAL_SETTLEMENT_BPS;
         }
 
