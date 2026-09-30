@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { formatUnits } from 'viem';
 import { useCountdown } from '../hooks/useCountdown';
-import { mapApiOrderToUi } from './orderUiModel';
+import { mapApiOrderToUi, formatTokenAmount as formatTokenAmountFromRaw, tokenToNumber as rawTokenToDisplayNumber } from './orderUiModel';
 import { buildApiUrl } from './apiConfig';
 import { WALLET_AGE_MIN_SEC } from './walletAge';
 
@@ -42,26 +41,6 @@ const fetchAllMyPages = async ({ authenticatedFetch, endpoint, collectionKey, en
 
   console.warn(`${endpointLabel} pagination stopped after ${MAX_MY_ITEMS_PAGE_FETCHES} pages to avoid an infinite loop.`);
   return allItems;
-};
-
-const formatTokenAmountFromRaw = (rawAmount, decimals = DEFAULT_TOKEN_DECIMALS, maxFractionDigits = 4) => {
-  try {
-    const normalized = formatUnits(BigInt(rawAmount ?? 0), decimals);
-    return Number(normalized).toLocaleString('en-US', {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: maxFractionDigits,
-    });
-  } catch {
-    return '0';
-  }
-};
-
-const rawTokenToDisplayNumber = (rawAmount, decimals = DEFAULT_TOKEN_DECIMALS) => {
-  try {
-    return Number(formatUnits(BigInt(rawAmount ?? 0), decimals));
-  } catch {
-    return 0;
-  }
 };
 
 export function mapSettlementProposalFromApi(settlementProposal) {

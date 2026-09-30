@@ -1,7 +1,8 @@
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
-import { normalizeSettlementState, SETTLEMENT_NEUTRALITY_COPY, toUnixSeconds, safeDate } from '../../frontend/src/components/SettlementProposalCard';
+import { SETTLEMENT_NEUTRALITY_COPY, safeDate } from '../../frontend/src/components/SettlementProposalCard';
+import { normalizeSettlementState, toUnixSeconds } from '../../frontend/src/app/contexts/settlement/settlementActionModel';
 import { getPreviewTotalPool, shortNum } from '../../frontend/src/components/SettlementPreviewModal';
 import SettlementProposalCard from '../../frontend/src/components/SettlementProposalCard';
 

@@ -16,7 +16,3 @@ export const scenarioCategories = [
 
 export const scenarioRegistry = Object.fromEntries(scenarioCategories.map((category) => [category.key, category]));
 
-export const findScenario = (categoryKey, scenarioId) => {
-  const category = scenarioRegistry[categoryKey] || scenarioCategories[0];
-  return category.scenarios.find((scenario) => scenario.id === scenarioId) || category.scenarios[0];
-};

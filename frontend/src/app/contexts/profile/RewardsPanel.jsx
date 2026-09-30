@@ -1,7 +1,7 @@
 import { CalendarClock, CheckCircle2, Coins, Gift, Hourglass, LoaderCircle, RefreshCw, TimerOff } from 'lucide-react';
 import React from 'react';
-import { formatUnits } from 'viem';
 import { buildApiUrl } from '../../apiConfig';
+import { formatTokenAmount } from '../../orderUiModel';
 import { useRewardsContract } from '../../../hooks/useRewardsContract';
 import { deriveEpochReward, REWARD_STATUS, summarizeRewards } from './rewardsModel';
 
@@ -12,11 +12,7 @@ const TOKEN_ADDRESSES = {
 const EPOCHS_BACK = 5;
 
 const tx = (lang, tr, en) => (lang === 'TR' ? tr : en);
-const fmtAmount = (raw, decimals = 6) => {
-  try {
-    return Number(formatUnits(BigInt(raw ?? 0), decimals)).toLocaleString('en-US', { maximumFractionDigits: 2 });
-  } catch { return '—'; }
-};
+const fmtAmount = (raw, decimals = 6) => formatTokenAmount(raw, decimals, 2);
 const fmtPct = (bps, lang) => {
   const v = Number(bps) / 100;
   const s = v.toLocaleString(lang === 'TR' ? 'tr-TR' : 'en-US', { maximumFractionDigits: v < 1 ? 2 : 1 });

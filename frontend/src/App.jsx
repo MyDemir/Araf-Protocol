@@ -1,7 +1,7 @@
 import { CircleCheck, Info, MessageSquare, TriangleAlert, Wallet } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 import { useAccount, useConnect, useDisconnect, useSignMessage, useChainId, usePublicClient } from 'wagmi';
-import { formatUnits } from 'viem';
+import { formatTokenAmount as formatTokenAmountFromRaw, tokenToNumber as rawTokenToDisplayNumber } from './app/orderUiModel';
 import { useArafContract } from './hooks/useArafContract';
 import PIIDisplay from './components/PIIDisplay';
 import { buildAppViews } from './app/AppViews';
@@ -10,17 +10,10 @@ import AppShell from './app/shell/AppShell';
 import { useSessionActions } from './app/providers/SessionProvider';
 import { useAppSessionData } from './app/useAppSessionData';
 import AdminPanel from './AdminPanel';
-import DevScenarioController from './dev/ui-lab/DevScenarioController';
 import useFullscreen from './app/shell/useFullscreen';
 import { deriveTradeTimeline, estimateBleeding } from './app/contexts/trade-room/tradeTimeline';
 import { readProtocolConfig } from './app/contexts/admin/adminChainConfig';
-import { createMockProtocolConfigReader } from './dev/mocks/mockAdminFetch';
-import { labTokenSymbols } from './dev/fixtures/adminFixtures';
-import { LAB_TOKEN_ADDRESSES, LAB_BOND_MAP, LAB_FEE_CONFIG } from './dev/fixtures/makerOrderFixtures';
-import { buildLabRewards } from './dev/fixtures/profileFixtures';
-import { isUiLabEnabled } from './dev/ui-lab/isUiLabEnabled';
-import { createMockAdminFetch } from './dev/mocks/mockAdminFetch';
-import { createSetterAction, createSettlementContractMocks, createTradeRoomFetch, createTradeRoomHandlers } from './dev/mocks/mockActions';
+import { isUiLabEnabled, loadUiLab } from './app/uiLab';
 import { getInitialLang, APP_LANG_STORAGE_KEY } from './app/bootstrapState';
 import { markTermsAcceptedLocally } from './app/legal/terms';
 import { buildApiUrl, resolveApiPolicyDiagnostics } from './app/apiConfig';
@@ -32,9 +25,9 @@ import { buildNextActiveTrade, findEscrowByRouteTradeId, getEscrowRouteId, parse
 // [TR] Uygulama başlangıcında kritik env değişkenlerini doğrula
 // [EN] Validate critical env variables on app start
 
-const createDevScenarioFetch = (categoryKey, scenario, fallbackFetch) => {
-  if (categoryKey === 'admin') return createMockAdminFetch(scenario);
-  if (categoryKey === 'tradeRoom') return createTradeRoomFetch({ trade: scenario?.decisionInput?.trade, estimate: estimateBleeding, fallbackFetch });
+const createDevScenarioFetch = (uiLab, categoryKey, scenario, fallbackFetch) => {
+  if (categoryKey === 'admin') return uiLab.createMockAdminFetch(scenario);
+  if (categoryKey === 'tradeRoom') return uiLab.createTradeRoomFetch({ trade: scenario?.decisionInput?.trade, estimate: estimateBleeding, fallbackFetch });
   return fallbackFetch;
 };
 
@@ -113,36 +106,20 @@ const canonicalizePayoutProfileDraft = (draft = {}) => {
 
 // [TR] Otoritatif raw base-unit değerini UI için normalize eder (display-only).
 // [EN] Normalizes authoritative raw base-unit values for UI display only.
-const formatTokenAmountFromRaw = (rawAmount, decimals = DEFAULT_TOKEN_DECIMALS, maxFractionDigits = 4) => {
-  if (!Number.isInteger(decimals) || decimals <= 0 || decimals > 18) return '—';
-  try {
-    const normalized = formatUnits(BigInt(rawAmount ?? 0), decimals);
-    return Number(normalized).toLocaleString('en-US', {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: maxFractionDigits,
-    });
-  } catch {
-    return '0';
-  }
-};
-
-// [TR] UI/analytics hesapları için Number cache; enforcement için kullanılmaz.
-// [EN] Number cache for UI/analytics math; never used for enforcement.
-const rawTokenToDisplayNumber = (rawAmount, decimals = DEFAULT_TOKEN_DECIMALS) => {
-  if (!Number.isInteger(decimals) || decimals <= 0 || decimals > 18) return 0;
-  try {
-    return Number(formatUnits(BigInt(rawAmount ?? 0), decimals));
-  } catch {
-    return 0;
-  }
-};
-
 function App() {
   // ═══════════════════════════════════════════
   // 1. EKRAN VE UI STATE YÖNETİMİ
   //    View routing + modal open/close flags
   // ═══════════════════════════════════════════
   const uiLabEnabled = isUiLabEnabled();
+  // [TR] Lab kodu yalnız etkinse ve ilk ihtiyaçta yüklenir. [EN] Lab code loads only when enabled.
+  const [uiLab, setUiLab] = useState(null);
+  useEffect(() => {
+    if (!uiLabEnabled) return undefined;
+    let alive = true;
+    loadUiLab().then((mod) => { if (alive) setUiLab(mod); }).catch(() => {});
+    return () => { alive = false; };
+  }, [uiLabEnabled]);
   const fullscreen = useFullscreen();
   const initialView = 'home';
   const [currentView, setCurrentView] = useState(initialView);
@@ -369,14 +346,14 @@ function App() {
   const devScenarioActions = React.useMemo(() => {
     if (!devScenario) return null;
     const appendLog = devScenario.appendLog;
-    const setter = (key) => createSetterAction({ scenarioId: devScenario.scenario.id, appendLog, actionKey: key });
+    const setter = (key) => uiLab.createSetterAction({ scenarioId: devScenario.scenario.id, appendLog, actionKey: key });
     return {
-      tradeRoomHandlers: createTradeRoomHandlers({ scenarioId: devScenario.scenario.id, appendLog }),
-      settlementFns: createSettlementContractMocks({ scenarioId: devScenario.scenario.id, appendLog }),
+      tradeRoomHandlers: uiLab.createTradeRoomHandlers({ scenarioId: devScenario.scenario.id, appendLog }),
+      settlementFns: uiLab.createSettlementContractMocks({ scenarioId: devScenario.scenario.id, appendLog }),
       setter,
       noop: (actionKey) => (...args) => setter(actionKey)(...args),
     };
-  }, [devScenario]);
+  }, [devScenario, uiLab]);
 
   const activeScenarioCategory = devScenarioActive ? devScenario?.categoryKey : null;
   const activeScenarioPayload = devScenario?.scenario || null;
@@ -443,15 +420,15 @@ function App() {
 
   const effectiveAuthenticatedFetch = React.useMemo(() => (
     devScenarioActive
-      ? createDevScenarioFetch(devScenario.categoryKey, devScenario.scenario, authenticatedFetch)
+      ? createDevScenarioFetch(uiLab, devScenario.categoryKey, devScenario.scenario, authenticatedFetch)
       : authenticatedFetch
-  ), [devScenarioActive, devScenario, authenticatedFetch]);
+  ), [devScenarioActive, devScenario, authenticatedFetch, uiLab]);
   const activeAdminFetch = effectiveAuthenticatedFetch;
 
   // [TR] Admin "Kontrat" sekmesi zincirden okur; lab'da sahte okuyucu kullanılır.
   const adminProtocolReader = React.useCallback(() => (
     activeScenarioCategory === 'admin'
-      ? createMockProtocolConfigReader(devScenario?.scenario)()
+      ? uiLab.createMockProtocolConfigReader(devScenario?.scenario)()
       : readProtocolConfig({
         publicClient,
         escrowAddress: import.meta.env.VITE_ESCROW_ADDRESS,
@@ -460,7 +437,7 @@ function App() {
         tokens: SUPPORTED_TOKEN_ADDRESSES,
       })
   ), [activeScenarioCategory, devScenario, publicClient]); // eslint-disable-line react-hooks/exhaustive-deps
-  const adminTokenSymbols = React.useMemo(() => (activeScenarioCategory === 'admin' ? labTokenSymbols : Object.fromEntries(
+  const adminTokenSymbols = React.useMemo(() => (activeScenarioCategory === 'admin' ? uiLab.labTokenSymbols : Object.fromEntries(
     Object.entries(SUPPORTED_TOKEN_ADDRESSES).filter(([, a]) => a).map(([sym, a]) => [String(a).toLowerCase(), sym])
   )), [activeScenarioCategory]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -701,7 +678,7 @@ function App() {
   // [TR] Lab "Profil Merkezi": kontrat itibarı ve backend kayıtları senaryodan gelir; sayaçlar seçim anına göre.
   const labProfile = React.useMemo(() => (
     activeScenarioCategory === 'profile' && activeScenarioPayload
-      ? { ...activeScenarioPayload, userReputation: activeScenarioPayload.build?.() || null, labRewards: activeScenarioPayload.labRewards ? buildLabRewards(activeScenarioPayload.labRewards) : null }
+      ? { ...activeScenarioPayload, userReputation: activeScenarioPayload.build?.() || null, labRewards: activeScenarioPayload.labRewards ? uiLab.buildLabRewards(activeScenarioPayload.labRewards) : null }
       : null
   ), [activeScenarioCategory, activeScenarioPayload]);
 
@@ -732,7 +709,7 @@ function App() {
     requireSignedSessionForActiveWallet,
     setShowMakerModal,
     showToast,
-    supportedTokens: labMakerScenario ? { USDT: { address: LAB_TOKEN_ADDRESSES.USDT }, USDC: { address: LAB_TOKEN_ADDRESSES.USDC } } : SUPPORTED_TOKENS,
+    supportedTokens: labMakerScenario ? { USDT: { address: uiLab.LAB_TOKEN_ADDRESSES.USDT }, USDC: { address: uiLab.LAB_TOKEN_ADDRESSES.USDC } } : SUPPORTED_TOKENS,
     address,
     lang,
     isContractLoading,
@@ -1382,12 +1359,12 @@ function App() {
     makerFiat,
     setMakerFiat,
     // [TR] Lab "Emir oluşturma" senaryosunda kontrat verileri senaryodan gelir; gönderim yalnız günlüğe yazılır.
-    onchainBondMap: labMakerScenario ? LAB_BOND_MAP : onchainBondMap,
+    onchainBondMap: labMakerScenario ? uiLab.LAB_BOND_MAP : onchainBondMap,
     onchainTokenMap: labMakerScenario ? labMakerScenario.tokenMap : onchainTokenMap,
-    protocolFeeConfig: labMakerScenario ? LAB_FEE_CONFIG : protocolFeeConfig,
+    protocolFeeConfig: labMakerScenario ? uiLab.LAB_FEE_CONFIG : protocolFeeConfig,
     paymentRiskConfig,
     userReputation: labMakerScenario ? labMakerScenario.reputation : userReputation,
-    SUPPORTED_TOKEN_ADDRESSES: labMakerScenario ? LAB_TOKEN_ADDRESSES : SUPPORTED_TOKEN_ADDRESSES,
+    SUPPORTED_TOKEN_ADDRESSES: labMakerScenario ? uiLab.LAB_TOKEN_ADDRESSES : SUPPORTED_TOKEN_ADDRESSES,
     handleCreateOrder: labMakerScenario ? devScenarioActions?.setter('create_order') : handleCreateOrder,
     makerValidationError,
     makerPayoutRiskEntry,
@@ -1493,8 +1470,8 @@ function App() {
         )}
       />
 
-      {uiLabEnabled && (
-        <DevScenarioController
+      {uiLab && (
+        <uiLab.DevScenarioController
           activeScenario={devScenario}
           onApplyScenario={applyDevScenario}
           onClearScenario={clearDevScenario}

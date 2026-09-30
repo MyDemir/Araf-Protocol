@@ -10,6 +10,7 @@
  */
 
 const express = require("express");
+const { parsePositiveOnchainId: _parsePositiveOnchainId } = require("../utils/onchain");
 const Joi = require("joi");
 const router = express.Router();
 
@@ -74,7 +75,6 @@ const SAFE_ORDER_TRADES_PROJECTION = [
   "chargeback_ack.acknowledged_at",
 ].join(" ");
 
-const POSITIVE_NUMERIC_ID_RE = /^[1-9]\d*$/;
 const DEFAULT_MY_ORDERS_LIMIT = 20;
 const MAX_MY_ORDERS_LIMIT = 50;
 const LOCK_OR_SNAPSHOT_CAPTURED_MATCH = {
@@ -160,11 +160,6 @@ async function _attachMarketTrustVisibilitySummary(orders = []) {
   });
 }
 
-function _parsePositiveOnchainId(rawId) {
-  const normalized = String(rawId ?? "").trim();
-  if (!POSITIVE_NUMERIC_ID_RE.test(normalized)) return null;
-  return normalized;
-}
 
 function _buildIdentityLookup(field, idString) {
   return { [field]: idString };

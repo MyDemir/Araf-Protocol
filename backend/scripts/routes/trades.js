@@ -1,6 +1,7 @@
 "use strict";
 
 const express = require("express");
+const { parsePositiveOnchainId: _parsePositiveOnchainId } = require("../utils/onchain");
 const Joi = require("joi");
 const crypto = require("crypto");
 const { ethers } = require("ethers");
@@ -189,15 +190,9 @@ const SAFE_TRADE_PROJECTION = [
   "chargeback_ack.acknowledged_at",
 ].join(" ");
 
-const POSITIVE_NUMERIC_ID_RE = /^[1-9]\d*$/;
 const DEFAULT_MY_TRADES_LIMIT = 20;
 const MAX_MY_TRADES_LIMIT = 50;
 
-function _parsePositiveOnchainId(rawId) {
-  const normalized = String(rawId ?? "").trim();
-  if (!POSITIVE_NUMERIC_ID_RE.test(normalized)) return null;
-  return normalized;
-}
 
 function _buildIdentityLookup(field, idString) {
   return { [field]: idString };

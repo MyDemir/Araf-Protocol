@@ -14,6 +14,9 @@ export default defineConfig({
       { find: '@testing-library/react', replacement: fromFrontendNodeModules('@testing-library/react') },
       { find: '@testing-library/user-event', replacement: fromFrontendNodeModules('@testing-library/user-event') },
       { find: 'react', replacement: fromFrontendNodeModules('react') },
+      // [TR] Kök test/ui-lab (lazy UI Lab) paketleri frontend'in node_modules'undan çözer.
+      // [EN] Root test/ui-lab (lazy UI Lab) resolves packages from frontend node_modules.
+      { find: 'lucide-react', replacement: fromFrontendNodeModules('lucide-react') },
       { find: 'react-dom', replacement: fromFrontendNodeModules('react-dom') },
       { find: 'siwe', replacement: fromFrontendNodeModules('siwe') },
       { find: 'viem', replacement: fromFrontendNodeModules('viem') },

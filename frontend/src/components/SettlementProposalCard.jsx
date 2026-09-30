@@ -3,35 +3,16 @@ import React from 'react';
 import { buildSettlementPreviewUrl } from '../app/apiConfig';
 import SettlementPreviewModal from './SettlementPreviewModal';
 import { useSettlementActions } from '../app/contexts/settlement/useSettlementActions';
+import { normalizeSettlementState, toUnixSeconds } from '../app/contexts/settlement/settlementActionModel';
 
 const ACTIVE_ROOM_STATES = ['CHALLENGED'];
 const TERMINAL_ROOM_STATES = ['RESOLVED', 'CANCELED', 'BURNED'];
 const MIN_CUSTOM_EXPIRY_MINUTES = 10;
 const MAX_CUSTOM_EXPIRY_MINUTES = 7 * 24 * 60;
-const SETTLEMENT_STATE_BY_INDEX = ['NONE', 'PROPOSED', 'REJECTED', 'WITHDRAWN', 'EXPIRED', 'FINALIZED'];
 export const SETTLEMENT_NEUTRALITY_COPY = {
   TR: 'Araf karar vermez; teklif ancak iki taraf onaylarsa geçerli olur.',
   EN: 'Araf does not decide who is right; settlement is available only in the CHALLENGED dispute phase with both parties’ signatures.',
 };
-
-export function normalizeSettlementState(rawState) {
-  if (typeof rawState === 'number') return SETTLEMENT_STATE_BY_INDEX[rawState] || 'UNKNOWN';
-  if (typeof rawState === 'bigint') return SETTLEMENT_STATE_BY_INDEX[Number(rawState)] || 'UNKNOWN';
-  if (typeof rawState === 'string') return rawState.toUpperCase();
-  return 'NONE';
-}
-
-export function toUnixSeconds(value) {
-  // [TR] Backend hem unix hem ISO tarih dönebildiği için tek normalize kapısı.
-  // [EN] Single normalization gate because backend payload may provide unix or ISO time values.
-  if (!value) return 0;
-  if (typeof value === 'bigint') return Number(value);
-  if (typeof value === 'number') return value > 1e12 ? Math.floor(value / 1000) : Math.floor(value);
-  const asNumber = Number(value);
-  if (Number.isFinite(asNumber)) return asNumber > 1e12 ? Math.floor(asNumber / 1000) : Math.floor(asNumber);
-  const asDateMs = new Date(value).getTime();
-  return Number.isFinite(asDateMs) ? Math.floor(asDateMs / 1000) : 0;
-}
 
 const shortHash = (hash) => (hash && hash.length > 12 ? `${hash.slice(0, 8)}...${hash.slice(-4)}` : hash || '—');
 export const safeDate = (v) => {

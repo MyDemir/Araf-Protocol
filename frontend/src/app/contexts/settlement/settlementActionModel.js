@@ -2,14 +2,17 @@ const ACTIVE_ROOM_STATES = ['CHALLENGED'];
 const TERMINAL_PROPOSAL_STATES = ['FINALIZED', 'REJECTED', 'WITHDRAWN', 'EXPIRED'];
 const SETTLEMENT_STATE_BY_INDEX = ['NONE', 'PROPOSED', 'REJECTED', 'WITHDRAWN', 'EXPIRED', 'FINALIZED'];
 
-export const normalizeSettlementStateForAction = (rawState) => {
+// [TR] Settlement durumunun tek normalize kapısı (kontrat index'i, bigint veya backend string'i).
+// [EN] Single normalization gate for settlement state (contract index, bigint or backend string).
+export const normalizeSettlementState = (rawState) => {
   if (typeof rawState === 'number') return SETTLEMENT_STATE_BY_INDEX[rawState] || 'UNKNOWN';
   if (typeof rawState === 'bigint') return SETTLEMENT_STATE_BY_INDEX[Number(rawState)] || 'UNKNOWN';
-  if (typeof rawState === 'string') return rawState.toUpperCase();
+  if (typeof rawState === 'string') return rawState.toUpperCase() || 'NONE';
   return 'NONE';
 };
 
-export const toSettlementUnixSeconds = (value) => {
+// [TR] Backend hem unix (sn/ms) hem ISO tarih dönebilir. [EN] Backend may send unix (s/ms) or ISO time.
+export const toUnixSeconds = (value) => {
   if (!value) return 0;
   if (typeof value === 'bigint') return Number(value);
   if (typeof value === 'number') return value > 1e12 ? Math.floor(value / 1000) : Math.floor(value);
@@ -23,7 +26,7 @@ export const normalizeAddress = (address) => address?.toLowerCase?.() || null;
 
 export const getSettlementActionContext = ({ activeTrade, userRole, address, nowTs = Math.floor(Date.now() / 1000) }) => {
   const proposal = activeTrade?.settlementProposal || activeTrade?.rawTrade?.settlementProposal || null;
-  const proposalState = normalizeSettlementStateForAction(proposal?.state);
+  const proposalState = normalizeSettlementState(proposal?.state);
   const onchainTradeId = activeTrade?.onchainId ?? activeTrade?.rawTrade?.onchainId ?? null;
   const hasOnchainTradeId = onchainTradeId !== null && onchainTradeId !== undefined && onchainTradeId !== '';
   const roomState = activeTrade?.state || 'LOCKED';
@@ -35,7 +38,7 @@ export const getSettlementActionContext = ({ activeTrade, userRole, address, now
   const proposer = normalizeAddress(proposal?.proposer ?? proposal?.proposed_by);
   const isProposer = Boolean(isTradeParty && userAddress && proposer && userAddress === proposer);
   const isCounterparty = Boolean(isTradeParty && userAddress && proposer && userAddress !== proposer);
-  const expiresAt = toSettlementUnixSeconds(proposal?.expiresAt ?? proposal?.expires_at ?? 0);
+  const expiresAt = toUnixSeconds(proposal?.expiresAt ?? proposal?.expires_at ?? 0);
   const isExpired = expiresAt > 0 && nowTs >= expiresAt;
   const isProposed = proposalState === 'PROPOSED';
   const isTerminalProposal = TERMINAL_PROPOSAL_STATES.includes(proposalState);

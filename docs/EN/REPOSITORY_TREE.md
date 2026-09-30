@@ -16,7 +16,6 @@ Araf-Protokol/
 │   │   │   ├── paymentRailRiskConfig.js
 │   │   │   └── redis.js
 │   │   ├── jobs/
-│   │   │   ├── cleanupPendingListings.js
 │   │   │   ├── cleanupSensitiveData.js
 │   │   │   ├── cleanupUserBankRiskMetadata.js
 │   │   │   ├── reputationDecay.js
@@ -42,7 +41,6 @@ Araf-Protokol/
 │   │   │   ├── admin.js
 │   │   │   ├── auth.js
 │   │   │   ├── feedback.js
-│   │   │   ├── listings.js
 │   │   │   ├── logs.js
 │   │   │   ├── orders.js
 │   │   │   ├── pii.js
@@ -78,12 +76,11 @@ Araf-Protokol/
 ├── contracts/
 │   ├── scripts/
 │   │   ├── checkAbiDrift.js
-│   │   ├── configureRewards.js
 │   │   ├── deploy.js
 │   │   ├── deployRewards.js
-│   │   ├── smokeRewards.js
-│   │   ├── switchRewardsTreasury.js
-│   │   └── verifyRewardsDeployment.js
+│   │   ├── gasBaseline.js
+│   │   ├── rewardsOps.js        (configure | verify | switch-treasury)
+│   │   └── smokeRewards.js
 │   ├── src/
 │   │   ├── ArafEscrow.sol
 │   │   ├── ArafRevenueVault.sol
@@ -138,18 +135,12 @@ Araf-Protokol/
 │   │   │   ├── PaymentRiskBadge.jsx
 │   │   │   ├── PIIDisplay.jsx
 │   │   │   ├── ReferenceRateTicker.jsx
-│   │   │   ├── RewardsDashboard.jsx
 │   │   │   └── SettlementProposalCard.jsx
-│   │   ├── dev/
-│   │   │   └── fixtures/
 │   │   ├── hooks/
 │   │   │   ├── useArafContract.js
 │   │   │   ├── useCountdown.js
 │   │   │   ├── usePII.js
 │   │   │   └── useRewardsContract.js
-│   │   ├── test/
-│   │   │   ├── setupTests.js
-│   │   │   └── *.test.{js,jsx}
 │   │   ├── App.jsx
 │   │   ├── index.css
 │   │   └── main.jsx
@@ -160,9 +151,11 @@ Araf-Protokol/
 │   ├── tailwind.config.js
 │   ├── vercel.json
 │   └── vite.config.js
-├── shared/
 ├── test/
-│   └── testarea.md
+│   ├── backend/          (jest)
+│   ├── contracts/        (hardhat)
+│   ├── frontend/         (vitest)
+│   └── ui-lab/           (UI Lab: fixtures, mocks, controller; lazy-loaded only in dev)
 ├── README.md
 ├── package.json
 └── LICENSE

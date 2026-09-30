@@ -3,8 +3,7 @@ import {
   History, Hourglass, ListOrdered, LogOut, ShieldCheck, TrendingDown, TrendingUp, UserRound, Wallet, X, Zap,
 } from 'lucide-react';
 import React from 'react';
-import { formatUnits } from 'viem';
-import { mapOffchainHealthToUi } from '../../orderUiModel';
+import { formatTokenAmount, mapOffchainHealthToUi } from '../../orderUiModel';
 import { deriveReputationView, MIN_REPUTATION_NOTIONAL_USD } from './reputationModel';
 import { WALLET_AGE_MIN_DAYS } from '../../walletAge';
 
@@ -377,12 +376,7 @@ export const ReputationPanel = ({
 const formatHistoryAmount = (item, tokenDecimalsMap = {}) => {
   const asset = item?.financials?.crypto_asset || 'USDT';
   const decimals = Number(tokenDecimalsMap?.[asset]) || 6;
-  try {
-    const value = Number(formatUnits(BigInt(item?.financials?.crypto_amount || '0'), decimals));
-    return `${value.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${asset}`;
-  } catch {
-    return `— ${asset}`;
-  }
+  return `${formatTokenAmount(item?.financials?.crypto_amount || '0', decimals, 2)} ${asset}`;
 };
 
 const STATUS_TONE = {
