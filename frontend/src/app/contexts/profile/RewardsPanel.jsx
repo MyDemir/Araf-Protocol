@@ -1,4 +1,4 @@
-import { CalendarClock, CheckCircle2, Coins, Gift, Hourglass, LoaderCircle, RefreshCw, TimerOff } from 'lucide-react';
+import { CalendarClock, CheckCircle2, Gift, Hourglass, LoaderCircle, RefreshCw, TimerOff } from 'lucide-react';
 import React from 'react';
 import { buildApiUrl } from '../../apiConfig';
 import { formatTokenAmount } from '../../orderUiModel';

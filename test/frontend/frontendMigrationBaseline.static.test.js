@@ -197,14 +197,16 @@ describe('frontend migration scaffold baseline', () => {
       expect(viewsCtx, `${key} should be passed into buildAppViews`).toMatch(new RegExp(`\\b${key}\\b`));
     });
 
+    expect(modalsCtx, 'handleCreateOrder should be passed into buildAppModals').toMatch(/\bhandleCreateOrder\b/);
+    // [TR] Modal katmanının hiç okumadığı alanlar App'ten gönderilmez (ölü bağlantı koruması).
+    // [EN] Keys the modal layer never reads are not wired from App (dead-wiring guard).
     [
-      'handleCreateOrder',
       'handleUpdatePII',
       'handleRegisterWallet',
       'handleDeleteOrder',
       'setActiveTrade',
     ].forEach((key) => {
-      expect(modalsCtx, `${key} should be passed into buildAppModals`).toMatch(new RegExp(`\\b${key}\\b`));
+      expect(modalsCtx, `${key} is never read by AppModals and must not be wired`).not.toMatch(new RegExp(`\\b${key}\\b`));
     });
   });
 

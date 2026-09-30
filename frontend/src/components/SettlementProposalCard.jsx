@@ -63,7 +63,6 @@ export default function SettlementProposalCard({
   const makerAddress = (activeTrade?.makerFull || activeTrade?.rawTrade?.maker_address || null)?.toLowerCase?.() || null;
   const takerAddress = (activeTrade?.takerFull || activeTrade?.rawTrade?.taker_address || null)?.toLowerCase?.() || null;
   const userAddress = address?.toLowerCase?.() || null;
-  const userIsMaker = userRole === 'maker' || (userAddress && makerAddress === userAddress);
   const isTradeParty = Boolean(userAddress && (userAddress === makerAddress || userAddress === takerAddress));
   const proposer = (proposal?.proposer ?? proposal?.proposed_by)?.toLowerCase?.() || null;
   const isProposer = Boolean(isTradeParty && userAddress && proposer && userAddress === proposer);

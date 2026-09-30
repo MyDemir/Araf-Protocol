@@ -1094,7 +1094,6 @@ export function useAppSessionData({
   const principalProtectionTimer = useCountdown(principalProtectionEndDate);
   const makerPingEndDate = useMemo(() => activeTrade?.paidAt ? new Date(new Date(activeTrade.paidAt).getTime() + 48 * 3600 * 1000) : null, [activeTrade?.paidAt]);
   const makerPingTimer = useCountdown(makerPingEndDate);
-  const canMakerPing = makerPingTimer.isFinished;
   const makerChallengePingEndDate = useMemo(() => activeTrade?.paidAt ? new Date(new Date(activeTrade.paidAt).getTime() + 24 * 3600 * 1000) : null, [activeTrade?.paidAt]);
   const makerChallengePingTimer = useCountdown(makerChallengePingEndDate);
   const canMakerStartChallengeFlow = makerChallengePingTimer.isFinished;
@@ -1175,7 +1174,6 @@ export function useAppSessionData({
     bleedingTimer,
     principalProtectionTimer,
     makerPingTimer,
-    canMakerPing,
     makerChallengePingTimer,
     canMakerStartChallengeFlow,
     makerChallengeTimer,

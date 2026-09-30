@@ -1,4 +1,4 @@
-import { ChevronRight, Hourglass, Lock, ScrollText, ShieldCheck, Star, TriangleAlert, X } from 'lucide-react';
+import { ChevronRight, Lock, ScrollText, ShieldCheck, Star, TriangleAlert, X } from 'lucide-react';
 import React from 'react';
 import { buildMakerPreview, getMakerModalCopy, getOrderSideCopy, resolveEffectiveBondBps } from './orderUiModel';
 import { resolveTierMaxAmounts } from './actions/orderCreationActions';
@@ -134,7 +134,6 @@ export const buildAppModals = (ctx) => {
     makerFiat,
     setMakerFiat,
     onchainBondMap,
-    paymentRiskConfig,
     userReputation,
     SUPPORTED_TOKEN_ADDRESSES,
     onchainTokenMap,
@@ -151,9 +150,6 @@ export const buildAppModals = (ctx) => {
     onAcceptTerms,
     onDeclineTerms,
     address,
-    connector,
-    isRegisteringWallet,
-    handleRegisterWallet,
   
   } = ctx;
 

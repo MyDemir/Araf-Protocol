@@ -303,7 +303,6 @@ export const buildTradeRoomActions = ({
   setCancelStatus,
   setChargebackAccepted,
   setCurrentView,
-  setLoadingText,
   fetchFn = fetch,
 }) => {
   const finishTrade = (state) => {

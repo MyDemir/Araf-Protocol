@@ -26,8 +26,6 @@ const makeMakerCtx = (overrides = {}) => ({
   setMakerRate: vi.fn(),
   makerMinLimit: '100',
   setMakerMinLimit: vi.fn(),
-  makerMaxLimit: '1000',
-  setMakerMaxLimit: vi.fn(),
   makerFiat: 'TRY',
   setMakerFiat: vi.fn(),
   onchainBondMap: { 1: { maker: 8, taker: 10 } },

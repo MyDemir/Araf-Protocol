@@ -8,7 +8,9 @@ import { orderSide as orderSideCopy } from './copy';
 
 const DEFAULT_TOKEN_DECIMALS = 6;
 const VALID_ORDER_SIDES = new Set(['SELL_CRYPTO', 'BUY_CRYPTO']);
-const SEPA_COUNTRIES = new Set(['DE', 'FR', 'NL', 'BE', 'ES', 'IT', 'AT', 'PT', 'IE', 'LU', 'FI', 'GR']);
+// [TR] SEPA ülke listesinin tek kaynağı (profil formu ve rail doğrulaması). [EN] Single source for SEPA countries.
+export const SEPA_COUNTRY_CODES = ['DE', 'FR', 'NL', 'BE', 'ES', 'IT', 'AT', 'PT', 'IE', 'LU', 'FI', 'GR'];
+const SEPA_COUNTRIES = new Set(SEPA_COUNTRY_CODES);
 
 export const getOrderSideCopy = (side, variant = 'display', lang = 'TR') => {
   const suffixByVariant = {

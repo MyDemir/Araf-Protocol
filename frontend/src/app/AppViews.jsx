@@ -1,6 +1,5 @@
-import React from 'react';
 import PIIDisplay from '../components/PIIDisplay';
-import { getPiiCopy, getStateLabel, getTradeTerm } from './copy';
+import { getStateLabel, getTradeTerm } from './copy';
 import ReferenceRateTicker from '../components/ReferenceRateTicker';
 import SettlementProposalCard from '../components/SettlementProposalCard';
 import { normalizeSettlementState } from './contexts/settlement/settlementActionModel';
@@ -16,18 +15,23 @@ import TradeRoomPage from './contexts/trade-room/TradeRoomPage';
 import ThemeToggle from './shell/ThemeToggle';
 import { isViewInNav, NAV_ORDER, VIEW_REGISTRY } from './viewRegistry';
 import {
-  Banknote, Briefcase, ChevronDown, CircleCheck, CirclePause, Clock, Compass, Droplets, Flame, Handshake, History, Hourglass, House,
-  Layers, ListPlus, LoaderCircle, Lock, Menu, Paperclip, Plus, Radar, Search, Settings, ShieldCheck, ShieldOff, Store, Swords,
-  TriangleAlert, Undo2, Unplug, UserRound, Wallet, X, Info, Maximize2, Minimize2, Download, Share,
+  Banknote, ChevronDown, CircleCheck, CirclePause, Clock, Droplets, Flame, Handshake, History, Hourglass, Layers, ListPlus, LoaderCircle, Lock, Menu, Paperclip, Plus, Search, Settings, ShieldOff, Store, Swords,
+  TriangleAlert, Undo2, Unplug, Wallet, X, Info, Maximize2, Minimize2, Download, Share,
 } from 'lucide-react';
 import { buildTradeRoomPanelCallbacks, getBurnExpiredDeadlinePassed, getPaymentWindowExpired, PAYMENT_WINDOW_MS } from './contexts/trade-room/tradeRoomPanelActions';
 
 // [TR] App ana görünüm/render katmanı burada tutulur.
 // [EN] Main application view/render layer lives here.
+// [TR] Ana sayfa istatistik değişim rozeti (yalnız burada kullanılır). [EN] Home stat delta badge.
+const StatChange = ({ value }) => {
+  if (value == null) return null;
+  const isPositive = value >= 0;
+  return <span className={`text-[10px] ml-2 font-bold ${isPositive ? 'text-success' : 'text-danger'}`}>{isPositive ? '▲' : '▼'}{Math.abs(value).toFixed(1)}%</span>;
+};
+
 export const buildAppViews = (ctx) => {
   const {
     lang,
-    t,
     setLang,
     isConnected,
     isAuthenticated,
@@ -75,7 +79,6 @@ export const buildAppViews = (ctx) => {
     statsLoading,
     statsError,
     fetchStats,
-    StatChange,
     userReputation,
     sybilStatus,
     walletAgeRemainingDays,
@@ -86,13 +89,11 @@ export const buildAppViews = (ctx) => {
     setActiveTrade,
     userRole,
     setUserRole,
-    tradeState,
     setTradeState,
     resolvedTradeState,
     setCancelStatus,
     setChargebackAccepted,
     paymentIpfsHash,
-    setPaymentIpfsHash,
     handleFileUpload,
     handleReportPayment,
     handleProposeCancel,
@@ -103,7 +104,6 @@ export const buildAppViews = (ctx) => {
     handleChallenge,
     handlePingMaker,
     handleAutoRelease,
-    canMakerPing,
     makerPingTimer,
     canMakerStartChallengeFlow,
     makerChallengePingTimer,
@@ -120,8 +120,6 @@ export const buildAppViews = (ctx) => {
     rawTokenToDisplayNumber,
     fetchMyTrades,
     setIsContractLoading,
-    setLoadingText,
-    getSafeTelegramUrl,
     authenticatedFetch,
     showToast,
     settlementContractFns,
@@ -919,7 +917,7 @@ export const buildAppViews = (ctx) => {
             const showTakerPii = isTaker && ['LOCKED', 'PAID'].includes(roomState);
             const beforeActions = showTakerPii ? (
               <div className="mb-4">
-                <PIIDisplay tradeId={activeTrade?.id} lang={lang} getSafeTelegramUrl={getSafeTelegramUrl} authenticatedFetch={authenticatedFetch} />
+                <PIIDisplay tradeId={activeTrade?.id} lang={lang} authenticatedFetch={authenticatedFetch} />
               </div>
             ) : null;
 
@@ -1109,7 +1107,6 @@ export const buildAppViews = (ctx) => {
         mapResolutionTypeLabel={mapResolutionTypeLabel}
         handleLogoutAndDisconnect={ctx.handleLogoutAndDisconnect}
         canonicalizePayoutProfileDraft={ctx.canonicalizePayoutProfileDraft}
-        SEPA_COUNTRIES={ctx.SEPA_COUNTRIES}
         isContractLoading={isContractLoading}
         setIsContractLoading={setIsContractLoading}
         tokenDecimalsMap={tokenDecimalsMap}

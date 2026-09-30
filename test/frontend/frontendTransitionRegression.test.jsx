@@ -125,7 +125,6 @@ const baseViewCtx = {
   rawTokenToDisplayNumber: () => 0,
   fetchMyTrades: vi.fn(),
   setIsContractLoading: vi.fn(),
-  getSafeTelegramUrl: () => '#',
   authenticatedFetch: vi.fn(),
   showToast: vi.fn(),
 };
