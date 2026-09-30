@@ -29,7 +29,7 @@ const userSchema = new mongoose.Schema(
       unique: true,
       lowercase: true,
       match: /^0x[a-fA-F0-9]{40}$/,
-      index: true,
+      // [TR] unique:true zaten index üretir; index:true ve schema.index çift tanımı kaldırıldı.
     },
 
     // ── Generic Payout Profile (rail-aware) ──────────────────────────────────
@@ -150,7 +150,6 @@ const userSchema = new mongoose.Schema(
 );
 
 // ── Index'ler ─────────────────────────────────────────────────────────────────
-userSchema.index({ wallet_address: 1 });
 userSchema.index({ is_banned: 1 });
 userSchema.index({ lastBankChangeAt: -1 });
 
