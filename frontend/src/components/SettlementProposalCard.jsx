@@ -207,12 +207,41 @@ export default function SettlementProposalCard({
     if (ok) setPreviewOpen(false);
   };
 
+  // [TR] F3: önizleme ve kabul zincirdeki GÜNCEL tekliften beslenir; backend kopyası bayat olabilir.
+  // [EN] F3: preview and acceptance use the LIVE on-chain offer; the backend copy may be stale.
   const onPreviewAccept = async () => {
-    const makerBps = Number(proposal?.makerShareBps ?? proposal?.maker_share_bps ?? 0);
     setPreviewMode('accept');
-    const ok = await loadPreview(makerBps);
+    setPreviewError('');
+    const prepared = await settlementActions.prepareAccept();
+    if (!prepared.ok) {
+      // Değişiklik varsa kullanıcı güncel değerleri görüp onaylayabilsin diye modal açılır.
+      if (prepared.reason === 'CHANGED') setPreviewOpen(true);
+      else setPreviewError(prepared.error || '');
+      return;
+    }
+    const ok = await loadPreview(prepared.live.makerShareBps);
     if (ok) setPreviewOpen(true);
   };
+
+  const onConfirmAccept = async () => {
+    // [TR] Değişiklik bildirimi varsa ilk tık yalnız güncel teklifi onaylar (tx yok); ikinci tık gönderir.
+    if (settlementActions.acceptReview?.reason === 'CHANGED') {
+      const live = settlementActions.confirmAcceptReview();
+      if (live) await loadPreview(live.makerShareBps);
+      return;
+    }
+    const ok = await settlementActions.accept();
+    if (ok) setPreviewOpen(false);
+  };
+
+  // [TR] Kabul önizlemesinde gösterilen değerler: değişiklik incelemesindeki canlı teklif > sabitlenen anlık görüntü > ekrandaki teklif.
+  const acceptReviewChanged = settlementActions.acceptReview?.reason === 'CHANGED';
+  const acceptLive = settlementActions.acceptReview?.live || null;
+  const acceptSnap = settlementActions.acceptSnapshot;
+  const acceptShownMaker = acceptLive?.makerShareBps ?? acceptSnap?.makerShareBps ?? proposal?.makerShareBps ?? proposal?.maker_share_bps;
+  const acceptShown = Number.isFinite(Number(acceptShownMaker))
+    ? { makerShareBps: Number(acceptShownMaker), takerShareBps: 10000 - Number(acceptShownMaker) }
+    : null;
 
   if (!activeTrade) return null;
 
@@ -417,16 +446,20 @@ export default function SettlementProposalCard({
         lang={lang}
         isLoading={isContractLoading || previewLoading}
         error={previewError}
-        makerShareBps={previewMode === 'accept' ? (proposal?.makerShareBps ?? proposal?.maker_share_bps ?? '—') : normalizedMakerShareBps}
-        takerShareBps={previewMode === 'accept' ? (proposal?.takerShareBps ?? proposal?.taker_share_bps ?? '—') : normalizedTakerShareBps}
+        notice={previewMode === 'accept' ? settlementActions.acceptReviewMessage : ''}
+        makerShareBps={previewMode === 'accept' ? (acceptShown?.makerShareBps ?? '—') : normalizedMakerShareBps}
+        takerShareBps={previewMode === 'accept' ? (acceptShown?.takerShareBps ?? '—') : normalizedTakerShareBps}
         previewData={previewData}
         onConfirm={previewMode === 'accept'
-          ? settlementActions.accept
+          ? onConfirmAccept
           : onConfirmCreate}
         confirmLabel={previewMode === 'accept'
-          ? (lang === 'TR' ? 'Kabul et ve zincire gönder' : 'Accept and submit on-chain')
+          ? (acceptReviewChanged
+            ? (lang === 'TR' ? 'Güncel teklifi onayla' : 'Confirm updated offer')
+            : (lang === 'TR' ? 'Kabul et ve zincire gönder' : 'Accept and submit on-chain'))
           : (lang === 'TR' ? 'Teklifi zincire gönder' : 'Submit proposal on-chain')}
-        disableConfirm={previewLoading || Boolean(previewError) || !hasOnchainTradeId}
+        disableConfirm={previewLoading || (Boolean(previewError) && !acceptReviewChanged) || !hasOnchainTradeId
+          || (previewMode === 'accept' && Boolean(settlementActions.acceptReview) && !acceptReviewChanged)}
         userRole={userRole}
         tokenSymbol={activeTrade?.crypto || 'USDT'}
         decimals={activeTrade?.tokenDecimals ?? 6}

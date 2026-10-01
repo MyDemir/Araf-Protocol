@@ -19,6 +19,7 @@ const makeTrade = (overrides = {}) => ({
 
 const makeProposedTrade = (overrides = {}) => makeTrade({
   settlementProposal: {
+    id: 42,
     state: 'PROPOSED',
     proposer: maker,
     makerShareBps: 6000,
@@ -39,6 +40,11 @@ const makeDeps = (overrides = {}) => ({
     rejectSettlement: vi.fn().mockResolvedValue(undefined),
     withdrawSettlement: vi.fn().mockResolvedValue(undefined),
     expireSettlement: vi.fn().mockResolvedValue(undefined),
+    // F3: kabul öncesi zincirden canlı teklif okunur. / live proposal is read before acceptance.
+    getSettlementProposal: vi.fn().mockResolvedValue({
+      id: 42n, tradeId: 7n, proposer: maker, makerShareBps: 6000, takerShareBps: 4000,
+      proposedAt: 1n, expiresAt: BigInt(Math.floor(Date.now() / 1000) + 3600), state: 1,
+    }),
   },
   fetchMyTrades: vi.fn().mockResolvedValue(undefined),
   showToast: vi.fn(),
@@ -133,7 +139,7 @@ describe('settlement action module', () => {
       await getExpiredActions().expire();
     });
 
-    expect(counterpartyDeps.contractFns.acceptSettlement).toHaveBeenCalledWith(7n);
+    expect(counterpartyDeps.contractFns.acceptSettlement).toHaveBeenCalledWith(7n, 42n);
     expect(counterpartyDeps.contractFns.rejectSettlement).toHaveBeenCalledWith(7n);
     expect(proposerDeps.contractFns.withdrawSettlement).toHaveBeenCalledWith(7n);
     expect(expiredDeps.contractFns.expireSettlement).toHaveBeenCalledWith(7n);

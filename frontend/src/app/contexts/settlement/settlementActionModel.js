@@ -100,3 +100,41 @@ export const validateSettlementTradeId = ({ tradeId, lang = 'EN' }) => {
   }
   return null;
 };
+
+// [TR] Zincirdeki canlı teklif (getSettlementProposal) ile kullanıcının önizlediği teklifi karşılaştırır.
+//      Teklif sahibi withdraw + yeniden teklif ile oranı kabulden hemen önce değiştirebilir (K5); bu yüzden
+//      PROPOSED değil / süresi dolmuş / id ya da makerShareBps önizlemeden farklıysa tx GÖNDERİLMEZ.
+// [EN] Compares the live on-chain proposal with what the user previewed. If it is not PROPOSED, is expired, or
+//      the id / makerShareBps differ from the preview, NO tx is sent and the user must re-confirm.
+export const normalizeLiveProposal = (raw) => {
+  if (!raw || typeof raw !== 'object') return null;
+  const pick = (name, index) => (Array.isArray(raw) ? raw[index] : raw[name]);
+  try {
+    return {
+      id: BigInt(pick('id', 0) ?? 0),
+      proposer: pick('proposer', 2) || null,
+      makerShareBps: Number(pick('makerShareBps', 3)),
+      takerShareBps: Number(pick('takerShareBps', 4)),
+      expiresAt: Number(pick('expiresAt', 6) ?? 0),
+      state: normalizeSettlementState(pick('state', 7)),
+    };
+  } catch {
+    return null;
+  }
+};
+
+export const checkLiveProposalForAccept = ({ live, expected = null, nowTs }) => {
+  const proposal = normalizeLiveProposal(live);
+  if (!proposal) return { ok: false, reason: 'UNREADABLE', live: null };
+  if (proposal.state !== 'PROPOSED' || proposal.id <= 0n) return { ok: false, reason: 'NOT_PROPOSED', live: proposal };
+  // Kontrat: now > expiresAt => dolmuş.
+  if (!(proposal.expiresAt > 0) || nowTs > proposal.expiresAt) return { ok: false, reason: 'EXPIRED', live: proposal };
+  if (expected) {
+    const sameId = expected.id !== null && expected.id !== undefined && expected.id !== '' && BigInt(expected.id) === proposal.id;
+    const sameShare = Number(expected.makerShareBps) === proposal.makerShareBps;
+    if (!sameId || !sameShare) return { ok: false, reason: 'CHANGED', live: proposal };
+  } else {
+    return { ok: false, reason: 'CHANGED', live: proposal };
+  }
+  return { ok: true, reason: null, live: proposal };
+};

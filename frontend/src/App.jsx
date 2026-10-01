@@ -143,6 +143,8 @@ function App() {
     cancelSellOrder,
     cancelBuyOrder,
     proposeOrApproveCancel,
+    revokeCancel,
+    getSettlementProposal,
     expirePaymentWindow,
     getReputation,
     getCurrentAmounts,
@@ -581,7 +583,8 @@ function App() {
     rejectSettlement,
     withdrawSettlement,
     expireSettlement,
-  }), [proposeSettlement, acceptSettlement, rejectSettlement, withdrawSettlement, expireSettlement]);
+    getSettlementProposal,
+  }), [proposeSettlement, acceptSettlement, rejectSettlement, withdrawSettlement, expireSettlement, getSettlementProposal]);
   const handleMint = React.useMemo(() => buildMintAction({
     lang,
     isConnected,
