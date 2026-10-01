@@ -95,6 +95,19 @@ describe('useAppSessionData V3 reputation mapping', () => {
     });
   });
 
+  it('item 10: expired PROPOSED offers (chain time) are not counted as waiting / action required', () => {
+    const now = 1_800_000_000;
+    const activeEscrows = [
+      { rawTrade: { settlementProposal: { state: 'PROPOSED', proposer: '0xmaker', expiresAt: now - 1 } } },
+      { rawTrade: { settlementProposal: { state: 'PROPOSED', proposer: '0xother', expiresAt: now - 1 } } },
+      { rawTrade: { settlementProposal: { state: 'PROPOSED', proposer: '0xmaker', expiresAt: now } } },
+      { rawTrade: { settlementProposal: { state: 'PROPOSED', proposer: '0xother', expiresAt: now + 60 } } },
+    ];
+    expect(buildSettlementQuickCounts(activeEscrows, '0xmaker', now)).toStrictEqual({ PROPOSED: 4, ACTION_REQUIRED: 1, WAITING: 1 });
+    // chain time ahead of the device clock: the boundary second flips to expired
+    expect(buildSettlementQuickCounts(activeEscrows, '0xmaker', now + 1)).toStrictEqual({ PROPOSED: 4, ACTION_REQUIRED: 1, WAITING: 0 });
+  });
+
   it('maps terminal trade resolutionType labels with EN/TR copy and unknown fallback', () => {
     expect(mapResolutionTypeLabel('PARTIAL_SETTLEMENT', 'EN')).toBe('Closed by agreed partial settlement');
     expect(mapResolutionTypeLabel('BURNED', 'EN')).toBe('Closed by burn');

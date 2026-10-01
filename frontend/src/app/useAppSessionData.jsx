@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { deriveTradeTimeline } from './contexts/trade-room/tradeTimeline';
 import { shortAddress } from './copy';
+import { toUnixSeconds } from './contexts/settlement/settlementActionModel';
 import { buildMarketOrdersQuery, MARKET_FILTER_DEFAULTS, matchesMarketFilters } from './contexts/marketplace/marketFilters';
 import { mapApiOrderToUi, formatTokenAmount as formatTokenAmountFromRaw, tokenToNumber as rawTokenToDisplayNumber } from './orderUiModel';
 import { buildApiUrl } from './apiConfig';
@@ -105,13 +106,18 @@ export function mapSettlementProposalFromApi(settlementProposal) {
   };
 }
 
-export function buildSettlementQuickCounts(activeEscrows = [], connectedAddress = null) {
+// [TR] nowSec ZİNCİR zamanıdır (cihaz saati + chainOffset). Kontrat: now > expiresAt ise teklif dolmuştur; dolmuş
+//      teklif ne "yanıt bekliyor" ne "aksiyon gerekli" sayılır (artık kabul/ret edilemez, yalnız expire edilebilir).
+// [EN] nowSec is CHAIN time. An expired proposal (now > expiresAt) is neither "waiting for reply" nor "action required".
+export function buildSettlementQuickCounts(activeEscrows = [], connectedAddress = null, nowSec = Math.floor(Date.now() / 1000)) {
   const viewer = connectedAddress?.toLowerCase?.() || null;
   return activeEscrows.reduce((acc, escrow) => {
     const proposal = escrow?.rawTrade?.settlementProposal;
     if (!proposal || proposal.state !== 'PROPOSED') return acc;
 
     acc.PROPOSED += 1;
+    const expiresAtSec = toUnixSeconds(proposal.expiresAt ?? proposal.expires_at ?? 0);
+    if (expiresAtSec > 0 && nowSec > expiresAtSec) return acc;
     // [TR] quick-count action lane sadece normalize proposer varsa hesaplanır.
     // [EN] action-required lane is counted only when normalized proposer exists.
     const proposer = proposal.proposer?.toLowerCase?.() || null;
@@ -290,6 +296,8 @@ export function useAppSessionData({
   const [onchainTokenMap, setOnchainTokenMap] = useState({});
   const [paymentRiskConfig, setPaymentRiskConfig] = useState({});
   // [TR] null = henüz okunmadı / okunamadı (bilinmiyor); eski varsayılan 15 gerçek ücretmiş gibi gösteriliyordu.
+  // [TR] Zincir saati - cihaz saati farkı (ms); aşağıdaki zamana bağlı kararlar bunu kullanır.
+  const [chainOffsetMs, setChainOffsetMs] = useState(0);
   const [takerFeeBps, setTakerFeeBps] = useState(null);
   // [TR] Kontrat getFeeConfig aynası (backend /orders/config): emir önizlemesinde ücret gösterimi için.
   const [protocolFeeConfig, setProtocolFeeConfig] = useState(null);
@@ -1270,7 +1278,7 @@ export function useAppSessionData({
     LOCKED: activeEscrows.filter((e) => e.state === 'LOCKED').length,
     PAID: activeEscrows.filter((e) => e.state === 'PAID').length,
     CHALLENGED: activeEscrows.filter((e) => e.state === 'CHALLENGED').length,
-    settlement: buildSettlementQuickCounts(activeEscrows, address),
+    settlement: buildSettlementQuickCounts(activeEscrows, address, Math.floor((Date.now() + chainOffsetMs) / 1000)),
   };
 
   // [TR] İşlem odası sayaçları tek saatten, kontrat kurallarının aynası tradeTimeline ile türetilir.
@@ -1284,7 +1292,6 @@ export function useAppSessionData({
   //      açıldığında tek bir getBlock ile fark ölçülür (ek yük yok); okunamazsa cihaz saati kullanılır.
   // [EN] Timing decisions follow chain time, not the device clock (a lagging clock could cost the taker the
   //      auto-release path). One getBlock per trade-room open measures the offset; falls back to the device clock.
-  const [chainOffsetMs, setChainOffsetMs] = useState(0);
   const tradeRoomOpen = currentView === 'tradeRoom' && Boolean(activeTrade);
   // [TR] Ban kararı zincir saatine göre verilir; süre dolunca itibar yeniden okunur ve ban anında kalkar (F9).
   const bannedUntilSec = userReputation?.bannedUntil ?? 0;
