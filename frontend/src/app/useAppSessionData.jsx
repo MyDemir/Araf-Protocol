@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { deriveTradeTimeline } from './contexts/trade-room/tradeTimeline';
 import { shortAddress } from './copy';
+import { getChainNowMs, setClockOffset } from './clock';
 import { toUnixSeconds } from './contexts/settlement/settlementActionModel';
 import { buildMarketOrdersQuery, MARKET_FILTER_DEFAULTS, matchesMarketFilters } from './contexts/marketplace/marketFilters';
 import { mapApiOrderToUi, formatTokenAmount as formatTokenAmountFromRaw, tokenToNumber as rawTokenToDisplayNumber } from './orderUiModel';
@@ -1314,7 +1315,6 @@ export function useAppSessionData({
   //      şimdi tek interval, yalnız işlem odası açıkken ve sekme görünürken çalışır.
   // [EN] Trade room timers derive from one clock via tradeTimeline (the contract-rule mirror): one interval,
   //      only while the trade room is open and the tab is visible (was six 1s intervals re-rendering App).
-  const [clockMs, setClockMs] = useState(() => Date.now());
   // [TR] Süre kararları cihaz saatine değil zincir saatine göre verilir: cihaz saati geri kalan taker'ın uyarı butonu
   //      geç açılırsa maker ping yolunu önce açıp otomatik serbest bırakma hakkını kapatabilirdi. İşlem odası her
   //      açıldığında tek bir getBlock ile fark ölçülür (ek yük yok); okunamazsa cihaz saati kullanılır.
@@ -1350,22 +1350,29 @@ export function useAppSessionData({
       .catch(() => {});
     return () => { alive = false; };
   }, [tradeRoomOpen, bannedUntilSec, publicClient]);
-  useEffect(() => {
-    if (!tradeRoomOpen) return undefined;
-    setClockMs(Date.now() + chainOffsetMs);
-    const interval = setInterval(whenVisible(() => setClockMs(Date.now() + chainOffsetMs)), 1000);
-    return () => clearInterval(interval);
-  }, [tradeRoomOpen, chainOffsetMs]);
-  // [TR] Odaya yeniden girişte ilk render'da saat eski kalmasın. [EN] Never decide on a stale tick after re-entering the room.
-  const freshNowMs = Date.now() + chainOffsetMs;
-  const chainNowMs = Math.abs(clockMs - freshNowMs) > 1500 ? freshNowMs : clockMs;
-  const tradeTimers = useMemo(
-    () => deriveTradeTimeline(activeTrade, { state: resolvedTradeState, now: chainNowMs }).timers,
-    [activeTrade, resolvedTradeState, chainNowMs],
+  // [TR] P1: saniyelik saat App kökünde state DEĞİL; zincir farkı paylaşılan saat store'una yazılır ve yalnız saate
+  //      ihtiyaç duyan yaprak bileşenler (NowBoundary/useNow) saniyede bir render olur.
+  // [EN] P1: the per-second clock is not root state; the chain offset feeds the shared clock store and only leaf
+  //      components that subscribe re-render each second.
+  useEffect(() => { setClockOffset(chainOffsetMs); }, [chainOffsetMs]);
+  // [TR] Zaman damgası bilinmiyorsa (eski veri) buton kilidi kontrata bırakılır. Karar anı TIKLAMA anındadır:
+  //      okuyucular o anki zincir saatiyle hesaplar (render anındaki bayat değer kullanılmaz).
+  // [EN] Unknown timestamp → let the contract decide. The decision is made at CLICK time using the fresh chain clock.
+  const readMakerChallengeTimers = React.useCallback(
+    () => deriveTradeTimeline(activeTrade, { state: resolvedTradeState, now: getChainNowMs() }).timers,
+    [activeTrade, resolvedTradeState],
   );
-  // [TR] Zaman damgası bilinmiyorsa (eski veri) buton kilidi kontrata bırakılır. [EN] Unknown timestamp → let the contract decide.
-  const canMakerStartChallengeFlow = tradeTimers.makerChallengePing ? tradeTimers.makerChallengePing.isFinished : true;
-  const canMakerChallenge = tradeTimers.makerChallenge ? tradeTimers.makerChallenge.isFinished : true;
+  const readCanMakerStartChallengeFlow = React.useCallback(() => {
+    const t = readMakerChallengeTimers();
+    return t.makerChallengePing ? t.makerChallengePing.isFinished : true;
+  }, [readMakerChallengeTimers]);
+  const readCanMakerChallenge = React.useCallback(() => {
+    const t = readMakerChallengeTimers();
+    return t.makerChallenge ? t.makerChallenge.isFinished : true;
+  }, [readMakerChallengeTimers]);
+  // Render-time snapshots (yalnız paidAt bilinmeyen eski veride yedek olarak kullanılır).
+  const canMakerStartChallengeFlow = readCanMakerStartChallengeFlow();
+  const canMakerChallenge = readCanMakerChallenge();
 
   return {
     isAuthenticated,
@@ -1439,10 +1446,10 @@ export function useAppSessionData({
     filteredOrders,
     marketOrdersTotal,
     activeEscrowCounts,
-    tradeTimers,
-    chainNowMs,
     chainOffsetMs,
     canMakerStartChallengeFlow,
     canMakerChallenge,
+    readCanMakerStartChallengeFlow,
+    readCanMakerChallenge,
   };
 }

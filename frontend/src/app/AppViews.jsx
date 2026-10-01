@@ -14,6 +14,8 @@ import { countActiveMarketFilters, MARKET_FIAT_OPTIONS, MARKET_FILTER_DEFAULTS }
 import { mapResolutionTypeLabel } from './useAppSessionData';
 import TradeRoomPage from './contexts/trade-room/TradeRoomPage';
 import ThemeToggle from './shell/ThemeToggle';
+import NowBoundary from './shell/NowBoundary';
+import { deriveTradeTimeline } from './contexts/trade-room/tradeTimeline';
 import { isViewInNav, NAV_ORDER, VIEW_REGISTRY } from './viewRegistry';
 import {
   Banknote, ChevronDown, CircleCheck, CirclePause, Clock, Droplets, Flame, Handshake, History, Hourglass, Layers, ListPlus, LoaderCircle, Lock, Menu, Paperclip, Plus, RotateCcw, Search, Settings, Store, Swords,
@@ -180,7 +182,8 @@ export const buildAppViews = (ctx) => {
     handleAutoRelease,
     canMakerStartChallengeFlow,
     canMakerChallenge,
-    tradeTimers = {},
+    // [TR] tradeTimers artık yalnız GEÇERSİZ KILMA (lab/test) içindir; gerçek sayaçlar saat sınırında türetilir (P1).
+    tradeTimers: tradeTimerOverrides = {},
     chainNowMs,
     chainOffsetMs = 0,
     bleedingAmounts,
@@ -694,7 +697,7 @@ export const buildAppViews = (ctx) => {
               // [TR] K6: SELL emrinde emir sahibi (maker) kısıtlıysa kontrat fill'i MakerBanActive ile reddeder. Bilgi varsa
               //      buton kapanır; bilinmiyorsa (null) tx denenir ve revert mesajı çevrilir.
               const ownerBanKnown = isSellSide && Number.isFinite(order.ownerBannedUntil);
-              const isOwnerBanned = ownerBanKnown && order.ownerBannedUntil > Math.floor((Number.isFinite(chainNowMs) ? chainNowMs : Date.now()) / 1000);
+              const isOwnerBanned = ownerBanKnown && order.ownerBannedUntil > Math.floor((Number.isFinite(chainNowMs) ? chainNowMs : Date.now() + chainOffsetMs) / 1000);
               const finalCanTakeOrder = canTakeOrder && !isOwnerBanned && isCooldownOk && isFunded && isAged && !isPaused && isTokenConfigured && isCorrectChain;
               // [TR] Renk kullanıcının yapacağı işi anlatır: "Satın Al" yeşil, "Sat" kırmızı. Emir yönü rozeti nötrdür;
               //      renkli rozet (ör. yeşil "Satış emri") yanındaki butonla çelişiyordu.
@@ -818,7 +821,7 @@ export const buildAppViews = (ctx) => {
   //      Bleeding Escrow görsel barı, zamanlayıcılar, iptal/serbest bırakma ve PII bölümü içerir.
   // [EN] Trade room — shows taker/maker actions based on LOCKED/PAID/CHALLENGED state.
   //      Contains Bleeding Escrow visual bar, timers, cancel/release and PII section.
-  const renderTradeRoom = () => {
+  const renderTradeRoomAt = (clockNowMs) => {
     // [TR] Session invalidation sonrası activeTrade temizlenmiş olabilir.
     //      Bu durumda fallback "0.00/undefined" ile kırık oda render etmek yerine
     //      kullanıcıya deterministik empty-state gösterip güvenli aksiyon sunuyoruz.
@@ -911,7 +914,9 @@ export const buildAppViews = (ctx) => {
     const hasOnchainTradeId = activeTrade?.onchainId !== null && activeTrade?.onchainId !== undefined && activeTrade?.onchainId !== '';
     const missingOnchainIdReason = lang === 'TR' ? 'On-chain trade ID bulunamadı.' : 'Missing on-chain trade ID.';
     // [TR] Zincir saati (yoksa cihaz saati). [EN] Chain time, falling back to the device clock.
-    const nowMs = Number.isFinite(chainNowMs) ? chainNowMs : Date.now();
+    const nowMs = clockNowMs;
+    // [TR] Sayaçlar bu render'ın saatinden türetilir (App kökünde saniyelik state yok).
+    const tradeTimers = { ...deriveTradeTimeline(activeTrade, { state: roomState, now: nowMs }).timers, ...tradeTimerOverrides };
     const burnExpiredDeadlinePassed = getBurnExpiredDeadlinePassed({ activeTrade, roomState, now: new Date(nowMs) });
     const handleBurnExpired = ctx.handleBurnExpired || ctx.tradeRoomActions?.handleBurnExpired;
     const paymentWindowExpired = getPaymentWindowExpired({ activeTrade, roomState, now: new Date(nowMs) });
@@ -1141,6 +1146,13 @@ export const buildAppViews = (ctx) => {
 
   // [TR] Mobil alt navigasyon çubuğu — yalnızca mobil cihazlarda görünür
   // [EN] Mobile bottom navigation bar — visible only on mobile devices
+
+  // [TR] P1: işlem odası saat sınırı içinde render edilir; yalnız bu alt ağaç saniyede bir güncellenir.
+  // [EN] P1: the trade room renders inside a clock boundary; only this subtree updates each second.
+  const renderTradeRoom = () => (
+    <NowBoundary fixedNowMs={chainNowMs} render={renderTradeRoomAt} />
+  );
+
   const renderMobileNav = () => {
     // [TR] Her ikonun altında kısa etiket: yalnız emoji ile menü tahmin oyununa dönüyordu. Giriş yapınca
     //      cüzdan düğmesi profil ikonuyla aynı görünüyordu; artık cüzdan ikonu + yeşil nokta.

@@ -642,11 +642,13 @@ export const buildTradeRoomActions = ({
     if (!requireActiveOnchainId() || isContractLoading) return;
     const tradeDetails = activeEscrows.find((e) => e.id === `#${activeTrade.onchainId}`);
     const challengePingedAt = activeTrade?.challengePingedAt || tradeDetails?.challengePingedAt;
-    if (!challengePingedAt && !canMakerStartChallengeFlow) {
+    // [TR] Bayraklar işlev olabilir: karar TIKLAMA anındaki zincir saatiyle verilir (render anındaki değer bayatlar).
+    const readFlag = (flag) => (typeof flag === 'function' ? Boolean(flag()) : Boolean(flag));
+    if (!challengePingedAt && !readFlag(canMakerStartChallengeFlow)) {
       showToast(lang === 'TR' ? 'Ping için 24 saat dolmadan işlem gönderemezsiniz.' : 'You cannot ping before the 24-hour cooldown ends.', 'error');
       return;
     }
-    if (challengePingedAt && !canMakerChallenge) {
+    if (challengePingedAt && !readFlag(canMakerChallenge)) {
       showToast(lang === 'TR' ? 'Resmi itiraz için ping sonrası 24 saat beklenmeli.' : 'You must wait 24h after ping before opening a challenge.', 'error');
       return;
     }
