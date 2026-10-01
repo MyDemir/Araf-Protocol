@@ -32,6 +32,9 @@ export const useMakerOrderForm = ({
   paymentRiskConfig,
   authenticatedFetch = null,
   onchainTokenMap = {},
+  // [TR] Tam approve tutarı için backend bondMap + cüzdan itibarı okuyucusu (yoksa muhafazakâr üst sınır).
+  bondMap = null,
+  getReputation = null,
 }) => {
   const [makerTier, setMakerTier] = React.useState(MAKER_ORDER_DEFAULTS.makerTier);
   const [makerAmount, setMakerAmount] = React.useState(MAKER_ORDER_DEFAULTS.makerAmount);
@@ -114,6 +117,8 @@ export const useMakerOrderForm = ({
     authenticatedFetch,
     tierMaxAmounts,
     tokenPolicy,
+    bondMap,
+    getReputation,
   }), [
     getFormState,
     resetMakerOrderForm,
@@ -141,6 +146,8 @@ export const useMakerOrderForm = ({
     authenticatedFetch,
     tierMaxAmounts,
     tokenPolicy,
+    bondMap,
+    getReputation,
   ]);
 
   const handleOpenMakerModal = React.useCallback(() => {

@@ -553,6 +553,8 @@ function App() {
     paymentRiskConfig,
     authenticatedFetch,
     onchainTokenMap: labMaker?.tokenMap || onchainTokenMap,
+    bondMap: onchainBondMap,
+    getReputation,
   });
 
   // [TR] Lab "Emir oluşturma": formu senaryo değerleriyle doldurup modalı açar (kontrat çağrısı yapılmaz).
