@@ -2,33 +2,11 @@
 /**
  * SIWE Authentication Service
  *
- ## siwe.js hardening
-
-This PR updates `backend/scripts/services/siwe.js` to make nonce issuance safer and more authoritative under race conditions.
-
-### Previous behavior
-`generateNonce()` checked for an existing nonce, but after generating a new nonce it called Redis `SET NX` without verifying whether the write actually succeeded.
-
-That created a race condition:
-
-- two concurrent requests for the same wallet could both generate different nonces
-- one request could lose the `NX` write
-- but still return its own locally generated nonce
-- Redis would contain a different nonce than the one returned to the client
-
-This could break SIWE verification even when the user flow looked valid from the frontend.
-
-### New behavior
-`generateNonce()` now treats Redis as the source of truth:
-
-- if a nonce already exists, it is reused
-- if no nonce exists, a new nonce is generated and written with `SET NX`
-- if `NX` fails, the function no longer returns the local nonce
-- instead, it re-reads the actual nonce from Redis and returns that value
-- if Redis still does not contain a nonce after the failed `NX`, the function throws a safe retry error
-
-### Effect
-This makes nonce issuance authoritative under concurrency and removes nonce drift between the app and Redis.*/
+ * Nonce, JWT ve refresh token yönetimi. Redis nonce için tek doğruluk kaynağıdır:
+ * generateNonce() SET NX başarısız olursa Redis'teki gerçek nonce'u yeniden okur.
+ * Nonce, JWT and refresh token handling. Redis is the source of truth for nonces: when SET NX
+ * loses a race, generateNonce() re-reads the stored nonce instead of returning its local one.
+ */
 const { SiweMessage } = require("siwe");
 const { CURRENT_TERMS_VERSION } = require("../config/terms");
 const jwt = require("jsonwebtoken");
