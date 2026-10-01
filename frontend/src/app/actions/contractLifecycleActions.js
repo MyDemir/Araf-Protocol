@@ -55,23 +55,37 @@ const FETCH_RETRY_MS = 2000;
  * [EN] The fill is already on chain; "retry" would double-fill. Find the trade in /trades/my by parent order,
  *      filled amount and role instead.
  */
+// [TR] /trades/my sayfalıdır; yalnız ilk sayfaya bakmak çok işlemi olan cüzdanlarda trade'i kaçırıyordu. Her denemede
+//      sayfalar sırayla taranır (üst sınırlı: döngüye/aşırı isteğe karşı).
+// [EN] /trades/my is paginated; scanning only page 1 missed the trade for busy wallets. Each attempt walks the pages
+//      (bounded to avoid runaway requests).
+export const FIND_TRADE_PAGE_LIMIT = 50;
+export const FIND_TRADE_MAX_PAGES = 10;
+
 const findFilledTradeViaBackend = async ({ authenticatedFetch, order, address, side, fillAmountRaw, sleep }) => {
   const me = String(address || '').toLowerCase();
+  const matches = (t) => {
+    if (String(t?.parent_order_id ?? '') !== String(order.onchainId)) return false;
+    // Sell emrini dolduran taker, buy emrini dolduran maker olur.
+    const mine = side === 'BUY_CRYPTO' ? t?.maker_address : t?.taker_address;
+    if (String(mine || '').toLowerCase() !== me) return false;
+    return String(t?.financials?.crypto_amount ?? '') === fillAmountRaw.toString();
+  };
   for (let attempt = 0; attempt < fetchAttempts; attempt += 1) {
     try {
-      const res = await authenticatedFetch(buildApiUrl('trades/my?page=1&limit=50'));
-      if (res?.ok) {
+      for (let page = 1; page <= FIND_TRADE_MAX_PAGES; page += 1) {
+        const res = await authenticatedFetch(buildApiUrl(`trades/my?page=${page}&limit=${FIND_TRADE_PAGE_LIMIT}`));
+        if (!res?.ok) break;
         const data = await res.json();
-        const found = (data?.trades || []).find((t) => {
-          if (String(t?.parent_order_id ?? '') !== String(order.onchainId)) return false;
-          // Sell emrini dolduran taker, buy emrini dolduran maker olur.
-          const mine = side === 'BUY_CRYPTO' ? t?.maker_address : t?.taker_address;
-          if (String(mine || '').toLowerCase() !== me) return false;
-          return String(t?.financials?.crypto_amount ?? '') === fillAmountRaw.toString();
-        });
+        const trades = data?.trades || [];
+        const found = trades.find(matches);
         if (found?.onchain_escrow_id !== undefined && found?.onchain_escrow_id !== null && found?._id) {
           return { onchainId: String(found.onchain_escrow_id), id: found._id };
         }
+        // Son sayfa: kısa sayfa ya da toplam aşıldı.
+        const total = Number(data?.total);
+        const limit = Number(data?.limit) || FIND_TRADE_PAGE_LIMIT;
+        if (trades.length < limit || (Number.isFinite(total) && page * limit >= total)) break;
       }
     } catch (_) {}
     if (attempt < fetchAttempts - 1) await sleep(FETCH_RETRY_MS);

@@ -389,3 +389,36 @@ describe('item 6: fill reverts caused by the order owner ban are translated', ()
     expect(deps.showToast).toHaveBeenCalledWith(expect.stringContaining('order owner (seller) is currently restricted'), 'error');
   });
 });
+
+describe('item 13: findFilledTradeViaBackend paginates /trades/my', () => {
+  const me = '0xabc0000000000000000000000000000000000000';
+  const filler = (i) => ({ _id: `f${i}`, onchain_escrow_id: String(1000 + i), parent_order_id: '99', taker_address: '0xother', financials: { crypto_amount: '1' } });
+  const page = (n) => Array.from({ length: 50 }, (_, i) => filler(n * 50 + i));
+
+  it('finds the trade on page 3 (not only the first page)', async () => {
+    const target = { _id: 'db-77', onchain_escrow_id: '77', parent_order_id: '12', taker_address: me, financials: { crypto_amount: '100000000' } };
+    const pages = { 1: page(0), 2: page(1), 3: [target] };
+    const authenticatedFetch = vi.fn(async (url) => {
+      const m = String(url).match(/trades\/my\?page=(\d+)&limit=50/);
+      if (!m) return { ok: false, json: async () => ({}) };
+      return { ok: true, json: async () => ({ trades: pages[Number(m[1])] || [], total: 101, page: Number(m[1]), limit: 50 }) };
+    });
+    const deps = makeDeps({ fillSellOrder: vi.fn(async () => ({ receipt: {}, tradeId: null })), authenticatedFetch });
+    await runAction(deps);
+    expect(deps.setActiveTrade).toHaveBeenCalledWith(expect.objectContaining({ id: 'db-77', onchainId: '77' }));
+    const calls = authenticatedFetch.mock.calls.map((c) => String(c[0]));
+    expect(calls.some((u) => u.includes('page=3'))).toBe(true);
+  });
+
+  it('is bounded: never requests more than the page cap per attempt, then asks the user not to retry', async () => {
+    const authenticatedFetch = vi.fn(async (url) => (String(url).includes('trades/my')
+      ? { ok: true, json: async () => ({ trades: page(0), total: 100000, page: 1, limit: 50 }) }
+      : { ok: false, json: async () => ({}) }));
+    const deps = makeDeps({ fillSellOrder: vi.fn(async () => ({ receipt: {}, tradeId: null })), authenticatedFetch });
+    await runAction(deps);
+    const tradeCalls = authenticatedFetch.mock.calls.filter((c) => String(c[0]).includes('trades/my'));
+    expect(tradeCalls.length).toBeLessThanOrEqual(10 * 6);
+    expect(tradeCalls.length).toBeGreaterThan(6);
+    expect(deps.showToast).toHaveBeenCalledWith(expect.stringContaining('Do not retry'), 'info');
+  });
+});
