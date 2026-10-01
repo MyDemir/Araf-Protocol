@@ -50,13 +50,15 @@ export const deriveReputationView = ({ reputation, policy: rawPolicy = null, now
   const tier = Number(reputation.effectiveTier ?? 0);
   const bannedUntil = Number(reputation.bannedUntil ?? 0);
   const consecutiveBans = Number(reputation.consecutiveBans ?? 0);
+  // [TR] null = ilk başarılı işlem zamanı okunamadı → BİLİNMİYOR (0 = "hiç başarılı işlem yok" demektir, farklı şey).
+  const firstSuccessUnknown = reputation.firstSuccessfulTradeAt === null;
   const firstSuccessAt = Number(reputation.firstSuccessfulTradeAt ?? 0);
 
   const byCounts = computeTierByCounts(successful, riskPoints, policy);
   const activeUntil = firstSuccessAt > 0 ? firstSuccessAt + MIN_ACTIVE_PERIOD_SEC : 0;
-  const activePeriodPending = byCounts > 0 && (firstSuccessAt === 0 || now < activeUntil);
+  const activePeriodPending = !firstSuccessUnknown && byCounts > 0 && (firstSuccessAt === 0 || now < activeUntil);
   // [TR] Sayılar daha yüksek tier'a yetiyor, aktiflik süresi dolmuş, ama efektif tier düşük → kontrat ceza tavanı.
-  const tierCapped = !activePeriodPending && tier < byCounts;
+  const tierCapped = !firstSuccessUnknown && !activePeriodPending && tier < byCounts;
 
   let nextTier = null;
   if (tier < 4) {
@@ -104,6 +106,7 @@ export const deriveReputationView = ({ reputation, policy: rawPolicy = null, now
     banActive,
     consecutiveBans,
     activePeriodPending,
+    firstSuccessUnknown,
     activeUntil,
     nextTier,
     cleanSlate,

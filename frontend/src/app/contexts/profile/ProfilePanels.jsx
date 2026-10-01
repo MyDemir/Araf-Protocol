@@ -80,7 +80,7 @@ const CheckRow = ({ ok, label, detail, pending }) => (
 
 export const AccountPanel = ({
   lang = 'EN', address, isConnected, isAuthenticated, userReputation, reputationPolicy,
-  sybilStatus, walletAgeRemainingDays, isBanned, activeEscrows = [], myOrders = [], onNavigateTab,
+  sybilStatus, walletAgeRemainingDays, isWalletRegistered = null, isBanned, activeEscrows = [], myOrders = [], onNavigateTab,
 }) => {
   const [copied, setCopied] = React.useState(false);
   const rep = deriveReputationView({ reputation: userReputation, policy: reputationPolicy });
@@ -139,10 +139,10 @@ export const AccountPanel = ({
         <p className="text-xs text-textMuted -mt-1 mb-1">{tx(lang, 'Kontratın emir doldurmadan önce kontrol ettiği koşullar.', 'Conditions the contract checks before you fill an order.')}</p>
         <div className="divide-y divide-borderSubtle">
           <CheckRow
-            pending={!sybilStatus}
+            pending={!sybilStatus || (!sybilStatus.aged && isWalletRegistered === null)}
             ok={Boolean(sybilStatus?.aged)}
             label={tx(lang, `Cüzdan yaşı (${WALLET_AGE_MIN_DAYS} gün)`, `Wallet age (${WALLET_AGE_MIN_DAYS} days)`)}
-            detail={!sybilStatus ? '…' : sybilStatus.aged ? tx(lang, 'Tamam', 'OK') : (walletAgeRemainingDays != null ? tx(lang, `${walletAgeRemainingDays} gün kaldı`, `${walletAgeRemainingDays} days left`) : tx(lang, 'Kayıt gerekli', 'Registration needed'))}
+            detail={!sybilStatus ? '…' : sybilStatus.aged ? tx(lang, 'Tamam', 'OK') : isWalletRegistered === null ? tx(lang, 'Kayıt durumu bilinmiyor', 'Registration status unknown') : (walletAgeRemainingDays != null ? tx(lang, `${walletAgeRemainingDays} gün kaldı`, `${walletAgeRemainingDays} days left`) : tx(lang, 'Kayıt gerekli', 'Registration needed'))}
           />
           <CheckRow
             pending={!sybilStatus}
@@ -151,10 +151,10 @@ export const AccountPanel = ({
             detail={!sybilStatus ? '…' : sybilStatus.funded ? tx(lang, 'Yeterli', 'Enough') : tx(lang, 'Yetersiz', 'Too low')}
           />
           <CheckRow
-            pending={!sybilStatus}
+            pending={!sybilStatus || (!sybilStatus.cooldownOk && Boolean(sybilStatus.cooldownUnknown))}
             ok={sybilStatus ? Boolean(sybilStatus.cooldownOk) : false}
             label={tx(lang, 'İşlem arası bekleme', 'Trade cooldown')}
-            detail={!sybilStatus ? '…' : sybilStatus.cooldownOk ? tx(lang, 'Hazır', 'Ready') : tx(lang, `${Math.ceil((sybilStatus.cooldownRemaining || 0) / 60)} dk`, `${Math.ceil((sybilStatus.cooldownRemaining || 0) / 60)} min`)}
+            detail={!sybilStatus ? '…' : sybilStatus.cooldownOk ? tx(lang, 'Hazır', 'Ready') : sybilStatus.cooldownUnknown ? tx(lang, 'Bilinmiyor', 'Unknown') : tx(lang, `${Math.ceil((sybilStatus.cooldownRemaining || 0) / 60)} dk`, `${Math.ceil((sybilStatus.cooldownRemaining || 0) / 60)} min`)}
           />
           <CheckRow ok={!isBanned} label={tx(lang, 'Yasak durumu', 'Ban status')} detail={isBanned ? tx(lang, 'Yasaklı', 'Banned') : tx(lang, 'Temiz', 'Clear')} />
         </div>
@@ -299,10 +299,10 @@ export const ReputationPanel = ({
             </p>
             <CheckRow ok={rep.nextTier.riskOk} label={tx(lang, `Risk puanı ≤ ${rep.nextTier.riskCap}`, `Risk points ≤ ${rep.nextTier.riskCap}`)} detail={rep.nextTier.riskOk ? tx(lang, 'Tamam', 'OK') : tx(lang, `Şu an ${rep.riskPoints}`, `Now ${rep.riskPoints}`)} />
             <CheckRow
-              ok={!rep.activePeriodPending && rep.activeUntil > 0}
-              pending={rep.activeUntil === 0}
+              ok={!rep.firstSuccessUnknown && !rep.activePeriodPending && rep.activeUntil > 0}
+              pending={rep.firstSuccessUnknown || rep.activeUntil === 0}
               label={tx(lang, 'İlk başarılı işlemden 15 gün', '15 days since first success')}
-              detail={rep.activeUntil === 0 ? tx(lang, 'Başlamadı', 'Not started') : rep.activePeriodPending ? tx(lang, `${daysUntil(rep.activeUntil)} gün kaldı`, `${daysUntil(rep.activeUntil)} days left`) : tx(lang, 'Tamam', 'Done')}
+              detail={rep.firstSuccessUnknown ? tx(lang, 'Bilinmiyor', 'Unknown') : rep.activeUntil === 0 ? tx(lang, 'Başlamadı', 'Not started') : rep.activePeriodPending ? tx(lang, `${daysUntil(rep.activeUntil)} gün kaldı`, `${daysUntil(rep.activeUntil)} days left`) : tx(lang, 'Tamam', 'Done')}
             />
             {rep.tierCapped && (
               <p className="text-[11px] text-warning bg-warning/10 border border-warning/30 rounded-lg px-2.5 py-2">

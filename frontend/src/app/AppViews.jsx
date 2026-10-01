@@ -1,5 +1,5 @@
 import PIIDisplay from '../components/PIIDisplay';
-import { fmtBps, fmtNum, fmtPct, getStateLabel, localeOf } from './copy';
+import { fmtBps, isKnownNumber, fmtNum, fmtPct, getStateLabel, localeOf } from './copy';
 import ReferenceRateTicker from '../components/ReferenceRateTicker';
 import SettlementProposalCard from '../components/SettlementProposalCard';
 import { normalizeSettlementState } from './contexts/settlement/settlementActionModel';
@@ -83,9 +83,9 @@ const SOCIAL_LINKS = {
 // [EN] FAQ answers follow contract constants; the fee comes from the contract fee config.
 const buildFaqItems = (lang, protocolFeeConfig) => {
   const feeText = (() => {
-    const tb = Number(protocolFeeConfig?.takerFeeBps);
-    const mb = Number(protocolFeeConfig?.makerFeeBps);
-    if (!Number.isFinite(tb) || !Number.isFinite(mb)) return null;
+    if (!isKnownNumber(protocolFeeConfig?.takerFeeBps) || !isKnownNumber(protocolFeeConfig?.makerFeeBps)) return null;
+    const tb = Number(protocolFeeConfig.takerFeeBps);
+    const mb = Number(protocolFeeConfig.makerFeeBps);
     return lang === 'TR' ? `alıcıdan ${fmtBps(tb, lang)}, satıcıdan ${fmtBps(mb, lang)}` : `${fmtBps(tb, lang)} from the buyer and ${fmtBps(mb, lang)} from the seller`;
   })();
   return lang === 'TR'
@@ -728,7 +728,7 @@ export const buildAppViews = (ctx) => {
                 !canTakeOrder       ? <>{icon(Lock)} {tr ? 'Kilitli' : 'Locked'}</> :
                 !isAged             ? <>{icon(Hourglass)} {tr ? 'Cüzdan çok yeni' : 'Wallet too new'}</> :
                 !isFunded           ? <>{icon(TriangleAlert)} {tr ? 'Bakiye yetersiz' : 'Low balance'}</> :
-                !isCooldownOk       ? <>{icon(Hourglass)} {tr ? `${Math.ceil((sybilStatus?.cooldownRemaining || 0) / 60)} dk` : `${Math.ceil((sybilStatus?.cooldownRemaining || 0) / 60)} min`}</> :
+                !isCooldownOk       ? <>{icon(Hourglass)} {sybilStatus?.cooldownUnknown ? (tr ? 'Bekleme bilinmiyor' : 'Cooldown unknown') : (tr ? `${Math.ceil((sybilStatus?.cooldownRemaining || 0) / 60)} dk` : `${Math.ceil((sybilStatus?.cooldownRemaining || 0) / 60)} min`)}</> :
                 isContractLoading   ? <>{icon(LoaderCircle, true)}{loadingText || (tr ? 'İşleniyor…' : 'Processing…')}</> :
                 (order.ctaLabel || (tr ? 'İşlem yap' : 'Trade'));
               const ctaTone = isDisabled
@@ -900,14 +900,18 @@ export const buildAppViews = (ctx) => {
       : (Number(activeTrade?.max) > 0 && Number(activeTrade?.rate) > 0 ? Number(activeTrade.max) / Number(activeTrade.rate) : 0);
     // [TR] Ücret, global config değil trade'in kilitlendiği andaki fee snapshot'ından hesaplanır.
     // [EN] Fee uses the trade's lock-time fee snapshot, not the current global config.
-    const effectiveTakerFeeBps = Number.isFinite(Number(activeTrade?.takerFeeBps)) && activeTrade?.takerFeeBps !== null
+    // [TR] Ne snapshot ne kontrat ücreti okunabildiyse ücret "bilinmiyor" gösterilir (0 sanılmaz).
+    const effectiveTakerFeeBps = isKnownNumber(activeTrade?.takerFeeBps)
       ? Number(activeTrade.takerFeeBps)
-      : Number(takerFeeBps || 0);
-    const protocolFee  = rawCryptoAmt * (effectiveTakerFeeBps / 10000);
+      : (isKnownNumber(takerFeeBps) ? Number(takerFeeBps) : null);
+    const feeUnknown = effectiveTakerFeeBps === null;
+    const protocolFee  = feeUnknown ? 0 : rawCryptoAmt * (effectiveTakerFeeBps / 10000);
     const netAmount    = rawCryptoAmt - protocolFee;
     const asset        = activeTrade?.crypto || 'USDT';
     const fmt = (value, digits = 2) => fmtNum(value, lang, digits);
-    const feeBreakdownText = lang === 'TR'
+    const feeBreakdownText = feeUnknown
+      ? (lang === 'TR' ? `Kilitli ${fmt(rawCryptoAmt)} ${asset} · Ücret bilinmiyor` : `Locked ${fmt(rawCryptoAmt)} ${asset} · Fee unknown`)
+      : lang === 'TR'
       ? `Kilitli ${fmt(rawCryptoAmt)} ${asset} · Ücret ${fmt(protocolFee, 4)} · Alıcıya net ${fmt(netAmount)} ${asset}`
       : `Locked ${fmt(rawCryptoAmt)} ${asset} · Fee ${fmt(protocolFee, 4)} · Net to taker ${fmt(netAmount)} ${asset}`;
     // [TR] Karşı taraf adresi her zaman kısaltılır; ham 42 karakterlik adres mobilde taşıyordu.
@@ -1208,6 +1212,7 @@ export const buildAppViews = (ctx) => {
         reputationPolicy={lp ? lp.reputationPolicy : ctx.reputationPolicy}
         sybilStatus={lp ? lp.sybilStatus : sybilStatus}
         walletAgeRemainingDays={lp ? lp.walletAgeRemainingDays : walletAgeRemainingDays}
+        isWalletRegistered={lp ? (lp.isWalletRegistered ?? true) : ctx.isWalletRegistered}
         isBanned={lp ? lp.isBanned : Boolean(ctx.isBanned)}
         decayReputation={ctx.decayReputation}
         myOrders={lp ? lp.myOrders : (ctx.myOrders || [])}

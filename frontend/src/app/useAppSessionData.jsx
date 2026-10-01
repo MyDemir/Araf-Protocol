@@ -289,7 +289,8 @@ export function useAppSessionData({
   const [onchainBondMap, setOnchainBondMap] = useState(null);
   const [onchainTokenMap, setOnchainTokenMap] = useState({});
   const [paymentRiskConfig, setPaymentRiskConfig] = useState({});
-  const [takerFeeBps, setTakerFeeBps] = useState(15);
+  // [TR] null = henüz okunmadı / okunamadı (bilinmiyor); eski varsayılan 15 gerçek ücretmiş gibi gösteriliyordu.
+  const [takerFeeBps, setTakerFeeBps] = useState(null);
   // [TR] Kontrat getFeeConfig aynası (backend /orders/config): emir önizlemesinde ücret gösterimi için.
   const [protocolFeeConfig, setProtocolFeeConfig] = useState(null);
   // [TR] Kontrat itibar politikası (tier eşikleri, temiz sayfa süresi); getter olmadığından backend event aynası.
@@ -643,7 +644,9 @@ export function useAppSessionData({
       try {
         const fee = await getTakerFeeBps();
         setTakerFeeBps(Number(fee));
-      } catch (_) {}
+      } catch (_) {
+        setTakerFeeBps(null);
+      }
     };
     run();
   }, [getTakerFeeBps]);

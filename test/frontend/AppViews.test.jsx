@@ -683,3 +683,19 @@ describe('item 6: SELL fill button and the order owner ban (K6)', () => {
     }
   });
 });
+
+describe('item 9: trade room fee is unknown, not 0', () => {
+  const trade = { id: 'trade-1', onchainId: 1, max: 100, fiat: 'TRY', crypto: 'USDT', rate: 10, maker: '0xmaker', makerFull: '0x' + '1'.repeat(40) };
+  const roomCtx = (over) => ({ ...baseCtx, currentView: 'tradeRoom', resolvedTradeState: 'PAID', tradeState: 'PAID', userRole: 'maker', activeTrade: trade, ...over });
+
+  it('shows "Fee unknown" when neither the trade snapshot nor the contract fee is readable', () => {
+    render(<div>{buildAppViews(roomCtx({ takerFeeBps: null })).renderTradeRoom()}</div>);
+    expect(screen.getByText(/Fee unknown/)).toBeInTheDocument();
+  });
+
+  it('shows the fee when the contract fee is known', () => {
+    render(<div>{buildAppViews(roomCtx({ takerFeeBps: 10 })).renderTradeRoom()}</div>);
+    expect(screen.queryByText(/Fee unknown/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Fee 0\.01/)).toBeInTheDocument();
+  });
+});

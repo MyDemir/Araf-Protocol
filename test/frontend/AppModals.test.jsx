@@ -236,4 +236,19 @@ describe('AppModals side-aware behaviors', () => {
     const modals = buildAppModals(makeCtx({ showMakerModal: false }));
     expect(modals.renderProfileModal).toBeUndefined();
   });
+
+  it('item 9: maker modal shows "fee unknown" when the protocol fee config is missing, and the fee when known', () => {
+    const unknown = buildAppModals(makeCtx({ profileTab: 'ayarlar', showProfileModal: false, protocolFeeConfig: null }));
+    const { unmount } = render(<div>{unknown.renderMakerModal()}</div>);
+    expect(screen.getByTestId('maker-fee-unknown')).toBeInTheDocument();
+    unmount();
+    const nullFee = buildAppModals(makeCtx({ profileTab: 'ayarlar', showProfileModal: false, protocolFeeConfig: { makerFeeBps: null, takerFeeBps: null } }));
+    const second = render(<div>{nullFee.renderMakerModal()}</div>);
+    expect(screen.getByTestId('maker-fee-unknown')).toBeInTheDocument();
+    second.unmount();
+    const known = buildAppModals(makeCtx({ profileTab: 'ayarlar', showProfileModal: false, protocolFeeConfig: { makerFeeBps: 10, takerFeeBps: 10 } }));
+    render(<div>{known.renderMakerModal()}</div>);
+    expect(screen.queryByTestId('maker-fee-unknown')).not.toBeInTheDocument();
+    expect(screen.getByText(/Protocol fee is taken at settlement: 0\.1%/)).toBeInTheDocument();
+  });
 });
