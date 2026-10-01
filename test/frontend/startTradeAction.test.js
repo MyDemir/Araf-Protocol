@@ -379,3 +379,13 @@ describe('start trade action', () => {
     expect(appSource).not.toContain('trades/by-escrow/${onchainTradeId}');
   });
 });
+
+describe('item 6: fill reverts caused by the order owner ban are translated', () => {
+  it('SELL fill + MakerBanActive explains that the order owner (seller) is restricted', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const err = Object.assign(new Error('x'), { arafErrorName: 'MakerBanActive', shortMessage: 'Your restriction is active; you cannot open orders now.' });
+    const deps = makeDeps({ fillSellOrder: vi.fn(async () => { throw err; }) });
+    await buildStartTradeAction(deps)({ id: 'o', onchainId: 12, crypto: 'USDT', side: 'SELL_CRYPTO' });
+    expect(deps.showToast).toHaveBeenCalledWith(expect.stringContaining('order owner (seller) is currently restricted'), 'error');
+  });
+});

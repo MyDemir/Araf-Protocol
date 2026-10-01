@@ -302,7 +302,14 @@ export const buildStartTradeAction = ({
   } catch (err) {
     console.error('handleStartTrade error:', err);
 
-    const errorMessage = err.shortMessage || err.reason || err.message || (lang === 'TR' ? 'İşlem kilitlenemedi.' : 'Failed to lock trade.');
+    let errorMessage = err.shortMessage || err.reason || err.message || (lang === 'TR' ? 'İşlem kilitlenemedi.' : 'Failed to lock trade.');
+    // [TR] K6: fill'de kontrat emir sahibinin ban'ını da kontrol eder. Hata kullanıcının kendisine değil emir sahibine aittir.
+    const filledSide = normalizeOrderSide(String(order?.side || '').toUpperCase());
+    if (err?.arafErrorName === 'MakerBanActive' && filledSide === 'SELL_CRYPTO') {
+      errorMessage = lang === 'TR' ? 'Emir sahibi (satıcı) şu an kısıtlı; bu emir doldurulamaz. Başka bir emir deneyin.' : 'The order owner (seller) is currently restricted; this order cannot be filled. Try another order.';
+    } else if (err?.arafErrorName === 'TakerBanActive' && filledSide === 'BUY_CRYPTO') {
+      errorMessage = lang === 'TR' ? 'Emir sahibi (alıcı) şu an kısıtlı; bu emir doldurulamaz. Başka bir emir deneyin.' : 'The order owner (buyer) is currently restricted; this order cannot be filled. Try another order.';
+    }
     if (errorMessage.includes('rejected') || errorMessage.includes('User rejected')) {
       showToast(lang === 'TR' ? 'İşlem iptal edildi.' : 'Transaction cancelled.', 'error');
     } else {

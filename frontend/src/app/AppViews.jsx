@@ -702,7 +702,11 @@ export const buildAppViews = (ctx) => {
               const isFunded          = !isSellSide || (sybilStatus ? sybilStatus.funded !== false : true);
               const isAged            = !isSellSide || (sybilStatus ? sybilStatus.aged !== false : true);
               const isCooldownOk      = !isSellSide || Number(order.tier) >= 2 || (sybilStatus ? sybilStatus.cooldownOk !== false : true);
-              const finalCanTakeOrder = canTakeOrder && isCooldownOk && isFunded && isAged && !isPaused && isTokenConfigured && isCorrectChain;
+              // [TR] K6: SELL emrinde emir sahibi (maker) kısıtlıysa kontrat fill'i MakerBanActive ile reddeder. Bilgi varsa
+              //      buton kapanır; bilinmiyorsa (null) tx denenir ve revert mesajı çevrilir.
+              const ownerBanKnown = isSellSide && Number.isFinite(order.ownerBannedUntil);
+              const isOwnerBanned = ownerBanKnown && order.ownerBannedUntil > Math.floor((Number.isFinite(chainNowMs) ? chainNowMs : Date.now()) / 1000);
+              const finalCanTakeOrder = canTakeOrder && !isOwnerBanned && isCooldownOk && isFunded && isAged && !isPaused && isTokenConfigured && isCorrectChain;
               // [TR] Renk kullanıcının yapacağı işi anlatır: "Satın Al" yeşil, "Sat" kırmızı. Emir yönü rozeti nötrdür;
               //      renkli rozet (ör. yeşil "Satış emri") yanındaki butonla çelişiyordu.
               // [EN] Colour follows the viewer's action (buy green, sell red); the order-side badge stays neutral.
@@ -720,6 +724,7 @@ export const buildAppViews = (ctx) => {
                 !isTokenConfigured  ? <>{icon(Settings)} {tr ? 'Token ayarlanmadı' : 'Token not set'}</> :
                 isMyOwnAd           ? <>{tr ? 'Sizin emriniz' : 'Your order'}</> :
                 isTierLocked        ? <>{icon(Lock)} {tr ? `Tier ${order.tier} gerekli` : `Tier ${order.tier} required`}</> :
+                isOwnerBanned       ? <>{icon(Lock)} {tr ? 'Satıcı kısıtlı' : 'Seller restricted'}</> :
                 !canTakeOrder       ? <>{icon(Lock)} {tr ? 'Kilitli' : 'Locked'}</> :
                 !isAged             ? <>{icon(Hourglass)} {tr ? 'Cüzdan çok yeni' : 'Wallet too new'}</> :
                 !isFunded           ? <>{icon(TriangleAlert)} {tr ? 'Bakiye yetersiz' : 'Low balance'}</> :

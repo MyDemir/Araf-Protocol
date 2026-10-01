@@ -660,3 +660,26 @@ describe('AppViews market side-aware rendering', () => {
     expect(screen.getByRole('button', { name: 'Clear filters' })).toBeInTheDocument();
   });
 });
+
+describe('item 6: SELL fill button and the order owner ban (K6)', () => {
+  const sellOrder = (extra = {}) => ({
+    id: 's1', onchainId: 1, side: 'SELL_CRYPTO', crypto: 'USDT', tier: 0, fiat: 'TRY', rate: 40,
+    remainingAmount: 10, minFillAmount: 1, maker: '0x12…34', makerFull: '0x' + '3'.repeat(40), ...extra,
+  });
+  const farFuture = Math.floor(Date.now() / 1000) + 86400;
+
+  it('disables the CTA with "Seller restricted" when the owner ban is known', () => {
+    const views = buildAppViews({ ...baseCtx, filteredOrders: [sellOrder({ ownerBannedUntil: farFuture })] });
+    render(<div>{views.renderMarket()}</div>);
+    expect(screen.getByRole('button', { name: /Seller restricted/ })).toBeDisabled();
+  });
+
+  it('keeps the CTA enabled when the owner ban is unknown (null) or already over', () => {
+    for (const ownerBannedUntil of [null, undefined, 5]) {
+      cleanup();
+      const views = buildAppViews({ ...baseCtx, filteredOrders: [sellOrder({ ownerBannedUntil })] });
+      render(<div>{views.renderMarket()}</div>);
+      expect(screen.queryByRole('button', { name: /Seller restricted/ })).not.toBeInTheDocument();
+    }
+  });
+});
