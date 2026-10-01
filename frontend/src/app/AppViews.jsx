@@ -196,26 +196,15 @@ export const buildAppViews = (ctx) => {
   } = ctx;
 
   // [TR] Admin menü görünürlüğü yalnız UX katmanıdır; nihai yetki backend ADMIN_WALLETS + auth zincirindedir.
-  //      F19.5 — Sunucu yanıtı (ctx.isAdmin: boolean) varsa tek doğrudur: true → göster, false → gizle.
-  //      Şu an backend'de böyle bir uç yok (yalnız 403'lü /api/admin/*); yanıt yoksa geçiş dönemi davranışı:
-  //      VITE_ADMIN_WALLETS doluysa yalnız listedeki cüzdanlara, boşsa imzalı her kullanıcıya gösterilir.
-  //      NOT: env listesi istemci paketine girer; sunucu bayrağı bağlanınca bu yedek kaldırılmalı.
-  // [EN] Admin menu visibility is UX-only. A server answer (ctx.isAdmin: boolean) is authoritative. No such endpoint
-  //      exists yet (only 403-gated /api/admin/*), so without one: a non-empty VITE_ADMIN_WALLETS narrows the entry to
-  //      listed wallets; an empty list keeps it visible to signed-in users. The env list ships in the bundle;
-  //      drop this fallback once the server flag is wired.
-  const adminWalletAllowlist = String(import.meta.env.VITE_ADMIN_WALLETS || "")
-    .split(",")
-    .map((w) => w.trim().toLowerCase())
-    .filter(Boolean);
+  //      Tek doğru kaynak sunucudur: /api/auth/me yanıtındaki `isAdmin` (boolean) → ctx.isAdmin. Yanıt yoksa (null)
+  //      ya da false ise giriş gizlenir (fail-closed). Admin cüzdan listesi istemci paketine GİRMEZ: eski
+  //      VITE_ADMIN_WALLETS env yedeği kaldırıldı (her VITE_* değeri herkese açık bundle'a gömülür).
+  // [EN] Admin menu visibility is UX-only; the server decides. `isAdmin` from /api/auth/me → ctx.isAdmin. A missing
+  //      (null) or false answer hides the entry (fail-closed). The admin wallet list never ships in the client bundle:
+  //      the VITE_ADMIN_WALLETS fallback was removed (every VITE_* value is embedded in the public bundle).
   const connectedWalletLower = typeof address === "string" ? address.toLowerCase() : null;
-  const serverAdminAnswer = typeof ctx.isAdmin === "boolean" ? ctx.isAdmin : null;
-  const inEnvAllowlist = Boolean(connectedWalletLower) && adminWalletAllowlist.includes(connectedWalletLower);
-  const isLikelyAdminWallet = serverAdminAnswer === true || (serverAdminAnswer === null && inEnvAllowlist);
-  const adminAllowedByPolicy = serverAdminAnswer !== null
-    ? serverAdminAnswer
-    : (adminWalletAllowlist.length === 0 || inEnvAllowlist);
-  const canSeeAdminEntry = Boolean(isConnected && isAuthenticated && connectedWalletLower && adminAllowedByPolicy);
+  const isLikelyAdminWallet = ctx.isAdmin === true;
+  const canSeeAdminEntry = Boolean(isConnected && isAuthenticated && connectedWalletLower && isLikelyAdminWallet);
   // [TR] İşlem Odası, Takip, Profil ve Geçmiş yalnız imzalı oturumla anlamlıdır; oturum yokken gezinmede
   //      gösterilmez (App.jsx de bu görünümlerden ana sayfaya yönlendirir). UI Lab senaryoları istisnadır.
   // [EN] Trade room, tracking, profile and history need a signed session; hidden from navigation otherwise.

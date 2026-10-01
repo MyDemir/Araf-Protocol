@@ -101,22 +101,11 @@ describe('AppViews market side-aware rendering', () => {
     expect(screen.queryByText(/Get Test USDC|Test USDC Al/i)).not.toBeInTheDocument();
   });
 
-  it('keeps admin entry reachable for authenticated users even when VITE_ADMIN_WALLETS is empty', () => {
-    const previous = import.meta.env.VITE_ADMIN_WALLETS;
-    import.meta.env.VITE_ADMIN_WALLETS = '';
-    try {
-      const views = buildAppViews({
-        ...baseCtx,
-        isConnected: true,
-        isAuthenticated: true,
-      });
-      render(<div>{views.renderSlimRail()}</div>);
-      expect(screen.getByTitle('Admin Observability (server-authorized, read-only)')).toBeInTheDocument();
-    } finally {
-      import.meta.env.VITE_ADMIN_WALLETS = previous;
-    }
+  it('shows the admin entry for authenticated users when the server flags them as admin', () => {
+    const views = buildAppViews({ ...baseCtx, isConnected: true, isAuthenticated: true, isAdmin: true });
+    render(<div>{views.renderSlimRail()}</div>);
+    expect(screen.getByTitle(/Admin Panel/)).toBeInTheDocument();
   });
-
 
   it('keeps UI Lab out of product navigation even when enabled', () => {
     const views = buildAppViews({

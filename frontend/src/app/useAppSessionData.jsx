@@ -230,6 +230,9 @@ export function useAppSessionData({
   const [chargebackAccepted, setChargebackAccepted] = useState(false);
 
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  // [TR] Sunucunun /auth/me yanıtındaki isAdmin: true/false; null = henüz bilinmiyor (menü gizli kalır).
+  const [isAdmin, setIsAdmin] = useState(null);
+  const adminResolvedWalletRef = React.useRef(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [authenticatedWallet, setAuthenticatedWallet] = useState(null);
   const [isWalletRegistered, setIsWalletRegistered] = useState(null);
@@ -352,6 +355,8 @@ export function useAppSessionData({
     statePinRef.current = null;
     setIsAuthenticated(false);
     setAuthenticatedWallet(null);
+    setIsAdmin(null);
+    adminResolvedWalletRef.current = null;
     authenticatedWalletRef.current = null;
     if (closeModals) {
       setShowMakerModal(false);
@@ -728,7 +733,9 @@ export function useAppSessionData({
     })
       .then(async (res) => {
         if (cancelled) return;
-        if (res.status === 409) {
+        // [TR] Yalnız SESSION_WALLET_MISMATCH kodlu 409 cüzdan uyuşmazlığıdır; diğer 409'lar genel hata yoluna düşer.
+        if (res.status === 409 && await isSessionWalletMismatch(res)) {
+          if (cancelled) return;
           clearLocalSessionState({ navigateHome: false, closeModals: true });
           setAuthChecked(true);
           showToastRef.current(
@@ -774,6 +781,8 @@ export function useAppSessionData({
         setIsAuthenticated(true);
         setAuthenticatedWallet(sessionWallet);
         authenticatedWalletRef.current = sessionWallet;
+        setIsAdmin(typeof data?.isAdmin === 'boolean' ? data.isAdmin : null);
+        adminResolvedWalletRef.current = sessionWallet;
         setAuthChecked(true);
       })
       .catch(() => {
@@ -785,6 +794,25 @@ export function useAppSessionData({
       cancelled = true;
     };
   }, [isConnected, connectedWallet, clearLocalSessionState, bestEffortBackendLogout]);
+
+  // [TR] Giriş (imza) /auth/me doğrulamasından bağımsız yapılır; isAdmin bu durumda henüz bilinmez. Oturum açılınca
+  //      yönetici bayrağı bir kez /auth/me'den okunur (doğrulama zaten okuduysa tekrar istenmez).
+  // [EN] Sign-in bypasses the /auth/me validation effect, so isAdmin is unknown then; read it once after login.
+  useEffect(() => {
+    if (!isAuthenticated || !authenticatedWallet) return undefined;
+    if (adminResolvedWalletRef.current === authenticatedWallet) return undefined;
+    let cancelled = false;
+    fetch(buildApiUrl('auth/me'), { credentials: 'include', headers: { 'x-wallet-address': authenticatedWallet } })
+      .then(async (res) => {
+        if (cancelled || !res.ok) return;
+        const data = await res.json().catch(() => ({}));
+        if (cancelled || data?.wallet?.toLowerCase?.() !== authenticatedWallet) return;
+        setIsAdmin(typeof data?.isAdmin === 'boolean' ? data.isAdmin : null);
+        adminResolvedWalletRef.current = authenticatedWallet;
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [isAuthenticated, authenticatedWallet]);
 
   // [TR] Tutar araması her tuşta istek atmasın diye 400 ms geciktirilir. [EN] Debounce the amount search.
   const searchAmount = marketFilters.amount;
@@ -1347,6 +1375,7 @@ export function useAppSessionData({
     setAuthenticatedWallet,
     isWalletRegistered,
     setIsWalletRegistered,
+    isAdmin,
     isRegisteringWallet,
     setIsRegisteringWallet,
     isLoggingIn,
