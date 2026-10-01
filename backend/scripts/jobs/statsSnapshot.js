@@ -14,6 +14,7 @@
 
 const Trade = require("../models/Trade");
 const Order = require("../models/Order");
+const TerminalTradeStat = require("../models/TerminalTradeStat");
 const HistoricalStat = require("../models/HistoricalStat");
 const logger = require("../utils/logger");
 const { getConfig } = require("../services/protocolConfig");
@@ -88,8 +89,34 @@ async function _sumAmountStrings(match, paths) {
   return _decimal128ToIntString(rows[0]?.total);
 }
 
+const TERMINAL_TRADE_STATES = ["RESOLVED", "CANCELED", "BURNED"];
+
+async function _sumCounterStrings(match, path) {
+  const rows = await TerminalTradeStat.aggregate([
+    { $match: match },
+    { $group: { _id: null, total: { $sum: _decimalSumExpr([path]) } } },
+  ]);
+  return _decimal128ToIntString(rows[0]?.total);
+}
+
+// [TR] Token bazlı iki satır kümesini (Trade canlı + kalıcı sayaç) _id'ye göre toplar.
+function _mergeTokenRows(a = [], b = [], field) {
+  const map = new Map();
+  [...a, ...b].forEach((row) => {
+    const key = row?._id ?? null;
+    map.set(key, (map.get(key) || 0) + Number(row?.[field] || 0));
+  });
+  return [...map.entries()].map(([_id, value]) => ({ _id, [field]: value }));
+}
+
 /**
  * V3 güncel istatistiklerini DB seviyesinde hesaplar.
+ *
+ * B23: Terminal trade'ler 1 yıl sonra TTL ile silindiği için TERMİNAL kümülatifler (hacim, tamamlanan,
+ * yakılan, süre) kalıcı TerminalTradeStat sayacından okunur; Trade koleksiyonundan yalnız terminal
+ * olmayan (canlı) trade'ler okunur. Böylece hiçbir trade iki kez sayılmaz ve istatistik geriye gitmez.
+ * B23: terminal cumulatives come from the permanent TerminalTradeStat counter; Trade is read only for
+ * non-terminal (live) rows, so nothing is double counted and stats never go backwards.
  *
  * Notlar:
  *   - total_volume_usdt                = RESOLVED child trade hacmi (approximate Number cache)
@@ -103,7 +130,9 @@ async function _sumAmountStrings(match, paths) {
  */
 async function computeCurrentStats() {
   const activeTradeStates = ["OPEN", "LOCKED", "PAID", "CHALLENGED"];
-  const executedTradeStates = ["LOCKED", "PAID", "CHALLENGED", "RESOLVED", "CANCELED", "BURNED"];
+  // [TR] Canlı (terminal olmayan) trade'lerden "executed" sayılanlar; terminal olanlar sayaçtan gelir.
+  const liveExecutedStates = ["LOCKED", "PAID", "CHALLENGED"];
+  const nonTerminal = { status: { $nin: TERMINAL_TRADE_STATES } };
 
   // [TR] "Açık emir" semantiğinde PARTIALLY_FILLED de halen fill edilebilir kabul edilir.
   // [EN] PARTIALLY_FILLED orders are still fillable, so they are included in "open" order semantics.
@@ -112,9 +141,11 @@ async function computeCurrentStats() {
   const [
     resolvedAgg,
     totalVolumeStr,
-    executedVolumeStr,
+    executedTerminalStr,
+    executedLiveStr,
     burnedBondsStr,
-    childTradeCount,
+    liveChildTradeCount,
+    terminalChildTradeCount,
     activeChildTrades,
     openSellOrders,
     openBuyOrders,
@@ -122,34 +153,23 @@ async function computeCurrentStats() {
     filledOrders,
     canceledOrders,
   ] = await Promise.all([
-    Trade.aggregate([
+    TerminalTradeStat.aggregate([
       { $match: { status: "RESOLVED" } },
       {
         $group: {
           _id: null,
-          totalVolumeApprox: { $sum: "$financials.crypto_amount_num" },
+          totalVolumeApprox: { $sum: "$crypto_amount_num" },
           count: { $sum: 1 },
-          totalDurationMs: {
-            $sum: {
-              $cond: {
-                if: {
-                  $and: [
-                    { $ne: ["$timers.locked_at", null] },
-                    { $ne: ["$timers.resolved_at", null] },
-                  ],
-                },
-                then: { $subtract: ["$timers.resolved_at", "$timers.locked_at"] },
-                else: 0,
-              },
-            },
-          },
+          totalDurationMs: { $sum: "$duration_ms" },
         },
       },
     ]),
-    _sumAmountStrings({ status: "RESOLVED" }, ["$financials.crypto_amount"]),
-    _sumAmountStrings({ status: { $in: executedTradeStates } }, ["$financials.crypto_amount"]),
-    _sumAmountStrings({ status: "BURNED" }, ["$financials.total_decayed", "$financials.burned_amount"]),
-    Trade.countDocuments({}),
+    _sumCounterStrings({ status: "RESOLVED" }, "$crypto_amount"),
+    _sumCounterStrings({}, "$crypto_amount"),
+    _sumAmountStrings({ status: { $in: liveExecutedStates } }, ["$financials.crypto_amount"]),
+    _sumCounterStrings({ status: "BURNED" }, "$burned_amount"),
+    Trade.countDocuments(nonTerminal),
+    TerminalTradeStat.countDocuments({}),
     Trade.countDocuments({ status: { $in: activeTradeStates } }),
     Order.countDocuments({ side: "SELL_CRYPTO", status: { $in: fillableOrderStates } }),
     Order.countDocuments({ side: "BUY_CRYPTO", status: { $in: fillableOrderStates } }),
@@ -157,34 +177,47 @@ async function computeCurrentStats() {
     Order.countDocuments({ status: "FILLED" }),
     Order.countDocuments({ status: "CANCELED" }),
   ]);
+  const executedVolumeStr = (BigInt(executedTerminalStr) + BigInt(executedLiveStr)).toString();
+  const childTradeCount = Number(liveChildTradeCount || 0) + Number(terminalChildTradeCount || 0);
 
-  const [resolvedByToken, executedByToken, burnedByToken] = await Promise.all([
-    Trade.aggregate([
-      { $match: { status: "RESOLVED" } },
-      { $group: { _id: "$token_address", volume: { $sum: "$financials.crypto_amount_num" } } },
-    ]),
-    Trade.aggregate([
-      { $match: { status: { $in: executedTradeStates } } },
-      { $group: { _id: "$token_address", volume: { $sum: "$financials.crypto_amount_num" } } },
-    ]),
-    // [TR] Eriyen hazine = tüm trade'lerde bleeding decay + burnExpired ile yakılan toplam.
-    // [EN] Burned treasury = bleeding decay across all trades + totals burned by burnExpired.
-    Trade.aggregate([
-      {
-        $group: {
-          _id: "$token_address",
-          burned: {
-            $sum: {
-              $add: [
-                { $ifNull: ["$financials.total_decayed_num", 0] },
-                { $ifNull: ["$financials.burned_amount_num", 0] },
-              ],
+  const [resolvedByToken, executedTerminalByToken, executedLiveByToken, burnedTerminalByToken, burnedLiveByToken] =
+    await Promise.all([
+      TerminalTradeStat.aggregate([
+        { $match: { status: "RESOLVED" } },
+        { $group: { _id: "$token_address", volume: { $sum: "$crypto_amount_num" } } },
+      ]),
+      TerminalTradeStat.aggregate([
+        { $group: { _id: "$token_address", volume: { $sum: "$crypto_amount_num" } } },
+      ]),
+      Trade.aggregate([
+        { $match: { status: { $in: liveExecutedStates } } },
+        { $group: { _id: "$token_address", volume: { $sum: "$financials.crypto_amount_num" } } },
+      ]),
+      // [TR] Eriyen hazine = tüm trade'lerde bleeding decay + burnExpired ile yakılan toplam
+      //      (terminal olanlar sayaçta, canlı olanlar Trade'de).
+      // [EN] Burned treasury = bleeding decay across all trades + burnExpired totals (terminal in counter, live in Trade).
+      TerminalTradeStat.aggregate([
+        { $group: { _id: "$token_address", burned: { $sum: "$burned_amount_num" } } },
+      ]),
+      Trade.aggregate([
+        { $match: nonTerminal },
+        {
+          $group: {
+            _id: "$token_address",
+            burned: {
+              $sum: {
+                $add: [
+                  { $ifNull: ["$financials.total_decayed_num", 0] },
+                  { $ifNull: ["$financials.burned_amount_num", 0] },
+                ],
+              },
             },
           },
         },
-      },
-    ]),
-  ]);
+      ]),
+    ]);
+  const executedByToken = _mergeTokenRows(executedTerminalByToken, executedLiveByToken, "volume");
+  const burnedByToken = _mergeTokenRows(burnedTerminalByToken, burnedLiveByToken, "burned");
 
   const resolved = resolvedAgg[0] || { totalVolumeApprox: 0, count: 0, totalDurationMs: 0 };
 

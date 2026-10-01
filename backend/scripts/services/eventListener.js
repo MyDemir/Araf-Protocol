@@ -29,6 +29,7 @@ const Trade = require("../models/Trade");
 const Order = require("../models/Order");
 const User = require("../models/User");
 const RevenueEvent = require("../models/RevenueEvent");
+const { recordTerminalTradeStat } = require("./terminalStats");
 const RewardFunding = require("../models/RewardFunding");
 const RewardEpoch = require("../models/RewardEpoch");
 const RewardClaim = require("../models/RewardClaim");
@@ -2051,6 +2052,11 @@ class EventWorker {
     );
 
     if (!trade) return null;
+
+    // [TR] B23: kalıcı kümülatif sayaç (trade başına bir kez, idempotent). Trade 1 yıl sonra TTL ile silinse de
+    //      istatistik geriye gitmez. Aynı session/transaction içinde; hata olursa terminal geçiş de geri alınır.
+    // [EN] B23: permanent cumulative counter row (once per trade, idempotent) so stats survive the Trade TTL.
+    await recordTerminalTradeStat(trade, { session });
 
     if (trade.parent_order_id) {
       await Order.findOneAndUpdate(
