@@ -157,7 +157,7 @@ export const buildStartTradeAction = ({
   }
   if (resolveLoadingState(isContractLoading)) return;
 
-  let tokenAddress = null;
+  let tokenAddress;
 
   try {
     setIsContractLoading(true);

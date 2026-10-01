@@ -111,7 +111,7 @@ export default function PIIDisplay({ tradeId, lang = 'tr', authenticatedFetch })
       await navigator.clipboard.writeText(cleanValue);
       setCopyState({ status: 'success', field: fieldKey });
       setTimeout(() => setCopyState({ status: 'idle', field: null }), 2000);
-    } catch (err) {
+    } catch (_err) {
       // [TR] İzin reddedildi veya başka clipboard hatası — fallback: seçim yöntemi
       try {
         const textArea = document.createElement('textarea');

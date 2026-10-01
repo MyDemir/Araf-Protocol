@@ -283,7 +283,8 @@ function App() {
     devScenarioActive && uiLab ? uiLab.createLabRuntime(devScenario, { authenticatedFetch }) : null
   ), [devScenarioActive, devScenario, uiLab, authenticatedFetch]);
   // [TR] Lab'da kontrat çağrısı yapılmaz, yalnız günlüğe yazılır. [EN] In the lab contract calls are only logged.
-  const labOr = (actionKey, fn) => (lab ? lab.noop(actionKey) : fn);
+  // [TR] Kimliği `lab`e bağlı sabit tutulur: useMemo bağımlılıklarında güvenle kullanılır (davranış aynı).
+  const labOr = React.useCallback((actionKey, fn) => (lab ? lab.noop(actionKey) : fn), [lab]);
   const effectiveActiveEscrows = lab?.activeEscrows ?? activeEscrows;
   const effectiveActiveEscrowCounts = lab?.activeEscrowCounts ?? activeEscrowCounts;
   const effectiveAuthenticatedFetch = lab?.authenticatedFetch ?? authenticatedFetch;
@@ -597,7 +598,7 @@ function App() {
     showToast,
     setIsContractLoading,
     setLoadingText,
-  }), [lang, isConnected, isFaucetEnabled, SUPPORTED_TOKEN_ADDRESSES, mintToken, showToast]);
+  }), [lang, isConnected, isFaucetEnabled, mintToken, showToast]);
 
   const handleStartTrade = React.useMemo(() => buildStartTradeAction({
     lang,
@@ -636,7 +637,6 @@ function App() {
     address,
     isBanned,
     isContractLoading,
-    SUPPORTED_TOKEN_ADDRESSES,
     getOrder,
     getAllowance,
     approveToken,
@@ -652,7 +652,7 @@ function App() {
     setTradeState,
     setCancelStatus,
     setChargebackAccepted,
-    lab,
+    labOr,
   ]);
 
   const tradeRoomActions = React.useMemo(() => buildTradeRoomActions({
@@ -719,7 +719,7 @@ function App() {
     setPaymentIpfsHash,
     setCancelStatus,
     setChargebackAccepted,
-    lab,
+    labOr,
   ]);
 
   const profileActions = React.useMemo(() => buildProfileActions({
@@ -748,7 +748,7 @@ function App() {
     showToast,
     setIsRegisteringWallet,
     setIsWalletRegistered,
-    lab,
+    labOr,
   ]);
 
   const orderActions = React.useMemo(() => buildOrderActions({
@@ -768,7 +768,6 @@ function App() {
     setConfirmDeleteId,
   }), [
     lang,
-    address,
     isContractLoading,
     requireSignedSessionForActiveWallet,
     fillSellOrder,
@@ -780,7 +779,7 @@ function App() {
     showToast,
     setOrders,
     setMyOrders,
-    lab,
+    labOr,
   ]);
 
   const {

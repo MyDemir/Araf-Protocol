@@ -635,7 +635,7 @@ export function useAppSessionData({
     } catch (err) {
       console.error('Trades fetch error:', err);
     }
-  }, [devScenarioActive, isAuthenticated, isConnected, address, lang, authenticatedFetch, tokenDecimalsMap, showToast, setActiveEscrows, setActiveTrade]);
+  }, [devScenarioActive, isAuthenticated, isConnected, address, lang, authenticatedFetch, tokenDecimalsMap, showToast, setActiveEscrows, setActiveTrade, formatAddress]);
 
   // Protocol configuration and read models
   useEffect(() => {
@@ -885,7 +885,7 @@ export function useAppSessionData({
     }
     const interval = setInterval(whenVisible(fetchOrders), 30000);
     return () => { cancelled = true; controller?.abort(); clearInterval(interval); };
-  }, [lang, onchainBondMap, onchainTokenMap, paymentRiskConfig, marketOrdersQuery, marketViewOpen]);
+  }, [lang, onchainBondMap, onchainTokenMap, paymentRiskConfig, marketOrdersQuery, marketViewOpen, formatAddress]);
 
   useEffect(() => {
     if (!isAuthenticated || !isConnected) {
@@ -924,7 +924,7 @@ export function useAppSessionData({
 
     fetchMyOrders();
     return () => { cancelled = true; controller?.abort(); };
-  }, [isAuthenticated, isConnected, authenticatedFetch, lang, onchainBondMap, onchainTokenMap, paymentRiskConfig]);
+  }, [isAuthenticated, isConnected, authenticatedFetch, lang, onchainBondMap, onchainTokenMap, paymentRiskConfig, formatAddress]);
 
   useEffect(() => { fetchStats(); }, [fetchStats]);
 
@@ -1010,7 +1010,7 @@ export function useAppSessionData({
   useEffect(() => {
     if (!isConnected || !address || !antiSybilCheck) return;
     const fetchSybil = async () => {
-      let res = null;
+      let res;
       try { res = await antiSybilCheck(address); } catch { res = null; }
       if (res) {
         const cooldownOk = typeof res.cooldownOk !== 'undefined' ? res.cooldownOk : res[2];
@@ -1181,7 +1181,7 @@ export function useAppSessionData({
     const raw = localStorage.getItem('araf_pending_tx');
     if (!raw) return;
 
-    let parsed = null;
+    let parsed;
     try {
       parsed = JSON.parse(raw);
     } catch {
@@ -1246,7 +1246,7 @@ export function useAppSessionData({
       lang === 'TR' ? 'Aktif işleminize otomatik geri dönüldü.' : 'Automatically returned to your active trade.',
       'info'
     );
-  }, [isAuthenticated, currentView, activeEscrows, lang, showToast, setCurrentView]);
+  }, [isAuthenticated, currentView, activeEscrows, lang, showToast, setCurrentView, setActiveTrade]);
 
   useEffect(() => {
     if (!isConnected || !connectedWallet || !isAuthenticated || !authenticatedWallet) return;

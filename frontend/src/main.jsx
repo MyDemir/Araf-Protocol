@@ -37,7 +37,7 @@ const getCodespacesRPC = (port) => {
     if (host === 'localhost' || host === '127.0.0.1') return `http://127.0.0.1:${port}`;
     // [TR] Codespaces: 5173 portunu hedef porta çevir
     return `https://${host.replace('-5173', `-${port}`)}`;
-  } catch (e) {
+  } catch (_e) {
     return `http://127.0.0.1:${port}`;
   }
 };

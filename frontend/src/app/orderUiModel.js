@@ -192,7 +192,7 @@ export const getMakerModalCopy = (side, lang = 'TR') => {
 export const buildMakerPreview = ({ side, amountUi, bondPct, bondBps = null, decimals = 6 }) => {
   const safeAmount = Number(amountUi || 0);
   const bps = bondBps != null ? Number(bondBps) : Math.round(Number(bondPct || 0) * 100);
-  let reserveAmount = 0;
+  let reserveAmount;
   try {
     const scale = 10 ** decimals;
     const amountBase = BigInt(Math.round(safeAmount * scale));

@@ -633,7 +633,7 @@ export function useArafContract({ expectedChainId = null } = {}) {
 
       return normalizeTokenDecimalsOrThrow(decimals);
     } catch (error) {
-      throw new Error(error?.message || "Token decimals could not be read safely.");
+      throw new Error(error?.message || "Token decimals could not be read safely.", { cause: error });
     }
   }, [publicClient]);
 
