@@ -224,10 +224,9 @@ export function buildTradeDecisionModel({
     // [TR] Kontrat: süre dolunca iki taraf da kilidi çözebilir; alıcı teminatından küçük ceza kesilir ve
     //      alıcıya negatif sinyal yazılır. Taker ödeme bildirimi hâlâ mümkündür ama satıcıyla yarışır.
     if (normalizedRole === 'taker') {
-      primaryAction = {
-        ...primaryAction,
-        description: t(lang, '48 saatlik ödeme süresi doldu: satıcı işlemi her an iptal edebilir. Ödediyseniz hemen bildirin.', 'The 48h payment window has passed: the maker can unwind the trade at any time. If you paid, report it now.'),
-      };
+      // [TR] K10: süre dolduktan sonra ödeme bildirilemez (PaymentWindowClosed); birincil buton kapanır.
+      primaryAction = action('waiting', 'payment_window_closed', t(lang, 'Süre doldu', 'Time expired'),
+        t(lang, '48 saatlik ödeme süresi doldu: ödeme artık bildirilemez, satıcı işlemi her an iptal edebilir. Ödediyseniz satıcıyla iptali birlikte onaylayın.', 'The 48h payment window has passed: payment can no longer be reported and the maker can unwind the trade at any time. If you paid, agree on a mutual cancel with the maker.'));
       secondaryActions.push(action('contract', 'expire_payment_window', t(lang, 'Ödemedim — kilidi çöz (teminattan ceza)', 'I did not pay — unlock (bond penalty)'), null));
     } else {
       primaryAction = action('contract', 'expire_payment_window', t(lang, 'Kilidi Çöz (48 saat doldu)', 'Unlock (48h passed)'), t(lang, 'Alıcı süresinde ödeme bildirmedi. Kilidi çözerseniz fonlarınız ve teminatınız iade edilir.', 'The taker did not report payment in time. Unlocking returns your funds and bond.'));

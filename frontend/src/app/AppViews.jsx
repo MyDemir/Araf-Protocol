@@ -170,6 +170,7 @@ export const buildAppViews = (ctx) => {
     handleFileUpload,
     handleReportPayment,
     handleProposeCancel,
+    handleRevokeCancel,
     cancelStatus,
     chargebackAccepted,
     handleChargebackAck,
@@ -937,6 +938,7 @@ export const buildAppViews = (ctx) => {
       handlePingMaker: labHandlers?.handlePingMaker || handlePingMaker,
       handleAutoRelease: labHandlers?.handleAutoRelease || handleAutoRelease,
       handleProposeCancel: labHandlers?.handleProposeCancel || handleProposeCancel,
+      handleRevokeCancel: labHandlers?.handleRevokeCancel || handleRevokeCancel,
       handleBurnExpired: labHandlers?.handleBurnExpired || handleBurnExpired,
       handleExpirePaymentWindow: labHandlers?.handleExpirePaymentWindow || handleExpirePaymentWindow,
       paymentWindowExpired,
@@ -1100,7 +1102,17 @@ export const buildAppViews = (ctx) => {
                 {['LOCKED', 'PAID', 'CHALLENGED'].includes(roomState) && cancelStatus === 'proposed_by_me' && (
                   <div className="mb-4 py-3 px-4 bg-warning/10 border border-warning/30 rounded-xl flex items-center gap-3">
                     <div className="w-4 h-4 border-2 border-warning border-t-transparent rounded-full animate-spin shrink-0"></div>
-                    <span className="text-sm font-semibold text-textPrimary">{lang === 'TR' ? 'İptal teklifiniz gönderildi; karşı taraf bekleniyor.' : 'Cancel proposed; waiting for the counterparty.'}</span>
+                    <span className="text-sm font-semibold text-textPrimary flex-1">{lang === 'TR' ? 'İptal teklifiniz gönderildi; karşı taraf bekleniyor.' : 'Cancel proposed; waiting for the counterparty.'}</span>
+                    {handleRevokeCancel && (
+                      <button
+                        onClick={tradeActionCallbacks.revoke_cancel.onClick}
+                        disabled={tradeActionCallbacks.revoke_cancel.disabled}
+                        data-testid="revoke-cancel-button"
+                        className="shrink-0 px-3 py-1.5 rounded-lg border border-warning/60 text-warning text-xs font-bold hover:bg-warning hover:text-white transition disabled:opacity-50"
+                      >
+                        {lang === 'TR' ? 'İptal onayımı geri çek' : 'Withdraw my cancel consent'}
+                      </button>
+                    )}
                   </div>
                 )}
                 {['LOCKED', 'PAID', 'CHALLENGED'].includes(roomState) && cancelStatus === 'proposed_by_other' && (

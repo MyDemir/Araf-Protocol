@@ -38,6 +38,7 @@ export const buildTradeRoomPanelCallbacks = ({
   handlePingMaker,
   handleAutoRelease,
   handleProposeCancel,
+  handleRevokeCancel,
   handleBurnExpired,
   handleExpirePaymentWindow,
   paymentWindowExpired = false,
@@ -78,7 +79,14 @@ export const buildTradeRoomPanelCallbacks = ({
   const withGuard = (onClick, options = {}) => panelActionConfig(onClick, { ...options, hasOnchainTradeId, missingOnchainIdReason });
 
   return {
-    report_payment: withGuard(handleReportPayment, { disabled: isContractLoading }),
+    // [TR] K10: kontrat lockedAt + 48s sonrası reportPayment'ı PaymentWindowClosed ile reddeder; buton kapanır.
+    // [EN] K10: the contract rejects reportPayment after lockedAt + 48h (PaymentWindowClosed); the button closes.
+    report_payment: withGuard(handleReportPayment, {
+      disabled: isContractLoading || (roomState === 'LOCKED' && paymentWindowExpired),
+      disabledReasons: roomState === 'LOCKED' && paymentWindowExpired
+        ? [tr ? 'Süre doldu: 48 saatlik ödeme süresi bitti, ödeme artık bildirilemez.' : 'Time expired: the 48h payment window is over; payment can no longer be reported.']
+        : [],
+    }),
     release_funds: withGuard(handleRelease, {
       disabled: isContractLoading || (isMaker && roomState === 'PAID' && !chargebackAccepted),
       disabledReasons: isMaker && roomState === 'PAID' && !chargebackAccepted
@@ -103,6 +111,7 @@ export const buildTradeRoomPanelCallbacks = ({
         : (lang === 'TR' ? 'Karşılıklı iptal durumunda standart protokol ücreti kesilecektir. Onaylıyor musunuz?' : 'Standard protocol fees will be deducted upon mutual cancellation. Confirm?');
       if (confirmFn(msg)) handleProposeCancel();
     }, { disabled: isContractLoading }),
+    revoke_cancel: withGuard(() => handleRevokeCancel?.(), { disabled: isContractLoading || typeof handleRevokeCancel !== 'function' }),
     ...(typeof handleExpirePaymentWindow === 'function' ? {
       expire_payment_window: withGuard(handleExpirePaymentWindow, {
         disabled: isContractLoading || !paymentWindowExpired,

@@ -363,6 +363,7 @@ export const buildTradeRoomActions = ({
   canMakerChallenge,
   reportPayment,
   proposeOrApproveCancel,
+  revokeCancel,
   expirePaymentWindow,
   cancelStatus = null,
   releaseFunds,
@@ -541,6 +542,28 @@ export const buildTradeRoomActions = ({
     }
   };
 
+  // [TR] K11: kendi iptal onayını, karşı taraf onaylamadan önce geri çeker (revokeCancel).
+  // [EN] K11: withdraws the caller's own cancel consent before the counterparty consents.
+  const handleRevokeCancel = async () => {
+    if (!requireActiveOnchainId()) return;
+    if (isContractLoading) return;
+    if (typeof revokeCancel !== 'function') return;
+    try {
+      setIsContractLoading(true);
+      showToast(lang === 'TR' ? 'İptal onayı geri çekiliyor... Cüzdanınızdan onaylayın.' : 'Withdrawing cancel consent... Confirm in wallet.', 'info');
+      await revokeCancel(activeTrade.onchainId);
+      setCancelStatus(null);
+      showToast(lang === 'TR' ? 'İptal onayınız geri çekildi.' : 'Your cancel consent was withdrawn.', 'success');
+      refreshTrades();
+    } catch (err) {
+      console.error('handleRevokeCancel error:', err);
+      const errorMessage = getTxErrorMessage(err, lang === 'TR' ? 'İptal onayı geri çekilemedi.' : 'Could not withdraw cancel consent.');
+      showToast(isUserRejected(errorMessage) ? (lang === 'TR' ? 'İşlem iptal edildi.' : 'Transaction cancelled.') : errorMessage, 'error');
+    } finally {
+      setIsContractLoading(false);
+    }
+  };
+
   // [TR] LOCKED trade'de 48 saatlik ödeme penceresi dolduysa kilit zamanla çözülür (maker tam iade alır).
   // [EN] Once the 48h payment window on a LOCKED trade has passed, the lock unwinds by time (maker refunded in full).
   const handleExpirePaymentWindow = async () => {
@@ -702,6 +725,7 @@ export const buildTradeRoomActions = ({
     handleFileUpload,
     handleReportPayment,
     handleProposeCancel,
+    handleRevokeCancel,
     handleChargebackAck,
     handleRelease,
     handleChallenge,
