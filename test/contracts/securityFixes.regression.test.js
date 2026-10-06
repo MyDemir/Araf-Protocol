@@ -134,54 +134,168 @@ describe("Security fixes regression (K1–K14, G1/G2)", function () {
     }
   });
 
-  describe("K2 taker can open the challenge after a silent maker ping", function () {
-    it("K2: taker challenge reverts before maker ping, inside the 24h window and for outsiders", async function () {
-      const c = await loadFixture(base);
-      const tid = await sellTrade(c, U(100));
-      await toPaid(c, tid);
-      await time.increase(3 * DAY);
-      await expect(c.escrow.connect(c.taker).challengeTrade(tid)).to.be.revertedWithCustomError(c.escrow, "MustPingFirst");
-      await c.escrow.connect(c.maker).pingTakerForChallenge(tid);
-      await expect(c.escrow.connect(c.taker).challengeTrade(tid)).to.be.revertedWithCustomError(c.escrow, "ResponseWindowActive");
-      await time.increase(DAY - 10);
-      await expect(c.escrow.connect(c.taker).challengeTrade(tid)).to.be.revertedWithCustomError(c.escrow, "ResponseWindowActive");
-      await time.increase(20);
-      await expect(c.escrow.connect(c.other).challengeTrade(tid)).to.be.revertedWithCustomError(c.escrow, "NotTradeParty");
-    });
+  describe("K2(B) maker challenge ping lapses if not backed by challengeTrade", function () {
+    const WINDOW = 24n * 3600n; // MAKER_CHALLENGE_WINDOW
+    const RESPONSE = 24n * 3600n;
 
-    it("K2: maker ping + silence -> taker challenges -> bleeding -> burn is reachable after MAX_BLEEDING", async function () {
-      const c = await loadFixture(base);
+    async function pingedTrade(c) {
       const tid = await sellTrade(c, U(100));
       await toPaid(c, tid);
       await pingChallenge(c, tid);
+      const pingAt = (await c.escrow.getTrade(tid)).challengePingedAt;
+      return { tid, pingAt, opensAt: pingAt + RESPONSE, lapsesAt: pingAt + RESPONSE + WINDOW };
+    }
+
+    async function balances(c) {
+      const who = [c.maker.address, c.taker.address, await c.escrow.getAddress(), await c.vault.getAddress(), c.finalTreasury.address];
+      let sum = 0n;
+      for (const w of who) sum += await c.token.balanceOf(w);
+      return sum;
+    }
+
+    it("K2(B): MAKER_CHALLENGE_WINDOW is a public 24h constant", async function () {
+      const c = await loadFixture(base);
+      expect(await c.escrow.MAKER_CHALLENGE_WINDOW()).to.equal(WINDOW);
+    });
+
+    it("K2(B): only the maker can challenge (taker and outsiders get OnlyMaker)", async function () {
+      const c = await loadFixture(base);
+      const { tid, opensAt } = await pingedTrade(c);
+      await time.increaseTo(opensAt);
+      await expect(c.escrow.connect(c.taker).challengeTrade(tid)).to.be.revertedWithCustomError(c.escrow, "OnlyMaker");
+      await expect(c.escrow.connect(c.other).challengeTrade(tid)).to.be.revertedWithCustomError(c.escrow, "OnlyMaker");
+    });
+
+    it("K2(B): maker challenge reverts before ping and inside the 24h response window", async function () {
+      const c = await loadFixture(base);
+      const tid = await sellTrade(c, U(100));
+      await toPaid(c, tid);
       await time.increase(DAY);
-      await expect(c.escrow.connect(c.taker).challengeTrade(tid))
-        .to.emit(c.escrow, "DisputeOpened");
+      await expect(c.escrow.connect(c.maker).challengeTrade(tid)).to.be.revertedWithCustomError(c.escrow, "MustPingFirst");
+      await c.escrow.connect(c.maker).pingTakerForChallenge(tid);
+      const pingAt = (await c.escrow.getTrade(tid)).challengePingedAt;
+      await time.setNextBlockTimestamp(pingAt + RESPONSE - 1n);
+      await expect(c.escrow.connect(c.maker).challengeTrade(tid)).to.be.revertedWithCustomError(c.escrow, "ResponseWindowActive");
+    });
+
+    it("K2(B): maker can challenge at the first second (ping+24h)", async function () {
+      const c = await loadFixture(base);
+      const { tid, opensAt } = await pingedTrade(c);
+      await time.setNextBlockTimestamp(opensAt);
+      await expect(c.escrow.connect(c.maker).challengeTrade(tid)).to.emit(c.escrow, "DisputeOpened");
+      expect((await c.escrow.getTrade(tid)).state).to.equal(TradeState.CHALLENGED);
+    });
+
+    it("K2(B): maker can challenge at the last second (ping+48h-1)", async function () {
+      const c = await loadFixture(base);
+      const { tid, lapsesAt } = await pingedTrade(c);
+      await time.setNextBlockTimestamp(lapsesAt - 1n);
+      await c.escrow.connect(c.maker).challengeTrade(tid);
       const tr = await c.escrow.getTrade(tid);
       expect(tr.state).to.equal(TradeState.CHALLENGED);
-      expect(tr.challengedAt).to.be.gt(0n);
-
-      await expect(c.escrow.burnExpired(tid)).to.be.revertedWithCustomError(c.escrow, "BurnPeriodNotReached");
-      await time.increase(240 * H);
-      await c.escrow.connect(c.taker).burnExpired(tid);
-      expect((await c.escrow.getTrade(tid)).state).to.equal(TradeState.BURNED);
-      expect((await c.escrow.getRewardableTrade(tid)).outcome).to.equal(Outcome.BURNED);
+      expect(tr.challengedAt).to.equal(lapsesAt - 1n);
     });
 
-    it("K2: maker release after a taker-opened challenge is classified as DISPUTED_RELEASE with maker dispute loss", async function () {
+    it("K2(B): at ping+48h exactly and after, challenge reverts with ChallengeWindowExpired", async function () {
+      const c = await loadFixture(base);
+      const { tid, lapsesAt } = await pingedTrade(c);
+      await time.setNextBlockTimestamp(lapsesAt);
+      await expect(c.escrow.connect(c.maker).challengeTrade(tid)).to.be.revertedWithCustomError(c.escrow, "ChallengeWindowExpired");
+      await time.increase(30 * DAY);
+      await expect(c.escrow.connect(c.maker).challengeTrade(tid)).to.be.revertedWithCustomError(c.escrow, "ChallengeWindowExpired");
+    });
+
+    it("K2(B): while the ping is valid (before ping+48h) taker pingMaker reverts with ConflictingPingPath", async function () {
+      const c = await loadFixture(base);
+      const { tid, lapsesAt } = await pingedTrade(c);
+      // paidAt + GRACE_PERIOD (48h) already passed? ping >= paidAt+24h, so ensure we are past grace too.
+      await time.increase(DAY);
+      await expect(c.escrow.connect(c.taker).pingMaker(tid)).to.be.revertedWithCustomError(c.escrow, "ConflictingPingPath");
+      await time.setNextBlockTimestamp(lapsesAt - 1n);
+      await expect(c.escrow.connect(c.taker).pingMaker(tid)).to.be.revertedWithCustomError(c.escrow, "ConflictingPingPath");
+    });
+
+    it("K2(B): boundary second ping+48h — challenge is rejected and taker pingMaker succeeds (no gap, no overlap)", async function () {
+      const c = await loadFixture(base);
+      const { tid, lapsesAt } = await pingedTrade(c);
+      await time.setNextBlockTimestamp(lapsesAt);
+      await expect(c.escrow.connect(c.taker).pingMaker(tid)).to.emit(c.escrow, "MakerPinged");
+      const tr = await c.escrow.getTrade(tid);
+      expect(tr.pingedByTaker).to.equal(true);
+      expect(tr.pingedAt).to.equal(lapsesAt);
+      // Maker challenge is closed from this second on.
+      await expect(c.escrow.connect(c.maker).challengeTrade(tid)).to.be.revertedWithCustomError(c.escrow, "ChallengeWindowExpired");
+    });
+
+    it("K2(B): maker cannot ping a second time (before or after the ping lapses)", async function () {
+      const c = await loadFixture(base);
+      const { tid, lapsesAt } = await pingedTrade(c);
+      await expect(c.escrow.connect(c.maker).pingTakerForChallenge(tid)).to.be.revertedWithCustomError(c.escrow, "AlreadyPinged");
+      await time.increaseTo(lapsesAt + 10n);
+      await expect(c.escrow.connect(c.maker).pingTakerForChallenge(tid)).to.be.revertedWithCustomError(c.escrow, "AlreadyPinged");
+      await c.escrow.connect(c.taker).pingMaker(tid);
+      await expect(c.escrow.connect(c.maker).pingTakerForChallenge(tid)).to.be.revertedWithCustomError(c.escrow, "AlreadyPinged");
+    });
+
+    it("K2(B): reverse direction unchanged — after taker pingMaker, maker ping reverts with ConflictingPingPath", async function () {
       const c = await loadFixture(base);
       const tid = await sellTrade(c, U(100));
       await toPaid(c, tid);
-      await pingChallenge(c, tid);
-      await time.increase(DAY);
-      await c.escrow.connect(c.taker).challengeTrade(tid);
+      await time.increase(2 * DAY);
+      await c.escrow.connect(c.taker).pingMaker(tid);
+      await expect(c.escrow.connect(c.maker).pingTakerForChallenge(tid)).to.be.revertedWithCustomError(c.escrow, "ConflictingPingPath");
+    });
+
+    for (const [label, offset] of [["inside the response window", 3600n], ["inside the challenge window", 24n * 3600n + 60n], ["after the ping lapsed", 72n * 3600n]]) {
+      it(`K2(B): maker can always releaseFunds from PAID after pinging (${label}) as CLEAN_RELEASE`, async function () {
+        const c = await loadFixture(base);
+        const { tid, pingAt } = await pingedTrade(c);
+        await time.increaseTo(pingAt + offset);
+        const tx = await c.escrow.connect(c.maker).releaseFunds(tid);
+        expect(await eventArg(tx, c.escrow, "ProtocolRevenueSent", "kind")).to.not.equal(3n);
+        expect((await c.escrow.getTrade(tid)).state).to.equal(TradeState.RESOLVED);
+        expect((await c.escrow.getRewardableTrade(tid)).outcome).to.not.equal(Outcome.DISPUTED_RELEASE);
+      });
+    }
+
+    it("K2(B): maker release from CHALLENGED stays DISPUTED_RELEASE with maker dispute loss", async function () {
+      const c = await loadFixture(base);
+      const { tid, opensAt } = await pingedTrade(c);
+      await time.increaseTo(opensAt);
+      await c.escrow.connect(c.maker).challengeTrade(tid);
       const tx = await c.escrow.connect(c.maker).releaseFunds(tid);
       expect(await eventArg(tx, c.escrow, "ProtocolRevenueSent", "kind")).to.equal(3n); // DISPUTED_RELEASE_FEE
       expect((await c.escrow.getRewardableTrade(tid)).outcome).to.equal(Outcome.DISPUTED_RELEASE);
-      const makerRep = await c.escrow.getReputation(c.maker.address);
-      const takerRep = await c.escrow.getReputation(c.taker.address);
-      expect(makerRep.disputeLossCount).to.equal(1n);
-      expect(takerRep.disputeWinCount).to.equal(1n);
+      expect((await c.escrow.getReputation(c.maker.address)).disputeLossCount).to.equal(1n);
+      expect((await c.escrow.getReputation(c.taker.address)).disputeWinCount).to.equal(1n);
+    });
+
+    it("K2(B): silent maker cannot lock the trade — lapsed ping -> pingMaker -> +24h autoRelease, funds conserved", async function () {
+      const c = await loadFixture(base);
+      const totalBefore = await balances(c);
+      const escBefore = await c.token.balanceOf(await c.escrow.getAddress());
+      const takerBefore = await c.token.balanceOf(c.taker.address);
+
+      const { tid, lapsesAt } = await pingedTrade(c);
+      const tr0 = await c.escrow.getTrade(tid);
+      await time.increaseTo(lapsesAt);
+      await c.escrow.connect(c.taker).pingMaker(tid);
+      const pingedAt = (await c.escrow.getTrade(tid)).pingedAt;
+
+      await time.setNextBlockTimestamp(pingedAt + RESPONSE - 1n);
+      await expect(c.escrow.connect(c.taker).autoRelease(tid)).to.be.revertedWithCustomError(c.escrow, "ResponseWindowActive");
+      await time.setNextBlockTimestamp(pingedAt + RESPONSE);
+      await c.escrow.connect(c.taker).autoRelease(tid);
+
+      const tr = await c.escrow.getTrade(tid);
+      expect(tr.state).to.equal(TradeState.RESOLVED);
+      // AUTO_RELEASE_PENALTY (2% of each bond) applies as before.
+      const takerPenalty = (tr0.takerBond * 200n) / 10_000n;
+      expect((await c.token.balanceOf(c.taker.address)) - takerBefore).to.equal(tr0.cryptoAmount - takerPenalty);
+      // Conservation: nothing left in escrow for the trade, nothing created or lost.
+      expect(await c.token.balanceOf(await c.escrow.getAddress())).to.equal(escBefore);
+      expect(await balances(c)).to.equal(totalBefore);
+      expect((await c.escrow.getReputation(c.maker.address)).autoReleaseCount).to.equal(1n);
     });
   });
 
