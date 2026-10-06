@@ -34,6 +34,9 @@ flowchart TD
     parent_order[Parent order acik] --> fill_event[OrderFilled]
     fill_event --> child_trade[Child trade LOCKED]
     child_trade --> paid_state[PAID]
+    child_trade --> pay_window[48 saatte reportPayment yoksa expirePaymentWindow]
+    pay_window --> canceled_locked[CANCELED odeme penceresi asimi]
+    child_trade --> cancel_dual
 
     paid_state --> release_call[Maker releaseFunds cagirir]
     release_call --> resolved_normal[RESOLVED clean/manual release]
@@ -55,6 +58,7 @@ flowchart TD
     split_offer --> split_accept[Karsi taraf kabul eder]
     split_accept --> split_resolved[RESOLVED partial settlement]
 
+    paid_state --> cancel_dual
     challenged_state --> cancel_dual[proposeOrApproveCancel cift onay]
     cancel_dual --> canceled_state[CANCELED]
 
@@ -166,14 +170,17 @@ Reward weight bilinçli olarak outcome-sensitive tasarlanmıştır:
 
 | Terminal outcome | Reward etkisi | Oyun teorisi nedeni |
 |---|---|---|
-| Hızlı clean release | En yüksek pozitif weight | Anında iş birliğini dominant sosyal davranış haline getirir |
-| 24h/72h içinde clean release | Orta pozitif weight | İş birliğini ödüllendirir ama gecikmeyi fiyatlandırır |
-| Yavaş clean release | Düşük pozitif weight | Geç iş birliğini kabul eder ama ideal saymaz |
-| Partial settlement | Düşük pozitif weight | Dispute de-escalation'ı ödüllendirir ama dispute'u kârlı hale getirmez |
+| Hızlı clean release (`paidAt`'ten release'e ≤ 1 saat) | En yüksek pozitif weight (×2,5) | Anında iş birliğini dominant sosyal davranış haline getirir |
+| ≤ 24 saat / ≤ 72 saat içinde clean release | Orta pozitif weight (×1,5 / ×1,0) | İş birliğini ödüllendirir ama gecikmeyi fiyatlandırır |
+| Yavaş clean release (> 72 saat) | Düşük pozitif weight (×0,5) | Geç iş birliğini kabul eder ama ideal saymaz |
+| Partial settlement | Düşük pozitif weight (×0,3) | Dispute de-escalation'ı ödüllendirir ama dispute'u kârlı hale getirmez |
 | Auto-release | Zero weight | Maker inaktivitesini veya liveness failure'ı ödüllendirmez |
 | Mutual cancel | Zero weight | Cancel-loop farming'i engeller; nötr çıkıştır, başarılı trade değildir |
 | Disputed release | Zero weight | Stratejik challenge-sonra-release farming'i engeller |
+| Ödeme penceresi aşımı (`PAYMENT_WINDOW_EXPIRED`) | Zero weight | Bildirilmeyen ödeme başarılı trade sayılmaz |
 | Burned | Zero weight | Deadlock asla rewardable olmamalıdır |
+
+Ağırlık formülü (`ArafRewards`): `weight = stableNotional × outcomeÇarpanı × tierÇarpanı`; tier çarpanı Tier 1–4 için ×1,0 / ×1,1 / ×1,2 / ×1,3, Tier 0 için kayıt yoktur. Maker ve taker aynı ağırlığı alır. `stableNotional`, token tutarının 6 ondalığa normalize edilmiş halidir.
 
 Basit teşvik merdiveni:
 
