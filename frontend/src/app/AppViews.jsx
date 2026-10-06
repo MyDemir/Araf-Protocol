@@ -970,6 +970,7 @@ export const buildAppViews = (ctx) => {
       chargebackAccepted,
       paymentIpfsHash,
       timers: tradeTimers,
+      nowMs,
       isConnected,
       isAuthenticated,
       isSupportedChain: isSupportedChainId(chainId),
