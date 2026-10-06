@@ -6,7 +6,7 @@
 [![Version](https://img.shields.io/badge/version-V3_Order--First-00c9a7?style=flat-square)](.)
 [![Network](https://img.shields.io/badge/network-Base_L2_(8453)-0052FF?style=flat-square&logo=coinbase)](.)
 [![Status](https://img.shields.io/badge/status-Canonical-f5a623?style=flat-square)](.)
-[![Updated](https://img.shields.io/badge/updated-April_2026-purple?style=flat-square)](.)
+[![Updated](https://img.shields.io/badge/updated-October_2026-purple?style=flat-square)](.)
 [![Solidity](https://img.shields.io/badge/Solidity-0.8.24-363636?style=flat-square&logo=solidity)](.)
 [![Docs](https://img.shields.io/badge/docs-Source_of_Truth-green?style=flat-square)](.)
 
@@ -57,7 +57,10 @@ flowchart TD
     D --> E[PAID]
     E --> F[RESOLVED]
     E --> G[CHALLENGED]
-    E --> H[CANCELED]
+    D --> H[CANCELED]
+    E --> H
+    G --> F
+    G --> H
     G --> I[BURNED]
 ```
 
@@ -148,53 +151,61 @@ The contract is the single authoritative V3 state machine surface. The following
 | Surface | Functions | Architectural meaning |
 |---|---|---|
 | Parent-order write surface | `createSellOrder`, `fillSellOrder`, `cancelSellOrder`, `createBuyOrder`, `fillBuyOrder`, `cancelBuyOrder` | Public market and fill primitive |
-| Child-trade lifecycle write surface | `reportPayment`, `releaseFunds`, `challengeTrade`, `autoRelease`, `burnExpired`, `proposeOrApproveCancel`, `revokeCancel`, `expirePaymentWindow`, `proposeSettlement`, `acceptSettlement(tradeId, expectedProposalId)` | Real escrow lifecycle and economic state transitions |
+| Child-trade lifecycle write surface | `reportPayment`, `releaseFunds`, `challengeTrade`, `autoRelease`, `burnExpired`, `proposeOrApproveCancel`, `revokeCancel`, `expirePaymentWindow`, `proposeSettlement`, `acceptSettlement(tradeId, expectedProposalId)`, `rejectSettlement`, `withdrawSettlement`, `expireSettlement` | Real escrow lifecycle and economic state transitions |
 | Liveness / auxiliary write surface | `registerWallet`, `pingMaker`, `pingTakerForChallenge`, `decayReputation` | Entry gate, liveness, and clean-slate maintenance |
-| Governance / mutable admin surface | `setTreasury`, `setFeeConfig`, `setCooldownConfig`, `setTokenConfig`, `pause`, `unpause` | Runtime policy and governance control surface |
-| Read surface | `getOrder`, `getTrade`, `getReputation`, `getFeeConfig`, `getCooldownConfig`, `getCurrentAmounts`, `antiSybilCheck`, `getCooldownRemaining`, `getFirstSuccessfulTradeAt` | Verification, observability, and runtime read surface |
+| Governance / mutable admin surface (`onlyOwner`) | `setTreasury`, `setFeeConfig`, `setCooldownConfig`, `setTokenConfig`, `setReputationPolicy`, `setReputationTierThresholds`, `pause`, `unpause` (+ `Ownable`: `transferOwnership`, `renounceOwnership`) | Runtime policy and governance control surface |
+| Read surface | `getOrder`, `getTrade`, `getReputation`, `getTokenConfig`, `getSettlementProposal`, `getRewardableTrade`, `getFeeConfig`, `getCooldownConfig`, `getCurrentAmounts`, `antiSybilCheck`, `getCooldownRemaining`, `getFirstSuccessfulTradeAt`, `cleanPeriod`, `maxAllowedTier`, `walletRegisteredAt`, `treasury`, `tradeCounter`, `orderCounter` | Verification, observability, and runtime read surface |
 
 ### 3.1 Parent-order write surface
-- `createSellOrder`
-- `fillSellOrder`
-- `cancelSellOrder`
-- `createBuyOrder`
-- `fillBuyOrder`
-- `cancelBuyOrder`
-- At fill time both the filler and the order owner must still qualify for the order tier (`TierNotAllowed`); the maker-role party is re-checked for an active ban (`MakerBanActive`) and the taker-role party passes the entry gate (ban/age/dust/cooldown). An owner penalized after create can no longer have their open order filled.
+- `createSellOrder(token, totalAmount, minFillAmount, tier, orderRef, paymentRiskLevel)` — the seller locks inventory + the full maker bond reserve upfront. Only an active ban is checked for the owner (`MakerBanActive`).
+- `createBuyOrder(...)` — the buyer locks only its own full taker bond reserve; since the owner becomes taker in child trades, it passes the taker entry gate.
+- `fillSellOrder(orderId, fillAmount, childListingRef)` / `fillBuyOrder(...)` — exact fill; the child trade is born `LOCKED` in the same tx. The final fill sweeps the whole remaining reserve (no rounding drift).
+- `cancelSellOrder` / `cancelBuyOrder` — order owner only, only `OPEN`/`PARTIALLY_FILLED`; unfilled inventory (sell) and unused bond reserve are refunded.
+- Order validation: `totalAmount > 0`, `0 < minFillAmount ≤ totalAmount`, `tier ≤ 4`, `orderRef ≠ 0`, tier ≤ the owner's effective tier (`TierNotAllowed`), amount ≤ the token's tier cap (`AmountExceedsTierLimit`; Tier 4 is unlimited). A disabled token direction reverts with `TokenDirectionNotAllowed`. Fee-on-transfer inflows revert with `InvalidTransferAmount`.
+- Fill validation: `childListingRef ≠ 0`, no self-trade (`SelfTradeForbidden`), `fillAmount ≤ remaining`, `fillAmount ≥ minFillAmount` (except the final remainder).
+- At fill time both the filler and the order owner must still qualify for the order tier (`TierNotAllowed`, Tier 0 exempt); the maker-role party is re-checked for an active ban (`MakerBanActive`) and the taker-role party passes the entry gate (ban/age/dust/cooldown). An owner penalized after create can no longer have their open order filled.
+- `pause` only stops the `create*` and `fill*` calls of this surface (`whenNotPaused`); order cancellation and every trade path below ignore pause.
 
 ### 3.2 Child-trade lifecycle write surface
-- `reportPayment`
-- `releaseFunds`
-- `challengeTrade`
-- `autoRelease`
-- `burnExpired`
-- `proposeOrApproveCancel` / `revokeCancel`
-- `proposeSettlement` / `acceptSettlement(tradeId, expectedProposalId)` / `rejectSettlement` / `withdrawSettlement` / `expireSettlement`
+- `reportPayment(tradeId, ipfsHash)` — taker only, `LOCKED` only, only before `lockedAt + PAYMENT_WINDOW`; the receipt hash is not stored, its canonical record is the `PaymentReported` event.
+- `releaseFunds` — maker only, `PAID` or `CHALLENGED`.
+- `challengeTrade` — maker only, within the post-ping window (see §7).
+- `autoRelease` — taker only, 24h after `pingMaker`.
+- `burnExpired` — permissionless, after `challengedAt + MAX_BLEEDING`.
+- `expirePaymentWindow` — maker or taker, from `lockedAt + PAYMENT_WINDOW` on.
+- `proposeOrApproveCancel` / `revokeCancel` — both parties, `LOCKED`/`PAID`/`CHALLENGED`.
+- `proposeSettlement` / `acceptSettlement(tradeId, expectedProposalId)` / `rejectSettlement` / `withdrawSettlement` / `expireSettlement` — `CHALLENGED` only (see §7.6).
 
 > **Bytecode split (EIP-170):** `ArafEscrow` links two external libraries: `ArafReputationLib` (outcome recording, risk
 > points, ban/tier ceiling, reputation policy validation) and `ArafSettlementLib` (terminal payout + treasury hooks,
 > settlement proposal management). They run via DELEGATECALL on escrow storage; events are emitted from the escrow
 > address with identical signatures, access control stays in the escrow, addresses are baked into the bytecode at deploy
-> (no upgrade path). Deploy order: `ArafReputationLib` → `ArafSettlementLib` → linked `ArafEscrow` (`contracts/scripts/deploy.js`).
+> (no upgrade path). Deploy order: `ArafReputationLib` → `ArafSettlementLib` (independent of each other) → linked `ArafEscrow` (`contracts/scripts/deploy.js`).
+> Runtime bytecode sizes (solc 0.8.24, `viaIR`, optimizer 200 runs, `cancun`): `ArafEscrow` 22,061 bytes (EIP-170 limit 24,576),
+> `ArafReputationLib` 4,705, `ArafSettlementLib` 2,168 bytes. The Hardhat network sets `allowUnlimitedContractSize: false`, so the limit is enforced locally too.
 
 ### 3.3 Liveness / auxiliary write surface
-- `registerWallet`
-- `pingMaker`
-- `pingTakerForChallenge`
-- `decayReputation`
+- `registerWallet` — starts the wallet-age clock (once; `AlreadyRegistered`).
+- `pingMaker` — taker, after `paidAt + GRACE_PERIOD`.
+- `pingTakerForChallenge` — maker, after `paidAt + 24h`, once per trade.
+- `decayReputation(wallet)` — permissionless clean-slate (see §8.3).
 
 ### 3.4 Governance / mutable admin surface
-- `setTreasury`
-- `setFeeConfig`
-- `setCooldownConfig`
-- `setTokenConfig`
+- `setTreasury` (zero address rejected)
+- `setFeeConfig` (≤ 2000 bps per side)
+- `setCooldownConfig` (≤ 30 days per tier)
+- `setTokenConfig` (decimals 1–18 and equal to the token's `decimals()`; all four tier caps > 0)
+- `setReputationPolicy`, `setReputationTierThresholds` (bounds in §8.4)
 - `pause` / `unpause`
 
 ### 3.5 Read surface
-- `getOrder`, `getTrade`, `getReputation`
+- `getOrder`, `getTrade`, `getReputation`, `getTokenConfig`, `getSettlementProposal`
+- `getRewardableTrade` (the only data source of ArafRewards)
 - `getFeeConfig`, `getCooldownConfig`
 - `getCurrentAmounts`
-- `antiSybilCheck`, `getCooldownRemaining`, `getFirstSuccessfulTradeAt`
+- `antiSybilCheck`, `getCooldownRemaining`, `getFirstSuccessfulTradeAt`, `walletRegisteredAt`
+- `cleanPeriod()`, `maxAllowedTier(wallet)`
+- Struct mappings are `internal`; data is only read through these named getters. There is no getter for reputation policy points; the values are published through `ReputationPolicyUpdated` / `ReputationTierThresholdsUpdated` events (also emitted by the constructor).
 
 ---
 
@@ -215,6 +226,7 @@ stateDiagram-v2
     state "Child Trade" as CT {
         [*] --> LOCKED
         LOCKED --> PAID
+        LOCKED --> CANCELED
         PAID --> CHALLENGED
         PAID --> RESOLVED
         PAID --> CANCELED
@@ -233,7 +245,7 @@ stateDiagram-v2
 Parent orders carry market visibility and fillability, not escrow dispute semantics.
 
 ### 4.2 Child-trade states
-- `OPEN` (not practically used in pure V3 fill path)
+- `OPEN` (kept in the enum; the V3 fill path spawns trades directly as `LOCKED`, `OPEN` is never written)
 - `LOCKED`
 - `PAID`
 - `CHALLENGED`
@@ -307,15 +319,19 @@ flowchart TD
 ```
 
 Gate components:
-- active ban gate (`bannedUntil`)
-- wallet age (`WALLET_AGE_MIN`)
-- native dust threshold (`DUST_LIMIT`)
-- tier cooldown (`tier0TradeCooldown`, `tier1TradeCooldown`)
+- active ban gate (`bannedUntil`; `TakerBanActive` while `block.timestamp <= bannedUntil`)
+- wallet age: `registerWallet` + `WALLET_AGE_MIN` = **2 days** (`WalletTooYoung`)
+- native dust threshold: `DUST_LIMIT` = **0.001 ETH** (`InsufficientNativeBalance`)
+- tier cooldown: `tier0TradeCooldown` for a Tier 0 order, `tier1TradeCooldown` for Tier 1 (both default to **4 hours**, max 30 days); no cooldown for Tier 2+ (`TierCooldownActive`). `lastTradeAt` is only written for the taker on Tier 0/1 fills.
 
 V3 enforcement points:
 - `fillSellOrder` (filler/taker)
 - `createBuyOrder` (owner/eventual taker)
 - `fillBuyOrder` (owner/taker re-check)
+
+The maker role is only checked for an active ban (`MakerBanActive`): `createSellOrder` (owner), `fillSellOrder` (owner), `fillBuyOrder` (filler). Age/dust/cooldown gates are taker-entry specific; the maker already locks inventory + bond. A tier gate applies as well: the order tier may not exceed the owner's effective tier at create time, nor the effective tier of either the owner or the filler at fill time.
+
+`antiSybilCheck(wallet)` and `getCooldownRemaining(wallet)` are informational only; being parameter-less, they report the larger of the two tier cooldowns, while binding decisions stay in the state-changing functions.
 
 So anti-sybil is no longer lockEscrow-centered legacy; it is child-trade-entry centered in V3.
 
@@ -323,29 +339,30 @@ So anti-sybil is no longer lockEscrow-centered legacy; it is child-trade-entry c
 
 ## 7. Dispute / Bleeding Escrow technical flow
 
-This section describes the real V3 economic state machine. After `PAID`, normal close, dispute, liveness, cancel, and burn paths all operate at child-trade level.
+This section describes the real V3 economic state machine. After `LOCKED` and `PAID`, normal close, dispute, liveness, cancel, and burn paths all operate at child-trade level.
 
 ```mermaid
 stateDiagram-v2
     [*] --> LOCKED
-    LOCKED --> PAID
+    LOCKED --> PAID : reportPayment
+    LOCKED --> CANCELED : expirePaymentWindow / dual cancel
     PAID --> RESOLVED : releaseFunds
     PAID --> CHALLENGED : pingTakerForChallenge -> challengeTrade
     PAID --> RESOLVED : pingMaker -> autoRelease
     PAID --> CANCELED : dual cancel
-    CHALLENGED --> RESOLVED
-    CHALLENGED --> CANCELED
+    CHALLENGED --> RESOLVED : releaseFunds / acceptSettlement
+    CHALLENGED --> CANCELED : dual cancel
     CHALLENGED --> BURNED : burnExpired
 ```
 
-### 7.1 Resolution paths after `PAID`
+### 7.1 Resolution paths after `LOCKED` and `PAID`
 - **Normal close:** maker `releaseFunds`
-- **Dispute path:** maker `pingTakerForChallenge` → 24h response window → `challengeTrade` (maker only). The ping is a claim: if the maker does not open the challenge within `[ping+24h, ping+48h)` (`MAKER_CHALLENGE_WINDOW` = 24h, constant), the ping **lapses**; from second `ping+48h` on, `challengeTrade` reverts with `ChallengeWindowExpired`. The maker may ping once per trade (`AlreadyPinged`).
-- **Liveness path:** taker `pingMaker` (after `paidAt + GRACE_PERIOD`) → 24h → `autoRelease` (including `AUTO_RELEASE_PENALTY`). While the maker's ping is valid (before `ping+48h`) `pingMaker` reverts with `ConflictingPingPath`; it opens from the second the ping lapses. A maker who pings and goes silent therefore cannot lock a PAID trade forever. In the other direction, once the taker has called `pingMaker`, the maker's `pingTakerForChallenge` reverts with `ConflictingPingPath`.
+- **Dispute path:** maker `pingTakerForChallenge` (at the earliest `paidAt + 24h`; before that `PingCooldownNotElapsed`) → 24h response window → `challengeTrade` (maker only). The ping is a claim: if the maker does not open the challenge within `[ping+24h, ping+48h)` (`MAKER_CHALLENGE_WINDOW` = 24h, constant), the ping **lapses**; from second `ping+48h` on, `challengeTrade` reverts with `ChallengeWindowExpired`. The maker may ping once per trade (`AlreadyPinged`).
+- **Liveness path:** taker `pingMaker` (after `paidAt + GRACE_PERIOD` = `paidAt + 48h`) → 24h → `autoRelease` (`AUTO_RELEASE_PENALTY_BPS` = 2% from both bonds). While the maker's ping is valid (before `ping+48h`) `pingMaker` reverts with `ConflictingPingPath`; it opens from the second the ping lapses. A maker who pings and goes silent therefore cannot lock a PAID trade forever. In the other direction, once the taker has called `pingMaker`, the maker's `pingTakerForChallenge` reverts with `ConflictingPingPath`.
 - **The maker can always release:** `releaseFunds` from `PAID` is open at any time regardless of the ping (clean release); a release from `CHALLENGED` is `DISPUTED_RELEASE` + a maker dispute loss.
-- **Mutual cancel:** each party sends its own `proposeOrApproveCancel(tradeId)` tx (no separate signature); before the second consent a party may withdraw its own consent with `revokeCancel(tradeId)` (`CancelRevoked`)
-- **Payment window expiry:** `reportPayment` is only accepted before `lockedAt + 48h` (`PaymentWindowClosed` from the boundary second). If no payment is reported within 48h of LOCKED, either party calls `expirePaymentWindow`; the maker is refunded in full, the taker bond pays a 2% liveness penalty and the taker gets a negative reputation signal
-- **Terminal burn:** `burnExpired` after challenge timeout
+- **Mutual cancel:** each party sends its own `proposeOrApproveCancel(tradeId)` tx (no separate signature); before the second consent a party may withdraw its own consent with `revokeCancel(tradeId)` (`CancelRevoked`; `NoCancelConsent` if there is none)
+- **Payment window expiry:** `reportPayment` is only accepted before `lockedAt + PAYMENT_WINDOW` (48h) (`PaymentWindowClosed` from the boundary second). If no payment is reported within 48h of LOCKED, either party calls `expirePaymentWindow` (`PaymentWindowActive` before that); the maker is refunded in full, the taker bond pays a 2% liveness penalty and the taker gets a negative reputation signal
+- **Terminal burn:** `burnExpired` once `MAX_BLEEDING` (240h) has elapsed since the challenge
 
 ### 7.2 Bleeding components
 - maker bond decay
@@ -357,116 +374,155 @@ Exact timeline (all times from `challengedAt`, matching `getCurrentAmounts`):
 | Window | What decays | Rate | Total by hour 240 |
 |---|---|---|---|
 | 0–48h (grace) | nothing | — | — |
-| 48h–240h | maker bond | 0.26% / hour | ≈ 49.9% |
-| 48h–240h | taker bond | 0.42% / hour | ≈ 80.6% |
-| 144h–240h | principal (crypto) | 0.68% / hour | ≈ 65.3% |
+| 48h–240h | maker bond | 0.26% / hour (`MAKER_BOND_DECAY_BPS_H` = 26) | ≈ 49.9% |
+| 48h–240h | taker bond | 0.42% / hour (`TAKER_BOND_DECAY_BPS_H` = 42) | ≈ 80.6% |
+| 144h–240h | principal (crypto) | 0.68% / hour (`CRYPTO_DECAY_BPS_H` = 34, ×2) | ≈ 65.3% |
 | 240h | `burnExpired` becomes callable; the trade's full balance (decayed part included: `cryptoAmount + makerBond + takerBond`) goes to treasury | — | 100% |
 
-`MAX_BLEEDING` (240h) is the total time from the challenge, not the length of principal decay: the principal
+Principal decay starts once `USDT_DECAY_START` (96h) has elapsed after the grace period. `MAX_BLEEDING` (240h) is the total time from the challenge, not the length of principal decay: the principal
 only decays for the final 96 hours, so ≈ 34.7% of it is still there to settle on until the burn.
 
-`getCurrentAmounts(tradeId)` exposes authoritative real-time economics.
+`getCurrentAmounts(tradeId)` exposes authoritative real-time economics. There is no decay in `PAID` (or any state other than `CHALLENGED`); amounts are the trade snapshot.
 
 ### 7.3 Challenge and liveness ping semantics
 - Ping paths are mutually exclusive (conflict guard). Exception: the maker ping lapses at `challengePingedAt + 24h + MAKER_CHALLENGE_WINDOW`; from that second `challengeTrade` reverts with `ChallengeWindowExpired` and the taker may call `pingMaker`.
+- The lapse is not announced by an event; off-chain code derives it from the `getTrade` fields (`challengePingedByMaker`, `challengePingedAt`, `pingedByTaker`).
 - Required wait windows are enforced by state guards.
 
 ### 7.4 Burn semantics
-- `burnExpired` finalizes stale challenged trades once max window elapses.
-- The trade's entire escrow balance (decayed part included) goes to treasury; nothing of that trade stays in the escrow. `EscrowBurned.burnedAmount` is that total; `burnExpired` emits no `BleedingDecayed`.
+- `burnExpired` is permissionless: anyone can finalize a challenged trade once the max window elapses.
+- The trade's entire escrow balance (decayed part included) goes to treasury (`RevenueKind.BURN_RESIDUAL`); nothing of that trade stays in the escrow. `EscrowBurned.burnedAmount` is that total; `burnExpired` emits no `BleedingDecayed`.
 
 ### 7.5 Cancel semantics
 - `proposeOrApproveCancel` consent is proven by msg.sender; consents are valid only for the state they were given in (`reportPayment` / `challengeTrade` reset them).
 - Cancel finalization requires both party approvals; a consent can be withdrawn with `revokeCancel` before that.
+- A `LOCKED` cancel carries no fee and fully refunds both sides. On a `PAID`/`CHALLENGED` cancel each side's fee (snapshot rate × current crypto) is capped by that side's current bond; in `CHALLENGED` the decayed part also goes to treasury.
 
-### 7.6 Settlement acceptance semantics
+### 7.6 Settlement semantics
+- A proposal can only be opened in `CHALLENGED` and only by a trade party; only one live proposal exists at a time (`ActiveSettlementProposalExists`; an expired one may be overwritten). `makerShareBps ≤ 10,000`, deadline between `now + 10 minutes` and `now + 7 days`.
 - `acceptSettlement(tradeId, expectedProposalId)`: the counterparty passes the `id` of the proposal it saw. If the proposer withdraws and re-proposes, the `id` changes and acceptance reverts with `SettlementProposalMismatch`.
+- `rejectSettlement` (counterparty) and `withdrawSettlement` (proposer) act on a live proposal; `expireSettlement` can be called by anyone on an expired one.
+- On acceptance the pool = current (post-decay) crypto + both bonds; the maker share is `makerShareBps`, fees are taken from the gross shares, the decayed part goes to treasury.
 
-<details>
-<summary>📄 Technical notes</summary>
+### 7.7 Terminal payout summary (from code)
 
-- maker bond decay  
-- taker bond decay  
-- post-threshold crypto-side decay  
-- `getCurrentAmounts(tradeId)` exposes authoritative real-time economics.  
-- Ping paths are mutually exclusive (conflict guard); the maker ping lapses at `ping + 48h`.  
-- Required wait windows are enforced by state guards.  
-- `burnExpired` finalizes stale challenged trades once max window elapses.  
-- The trade's entire escrow balance (decayed part included) goes to treasury.  
-- `proposeOrApproveCancel` consent is proven by msg.sender; consents are valid only for the state they were given in (`reportPayment` / `challengeTrade` reset them).  
-- Cancel finalization requires both party approvals.
+| Path | Maker receives | Taker receives | Treasury receives |
+|---|---|---|---|
+| `releaseFunds` (PAID) | `makerBond − makerFee` (fee capped by bond) | `crypto − takerFee + takerBond` | `takerFee + makerFee` |
+| `releaseFunds` (CHALLENGED) | same formula on current (post-decay) amounts | same | fees + decayed part |
+| `autoRelease` | `makerBond − 2%` | `crypto + takerBond − 2%` | 2% of both bonds |
+| `expirePaymentWindow` | `crypto + makerBond` | `takerBond − 2%` | 2% of the taker bond |
+| Mutual cancel (LOCKED) | `crypto + makerBond` | `takerBond` | — |
+| Mutual cancel (PAID/CHALLENGED) | `crypto + makerBond − makerFee` | `takerBond − takerFee` | fees (+ decayed part) |
+| `acceptSettlement` | maker gross share − maker fee | taker gross share − taker fee | fees + decayed part |
+| `burnExpired` | — | — | `crypto + makerBond + takerBond` |
 
-</details>
+Fees: `takerFee = crypto × takerFeeBpsSnapshot`, `makerFee = crypto × makerFeeBpsSnapshot` (default 15 bps = 0.15%; maker fee is 0 on Tier 0 orders). If the treasury is a contract (`ArafRevenueVault`), the transfer runs as `noteEscrowRevenueIntent` → transfer → `onArafRevenue`; if the hook reverts, the whole transaction reverts with `RevenueHookFailed`.
 
 ---
 
 ## 8. Reputation / bans / clean-slate
 
-The reputation model in V3 combines tier progression, ban discipline, and a clean-slate maintenance trigger.
+The reputation model in V3 combines tier progression, ban discipline, and a clean-slate maintenance trigger. The engine lives in `ArafReputationLib` (DELEGATECALL; storage and events belong to the escrow).
 
 ```mermaid
 flowchart TD
-    A[successfulTrades / failedDisputes] --> B[effective tier]
+    A[successfulTrades / riskPoints] --> B[calculated tier]
+    T[MIN_ACTIVE_PERIOD 15 days] --> B
     B --> C[maxAllowedTier ceiling]
-    C --> D[usable tier]
-    D --> E[ban / penalty state]
-    E --> F[90-day clean period]
+    C --> D[effective tier]
+    R[riskPoints >= ban threshold] --> E[ban + ceiling drops one step]
+    E --> C
+    E --> F[cleanPeriod 90 days]
     F --> G[decayReputation]
 ```
 
 ### 8.1 Reputation fields
-- `successfulTrades`
-- `failedDisputes`
-- `bannedUntil`
-- `consecutiveBans`
+- `successfulTrades`, `failedDisputes`, `bannedUntil`, `consecutiveBans`, `riskPoints`
+- Outcome counters: `manualReleaseCount`, `autoReleaseCount`, `mutualCancelCount`, `disputedResolvedCount`, `burnCount`, `disputeWinCount`, `disputeLossCount`, `partialSettlementCount`
+- `lastPositiveEventAt`, `lastNegativeEventAt`; plus `firstSuccessfulTradeAt` (`getFirstSuccessfulTradeAt`) and the penalty ceiling `maxAllowedTier`
+- Every terminal outcome emits `ReputationUpdated` for both parties (only for the taker on payment-window expiry).
 
-### 8.2 Tier impact
-- Success/failure history affects effective tier.
-- Penalty ceilings (`maxAllowedTier`) may apply.
-- `MIN_ACTIVE_PERIOD` enforces time-based progression discipline.
+### 8.2 Outcome → reputation effect (default policy)
 
-### 8.3 Clean-slate rule
-- `decayReputation` requires clean-period completion.
-- Current clean period: **90 days**.
-- Not full amnesty: `failedDisputes` history is not erased.
+| Terminal outcome | Maker | Taker |
+|---|---|---|
+| `MANUAL_RELEASE` (release from PAID) | +1 success, −8 risk | +1 success, −8 risk |
+| `AUTO_RELEASE` | `failedDisputes`+1, +60 risk | +1 success, −8 risk |
+| `MUTUAL_CANCEL` | +20 risk | +20 risk |
+| `DISPUTED_RELEASE` (release from CHALLENGED) | `failedDisputes`+1, dispute loss, +60 risk | dispute win, +1 success, −10 risk |
+| `BURN` | `failedDisputes`+1, +90 risk | `failedDisputes`+1, +90 risk |
+| `PARTIAL_SETTLEMENT` | +1 success, 0 points | +1 success, 0 points |
+| `PAYMENT_WINDOW_EXPIRED` | unaffected | `failedDisputes`+1, +60 risk |
+
+- **Micro-trade guard:** for trades whose amount, normalized to 6 decimals, is below `MIN_REPUTATION_NOTIONAL` (20e6 = 20 units, e.g. 20 USDT), positive signals (success counter, risk reduction, `firstSuccessfulTradeAt`) are ignored; penalties apply at any size.
+- Points can be changed via `setReputationPolicy`; changes only affect later recordings.
+
+### 8.3 Tier, ban and clean-slate
+- **Effective tier:** scanning from 4 down to 1, the first tier with `successfulTrades ≥ tierMinSuccessfulTrades[i]` and `riskPoints ≤ tierMaxRiskPoints[i]`. Default thresholds: successes **0 / 15 / 50 / 100 / 200**, max risk **100 / 80 / 50 / 30 / 15** (Tier 0–4). Tier > 0 also requires `MIN_ACTIVE_PERIOD` = **15 days** since the first successful trade. If a penalty ceiling exists, the result is capped by `maxAllowedTier`.
+- **Ban:** after a negative signal, if `riskPoints ≥ banRiskPointsThreshold` (**100**): when the user is not currently banned, `consecutiveBans`+1 and the ban lasts `baseBanDuration × 2^(consecutiveBans−1)` (**30 days**, 60, 120 …, at most **365 days**). Under the same condition the tier ceiling drops one step every time (the first penalty seeds it at 4 and lowers it to 3).
+- **Ban effect:** taker entry (`TakerBanActive`) and maker roles (`MakerBanActive`: opening a sell order, having one's sell order filled, filling a buy order) are closed. Exit paths of open trades stay available.
+- **Bond pricing:** with `riskPoints == 0` and at least one success the bond rate drops by 100 bps; with `riskPoints > 0` it rises by 300 bps (Tier 0 bond is always 0).
+- **Clean-slate:** `decayReputation(wallet)` is permissionless; conditions: ban history exists (`NoPriorBanHistory`), `now > bannedUntil + cleanPeriod` (`CleanPeriodNotElapsed`), `consecutiveBans > 0` (`NoBansToReset`). Current `cleanPeriod`: **90 days**. It resets `consecutiveBans`, `riskPoints`, and the tier ceiling (back to 4). Not full amnesty: `failedDisputes`, outcome counters and `bannedUntil` are not erased.
+- The backend `reputationDecay` job can trigger this call for candidate wallets after reading the contract's `getReputation()` / `cleanPeriod()` (optional `RELAYER_PRIVATE_KEY`); the decision stays in the contract.
+
+### 8.4 Policy bounds (`setReputationPolicy` / `setReputationTierThresholds`)
+- `cleanPeriod` 7–365 days; `baseBanDuration` > 0 and ≤ 365 days; `banRiskPointsThreshold` > 0 and ≤ `tierMaxRiskPoints[0]`; every reward/penalty point value ≤ the ban threshold.
+- Tier thresholds require ascending `minSuccessfulTrades`, descending `maxRiskPoints`, and `maxRiskPoints[0] ≥ banRiskPointsThreshold`.
 
 ---
 
 ## 9. Finalized parameters vs mutable config
 
-This section separates immutable parameters from runtime surfaces that the owner can still adjust.
+This section separates immutable parameters from runtime surfaces that the owner can still adjust. All values are taken from `contracts/src/ArafEscrow.sol` and `ArafReputationLib.sol`.
 
 ### 9.0 Parameter-classification table
 
 | Class | Parameters | Notes |
 |---|---|---|
-| Immutable/public constants | `TIER_MAX_AMOUNT_*`, `*_DECAY_BPS_H`, `WALLET_AGE_MIN`, `DUST_LIMIT`, `MAX_BLEEDING`, `MIN_ACTIVE_PERIOD`, `AUTO_RELEASE_PENALTY_BPS`, `MAX_CANCEL_DEADLINE`, `GOOD_REP_DISCOUNT_BPS`, `BAD_REP_PENALTY_BPS` | Not mutable via owner runtime calls. |
-| Mutable runtime config | `takerFeeBps`, `makerFeeBps`, `tier0TradeCooldown`, `tier1TradeCooldown` | Adjustable through owner governance surface. |
-| Direction-aware token runtime policy | `tokenConfigs[token] => {supported, allowSellOrders, allowBuyOrders}` | Token support is managed per order direction. |
+| Constants (`constant`; with or without a public getter) | Bond BPS (`MAKER_BOND_TIER*_BPS`, `TAKER_BOND_TIER*_BPS`), `GOOD_REP_DISCOUNT_BPS`, `BAD_REP_PENALTY_BPS`, `AUTO_RELEASE_PENALTY_BPS`, `GRACE_PERIOD`, `PAYMENT_WINDOW`, `MAKER_CHALLENGE_WINDOW`, `USDT_DECAY_START`, `MAX_BLEEDING`, `*_DECAY_BPS_H`, `WALLET_AGE_MIN`, `DUST_LIMIT`, `MIN_ACTIVE_PERIOD`, `MIN_REPUTATION_NOTIONAL`, `MAX_TRADE_COOLDOWN`, `MAX_FEE_CONFIG_BPS` | Not mutable via owner runtime calls. |
+| Mutable runtime config | `takerFeeBps`, `makerFeeBps`, `tier0TradeCooldown`, `tier1TradeCooldown`, `treasury`, reputation policy and tier thresholds | Adjustable through the owner governance surface; active-trade fees stay protected by snapshots. |
+| Direction-aware token runtime policy | `tokenConfigs[token] => {supported, allowSellOrders, allowBuyOrders, decimals, tierMaxAmountsBaseUnit[4]}` | Token support and tier caps are managed per token. |
 
-### 9.1 Immutable/public-constant class
-- tier max amount constants (`TIER_MAX_AMOUNT_*`)
-- decay constants (`*_DECAY_BPS_H`)
-- wallet age / dust / bleeding / active period limits
-- auto-release penalty
-- max cancel deadline
-- reputation discount/penalty BPS
+### 9.1 Constant values
+
+| Constant | Value | Meaning |
+|---|---|---|
+| Maker bond (Tier 0–4) | 0% / 8% / 6% / 5% / 2% | By order tier, on the fill amount |
+| Taker bond (Tier 0–4) | 0% / 10% / 8% / 5% / 2% | By order tier, on the fill amount |
+| `GOOD_REP_DISCOUNT_BPS` / `BAD_REP_PENALTY_BPS` | −100 / +300 bps | Reputation adjustment to the bond rate (Tier 1+) |
+| `AUTO_RELEASE_PENALTY_BPS` | 200 bps (2%) | Penalty for `autoRelease` (both bonds) and `expirePaymentWindow` (taker bond) |
+| `PAYMENT_WINDOW` | 48h | Time to report payment in `LOCKED` |
+| `GRACE_PERIOD` | 48h | Wait after `paidAt` for `pingMaker`; decay-free period after a challenge |
+| `MAKER_CHALLENGE_WINDOW` | 24h | Window to open the challenge after ping+24h |
+| `USDT_DECAY_START` | 96h | Principal decay start after the grace period |
+| `MAX_BLEEDING` | 240h | Total time from `challengedAt` to burn |
+| `MAKER/TAKER/CRYPTO_DECAY_BPS_H` | 26 / 42 / 34 (×2) bps/hour | Decay rates |
+| `WALLET_AGE_MIN` | 2 days | Registration age for taker entry |
+| `DUST_LIMIT` | 0.001 ETH | Native balance for taker entry |
+| `MIN_ACTIVE_PERIOD` | 15 days | Time since first success for Tier > 0 |
+| `MIN_REPUTATION_NOTIONAL` | 20e6 (6 decimals) | Smallest trade counted for reputation |
+| `MAX_TRADE_COOLDOWN` | 30 days | Cooldown setter upper bound |
+| `MAX_FEE_CONFIG_BPS` | 2000 bps | Fee setter upper bound (per side) |
+
+The constants `MAX_CANCEL_DEADLINE` (7 days) and `MIN_SETTLEMENT_EXPIRY` are declared in the escrow but unused by escrow code; the settlement deadline bounds (10 minutes – 7 days) are enforced by `ArafSettlementLib`'s own constants.
 
 ### 9.2 Mutable runtime config class
-- `takerFeeBps`
-- `makerFeeBps`
-- `tier0TradeCooldown`
-- `tier1TradeCooldown`
-- direction-aware token config via `setTokenConfig`
+- `takerFeeBps`, `makerFeeBps` — default **15 / 15 bps** (0.15%), ≤ 2000 bps per side
+- `tier0TradeCooldown`, `tier1TradeCooldown` — default **4h / 4h**, ≤ 30 days
+- `treasury` — `setTreasury`
+- reputation policy and tier thresholds — `setReputationPolicy`, `setReputationTierThresholds` (defaults in §8)
+- direction-aware token config via `setTokenConfig`: `supported`, `allowSellOrders`, `allowBuyOrders`, `decimals` (must equal the token's `decimals()`), four tier caps (Tier 0–3, base units, > 0). Tier 4 has no cap.
 
 ### 9.3 Fee snapshot semantics
-- Snapshot is captured at order creation.
+- Snapshot is captured at order creation; a Tier 0 order deliberately snapshots a maker fee of 0.
 - Child trade inherits parent snapshots.
 - Later `setFeeConfig` changes do not retroactively rewrite active-trade economics.
 
 ### 9.4 Toolchain / deployment assumptions
-- Deploy flow starts with `constructor(treasury)` and token direction config.
-- Post-deploy token-direction policy should be verified on-chain via `getTokenConfig(token)`.
+- `contracts/scripts/deploy.js` order: `ArafReputationLib` → `ArafSettlementLib` → linked `ArafEscrow(treasury)` → `setTokenConfig` for USDT/USDC (6 decimals, sell+buy enabled, tier caps 150 / 1,500 / 7,500 / 30,000 tokens) verified via `getTokenConfig` → `transferOwnership(FINAL_OWNER_ADDRESS)`. The manifest also records the library addresses.
+- Public chains require `CONFIRM_PUBLIC_DEPLOY=yes`; in public/custom mode `FINAL_OWNER_ADDRESS` must differ from `TREASURY_ADDRESS`.
+- `ArafRevenueVault` + `ArafRewards` are deployed by a separate script (`deployRewards.js`); switching the escrow treasury to the vault is a separate, explicit operation (`rewardsOps.js`).
 - Production guidance assumes owner governance key is managed by multisig to reduce key risk.
 
 ---

@@ -6,7 +6,7 @@
 [![Version](https://img.shields.io/badge/versiyon-V3_Order--First-00c9a7?style=flat-square)](.)
 [![Network](https://img.shields.io/badge/ağ-Base_L2_(8453)-0052FF?style=flat-square&logo=coinbase)](.)
 [![Status](https://img.shields.io/badge/durum-Canonical-f5a623?style=flat-square)](.)
-[![Updated](https://img.shields.io/badge/güncelleme-Nisan_2026-purple?style=flat-square)](.)
+[![Updated](https://img.shields.io/badge/güncelleme-Ekim_2026-purple?style=flat-square)](.)
 [![Solidity](https://img.shields.io/badge/Solidity-0.8.24-363636?style=flat-square&logo=solidity)](.)
 [![Docs](https://img.shields.io/badge/docs-Source_of_Truth-green?style=flat-square)](.)
 
@@ -57,7 +57,10 @@ flowchart TD
     D --> E[PAID]
     E --> F[RESOLVED]
     E --> G[CHALLENGED]
-    E --> H[CANCELED]
+    D --> H[CANCELED]
+    E --> H
+    G --> F
+    G --> H
     G --> I[BURNED]
 ```
 
@@ -145,53 +148,61 @@ Kontrat, V3’ün tek authoritative state machine yüzeyidir. Aşağıdaki fonks
 | Surface | Fonksiyonlar | Mimari anlam |
 |---|---|---|
 | Parent-order write surface | `createSellOrder`, `fillSellOrder`, `cancelSellOrder`, `createBuyOrder`, `fillBuyOrder`, `cancelBuyOrder` | Kamusal market ve fill primitive’i |
-| Child-trade lifecycle write surface | `reportPayment`, `releaseFunds`, `challengeTrade`, `autoRelease`, `burnExpired`, `proposeOrApproveCancel`, `revokeCancel`, `expirePaymentWindow`, `proposeSettlement`, `acceptSettlement(tradeId, expectedProposalId)` | Gerçek escrow lifecycle ve ekonomik state geçişleri |
+| Child-trade lifecycle write surface | `reportPayment`, `releaseFunds`, `challengeTrade`, `autoRelease`, `burnExpired`, `proposeOrApproveCancel`, `revokeCancel`, `expirePaymentWindow`, `proposeSettlement`, `acceptSettlement(tradeId, expectedProposalId)`, `rejectSettlement`, `withdrawSettlement`, `expireSettlement` | Gerçek escrow lifecycle ve ekonomik state geçişleri |
 | Liveness / yardımcı write surface | `registerWallet`, `pingMaker`, `pingTakerForChallenge`, `decayReputation` | Entry gate, liveness ve clean-slate bakım yüzeyi |
-| Governance / mutable admin surface | `setTreasury`, `setFeeConfig`, `setCooldownConfig`, `setTokenConfig`, `pause`, `unpause` | Runtime policy ve governance kontrol yüzeyi |
-| Read surface | `getOrder`, `getTrade`, `getReputation`, `getFeeConfig`, `getCooldownConfig`, `getCurrentAmounts`, `antiSybilCheck`, `getCooldownRemaining`, `getFirstSuccessfulTradeAt` | Doğrulama, görünürlük ve runtime read yüzeyi |
+| Governance / mutable admin surface (`onlyOwner`) | `setTreasury`, `setFeeConfig`, `setCooldownConfig`, `setTokenConfig`, `setReputationPolicy`, `setReputationTierThresholds`, `pause`, `unpause` (+ `Ownable`: `transferOwnership`, `renounceOwnership`) | Runtime policy ve governance kontrol yüzeyi |
+| Read surface | `getOrder`, `getTrade`, `getReputation`, `getTokenConfig`, `getSettlementProposal`, `getRewardableTrade`, `getFeeConfig`, `getCooldownConfig`, `getCurrentAmounts`, `antiSybilCheck`, `getCooldownRemaining`, `getFirstSuccessfulTradeAt`, `cleanPeriod`, `maxAllowedTier`, `walletRegisteredAt`, `treasury`, `tradeCounter`, `orderCounter` | Doğrulama, görünürlük ve runtime read yüzeyi |
 
 ### 3.1 Parent-order write surface
-- `createSellOrder`
-- `fillSellOrder`
-- `cancelSellOrder`
-- `createBuyOrder`
-- `fillBuyOrder`
-- `cancelBuyOrder`
-- Fill anında hem filler'ın hem order sahibinin efektif tier'ı order tier'ına yetmeli (`TierNotAllowed`); maker rolündeki taraf için aktif ban `MakerBanActive` ile, taker rolündeki için giriş kapısı (ban/yaş/dust/cooldown) ile yeniden kontrol edilir. Create sonrası ceza alan sahibin açık order'ı böylece doldurulamaz.
+- `createSellOrder(token, totalAmount, minFillAmount, tier, orderRef, paymentRiskLevel)` — satıcı envanteri + toplam maker bond rezervini peşin kilitler. Order sahibi için yalnız aktif ban kontrol edilir (`MakerBanActive`).
+- `createBuyOrder(...)` — alıcı yalnız kendi toplam taker bond rezervini kilitler; sahibi child trade'de taker olacağı için taker giriş kapısından geçer.
+- `fillSellOrder(orderId, fillAmount, childListingRef)` / `fillBuyOrder(...)` — exact fill; child trade aynı tx'te `LOCKED` doğar. Son fill kalan rezervin tamamını süpürür (yuvarlama birikmez).
+- `cancelSellOrder` / `cancelBuyOrder` — yalnız order sahibi, yalnız `OPEN`/`PARTIALLY_FILLED`; doldurulmamış envanter (sell) ve kullanılmamış bond rezervi iade edilir.
+- Order doğrulaması: `totalAmount > 0`, `0 < minFillAmount ≤ totalAmount`, `tier ≤ 4`, `orderRef ≠ 0`, tier ≤ sahibinin efektif tier'ı (`TierNotAllowed`), tutar ≤ token'ın tier tavanı (`AmountExceedsTierLimit`; Tier 4 sınırsız). Token yönü kapalıysa `TokenDirectionNotAllowed`. Fee-on-transfer token girişleri `InvalidTransferAmount` ile reddedilir.
+- Fill doğrulaması: `childListingRef ≠ 0`, self-trade yasak (`SelfTradeForbidden`), `fillAmount ≤ remaining`, `fillAmount ≥ minFillAmount` (son kalan kısım hariç).
+- Fill anında hem filler'ın hem order sahibinin efektif tier'ı order tier'ına yetmeli (`TierNotAllowed`, Tier 0 hariç); maker rolündeki taraf için aktif ban `MakerBanActive` ile, taker rolündeki için giriş kapısı (ban/yaş/dust/cooldown) ile yeniden kontrol edilir. Create sonrası ceza alan sahibin açık order'ı böylece doldurulamaz.
+- `pause` yalnız bu yüzeydeki `create*` ve `fill*` çağrılarını durdurur (`whenNotPaused`); order iptali ve aşağıdaki tüm trade yolları pause'dan etkilenmez.
 
 ### 3.2 Child-trade lifecycle write surface
-- `reportPayment`
-- `releaseFunds`
-- `challengeTrade`
-- `autoRelease`
-- `burnExpired`
-- `proposeOrApproveCancel` / `revokeCancel`
-- `proposeSettlement` / `acceptSettlement(tradeId, expectedProposalId)` / `rejectSettlement` / `withdrawSettlement` / `expireSettlement`
+- `reportPayment(tradeId, ipfsHash)` — yalnız taker, yalnız `LOCKED`, yalnız `lockedAt + PAYMENT_WINDOW` öncesi; dekont hash'i storage'a yazılmaz, kanonik kaydı `PaymentReported` event'idir.
+- `releaseFunds` — yalnız maker, `PAID` veya `CHALLENGED`.
+- `challengeTrade` — yalnız maker, ping sonrası pencere içinde (bkz. §7).
+- `autoRelease` — yalnız taker, `pingMaker` + 24 saat sonra.
+- `burnExpired` — permissionless, `challengedAt + MAX_BLEEDING` sonrası.
+- `expirePaymentWindow` — maker veya taker, `lockedAt + PAYMENT_WINDOW` anından itibaren.
+- `proposeOrApproveCancel` / `revokeCancel` — iki taraf, `LOCKED`/`PAID`/`CHALLENGED`.
+- `proposeSettlement` / `acceptSettlement(tradeId, expectedProposalId)` / `rejectSettlement` / `withdrawSettlement` / `expireSettlement` — yalnız `CHALLENGED` (bkz. §7.6).
 
 > **Bytecode ayrımı (EIP-170):** `ArafEscrow` iki external library'ye linklenir: `ArafReputationLib` (sonuç kaydı, risk puanı,
 > ban/tier tavanı, reputation politika setter doğrulaması) ve `ArafSettlementLib` (terminal payout + treasury hook'ları,
 > settlement teklif yönetimi). Library'ler DELEGATECALL ile escrow storage'ında çalışır; event'ler escrow adresinden aynı
 > imzalarla yayınlanır, yetki kontrolleri escrow'da kalır, adresler deploy anında bytecode'a gömülür (upgrade yolu yok).
-> Deploy sırası: `ArafReputationLib` → `ArafSettlementLib` → linkli `ArafEscrow` (`contracts/scripts/deploy.js`).
+> Deploy sırası: `ArafReputationLib` → `ArafSettlementLib` (ikisi bağımsız) → linkli `ArafEscrow` (`contracts/scripts/deploy.js`).
+> Runtime bytecode boyutları (solc 0.8.24, `viaIR`, optimizer 200 run, `cancun`): `ArafEscrow` 22.061 bayt (EIP-170 sınırı 24.576),
+> `ArafReputationLib` 4.705, `ArafSettlementLib` 2.168 bayt. Hardhat ağında `allowUnlimitedContractSize: false` ile sınır yerelde de zorlanır.
 
 ### 3.3 Liveness / yardımcı write surface
-- `registerWallet`
-- `pingMaker`
-- `pingTakerForChallenge`
-- `decayReputation`
+- `registerWallet` — cüzdan yaşı sayacını başlatır (tek kez; `AlreadyRegistered`).
+- `pingMaker` — taker, `paidAt + GRACE_PERIOD` sonrası.
+- `pingTakerForChallenge` — maker, `paidAt + 24 saat` sonrası, trade başına bir kez.
+- `decayReputation(wallet)` — permissionless clean-slate (bkz. §8.3).
 
 ### 3.4 Governance / mutable admin surface
-- `setTreasury`
-- `setFeeConfig`
-- `setCooldownConfig`
-- `setTokenConfig`
+- `setTreasury` (sıfır adres yasak)
+- `setFeeConfig` (taraf başına ≤ 2000 bps)
+- `setCooldownConfig` (her tier için ≤ 30 gün)
+- `setTokenConfig` (decimals 1–18 ve token'ın `decimals()` değerine eşit; dört tier tavanı > 0)
+- `setReputationPolicy`, `setReputationTierThresholds` (sınırlar §8.4)
 - `pause` / `unpause`
 
 ### 3.5 Read surface
-- `getOrder`, `getTrade`, `getReputation`
+- `getOrder`, `getTrade`, `getReputation`, `getTokenConfig`, `getSettlementProposal`
+- `getRewardableTrade` (ArafRewards'ın tek veri kaynağı)
 - `getFeeConfig`, `getCooldownConfig`
 - `getCurrentAmounts`
-- `antiSybilCheck`, `getCooldownRemaining`, `getFirstSuccessfulTradeAt`
+- `antiSybilCheck`, `getCooldownRemaining`, `getFirstSuccessfulTradeAt`, `walletRegisteredAt`
+- `cleanPeriod()`, `maxAllowedTier(wallet)`
+- Struct mapping'leri `internal`'dır; veri yalnız bu adlandırılmış getter'larla okunur. Reputation politika puanları için ayrı getter yoktur; değerler `ReputationPolicyUpdated` / `ReputationTierThresholdsUpdated` event'leriyle (constructor'da da) yayınlanır.
 
 ---
 
@@ -212,6 +223,7 @@ stateDiagram-v2
     state "Child Trade" as CT {
         [*] --> LOCKED
         LOCKED --> PAID
+        LOCKED --> CANCELED
         PAID --> CHALLENGED
         PAID --> RESOLVED
         PAID --> CANCELED
@@ -230,7 +242,7 @@ stateDiagram-v2
 Parent order market görünürlüğünü taşır; escrow uyuşmazlığı çözmez.
 
 ### 4.2 Child trade state
-- `OPEN` (V3 fill path’inde pratikte kullanılmıyor)
+- `OPEN` (enum'da durur; V3 fill path’i trade'i doğrudan `LOCKED` üretir, `OPEN` hiç yazılmaz)
 - `LOCKED`
 - `PAID`
 - `CHALLENGED`
@@ -304,15 +316,19 @@ flowchart TD
 ```
 
 Gate bileşenleri:
-- aktif ban kontrolü (`bannedUntil`)
-- wallet age (`WALLET_AGE_MIN`)
-- native balance dust eşiği (`DUST_LIMIT`)
-- tier bazlı cooldown (`tier0TradeCooldown`, `tier1TradeCooldown`)
+- aktif ban kontrolü (`bannedUntil`; `block.timestamp <= bannedUntil` ise `TakerBanActive`)
+- wallet age: `registerWallet` + `WALLET_AGE_MIN` = **2 gün** (`WalletTooYoung`)
+- native balance dust eşiği: `DUST_LIMIT` = **0,001 ETH** (`InsufficientNativeBalance`)
+- tier bazlı cooldown: order tier'ı 0 ise `tier0TradeCooldown`, 1 ise `tier1TradeCooldown` (varsayılan ikisi de **4 saat**, üst sınır 30 gün); Tier 2+ için cooldown yoktur (`TierCooldownActive`). `lastTradeAt` yalnız Tier 0/1 fill'lerinde taker için yazılır.
 
 V3 uygulama noktaları:
 - `fillSellOrder` (filler taker)
 - `createBuyOrder` (owner eventual taker)
 - `fillBuyOrder` (owner taker re-check)
+
+Maker rolü için yalnız aktif ban bakılır (`MakerBanActive`): `createSellOrder` (owner), `fillSellOrder` (owner), `fillBuyOrder` (filler). Yaş/dust/cooldown kapıları taker girişine özgüdür; maker zaten envanter + bond kilitler. Tier kapısı ayrıca uygulanır: order tier'ı create anında sahibinin, fill anında hem sahibinin hem filler'ın efektif tier'ını aşamaz.
+
+`antiSybilCheck(wallet)` ve `getCooldownRemaining(wallet)` yalnız bilgi amaçlıdır; parametresiz oldukları için iki tier cooldown'unun büyüğünü raporlar, bağlayıcı karar state-changing fonksiyonlardadır.
 
 Sonuç: anti-sybil enforcement lockEscrow-merkezli legacy değildir; V3 child-trade entry path merkezlidir.
 
@@ -320,29 +336,30 @@ Sonuç: anti-sybil enforcement lockEscrow-merkezli legacy değildir; V3 child-tr
 
 ## 7. Dispute/Bleeding Escrow teknik akışı
 
-Bu bölüm V3’ün gerçek ekonomik state machine’ini açıklar. `PAID` sonrası normal çözüm, dispute, liveness, cancel ve burn yolları child trade seviyesinde çalışır.
+Bu bölüm V3’ün gerçek ekonomik state machine’ini açıklar. `LOCKED` ve `PAID` sonrası normal çözüm, dispute, liveness, cancel ve burn yolları child trade seviyesinde çalışır.
 
 ```mermaid
 stateDiagram-v2
     [*] --> LOCKED
-    LOCKED --> PAID
+    LOCKED --> PAID : reportPayment
+    LOCKED --> CANCELED : expirePaymentWindow / dual cancel
     PAID --> RESOLVED : releaseFunds
     PAID --> CHALLENGED : pingTakerForChallenge -> challengeTrade
     PAID --> RESOLVED : pingMaker -> autoRelease
     PAID --> CANCELED : dual cancel
-    CHALLENGED --> RESOLVED
-    CHALLENGED --> CANCELED
+    CHALLENGED --> RESOLVED : releaseFunds / acceptSettlement
+    CHALLENGED --> CANCELED : dual cancel
     CHALLENGED --> BURNED : burnExpired
 ```
 
-### 7.1 `PAID` sonrası çözüm yolları
+### 7.1 `LOCKED` ve `PAID` sonrası çözüm yolları
 - **Normal kapanış:** maker `releaseFunds`
-- **Dispute hattı:** maker `pingTakerForChallenge` → 24 saat cevap penceresi → `challengeTrade` (yalnız maker). Ping bir iddiadır: maker challenge'ı `[ping+24sa, ping+48sa)` aralığında (`MAKER_CHALLENGE_WINDOW` = 24 saat, sabit) açmazsa ping **düşer**; `ping+48sa` saniyesinden itibaren `challengeTrade` `ChallengeWindowExpired` ile reddedilir. Maker trade başına tek ping atabilir (`AlreadyPinged`).
-- **Liveness hattı:** taker `pingMaker` (`paidAt + GRACE_PERIOD` sonrası) → 24 saat → `autoRelease` (`AUTO_RELEASE_PENALTY` dahil). Maker'ın pingi geçerliyken (`ping+48sa` öncesi) `pingMaker` `ConflictingPingPath` ile reddedilir; ping düştüğü saniyeden itibaren açılır. Böylece ping atıp susan maker PAID trade'i süresiz kilitleyemez. Ters yönde, taker `pingMaker` attıysa maker'ın `pingTakerForChallenge`'ı `ConflictingPingPath` ile reddedilir.
+- **Dispute hattı:** maker `pingTakerForChallenge` (en erken `paidAt + 24 saat`; öncesinde `PingCooldownNotElapsed`) → 24 saat cevap penceresi → `challengeTrade` (yalnız maker). Ping bir iddiadır: maker challenge'ı `[ping+24sa, ping+48sa)` aralığında (`MAKER_CHALLENGE_WINDOW` = 24 saat, sabit) açmazsa ping **düşer**; `ping+48sa` saniyesinden itibaren `challengeTrade` `ChallengeWindowExpired` ile reddedilir. Maker trade başına tek ping atabilir (`AlreadyPinged`).
+- **Liveness hattı:** taker `pingMaker` (`paidAt + GRACE_PERIOD` = `paidAt + 48 saat` sonrası) → 24 saat → `autoRelease` (iki bond'dan `AUTO_RELEASE_PENALTY_BPS` = %2). Maker'ın pingi geçerliyken (`ping+48sa` öncesi) `pingMaker` `ConflictingPingPath` ile reddedilir; ping düştüğü saniyeden itibaren açılır. Böylece ping atıp susan maker PAID trade'i süresiz kilitleyemez. Ters yönde, taker `pingMaker` attıysa maker'ın `pingTakerForChallenge`'ı `ConflictingPingPath` ile reddedilir.
 - **Maker her zaman release edebilir:** `PAID`'den `releaseFunds` ping'den bağımsız her an açıktır (clean release); `CHALLENGED`'dan release `DISPUTED_RELEASE` + maker dispute kaybıdır.
-- **Mutual cancel:** her iki taraf kendi `proposeOrApproveCancel(tradeId)` işlemini gönderir (ayrı imza yok); ikinci onay gelmeden önce taraf kendi onayını `revokeCancel(tradeId)` ile geri çekebilir (`CancelRevoked`)
-- **Ödeme penceresi aşımı:** `reportPayment` yalnız `lockedAt + 48 saat`'ten önce kabul edilir (sınır saniyesinde `PaymentWindowClosed`). LOCKED'da 48 saat içinde ödeme bildirilmezse taraflardan biri `expirePaymentWindow` çağırır; maker tam iade alır, taker bond'undan %2 liveness cezası + negatif itibar sinyali
-- **Terminal burn:** challenge sonrası süre dolunca `burnExpired`
+- **Mutual cancel:** her iki taraf kendi `proposeOrApproveCancel(tradeId)` işlemini gönderir (ayrı imza yok); ikinci onay gelmeden önce taraf kendi onayını `revokeCancel(tradeId)` ile geri çekebilir (`CancelRevoked`; onay yoksa `NoCancelConsent`)
+- **Ödeme penceresi aşımı:** `reportPayment` yalnız `lockedAt + PAYMENT_WINDOW` (48 saat) öncesinde kabul edilir (sınır saniyesinden itibaren `PaymentWindowClosed`). LOCKED'da 48 saat içinde ödeme bildirilmezse taraflardan biri `expirePaymentWindow` çağırır (öncesinde `PaymentWindowActive`); maker tam iade alır, taker bond'undan %2 liveness cezası + negatif itibar sinyali
+- **Terminal burn:** challenge sonrası `MAX_BLEEDING` (240 saat) dolunca `burnExpired`
 
 ### 7.2 Bleeding bileşenleri
 - maker bond decay
@@ -354,116 +371,155 @@ Kesin zaman çizelgesi (tüm süreler `challengedAt`'ten itibaren, `getCurrentAm
 | Aralık | Ne erir | Oran | 240. saate kadar toplam |
 |---|---|---|---|
 | 0–48 saat (grace) | hiçbir şey | — | — |
-| 48–240 saat | maker bond | saatte %0,26 | ≈ %49,9 |
-| 48–240 saat | taker bond | saatte %0,42 | ≈ %80,6 |
-| 144–240 saat | ana para (kripto) | saatte %0,68 | ≈ %65,3 |
+| 48–240 saat | maker bond | saatte %0,26 (`MAKER_BOND_DECAY_BPS_H` = 26) | ≈ %49,9 |
+| 48–240 saat | taker bond | saatte %0,42 (`TAKER_BOND_DECAY_BPS_H` = 42) | ≈ %80,6 |
+| 144–240 saat | ana para (kripto) | saatte %0,68 (`CRYPTO_DECAY_BPS_H` = 34, ×2) | ≈ %65,3 |
 | 240. saat | `burnExpired` çağrılabilir; trade'in tüm bakiyesi (erimiş kısım dahil: `cryptoAmount + makerBond + takerBond`) hazineye gider | — | %100 |
 
-`MAX_BLEEDING` (240 saat) challenge'dan itibaren toplam süredir, ana paranın erime süresi değildir: ana para
+Ana para erimesi, grace sonrası `USDT_DECAY_START` (96 saat) dolunca başlar. `MAX_BLEEDING` (240 saat) challenge'dan itibaren toplam süredir, ana paranın erime süresi değildir: ana para
 yalnız son 96 saatte erir; bu yüzden yakılma anına kadar yaklaşık %34,7'si uzlaşmaya konu olarak durur.
 
-`getCurrentAmounts(tradeId)`, o anki ekonomik bakiyeyi kanonik olarak çıkarır.
+`getCurrentAmounts(tradeId)`, o anki ekonomik bakiyeyi kanonik olarak çıkarır. `PAID` (ve `CHALLENGED` dışındaki her state) için erime yoktur; tutarlar trade snapshot'ıdır.
 
 ### 7.3 Challenge ve liveness ping semantiği
 - Ping yolları birbirini dışlayan şekilde tasarlanır (conflicting path koruması). İstisna: maker pingi `challengePingedAt + 24 saat + MAKER_CHALLENGE_WINDOW` anında düşer; o saniyeden itibaren `challengeTrade` `ChallengeWindowExpired` verir ve taker `pingMaker` çağırabilir.
+- Ping'in düşmesi event ile duyurulmaz; off-chain taraf `getTrade` alanlarından (`challengePingedByMaker`, `challengePingedAt`, `pingedByTaker`) hesaplar.
 - Bekleme pencereleri state-guard ile enforce edilir.
 
 ### 7.4 Burn semantiği
-- `burnExpired` permissionless pattern’e yakındır: challenge süresi dolan state’i finalize eder.
-- Trade'in escrow'daki tüm bakiyesi (erimiş kısım dahil) treasury'ye gider; burn sonrası escrow'da o trade'e ait bakiye kalmaz. `EscrowBurned.burnedAmount` bu toplamdır; `burnExpired` `BleedingDecayed` yaymaz.
+- `burnExpired` permissionless'tır: challenge süresi dolan state’i herkes finalize edebilir.
+- Trade'in escrow'daki tüm bakiyesi (erimiş kısım dahil) treasury'ye gider (`RevenueKind.BURN_RESIDUAL`); burn sonrası escrow'da o trade'e ait bakiye kalmaz. `EscrowBurned.burnedAmount` bu toplamdır; `burnExpired` `BleedingDecayed` yaymaz.
 
 ### 7.5 Cancel semantiği
 - `proposeOrApproveCancel` onayı msg.sender ile kanıtlanır; onaylar yalnız verildikleri state için geçerlidir (`reportPayment` / `challengeTrade` sıfırlar).
-- Her iki taraf imzası tamamlanmadan cancel finalize edilmez; tamamlanmadan önce verilen onay `revokeCancel` ile geri alınabilir.
+- Her iki taraf onayı tamamlanmadan cancel finalize edilmez; tamamlanmadan önce verilen onay `revokeCancel` ile geri alınabilir.
+- `LOCKED` iptalinde fee yoktur, iki taraf tam iade alır. `PAID`/`CHALLENGED` iptalinde her tarafın fee'si (snapshot oranı × güncel kripto) kendi güncel bond'uyla sınırlanarak kesilir; `CHALLENGED`'da erimiş kısım da hazineye gider.
 
-### 7.6 Settlement kabul semantiği
+### 7.6 Settlement semantiği
+- Teklif yalnız `CHALLENGED`'da ve yalnız trade taraflarınca açılır; aynı anda tek canlı teklif olur (`ActiveSettlementProposalExists`; süresi dolmuş teklifin üzerine yazılabilir). `makerShareBps ≤ 10.000`, son geçerlilik `now + 10 dakika` ile `now + 7 gün` arası.
 - `acceptSettlement(tradeId, expectedProposalId)`: karşı taraf gördüğü teklifin `id`'sini verir. Teklif sahibi withdraw + yeniden teklif ile oranı değiştirirse `id` değişir ve kabul `SettlementProposalMismatch` ile revert eder.
+- `rejectSettlement` (karşı taraf) ve `withdrawSettlement` (teklif sahibi) canlı teklifte; `expireSettlement` süresi dolmuş teklifte herkes tarafından çağrılır.
+- Kabulde havuz = güncel (erime sonrası) kripto + iki bond; maker payı `makerShareBps`, fee'ler gross paylardan kesilir, erimiş kısım hazineye gider.
 
-<details>
-<summary>📄 Teknik notlar</summary>
+### 7.7 Terminal dağıtım özeti (koddan)
 
-- maker bond decay  
-- taker bond decay  
-- belirli eşik sonrası crypto side decay  
-- `getCurrentAmounts(tradeId)`, o anki ekonomik bakiyeyi kanonik olarak çıkarır.  
-- Ping yolları birbirini dışlayan şekilde tasarlanır (conflicting path koruması); maker pingi `ping + 48 saat`te düşer.  
-- Bekleme pencereleri state-guard ile enforce edilir.  
-- `burnExpired` permissionless pattern’e yakındır: challenge süresi dolan state’i finalize eder.  
-- Trade'in escrow'daki tüm bakiyesi (erimiş kısım dahil) treasury'ye gider.  
-- `proposeOrApproveCancel` onayı msg.sender ile kanıtlanır; onaylar yalnız verildikleri state için geçerlidir (`reportPayment` / `challengeTrade` sıfırlar).  
-- Her iki taraf imzası tamamlanmadan cancel finalize edilmez.
+| Yol | Maker alır | Taker alır | Treasury alır |
+|---|---|---|---|
+| `releaseFunds` (PAID) | `makerBond − makerFee` (fee bond ile sınırlı) | `crypto − takerFee + takerBond` | `takerFee + makerFee` |
+| `releaseFunds` (CHALLENGED) | aynı formül, güncel (erime sonrası) tutarlarla | aynı | fee'ler + erimiş kısım |
+| `autoRelease` | `makerBond − %2` | `crypto + takerBond − %2` | iki bond'un %2'si |
+| `expirePaymentWindow` | `crypto + makerBond` | `takerBond − %2` | taker bond'unun %2'si |
+| Mutual cancel (LOCKED) | `crypto + makerBond` | `takerBond` | — |
+| Mutual cancel (PAID/CHALLENGED) | `crypto + makerBond − makerFee` | `takerBond − takerFee` | fee'ler (+ erimiş kısım) |
+| `acceptSettlement` | maker gross payı − maker fee | taker gross payı − taker fee | fee'ler + erimiş kısım |
+| `burnExpired` | — | — | `crypto + makerBond + takerBond` |
 
-</details>
+Fee'ler: `takerFee = crypto × takerFeeBpsSnapshot`, `makerFee = crypto × makerFeeBpsSnapshot` (varsayılan 15 bps = %0,15; Tier 0 order'da maker fee 0). Treasury bir kontratsa (`ArafRevenueVault`) aktarım `noteEscrowRevenueIntent` → transfer → `onArafRevenue` sırasıyla yapılır; hook revert ederse tüm işlem `RevenueHookFailed` ile geri alınır.
 
 ---
 
 ## 8. Reputation / bans / clean-slate
 
-Reputation modeli V3’te tier progression, ban disiplini ve clean-slate bakım çağrısını birlikte taşır.
+Reputation modeli V3’te tier progression, ban disiplini ve clean-slate bakım çağrısını birlikte taşır. Motor `ArafReputationLib` içindedir (DELEGATECALL; storage ve event'ler escrow'a aittir).
 
 ```mermaid
 flowchart TD
-    A[successfulTrades / failedDisputes] --> B[effective tier]
+    A[successfulTrades / riskPoints] --> B[calculated tier]
+    T[MIN_ACTIVE_PERIOD 15 gün] --> B
     B --> C[maxAllowedTier ceiling]
-    C --> D[usable tier]
-    D --> E[ban / penalty state]
-    E --> F[90-day clean period]
+    C --> D[effective tier]
+    R[riskPoints >= ban eşiği] --> E[ban + tavan bir kademe düşer]
+    E --> C
+    E --> F[cleanPeriod 90 gün]
     F --> G[decayReputation]
 ```
 
 ### 8.1 Reputation alanları
-- `successfulTrades`
-- `failedDisputes`
-- `bannedUntil`
-- `consecutiveBans`
+- `successfulTrades`, `failedDisputes`, `bannedUntil`, `consecutiveBans`, `riskPoints`
+- Sonuç sayaçları: `manualReleaseCount`, `autoReleaseCount`, `mutualCancelCount`, `disputedResolvedCount`, `burnCount`, `disputeWinCount`, `disputeLossCount`, `partialSettlementCount`
+- `lastPositiveEventAt`, `lastNegativeEventAt`; ayrıca `firstSuccessfulTradeAt` (`getFirstSuccessfulTradeAt`) ve ceza tavanı `maxAllowedTier`
+- Her terminal sonuçta iki taraf için (ödeme penceresi aşımında yalnız taker için) `ReputationUpdated` yayınlanır.
 
-### 8.2 Tier etkisi
-- Başarı/başarısızlık geçmişi efektif tier’ı etkiler.
-- Ceza sonrası tier ceiling (`maxAllowedTier`) devreye girebilir.
-- `MIN_ACTIVE_PERIOD` tier progression’da zaman bileşeni uygular.
+### 8.2 Sonuç → itibar etkisi (varsayılan politika)
 
-### 8.3 Clean-slate kuralı
-- `decayReputation` clean period tamamlanınca çağrılabilir.
-- Güncel clean period: **90 gün**.
-- Bu tam af değildir; `failedDisputes` silinmez.
+| Terminal sonuç | Maker | Taker |
+|---|---|---|
+| `MANUAL_RELEASE` (PAID'den release) | +1 başarı, −8 risk | +1 başarı, −8 risk |
+| `AUTO_RELEASE` | `failedDisputes`+1, +60 risk | +1 başarı, −8 risk |
+| `MUTUAL_CANCEL` | +20 risk | +20 risk |
+| `DISPUTED_RELEASE` (CHALLENGED'dan release) | `failedDisputes`+1, dispute kaybı, +60 risk | dispute kazancı, +1 başarı, −10 risk |
+| `BURN` | `failedDisputes`+1, +90 risk | `failedDisputes`+1, +90 risk |
+| `PARTIAL_SETTLEMENT` | +1 başarı, 0 puan | +1 başarı, 0 puan |
+| `PAYMENT_WINDOW_EXPIRED` | etkilenmez | `failedDisputes`+1, +60 risk |
+
+- **Mikro işlem koruması:** 6 ondalığa normalize edilmiş tutarı `MIN_REPUTATION_NOTIONAL` (20e6 = 20 birim, ör. 20 USDT) altında kalan trade'lerde pozitif sinyaller (başarı sayacı, risk düşüşü, `firstSuccessfulTradeAt`) yok sayılır; cezalar her büyüklükte uygulanır.
+- Puanlar `setReputationPolicy` ile değiştirilebilir; değişiklik yalnız sonraki kayıtları etkiler.
+
+### 8.3 Tier, ban ve clean-slate
+- **Efektif tier:** 4'ten 1'e doğru, `successfulTrades ≥ tierMinSuccessfulTrades[i]` ve `riskPoints ≤ tierMaxRiskPoints[i]` sağlayan ilk tier. Varsayılan eşikler: başarı **0 / 15 / 50 / 100 / 200**, azami risk **100 / 80 / 50 / 30 / 15** (Tier 0–4). Tier > 0 için ilk başarılı işlemden bu yana `MIN_ACTIVE_PERIOD` = **15 gün** geçmiş olmalı. Ceza tavanı varsa sonuç `maxAllowedTier` ile sınırlanır.
+- **Ban:** negatif sinyal sonrası `riskPoints ≥ banRiskPointsThreshold` (**100**) ise: kullanıcı o an banlı değilse `consecutiveBans`+1 ve ban süresi `baseBanDuration × 2^(consecutiveBans−1)` (**30 gün**, 60, 120 …, en çok **365 gün**). Aynı koşulda her seferinde tier tavanı bir kademe düşer (ilk ceza 4'ten başlatıp 3'e indirir).
+- **Ban etkisi:** taker girişi (`TakerBanActive`) ve maker rolleri (`MakerBanActive`: sell order açma, sell order'ın doldurulması, buy order'ı doldurma) kapanır. Açık trade'lerin kapanış yolları açık kalır.
+- **Bond fiyatlaması:** `riskPoints == 0` ve en az bir başarı varsa bond oranı 100 bps düşer; `riskPoints > 0` ise 300 bps artar (Tier 0 bond'u her durumda 0).
+- **Clean-slate:** `decayReputation(wallet)` permissionless'tır; koşullar: ban geçmişi var (`NoPriorBanHistory`), `now > bannedUntil + cleanPeriod` (`CleanPeriodNotElapsed`), `consecutiveBans > 0` (`NoBansToReset`). Güncel `cleanPeriod`: **90 gün**. Sıfırlananlar: `consecutiveBans`, `riskPoints`, tier tavanı (4'e döner). Bu tam af değildir; `failedDisputes`, sonuç sayaçları ve `bannedUntil` silinmez.
+- Backend'in `reputationDecay` job'ı aday cüzdanlar için kontratın `getReputation()` / `cleanPeriod()` okumasıyla bu çağrıyı tetikleyebilir (opsiyonel `RELAYER_PRIVATE_KEY`); karar yine kontrattadır.
+
+### 8.4 Politika sınırları (`setReputationPolicy` / `setReputationTierThresholds`)
+- `cleanPeriod` 7–365 gün; `baseBanDuration` > 0 ve ≤ 365 gün; `banRiskPointsThreshold` > 0 ve ≤ `tierMaxRiskPoints[0]`; her ödül/ceza puanı ≤ ban eşiği.
+- Tier eşiklerinde `minSuccessfulTrades` artan, `maxRiskPoints` azalan olmalı ve `maxRiskPoints[0] ≥ banRiskPointsThreshold`.
 
 ---
 
 ## 9. Finalized parameters ve mutable config ayrımı
 
-Bu bölüm immutable parametreler ile runtime’da owner tarafından değiştirilebilen yüzeyleri ayırır.
+Bu bölüm immutable parametreler ile runtime’da owner tarafından değiştirilebilen yüzeyleri ayırır. Tüm değerler `contracts/src/ArafEscrow.sol` ve `ArafReputationLib.sol`'den alınmıştır.
 
 ### 9.0 Parametre sınıflandırma tablosu
 
 | Sınıf | Parametreler | Not |
 |---|---|---|
-| Immutable/public constants | `TIER_MAX_AMOUNT_*`, `*_DECAY_BPS_H`, `WALLET_AGE_MIN`, `DUST_LIMIT`, `MAX_BLEEDING`, `MIN_ACTIVE_PERIOD`, `AUTO_RELEASE_PENALTY_BPS`, `MAX_CANCEL_DEADLINE`, `GOOD_REP_DISCOUNT_BPS`, `BAD_REP_PENALTY_BPS` | Runtime’da owner çağrısıyla değişmez. |
-| Mutable runtime config | `takerFeeBps`, `makerFeeBps`, `tier0TradeCooldown`, `tier1TradeCooldown` | Owner governance surface ile değişebilir. |
-| Direction-aware token runtime policy | `tokenConfigs[token] => {supported, allowSellOrders, allowBuyOrders}` | Token desteği yön-bilinçli yönetilir. |
+| Sabitler (`constant`; public getter'ı olanlar ve internal olanlar) | Bond BPS'leri (`MAKER_BOND_TIER*_BPS`, `TAKER_BOND_TIER*_BPS`), `GOOD_REP_DISCOUNT_BPS`, `BAD_REP_PENALTY_BPS`, `AUTO_RELEASE_PENALTY_BPS`, `GRACE_PERIOD`, `PAYMENT_WINDOW`, `MAKER_CHALLENGE_WINDOW`, `USDT_DECAY_START`, `MAX_BLEEDING`, `*_DECAY_BPS_H`, `WALLET_AGE_MIN`, `DUST_LIMIT`, `MIN_ACTIVE_PERIOD`, `MIN_REPUTATION_NOTIONAL`, `MAX_TRADE_COOLDOWN`, `MAX_FEE_CONFIG_BPS` | Runtime’da owner çağrısıyla değişmez. |
+| Mutable runtime config | `takerFeeBps`, `makerFeeBps`, `tier0TradeCooldown`, `tier1TradeCooldown`, `treasury`, reputation politikası ve tier eşikleri | Owner governance surface ile değişebilir; aktif trade'lerin fee'si snapshot ile korunur. |
+| Direction-aware token runtime policy | `tokenConfigs[token] => {supported, allowSellOrders, allowBuyOrders, decimals, tierMaxAmountsBaseUnit[4]}` | Token desteği ve tier tavanları token bazında yönetilir. |
 
-### 9.1 Immutable/public constant sınıfı
-- tier max amount seti (`TIER_MAX_AMOUNT_*`)
-- decay sabitleri (`*_DECAY_BPS_H`)
-- wallet age / dust / bleeding / active period limitleri
-- auto release penalty
-- max cancel deadline
-- rep discount/penalty BPS
+### 9.1 Sabit değerler
+
+| Sabit | Değer | Anlam |
+|---|---|---|
+| Maker bond (Tier 0–4) | %0 / %8 / %6 / %5 / %2 | Order tier'ına göre, fill tutarı üzerinden |
+| Taker bond (Tier 0–4) | %0 / %10 / %8 / %5 / %2 | Order tier'ına göre, fill tutarı üzerinden |
+| `GOOD_REP_DISCOUNT_BPS` / `BAD_REP_PENALTY_BPS` | −100 / +300 bps | Bond oranına itibar düzeltmesi (Tier 1+) |
+| `AUTO_RELEASE_PENALTY_BPS` | 200 bps (%2) | `autoRelease` (iki bond) ve `expirePaymentWindow` (taker bond) cezası |
+| `PAYMENT_WINDOW` | 48 saat | `LOCKED`'da ödeme bildirme süresi |
+| `GRACE_PERIOD` | 48 saat | `pingMaker` için `paidAt` sonrası bekleme; challenge sonrası erimesiz süre |
+| `MAKER_CHALLENGE_WINDOW` | 24 saat | Ping+24 saatten sonra challenge açma penceresi |
+| `USDT_DECAY_START` | 96 saat | Grace sonrası ana para erimesinin başlaması |
+| `MAX_BLEEDING` | 240 saat | `challengedAt`'ten burn'e kadar toplam süre |
+| `MAKER/TAKER/CRYPTO_DECAY_BPS_H` | 26 / 42 / 34 (×2) bps/saat | Erime hızları |
+| `WALLET_AGE_MIN` | 2 gün | Taker girişi için kayıt yaşı |
+| `DUST_LIMIT` | 0,001 ETH | Taker girişi için native bakiye |
+| `MIN_ACTIVE_PERIOD` | 15 gün | Tier > 0 için ilk başarıdan bu yana süre |
+| `MIN_REPUTATION_NOTIONAL` | 20e6 (6 ondalık) | İtibara sayılan en küçük trade |
+| `MAX_TRADE_COOLDOWN` | 30 gün | Cooldown setter üst sınırı |
+| `MAX_FEE_CONFIG_BPS` | 2000 bps | Fee setter üst sınırı (taraf başına) |
+
+`MAX_CANCEL_DEADLINE` (7 gün) ve `MIN_SETTLEMENT_EXPIRY` sabitleri escrow'da tanımlıdır ama escrow kodunda kullanılmaz; settlement süre sınırları (10 dakika – 7 gün) `ArafSettlementLib` içindeki kendi sabitleriyle uygulanır.
 
 ### 9.2 Mutable runtime config
-- `takerFeeBps`
-- `makerFeeBps`
-- `tier0TradeCooldown`
-- `tier1TradeCooldown`
-- direction-aware token config (`setTokenConfig`)
+- `takerFeeBps`, `makerFeeBps` — varsayılan **15 / 15 bps** (%0,15), taraf başına ≤ 2000 bps
+- `tier0TradeCooldown`, `tier1TradeCooldown` — varsayılan **4 saat / 4 saat**, ≤ 30 gün
+- `treasury` — `setTreasury`
+- reputation politikası ve tier eşikleri — `setReputationPolicy`, `setReputationTierThresholds` (varsayılanlar §8)
+- direction-aware token config (`setTokenConfig`): `supported`, `allowSellOrders`, `allowBuyOrders`, `decimals` (token'ın `decimals()` değerine eşit olmalı), dört tier tavanı (Tier 0–3, base unit, > 0). Tier 4 tavanı yoktur.
 
 ### 9.3 Fee snapshot semantiği
-- Snapshot order create anında alınır.
+- Snapshot order create anında alınır; Tier 0 order'da maker fee snapshot'ı bilinçli olarak 0'dır.
 - Child trade, parent snapshot’ını taşır.
 - Sonraki `setFeeConfig` aktif trade economics’ini geriye dönük değiştirmez.
 
 ### 9.4 Toolchain / deployment assumptions
-- Kontrat deploy akışı `constructor(treasury)` + token direction config ile başlar.
-- Deploy sonrası token yön politikası zincir üstünde `getTokenConfig(token)` ile doğrulanmalıdır.
+- `contracts/scripts/deploy.js` sırası: `ArafReputationLib` → `ArafSettlementLib` → linkli `ArafEscrow(treasury)` → USDT/USDC için `setTokenConfig` (6 ondalık, sell+buy açık, tier tavanları 150 / 1.500 / 7.500 / 30.000 token) ve `getTokenConfig` ile doğrulama → `transferOwnership(FINAL_OWNER_ADDRESS)`. Manifest library adreslerini de kaydeder.
+- Public ağda `CONFIRM_PUBLIC_DEPLOY=yes` zorunludur; public/custom modda `FINAL_OWNER_ADDRESS` ile `TREASURY_ADDRESS` aynı olamaz.
+- `ArafRevenueVault` + `ArafRewards` ayrı script'le (`deployRewards.js`) kurulur; escrow treasury'nin vault'a çevrilmesi ayrı ve açık bir operasyondur (`rewardsOps.js`).
 - Production rehberinde owner key’in multisig altında tutulması governance risk azaltımı için varsayımdır.
 
 ---
