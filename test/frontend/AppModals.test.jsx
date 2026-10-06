@@ -154,6 +154,19 @@ describe('AppModals side-aware behaviors', () => {
     expect(screen.getByRole('button', { name: 'Kripto Alıyor' })).toBeInTheDocument();
   });
 
+  it('locks create, shows the profile-required message and links to the profile page when no saved profile', async () => {
+    const user = userEvent.setup();
+    const openProfilePage = vi.fn();
+    const setShowMakerModal = vi.fn();
+    const modals = buildAppModals(makeCtx({ profileTab: 'ayarlar', showProfileModal: false, isPayoutProfileGateBlocked: true, openProfilePage, setShowMakerModal }));
+    render(<div>{modals.renderMakerModal()}</div>);
+    expect(screen.getByRole('button', { name: /Open Sell Order/i })).toBeDisabled();
+    expect(screen.getByTestId('create-needs-profile')).toHaveTextContent('Fill in your payout profile first.');
+    await user.click(screen.getByRole('button', { name: 'Open profile page' }));
+    expect(openProfilePage).toHaveBeenCalledWith('account');
+    expect(setShowMakerModal).toHaveBeenCalledWith(false);
+  });
+
   it('keeps submit disabled and readable when maker validation error exists', () => {
     const modals = buildAppModals(makeCtx({
       profileTab: 'ayarlar',

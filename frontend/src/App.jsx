@@ -182,6 +182,8 @@ function App() {
     isWalletRegistered,
     setIsWalletRegistered,
     isAdmin,
+    hasPayoutProfile,
+    setHasPayoutProfile,
     isRegisteringWallet,
     setIsRegisteringWallet,
     isLoggingIn,
@@ -528,6 +530,7 @@ function App() {
     validationError: makerValidationError,
     payoutRiskEntry: makerPayoutRiskEntry,
     isCreateTemporarilyDisabledByRisk,
+    isPayoutProfileGateBlocked,
     handleCreateOrder,
     handleOpenMakerModal,
   } = useMakerOrderForm({
@@ -557,6 +560,8 @@ function App() {
     onchainTokenMap: labMaker?.tokenMap || onchainTokenMap,
     bondMap: onchainBondMap,
     getReputation,
+    hasPayoutProfile,
+    openProfilePage,
   });
 
   // [TR] Lab "Emir oluşturma": formu senaryo değerleriyle doldurup modalı açar (kontrat çağrısı yapılmaz).
@@ -628,7 +633,11 @@ function App() {
     fetchMyTrades,
     bondMap: onchainBondMap,
     getReputation,
+    hasPayoutProfile,
+    openProfilePage,
   }), [
+    hasPayoutProfile,
+    openProfilePage,
     setUserRole,
     fetchMyTrades,
     onchainBondMap,
@@ -736,6 +745,7 @@ function App() {
     setIsContractLoading,
     setIsRegisteringWallet,
     setIsWalletRegistered,
+    setHasPayoutProfile,
   }), [
     lang,
     isContractLoading,
@@ -748,6 +758,7 @@ function App() {
     showToast,
     setIsRegisteringWallet,
     setIsWalletRegistered,
+    setHasPayoutProfile,
     labOr,
   ]);
 
@@ -955,6 +966,7 @@ function App() {
     takerFeeBps,
     protocolFeeConfig,
     isAdmin: lab?.isAdmin ?? isAdmin,
+    hasPayoutProfile,
     activeTrade: room.activeTrade,
     setActiveTrade,
     userRole: room.userRole,
@@ -1069,6 +1081,8 @@ function App() {
     makerValidationError,
     makerPayoutRiskEntry,
     isCreateTemporarilyDisabledByRisk,
+    isPayoutProfileGateBlocked: labMaker ? false : isPayoutProfileGateBlocked,
+    openProfilePage,
     isContractLoading,
     loadingText,
     address,

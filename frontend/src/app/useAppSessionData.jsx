@@ -233,6 +233,10 @@ export function useAppSessionData({
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   // [TR] Sunucunun /auth/me yanıtındaki isAdmin: true/false; null = henüz bilinmiyor (menü gizli kalır).
   const [isAdmin, setIsAdmin] = useState(null);
+  // [TR] Backend'e KAYDEDİLMİŞ ödeme profili var mı (/auth/me.hasPayoutProfile). null = bilinmiyor (yükleniyor/hata);
+  //      bilinmeyen durumda emir oluşturma/doldurma kapalıdır (fail-closed). Taslak form değeri buraya yansımaz.
+  // [EN] Whether a payout profile is SAVED on the backend. null = unknown -> create/fill stay blocked (fail-closed).
+  const [hasPayoutProfile, setHasPayoutProfile] = useState(null);
   const adminResolvedWalletRef = React.useRef(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [authenticatedWallet, setAuthenticatedWallet] = useState(null);
@@ -357,6 +361,7 @@ export function useAppSessionData({
     setIsAuthenticated(false);
     setAuthenticatedWallet(null);
     setIsAdmin(null);
+    setHasPayoutProfile(null);
     adminResolvedWalletRef.current = null;
     authenticatedWalletRef.current = null;
     if (closeModals) {
@@ -783,6 +788,7 @@ export function useAppSessionData({
         setAuthenticatedWallet(sessionWallet);
         authenticatedWalletRef.current = sessionWallet;
         setIsAdmin(typeof data?.isAdmin === 'boolean' ? data.isAdmin : null);
+        setHasPayoutProfile(typeof data?.hasPayoutProfile === 'boolean' ? data.hasPayoutProfile : null);
         adminResolvedWalletRef.current = sessionWallet;
         setAuthChecked(true);
       })
@@ -809,6 +815,7 @@ export function useAppSessionData({
         const data = await res.json().catch(() => ({}));
         if (cancelled || data?.wallet?.toLowerCase?.() !== authenticatedWallet) return;
         setIsAdmin(typeof data?.isAdmin === 'boolean' ? data.isAdmin : null);
+        setHasPayoutProfile(typeof data?.hasPayoutProfile === 'boolean' ? data.hasPayoutProfile : null);
         adminResolvedWalletRef.current = authenticatedWallet;
       })
       .catch(() => {});
@@ -1114,6 +1121,8 @@ export function useAppSessionData({
         const res = await authenticatedFetch(buildApiUrl('pii/my'));
         if (!res.ok) return;
         const data = await res.json();
+        // [TR] /pii/my kayıtlı profilin yetkili kaynağıdır: pii varsa true, yoksa false.
+        setHasPayoutProfile(Boolean(data.pii));
         if (data.pii) {
           setPayoutProfileDraft({
             rail: data.pii.rail || 'TR_IBAN',
@@ -1383,6 +1392,8 @@ export function useAppSessionData({
     isWalletRegistered,
     setIsWalletRegistered,
     isAdmin,
+    hasPayoutProfile,
+    setHasPayoutProfile,
     isRegisteringWallet,
     setIsRegisteringWallet,
     isLoggingIn,

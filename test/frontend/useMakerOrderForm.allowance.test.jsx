@@ -31,6 +31,7 @@ const run = async (extra) => {
     canonicalizePayoutProfileDraft: () => ({ rail: 'TR_IBAN', country: 'TR' }),
     payoutProfileDraft: {},
     paymentRiskConfig: { TR: { TR_IBAN: { riskLevel: 'MEDIUM', enabled: true } } },
+    hasPayoutProfile: true,
     ...extra,
   };
   const H = () => { latest = useMakerOrderForm(deps); return null; };

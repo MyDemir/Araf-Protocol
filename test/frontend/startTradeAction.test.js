@@ -32,6 +32,7 @@ const makeDeps = (overrides = {}) => ({
   setCancelStatus: vi.fn(),
   setChargebackAccepted: vi.fn(),
   setCurrentView: vi.fn(),
+  hasPayoutProfile: true,
   confirmFn: vi.fn(() => true),
   sleep: vi.fn(async () => undefined),
   ...overrides,
@@ -48,6 +49,23 @@ const sellOrder = (overrides = {}) => ({
 const runAction = async (deps, order = sellOrder()) => buildStartTradeAction(deps)(order);
 
 describe('start trade action', () => {
+  it.each([[false], [null], [undefined]])('blocks fill without a saved payout profile (hasPayoutProfile=%s), fail-closed, before confirm and chain', async (flag) => {
+    const deps = makeDeps({ hasPayoutProfile: flag, openProfilePage: vi.fn() });
+    await runAction(deps);
+    expect(deps.showToast).toHaveBeenCalledWith('Fill in your payout profile first.', 'error');
+    expect(deps.openProfilePage).toHaveBeenCalledWith('account');
+    expect(deps.confirmFn).not.toHaveBeenCalled();
+    expect(deps.getOrder).not.toHaveBeenCalled();
+    expect(deps.fillSellOrder).not.toHaveBeenCalled();
+  });
+
+  it('blocks fill when the order owner has no saved payout profile', async () => {
+    const deps = makeDeps();
+    await runAction(deps, sellOrder({ ownerHasPayoutProfile: false }));
+    expect(deps.showToast).toHaveBeenCalledWith('The seller has no payout profile.', 'error');
+    expect(deps.fillSellOrder).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
   });

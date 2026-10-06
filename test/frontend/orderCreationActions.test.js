@@ -41,6 +41,7 @@ const makeDeps = (overrides = {}) => {
     canonicalizePayoutProfileDraft: vi.fn((v) => ({ rail: v.rail || 'TR_IBAN', country: v.country || 'TR' })),
     payoutProfileDraft: { rail: 'TR_IBAN', country: 'TR' },
     paymentRiskConfig: { TR: { TR_IBAN: { riskLevel: 'MEDIUM', enabled: true } } },
+    hasPayoutProfile: true,
     ...overrides,
   };
 };
@@ -48,6 +49,15 @@ const makeDeps = (overrides = {}) => {
 const runAction = async (deps) => buildCreateOrderAction(deps)();
 
 describe('order creation actions', () => {
+  it.each([[false], [null], [undefined]])('blocks order creation without a saved payout profile (hasPayoutProfile=%s), fail-closed', async (flag) => {
+    const deps = makeDeps({ hasPayoutProfile: flag, openProfilePage: vi.fn() });
+    await runAction(deps);
+    expect(deps.showToast).toHaveBeenCalledWith('Fill in your payout profile first.', 'error');
+    expect(deps.openProfilePage).toHaveBeenCalledWith('account');
+    expect(deps.createSellOrder).not.toHaveBeenCalled();
+    expect(deps.approveToken).not.toHaveBeenCalled();
+  });
+
   it('SELL_CRYPTO calls the createSellOrder path with raw side-driven contract values', async () => {
     const deps = makeDeps({ state: { makerSide: 'SELL_CRYPTO' } });
 
