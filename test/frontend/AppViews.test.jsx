@@ -101,22 +101,11 @@ describe('AppViews market side-aware rendering', () => {
     expect(screen.queryByText(/Get Test USDC|Test USDC Al/i)).not.toBeInTheDocument();
   });
 
-  it('keeps admin entry reachable for authenticated users even when VITE_ADMIN_WALLETS is empty', () => {
-    const previous = import.meta.env.VITE_ADMIN_WALLETS;
-    import.meta.env.VITE_ADMIN_WALLETS = '';
-    try {
-      const views = buildAppViews({
-        ...baseCtx,
-        isConnected: true,
-        isAuthenticated: true,
-      });
-      render(<div>{views.renderSlimRail()}</div>);
-      expect(screen.getByTitle('Admin Observability (server-authorized, read-only)')).toBeInTheDocument();
-    } finally {
-      import.meta.env.VITE_ADMIN_WALLETS = previous;
-    }
+  it('shows the admin entry for authenticated users when the server flags them as admin', () => {
+    const views = buildAppViews({ ...baseCtx, isConnected: true, isAuthenticated: true, isAdmin: true });
+    render(<div>{views.renderSlimRail()}</div>);
+    expect(screen.getByTitle(/Admin Panel/)).toBeInTheDocument();
   });
-
 
   it('keeps UI Lab out of product navigation even when enabled', () => {
     const views = buildAppViews({
@@ -658,5 +647,44 @@ describe('AppViews market side-aware rendering', () => {
     render(<div>{views.renderMarket()}</div>);
     expect(screen.getByText('No orders match this filter.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Clear filters' })).toBeInTheDocument();
+  });
+});
+
+describe('item 6: SELL fill button and the order owner ban (K6)', () => {
+  const sellOrder = (extra = {}) => ({
+    id: 's1', onchainId: 1, side: 'SELL_CRYPTO', crypto: 'USDT', tier: 0, fiat: 'TRY', rate: 40,
+    remainingAmount: 10, minFillAmount: 1, maker: '0x12…34', makerFull: '0x' + '3'.repeat(40), ...extra,
+  });
+  const farFuture = Math.floor(Date.now() / 1000) + 86400;
+
+  it('disables the CTA with "Seller restricted" when the owner ban is known', () => {
+    const views = buildAppViews({ ...baseCtx, filteredOrders: [sellOrder({ ownerBannedUntil: farFuture })] });
+    render(<div>{views.renderMarket()}</div>);
+    expect(screen.getByRole('button', { name: /Seller restricted/ })).toBeDisabled();
+  });
+
+  it('keeps the CTA enabled when the owner ban is unknown (null) or already over', () => {
+    for (const ownerBannedUntil of [null, undefined, 5]) {
+      cleanup();
+      const views = buildAppViews({ ...baseCtx, filteredOrders: [sellOrder({ ownerBannedUntil })] });
+      render(<div>{views.renderMarket()}</div>);
+      expect(screen.queryByRole('button', { name: /Seller restricted/ })).not.toBeInTheDocument();
+    }
+  });
+});
+
+describe('item 9: trade room fee is unknown, not 0', () => {
+  const trade = { id: 'trade-1', onchainId: 1, max: 100, fiat: 'TRY', crypto: 'USDT', rate: 10, maker: '0xmaker', makerFull: '0x' + '1'.repeat(40) };
+  const roomCtx = (over) => ({ ...baseCtx, currentView: 'tradeRoom', resolvedTradeState: 'PAID', tradeState: 'PAID', userRole: 'maker', activeTrade: trade, ...over });
+
+  it('shows "Fee unknown" when neither the trade snapshot nor the contract fee is readable', () => {
+    render(<div>{buildAppViews(roomCtx({ takerFeeBps: null })).renderTradeRoom()}</div>);
+    expect(screen.getByText(/Fee unknown/)).toBeInTheDocument();
+  });
+
+  it('shows the fee when the contract fee is known', () => {
+    render(<div>{buildAppViews(roomCtx({ takerFeeBps: 10 })).renderTradeRoom()}</div>);
+    expect(screen.queryByText(/Fee unknown/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Fee 0\.01/)).toBeInTheDocument();
   });
 });

@@ -1,5 +1,5 @@
 import React from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 vi.mock('wagmi', () => ({
@@ -155,6 +155,16 @@ vi.mock('../../frontend/src/app/shell/AppShell', () => ({
 
 import AppProviders from '../../frontend/src/app/providers/AppProviders.jsx';
 import App from '../../frontend/src/App.jsx';
+import { loadUiLab } from '../../frontend/src/app/uiLab';
+
+// [TR] KÖK NEDEN (ara sıra kırılan test): App, UI Lab modülünü `loadUiLab()` ile tembel (dynamic import) yükler ve
+//      "Open dev scenario controller" düğmesi ancak o import çözülünce görünür. İlk testte bu modül ağacı vitest
+//      worker'ında soğuk derlenir; paralel koşuda CPU doygunken bu >1 sn sürüp findBy zaman aşımını (varsayılan 1000 ms)
+//      aşıyordu. Zaman aşımı büyütülmez: modül ağacı testlerden ÖNCE ısıtılır, böylece test yalnız App davranışını bekler.
+// [EN] ROOT CAUSE (intermittent failure): App lazy-loads the UI Lab via dynamic import and the controller button only
+//      exists once it resolves. On a cold vitest worker under CPU contention that first compile exceeded findBy's
+//      default 1000 ms. We do not raise the timeout; the module graph is warmed before the tests run.
+beforeAll(async () => { await loadUiLab(); });
 
 const renderApp = () => render(<AppProviders><App /></AppProviders>);
 

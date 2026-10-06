@@ -55,23 +55,37 @@ const FETCH_RETRY_MS = 2000;
  * [EN] The fill is already on chain; "retry" would double-fill. Find the trade in /trades/my by parent order,
  *      filled amount and role instead.
  */
+// [TR] /trades/my sayfalıdır; yalnız ilk sayfaya bakmak çok işlemi olan cüzdanlarda trade'i kaçırıyordu. Her denemede
+//      sayfalar sırayla taranır (üst sınırlı: döngüye/aşırı isteğe karşı).
+// [EN] /trades/my is paginated; scanning only page 1 missed the trade for busy wallets. Each attempt walks the pages
+//      (bounded to avoid runaway requests).
+export const FIND_TRADE_PAGE_LIMIT = 50;
+export const FIND_TRADE_MAX_PAGES = 10;
+
 const findFilledTradeViaBackend = async ({ authenticatedFetch, order, address, side, fillAmountRaw, sleep }) => {
   const me = String(address || '').toLowerCase();
+  const matches = (t) => {
+    if (String(t?.parent_order_id ?? '') !== String(order.onchainId)) return false;
+    // Sell emrini dolduran taker, buy emrini dolduran maker olur.
+    const mine = side === 'BUY_CRYPTO' ? t?.maker_address : t?.taker_address;
+    if (String(mine || '').toLowerCase() !== me) return false;
+    return String(t?.financials?.crypto_amount ?? '') === fillAmountRaw.toString();
+  };
   for (let attempt = 0; attempt < fetchAttempts; attempt += 1) {
     try {
-      const res = await authenticatedFetch(buildApiUrl('trades/my?page=1&limit=50'));
-      if (res?.ok) {
+      for (let page = 1; page <= FIND_TRADE_MAX_PAGES; page += 1) {
+        const res = await authenticatedFetch(buildApiUrl(`trades/my?page=${page}&limit=${FIND_TRADE_PAGE_LIMIT}`));
+        if (!res?.ok) break;
         const data = await res.json();
-        const found = (data?.trades || []).find((t) => {
-          if (String(t?.parent_order_id ?? '') !== String(order.onchainId)) return false;
-          // Sell emrini dolduran taker, buy emrini dolduran maker olur.
-          const mine = side === 'BUY_CRYPTO' ? t?.maker_address : t?.taker_address;
-          if (String(mine || '').toLowerCase() !== me) return false;
-          return String(t?.financials?.crypto_amount ?? '') === fillAmountRaw.toString();
-        });
+        const trades = data?.trades || [];
+        const found = trades.find(matches);
         if (found?.onchain_escrow_id !== undefined && found?.onchain_escrow_id !== null && found?._id) {
           return { onchainId: String(found.onchain_escrow_id), id: found._id };
         }
+        // Son sayfa: kısa sayfa ya da toplam aşıldı.
+        const total = Number(data?.total);
+        const limit = Number(data?.limit) || FIND_TRADE_PAGE_LIMIT;
+        if (trades.length < limit || (Number.isFinite(total) && page * limit >= total)) break;
       }
     } catch (_) {}
     if (attempt < fetchAttempts - 1) await sleep(FETCH_RETRY_MS);
@@ -143,7 +157,7 @@ export const buildStartTradeAction = ({
   }
   if (resolveLoadingState(isContractLoading)) return;
 
-  let tokenAddress = null;
+  let tokenAddress;
 
   try {
     setIsContractLoading(true);
@@ -302,7 +316,14 @@ export const buildStartTradeAction = ({
   } catch (err) {
     console.error('handleStartTrade error:', err);
 
-    const errorMessage = err.shortMessage || err.reason || err.message || (lang === 'TR' ? 'İşlem kilitlenemedi.' : 'Failed to lock trade.');
+    let errorMessage = err.shortMessage || err.reason || err.message || (lang === 'TR' ? 'İşlem kilitlenemedi.' : 'Failed to lock trade.');
+    // [TR] K6: fill'de kontrat emir sahibinin ban'ını da kontrol eder. Hata kullanıcının kendisine değil emir sahibine aittir.
+    const filledSide = normalizeOrderSide(String(order?.side || '').toUpperCase());
+    if (err?.arafErrorName === 'MakerBanActive' && filledSide === 'SELL_CRYPTO') {
+      errorMessage = lang === 'TR' ? 'Emir sahibi (satıcı) şu an kısıtlı; bu emir doldurulamaz. Başka bir emir deneyin.' : 'The order owner (seller) is currently restricted; this order cannot be filled. Try another order.';
+    } else if (err?.arafErrorName === 'TakerBanActive' && filledSide === 'BUY_CRYPTO') {
+      errorMessage = lang === 'TR' ? 'Emir sahibi (alıcı) şu an kısıtlı; bu emir doldurulamaz. Başka bir emir deneyin.' : 'The order owner (buyer) is currently restricted; this order cannot be filled. Try another order.';
+    }
     if (errorMessage.includes('rejected') || errorMessage.includes('User rejected')) {
       showToast(lang === 'TR' ? 'İşlem iptal edildi.' : 'Transaction cancelled.', 'error');
     } else {
@@ -363,6 +384,7 @@ export const buildTradeRoomActions = ({
   canMakerChallenge,
   reportPayment,
   proposeOrApproveCancel,
+  revokeCancel,
   expirePaymentWindow,
   cancelStatus = null,
   releaseFunds,
@@ -541,6 +563,28 @@ export const buildTradeRoomActions = ({
     }
   };
 
+  // [TR] K11: kendi iptal onayını, karşı taraf onaylamadan önce geri çeker (revokeCancel).
+  // [EN] K11: withdraws the caller's own cancel consent before the counterparty consents.
+  const handleRevokeCancel = async () => {
+    if (!requireActiveOnchainId()) return;
+    if (isContractLoading) return;
+    if (typeof revokeCancel !== 'function') return;
+    try {
+      setIsContractLoading(true);
+      showToast(lang === 'TR' ? 'İptal onayı geri çekiliyor... Cüzdanınızdan onaylayın.' : 'Withdrawing cancel consent... Confirm in wallet.', 'info');
+      await revokeCancel(activeTrade.onchainId);
+      setCancelStatus(null);
+      showToast(lang === 'TR' ? 'İptal onayınız geri çekildi.' : 'Your cancel consent was withdrawn.', 'success');
+      refreshTrades();
+    } catch (err) {
+      console.error('handleRevokeCancel error:', err);
+      const errorMessage = getTxErrorMessage(err, lang === 'TR' ? 'İptal onayı geri çekilemedi.' : 'Could not withdraw cancel consent.');
+      showToast(isUserRejected(errorMessage) ? (lang === 'TR' ? 'İşlem iptal edildi.' : 'Transaction cancelled.') : errorMessage, 'error');
+    } finally {
+      setIsContractLoading(false);
+    }
+  };
+
   // [TR] LOCKED trade'de 48 saatlik ödeme penceresi dolduysa kilit zamanla çözülür (maker tam iade alır).
   // [EN] Once the 48h payment window on a LOCKED trade has passed, the lock unwinds by time (maker refunded in full).
   const handleExpirePaymentWindow = async () => {
@@ -598,11 +642,13 @@ export const buildTradeRoomActions = ({
     if (!requireActiveOnchainId() || isContractLoading) return;
     const tradeDetails = activeEscrows.find((e) => e.id === `#${activeTrade.onchainId}`);
     const challengePingedAt = activeTrade?.challengePingedAt || tradeDetails?.challengePingedAt;
-    if (!challengePingedAt && !canMakerStartChallengeFlow) {
+    // [TR] Bayraklar işlev olabilir: karar TIKLAMA anındaki zincir saatiyle verilir (render anındaki değer bayatlar).
+    const readFlag = (flag) => (typeof flag === 'function' ? Boolean(flag()) : Boolean(flag));
+    if (!challengePingedAt && !readFlag(canMakerStartChallengeFlow)) {
       showToast(lang === 'TR' ? 'Ping için 24 saat dolmadan işlem gönderemezsiniz.' : 'You cannot ping before the 24-hour cooldown ends.', 'error');
       return;
     }
-    if (challengePingedAt && !canMakerChallenge) {
+    if (challengePingedAt && !readFlag(canMakerChallenge)) {
       showToast(lang === 'TR' ? 'Resmi itiraz için ping sonrası 24 saat beklenmeli.' : 'You must wait 24h after ping before opening a challenge.', 'error');
       return;
     }
@@ -702,6 +748,7 @@ export const buildTradeRoomActions = ({
     handleFileUpload,
     handleReportPayment,
     handleProposeCancel,
+    handleRevokeCancel,
     handleChargebackAck,
     handleRelease,
     handleChallenge,

@@ -143,6 +143,8 @@ function App() {
     cancelSellOrder,
     cancelBuyOrder,
     proposeOrApproveCancel,
+    revokeCancel,
+    getSettlementProposal,
     expirePaymentWindow,
     getReputation,
     getCurrentAmounts,
@@ -179,6 +181,7 @@ function App() {
     setAuthenticatedWallet,
     isWalletRegistered,
     setIsWalletRegistered,
+    isAdmin,
     isRegisteringWallet,
     setIsRegisteringWallet,
     isLoggingIn,
@@ -241,11 +244,11 @@ function App() {
     filteredOrders,
     marketOrdersTotal,
     activeEscrowCounts,
-    tradeTimers,
-    chainNowMs,
     chainOffsetMs,
     canMakerStartChallengeFlow,
     canMakerChallenge,
+    readCanMakerStartChallengeFlow,
+    readCanMakerChallenge,
   } = useAppSessionData({
     address,
     isConnected,
@@ -280,7 +283,8 @@ function App() {
     devScenarioActive && uiLab ? uiLab.createLabRuntime(devScenario, { authenticatedFetch }) : null
   ), [devScenarioActive, devScenario, uiLab, authenticatedFetch]);
   // [TR] Lab'da kontrat çağrısı yapılmaz, yalnız günlüğe yazılır. [EN] In the lab contract calls are only logged.
-  const labOr = (actionKey, fn) => (lab ? lab.noop(actionKey) : fn);
+  // [TR] Kimliği `lab`e bağlı sabit tutulur: useMemo bağımlılıklarında güvenle kullanılır (davranış aynı).
+  const labOr = React.useCallback((actionKey, fn) => (lab ? lab.noop(actionKey) : fn), [lab]);
   const effectiveActiveEscrows = lab?.activeEscrows ?? activeEscrows;
   const effectiveActiveEscrowCounts = lab?.activeEscrowCounts ?? activeEscrowCounts;
   const effectiveAuthenticatedFetch = lab?.authenticatedFetch ?? authenticatedFetch;
@@ -551,6 +555,8 @@ function App() {
     paymentRiskConfig,
     authenticatedFetch,
     onchainTokenMap: labMaker?.tokenMap || onchainTokenMap,
+    bondMap: onchainBondMap,
+    getReputation,
   });
 
   // [TR] Lab "Emir oluşturma": formu senaryo değerleriyle doldurup modalı açar (kontrat çağrısı yapılmaz).
@@ -581,7 +587,8 @@ function App() {
     rejectSettlement,
     withdrawSettlement,
     expireSettlement,
-  }), [proposeSettlement, acceptSettlement, rejectSettlement, withdrawSettlement, expireSettlement]);
+    getSettlementProposal,
+  }), [proposeSettlement, acceptSettlement, rejectSettlement, withdrawSettlement, expireSettlement, getSettlementProposal]);
   const handleMint = React.useMemo(() => buildMintAction({
     lang,
     isConnected,
@@ -591,7 +598,7 @@ function App() {
     showToast,
     setIsContractLoading,
     setLoadingText,
-  }), [lang, isConnected, isFaucetEnabled, SUPPORTED_TOKEN_ADDRESSES, mintToken, showToast]);
+  }), [lang, isConnected, isFaucetEnabled, mintToken, showToast]);
 
   const handleStartTrade = React.useMemo(() => buildStartTradeAction({
     lang,
@@ -630,7 +637,6 @@ function App() {
     address,
     isBanned,
     isContractLoading,
-    SUPPORTED_TOKEN_ADDRESSES,
     getOrder,
     getAllowance,
     approveToken,
@@ -646,7 +652,7 @@ function App() {
     setTradeState,
     setCancelStatus,
     setChargebackAccepted,
-    lab,
+    labOr,
   ]);
 
   const tradeRoomActions = React.useMemo(() => buildTradeRoomActions({
@@ -657,10 +663,11 @@ function App() {
     resolvedTradeState,
     chargebackAccepted,
     isContractLoading,
-    canMakerStartChallengeFlow,
-    canMakerChallenge,
+    canMakerStartChallengeFlow: readCanMakerStartChallengeFlow,
+    canMakerChallenge: readCanMakerChallenge,
     reportPayment: labOr('report_payment', reportPayment),
     proposeOrApproveCancel: labOr('propose_cancel', proposeOrApproveCancel),
+    revokeCancel: labOr('revoke_cancel', revokeCancel),
     expirePaymentWindow: labOr('expire_payment_window', expirePaymentWindow),
     cancelStatus,
     releaseFunds: labOr('release_funds', releaseFunds),
@@ -691,10 +698,11 @@ function App() {
     resolvedTradeState,
     chargebackAccepted,
     isContractLoading,
-    canMakerStartChallengeFlow,
-    canMakerChallenge,
+    readCanMakerStartChallengeFlow,
+    readCanMakerChallenge,
     reportPayment,
     proposeOrApproveCancel,
+    revokeCancel,
     expirePaymentWindow,
     cancelStatus,
     releaseFunds,
@@ -711,7 +719,7 @@ function App() {
     setPaymentIpfsHash,
     setCancelStatus,
     setChargebackAccepted,
-    lab,
+    labOr,
   ]);
 
   const profileActions = React.useMemo(() => buildProfileActions({
@@ -740,7 +748,7 @@ function App() {
     showToast,
     setIsRegisteringWallet,
     setIsWalletRegistered,
-    lab,
+    labOr,
   ]);
 
   const orderActions = React.useMemo(() => buildOrderActions({
@@ -760,7 +768,6 @@ function App() {
     setConfirmDeleteId,
   }), [
     lang,
-    address,
     isContractLoading,
     requireSignedSessionForActiveWallet,
     fillSellOrder,
@@ -772,13 +779,14 @@ function App() {
     showToast,
     setOrders,
     setMyOrders,
-    lab,
+    labOr,
   ]);
 
   const {
     handleFileUpload,
     handleReportPayment,
     handleProposeCancel,
+    handleRevokeCancel,
     handleChargebackAck,
     handleRelease,
     handleChallenge,
@@ -946,6 +954,7 @@ function App() {
     walletAgeRemainingDays,
     takerFeeBps,
     protocolFeeConfig,
+    isAdmin: lab?.isAdmin ?? isAdmin,
     activeTrade: room.activeTrade,
     setActiveTrade,
     userRole: room.userRole,
@@ -959,6 +968,7 @@ function App() {
     handleFileUpload,
     handleReportPayment,
     handleProposeCancel,
+    handleRevokeCancel,
     cancelStatus: effectiveCancelStatus,
     chargebackAccepted: room.chargebackAccepted,
     handleChargebackAck,
@@ -967,8 +977,8 @@ function App() {
     handlePingMaker,
     handleAutoRelease,
     handleBurnExpired,
-    tradeTimers: labTradeRoom ? { ...tradeTimers, ...labTradeRoom.timers } : tradeTimers,
-    chainNowMs,
+    // [TR] Gerçek sayaçlar saat sınırında (AppViews/NowBoundary) türetilir; burada yalnız lab geçersiz kılmaları taşınır.
+    tradeTimers: labTradeRoom ? labTradeRoom.timers : undefined,
     chainOffsetMs,
     canMakerStartChallengeFlow,
     canMakerChallenge,

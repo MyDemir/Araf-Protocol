@@ -146,28 +146,34 @@ describe('F19.5: admin entry follows the server answer', () => {
     expect(screen.queryByTitle(adminTitle)).not.toBeInTheDocument();
   });
 
-  it('shows the admin entry when the server says the wallet is an admin, even without env list', () => {
-    vi.stubEnv('VITE_ADMIN_WALLETS', '');
+  it('shows the admin entry only when the server says the wallet is an admin', () => {
     renderRail({ isAdmin: true });
     expect(screen.getByTitle(/Admin Panel \(Settlement analytics/)).toBeInTheDocument();
   });
 
-  it('server answer beats a matching env list', () => {
+  it('item 11: without a server answer (null/undefined) the entry is hidden (fail-closed)', () => {
+    renderRail({});
+    expect(screen.queryByTitle(adminTitle)).not.toBeInTheDocument();
+    cleanup();
+    renderRail({ isAdmin: null });
+    expect(screen.queryByTitle(adminTitle)).not.toBeInTheDocument();
+  });
+
+  it('item 11: VITE_ADMIN_WALLETS is no longer consulted (no admin list in the bundle)', () => {
+    vi.stubEnv('VITE_ADMIN_WALLETS', '0xabc');
+    renderRail({});
+    expect(screen.queryByTitle(adminTitle)).not.toBeInTheDocument();
+    cleanup();
     vi.stubEnv('VITE_ADMIN_WALLETS', '0xabc');
     renderRail({ isAdmin: false });
     expect(screen.queryByTitle(adminTitle)).not.toBeInTheDocument();
   });
 
-  it('without a server answer a non-empty env list narrows the entry to listed wallets', () => {
-    vi.stubEnv('VITE_ADMIN_WALLETS', '0xdef');
-    renderRail({});
-    expect(screen.queryByTitle(adminTitle)).not.toBeInTheDocument();
-  });
-
-  it('without a server answer and a matching env list the entry is shown', () => {
-    vi.stubEnv('VITE_ADMIN_WALLETS', '0xABC, 0xdef');
-    renderRail({});
-    expect(screen.getByTitle(/Admin Panel \(Settlement analytics/)).toBeInTheDocument();
+  it('item 11: the source no longer references VITE_ADMIN_WALLETS', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const src = fs.readFileSync(path.resolve(process.cwd(), 'src/app/AppViews.jsx'), 'utf8');
+    expect(src).not.toContain('import.meta.env.VITE_ADMIN_WALLETS');
   });
 
   it('never shows the entry when signed out', () => {

@@ -9,7 +9,8 @@
  * - createSellOrder / fillSellOrder / cancelSellOrder
  * - createBuyOrder / fillBuyOrder / cancelBuyOrder
  * - reportPayment / releaseFunds / challengeTrade / autoRelease / burnExpired / expirePaymentWindow
- * - Karşılıklı iptal: her taraf kendi proposeOrApproveCancel(tradeId) işlemini gönderir (imza yok)
+ * - Karşılıklı iptal: her taraf kendi proposeOrApproveCancel(tradeId) işlemini gönderir (imza yok);
+ *   karşı taraf onaylamadan önce revokeCancel(tradeId) ile geri çekilebilir
  *
  * Kullanım (App.jsx'te):
  * const { releaseFunds, proposeOrApproveCancel } = useArafContract();
@@ -37,11 +38,12 @@ const ArafEscrowABI = parseAbi([
   'function burnExpired(uint256 _tradeId)',
   'function expirePaymentWindow(uint256 _tradeId)',
   'function proposeOrApproveCancel(uint256 _tradeId)',
+  'function revokeCancel(uint256 _tradeId)',
   'function proposeSettlement(uint256 _tradeId, uint16 _makerShareBps, uint64 _expiresAt)',
   'function rejectSettlement(uint256 _tradeId)',
   'function withdrawSettlement(uint256 _tradeId)',
   'function expireSettlement(uint256 _tradeId)',
-  'function acceptSettlement(uint256 _tradeId)',
+  'function acceptSettlement(uint256 _tradeId, uint256 _expectedProposalId)',
   'function pingMaker(uint256 _tradeId)',
   'function pingTakerForChallenge(uint256 _tradeId)',
   'function decayReputation(address _wallet)',
@@ -160,6 +162,19 @@ export function normalizeTradeIdOrThrow(tradeId) {
     return normalized;
   } catch {
     throw new Error('Geçersiz tradeId. Lütfen işlemi yenileyin.');
+  }
+}
+
+// [TR] K5: acceptSettlement teklif kimliğini ister; 0 "teklif yok" demektir, kabul edilemez.
+// [EN] K5: acceptSettlement takes the proposal id; 0 means "no proposal" and is never acceptable.
+export function normalizeProposalIdOrThrow(proposalId) {
+  try {
+    if (proposalId === null || proposalId === undefined || String(proposalId).trim() === '') throw new Error('empty');
+    const normalized = BigInt(proposalId);
+    if (normalized <= 0n) throw new Error('non-positive');
+    return normalized;
+  } catch {
+    throw new Error('Geçersiz teklif kimliği (proposalId). Teklifi yenileyin.');
   }
 }
 
@@ -494,8 +509,11 @@ export function useArafContract({ expectedChainId = null } = {}) {
    * [TR] Karşı taraf aktif settlement teklifini kabul edip split payout'u finalize eder.
    * [EN] Counterparty accepts active settlement proposal and finalizes split payout.
    */
-  const acceptSettlement = useCallback((tradeId) =>
-    writeContract("acceptSettlement", [normalizeTradeIdOrThrow(tradeId)]), [writeContract]);
+  const acceptSettlement = useCallback((tradeId, expectedProposalId) =>
+    writeContract("acceptSettlement", [
+      normalizeTradeIdOrThrow(tradeId),
+      normalizeProposalIdOrThrow(expectedProposalId),
+    ]), [writeContract]);
 
   // ── ERC-20 Token Onayı ──
   /**
@@ -615,7 +633,7 @@ export function useArafContract({ expectedChainId = null } = {}) {
 
       return normalizeTokenDecimalsOrThrow(decimals);
     } catch (error) {
-      throw new Error(error?.message || "Token decimals could not be read safely.");
+      throw new Error(error?.message || "Token decimals could not be read safely.", { cause: error });
     }
   }, [publicClient]);
 
@@ -628,6 +646,14 @@ export function useArafContract({ expectedChainId = null } = {}) {
    */
   const proposeOrApproveCancel = useCallback((tradeId) =>
     writeContract("proposeOrApproveCancel", [BigInt(tradeId)]),
+  [writeContract]);
+
+  /**
+   * [TR] Kendi iptal onayını geri çeker (karşı taraf ikinci onayı vermeden önce).
+   * [EN] Withdraws the caller's own cancel consent (before the counterparty's second consent).
+   */
+  const revokeCancel = useCallback((tradeId) =>
+    writeContract("revokeCancel", [BigInt(tradeId)]),
   [writeContract]);
 
   /**
@@ -657,6 +683,7 @@ export function useArafContract({ expectedChainId = null } = {}) {
     pingTakerForChallenge, //App.jsx için export listesine eklendi
     decayReputation,
     proposeOrApproveCancel,
+    revokeCancel,
     proposeSettlement,
     rejectSettlement,
     withdrawSettlement,

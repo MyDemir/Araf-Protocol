@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { deriveTradeTimeline } from './contexts/trade-room/tradeTimeline';
 import { shortAddress } from './copy';
+import { getChainNowMs, setClockOffset } from './clock';
+import { toUnixSeconds } from './contexts/settlement/settlementActionModel';
 import { buildMarketOrdersQuery, MARKET_FILTER_DEFAULTS, matchesMarketFilters } from './contexts/marketplace/marketFilters';
 import { mapApiOrderToUi, formatTokenAmount as formatTokenAmountFromRaw, tokenToNumber as rawTokenToDisplayNumber } from './orderUiModel';
 import { buildApiUrl } from './apiConfig';
@@ -105,13 +107,18 @@ export function mapSettlementProposalFromApi(settlementProposal) {
   };
 }
 
-export function buildSettlementQuickCounts(activeEscrows = [], connectedAddress = null) {
+// [TR] nowSec ZİNCİR zamanıdır (cihaz saati + chainOffset). Kontrat: now > expiresAt ise teklif dolmuştur; dolmuş
+//      teklif ne "yanıt bekliyor" ne "aksiyon gerekli" sayılır (artık kabul/ret edilemez, yalnız expire edilebilir).
+// [EN] nowSec is CHAIN time. An expired proposal (now > expiresAt) is neither "waiting for reply" nor "action required".
+export function buildSettlementQuickCounts(activeEscrows = [], connectedAddress = null, nowSec = Math.floor(Date.now() / 1000)) {
   const viewer = connectedAddress?.toLowerCase?.() || null;
   return activeEscrows.reduce((acc, escrow) => {
     const proposal = escrow?.rawTrade?.settlementProposal;
     if (!proposal || proposal.state !== 'PROPOSED') return acc;
 
     acc.PROPOSED += 1;
+    const expiresAtSec = toUnixSeconds(proposal.expiresAt ?? proposal.expires_at ?? 0);
+    if (expiresAtSec > 0 && nowSec > expiresAtSec) return acc;
     // [TR] quick-count action lane sadece normalize proposer varsa hesaplanır.
     // [EN] action-required lane is counted only when normalized proposer exists.
     const proposer = proposal.proposer?.toLowerCase?.() || null;
@@ -224,6 +231,9 @@ export function useAppSessionData({
   const [chargebackAccepted, setChargebackAccepted] = useState(false);
 
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  // [TR] Sunucunun /auth/me yanıtındaki isAdmin: true/false; null = henüz bilinmiyor (menü gizli kalır).
+  const [isAdmin, setIsAdmin] = useState(null);
+  const adminResolvedWalletRef = React.useRef(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [authenticatedWallet, setAuthenticatedWallet] = useState(null);
   const [isWalletRegistered, setIsWalletRegistered] = useState(null);
@@ -289,7 +299,10 @@ export function useAppSessionData({
   const [onchainBondMap, setOnchainBondMap] = useState(null);
   const [onchainTokenMap, setOnchainTokenMap] = useState({});
   const [paymentRiskConfig, setPaymentRiskConfig] = useState({});
-  const [takerFeeBps, setTakerFeeBps] = useState(15);
+  // [TR] null = henüz okunmadı / okunamadı (bilinmiyor); eski varsayılan 15 gerçek ücretmiş gibi gösteriliyordu.
+  // [TR] Zincir saati - cihaz saati farkı (ms); aşağıdaki zamana bağlı kararlar bunu kullanır.
+  const [chainOffsetMs, setChainOffsetMs] = useState(0);
+  const [takerFeeBps, setTakerFeeBps] = useState(null);
   // [TR] Kontrat getFeeConfig aynası (backend /orders/config): emir önizlemesinde ücret gösterimi için.
   const [protocolFeeConfig, setProtocolFeeConfig] = useState(null);
   // [TR] Kontrat itibar politikası (tier eşikleri, temiz sayfa süresi); getter olmadığından backend event aynası.
@@ -343,6 +356,8 @@ export function useAppSessionData({
     statePinRef.current = null;
     setIsAuthenticated(false);
     setAuthenticatedWallet(null);
+    setIsAdmin(null);
+    adminResolvedWalletRef.current = null;
     authenticatedWalletRef.current = null;
     if (closeModals) {
       setShowMakerModal(false);
@@ -620,7 +635,7 @@ export function useAppSessionData({
     } catch (err) {
       console.error('Trades fetch error:', err);
     }
-  }, [devScenarioActive, isAuthenticated, isConnected, address, lang, authenticatedFetch, tokenDecimalsMap, showToast, setActiveEscrows, setActiveTrade]);
+  }, [devScenarioActive, isAuthenticated, isConnected, address, lang, authenticatedFetch, tokenDecimalsMap, showToast, setActiveEscrows, setActiveTrade, formatAddress]);
 
   // Protocol configuration and read models
   useEffect(() => {
@@ -643,7 +658,9 @@ export function useAppSessionData({
       try {
         const fee = await getTakerFeeBps();
         setTakerFeeBps(Number(fee));
-      } catch (_) {}
+      } catch (_) {
+        setTakerFeeBps(null);
+      }
     };
     run();
   }, [getTakerFeeBps]);
@@ -717,7 +734,9 @@ export function useAppSessionData({
     })
       .then(async (res) => {
         if (cancelled) return;
-        if (res.status === 409) {
+        // [TR] Yalnız SESSION_WALLET_MISMATCH kodlu 409 cüzdan uyuşmazlığıdır; diğer 409'lar genel hata yoluna düşer.
+        if (res.status === 409 && await isSessionWalletMismatch(res)) {
+          if (cancelled) return;
           clearLocalSessionState({ navigateHome: false, closeModals: true });
           setAuthChecked(true);
           showToastRef.current(
@@ -763,6 +782,8 @@ export function useAppSessionData({
         setIsAuthenticated(true);
         setAuthenticatedWallet(sessionWallet);
         authenticatedWalletRef.current = sessionWallet;
+        setIsAdmin(typeof data?.isAdmin === 'boolean' ? data.isAdmin : null);
+        adminResolvedWalletRef.current = sessionWallet;
         setAuthChecked(true);
       })
       .catch(() => {
@@ -774,6 +795,25 @@ export function useAppSessionData({
       cancelled = true;
     };
   }, [isConnected, connectedWallet, clearLocalSessionState, bestEffortBackendLogout]);
+
+  // [TR] Giriş (imza) /auth/me doğrulamasından bağımsız yapılır; isAdmin bu durumda henüz bilinmez. Oturum açılınca
+  //      yönetici bayrağı bir kez /auth/me'den okunur (doğrulama zaten okuduysa tekrar istenmez).
+  // [EN] Sign-in bypasses the /auth/me validation effect, so isAdmin is unknown then; read it once after login.
+  useEffect(() => {
+    if (!isAuthenticated || !authenticatedWallet) return undefined;
+    if (adminResolvedWalletRef.current === authenticatedWallet) return undefined;
+    let cancelled = false;
+    fetch(buildApiUrl('auth/me'), { credentials: 'include', headers: { 'x-wallet-address': authenticatedWallet } })
+      .then(async (res) => {
+        if (cancelled || !res.ok) return;
+        const data = await res.json().catch(() => ({}));
+        if (cancelled || data?.wallet?.toLowerCase?.() !== authenticatedWallet) return;
+        setIsAdmin(typeof data?.isAdmin === 'boolean' ? data.isAdmin : null);
+        adminResolvedWalletRef.current = authenticatedWallet;
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [isAuthenticated, authenticatedWallet]);
 
   // [TR] Tutar araması her tuşta istek atmasın diye 400 ms geciktirilir. [EN] Debounce the amount search.
   const searchAmount = marketFilters.amount;
@@ -845,7 +885,7 @@ export function useAppSessionData({
     }
     const interval = setInterval(whenVisible(fetchOrders), 30000);
     return () => { cancelled = true; controller?.abort(); clearInterval(interval); };
-  }, [lang, onchainBondMap, onchainTokenMap, paymentRiskConfig, marketOrdersQuery, marketViewOpen]);
+  }, [lang, onchainBondMap, onchainTokenMap, paymentRiskConfig, marketOrdersQuery, marketViewOpen, formatAddress]);
 
   useEffect(() => {
     if (!isAuthenticated || !isConnected) {
@@ -884,7 +924,7 @@ export function useAppSessionData({
 
     fetchMyOrders();
     return () => { cancelled = true; controller?.abort(); };
-  }, [isAuthenticated, isConnected, authenticatedFetch, lang, onchainBondMap, onchainTokenMap, paymentRiskConfig]);
+  }, [isAuthenticated, isConnected, authenticatedFetch, lang, onchainBondMap, onchainTokenMap, paymentRiskConfig, formatAddress]);
 
   useEffect(() => { fetchStats(); }, [fetchStats]);
 
@@ -970,7 +1010,7 @@ export function useAppSessionData({
   useEffect(() => {
     if (!isConnected || !address || !antiSybilCheck) return;
     const fetchSybil = async () => {
-      let res = null;
+      let res;
       try { res = await antiSybilCheck(address); } catch { res = null; }
       if (res) {
         const cooldownOk = typeof res.cooldownOk !== 'undefined' ? res.cooldownOk : res[2];
@@ -1141,7 +1181,7 @@ export function useAppSessionData({
     const raw = localStorage.getItem('araf_pending_tx');
     if (!raw) return;
 
-    let parsed = null;
+    let parsed;
     try {
       parsed = JSON.parse(raw);
     } catch {
@@ -1206,7 +1246,7 @@ export function useAppSessionData({
       lang === 'TR' ? 'Aktif işleminize otomatik geri dönüldü.' : 'Automatically returned to your active trade.',
       'info'
     );
-  }, [isAuthenticated, currentView, activeEscrows, lang, showToast, setCurrentView]);
+  }, [isAuthenticated, currentView, activeEscrows, lang, showToast, setCurrentView, setActiveTrade]);
 
   useEffect(() => {
     if (!isConnected || !connectedWallet || !isAuthenticated || !authenticatedWallet) return;
@@ -1267,7 +1307,7 @@ export function useAppSessionData({
     LOCKED: activeEscrows.filter((e) => e.state === 'LOCKED').length,
     PAID: activeEscrows.filter((e) => e.state === 'PAID').length,
     CHALLENGED: activeEscrows.filter((e) => e.state === 'CHALLENGED').length,
-    settlement: buildSettlementQuickCounts(activeEscrows, address),
+    settlement: buildSettlementQuickCounts(activeEscrows, address, Math.floor((Date.now() + chainOffsetMs) / 1000)),
   };
 
   // [TR] İşlem odası sayaçları tek saatten, kontrat kurallarının aynası tradeTimeline ile türetilir.
@@ -1275,13 +1315,11 @@ export function useAppSessionData({
   //      şimdi tek interval, yalnız işlem odası açıkken ve sekme görünürken çalışır.
   // [EN] Trade room timers derive from one clock via tradeTimeline (the contract-rule mirror): one interval,
   //      only while the trade room is open and the tab is visible (was six 1s intervals re-rendering App).
-  const [clockMs, setClockMs] = useState(() => Date.now());
   // [TR] Süre kararları cihaz saatine değil zincir saatine göre verilir: cihaz saati geri kalan taker'ın uyarı butonu
   //      geç açılırsa maker ping yolunu önce açıp otomatik serbest bırakma hakkını kapatabilirdi. İşlem odası her
   //      açıldığında tek bir getBlock ile fark ölçülür (ek yük yok); okunamazsa cihaz saati kullanılır.
   // [EN] Timing decisions follow chain time, not the device clock (a lagging clock could cost the taker the
   //      auto-release path). One getBlock per trade-room open measures the offset; falls back to the device clock.
-  const [chainOffsetMs, setChainOffsetMs] = useState(0);
   const tradeRoomOpen = currentView === 'tradeRoom' && Boolean(activeTrade);
   // [TR] Ban kararı zincir saatine göre verilir; süre dolunca itibar yeniden okunur ve ban anında kalkar (F9).
   const bannedUntilSec = userReputation?.bannedUntil ?? 0;
@@ -1312,22 +1350,29 @@ export function useAppSessionData({
       .catch(() => {});
     return () => { alive = false; };
   }, [tradeRoomOpen, bannedUntilSec, publicClient]);
-  useEffect(() => {
-    if (!tradeRoomOpen) return undefined;
-    setClockMs(Date.now() + chainOffsetMs);
-    const interval = setInterval(whenVisible(() => setClockMs(Date.now() + chainOffsetMs)), 1000);
-    return () => clearInterval(interval);
-  }, [tradeRoomOpen, chainOffsetMs]);
-  // [TR] Odaya yeniden girişte ilk render'da saat eski kalmasın. [EN] Never decide on a stale tick after re-entering the room.
-  const freshNowMs = Date.now() + chainOffsetMs;
-  const chainNowMs = Math.abs(clockMs - freshNowMs) > 1500 ? freshNowMs : clockMs;
-  const tradeTimers = useMemo(
-    () => deriveTradeTimeline(activeTrade, { state: resolvedTradeState, now: chainNowMs }).timers,
-    [activeTrade, resolvedTradeState, chainNowMs],
+  // [TR] P1: saniyelik saat App kökünde state DEĞİL; zincir farkı paylaşılan saat store'una yazılır ve yalnız saate
+  //      ihtiyaç duyan yaprak bileşenler (NowBoundary/useNow) saniyede bir render olur.
+  // [EN] P1: the per-second clock is not root state; the chain offset feeds the shared clock store and only leaf
+  //      components that subscribe re-render each second.
+  useEffect(() => { setClockOffset(chainOffsetMs); }, [chainOffsetMs]);
+  // [TR] Zaman damgası bilinmiyorsa (eski veri) buton kilidi kontrata bırakılır. Karar anı TIKLAMA anındadır:
+  //      okuyucular o anki zincir saatiyle hesaplar (render anındaki bayat değer kullanılmaz).
+  // [EN] Unknown timestamp → let the contract decide. The decision is made at CLICK time using the fresh chain clock.
+  const readMakerChallengeTimers = React.useCallback(
+    () => deriveTradeTimeline(activeTrade, { state: resolvedTradeState, now: getChainNowMs() }).timers,
+    [activeTrade, resolvedTradeState],
   );
-  // [TR] Zaman damgası bilinmiyorsa (eski veri) buton kilidi kontrata bırakılır. [EN] Unknown timestamp → let the contract decide.
-  const canMakerStartChallengeFlow = tradeTimers.makerChallengePing ? tradeTimers.makerChallengePing.isFinished : true;
-  const canMakerChallenge = tradeTimers.makerChallenge ? tradeTimers.makerChallenge.isFinished : true;
+  const readCanMakerStartChallengeFlow = React.useCallback(() => {
+    const t = readMakerChallengeTimers();
+    return t.makerChallengePing ? t.makerChallengePing.isFinished : true;
+  }, [readMakerChallengeTimers]);
+  const readCanMakerChallenge = React.useCallback(() => {
+    const t = readMakerChallengeTimers();
+    return t.makerChallenge ? t.makerChallenge.isFinished : true;
+  }, [readMakerChallengeTimers]);
+  // Render-time snapshots (yalnız paidAt bilinmeyen eski veride yedek olarak kullanılır).
+  const canMakerStartChallengeFlow = readCanMakerStartChallengeFlow();
+  const canMakerChallenge = readCanMakerChallenge();
 
   return {
     isAuthenticated,
@@ -1337,6 +1382,7 @@ export function useAppSessionData({
     setAuthenticatedWallet,
     isWalletRegistered,
     setIsWalletRegistered,
+    isAdmin,
     isRegisteringWallet,
     setIsRegisteringWallet,
     isLoggingIn,
@@ -1400,10 +1446,10 @@ export function useAppSessionData({
     filteredOrders,
     marketOrdersTotal,
     activeEscrowCounts,
-    tradeTimers,
-    chainNowMs,
     chainOffsetMs,
     canMakerStartChallengeFlow,
     canMakerChallenge,
+    readCanMakerStartChallengeFlow,
+    readCanMakerChallenge,
   };
 }

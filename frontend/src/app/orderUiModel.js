@@ -9,6 +9,16 @@ import { orderSide as orderSideCopy } from './copy';
 const DEFAULT_TOKEN_DECIMALS = 6;
 const VALID_ORDER_SIDES = new Set(['SELL_CRYPTO', 'BUY_CRYPTO']);
 // [TR] SEPA ülke listesinin tek kaynağı (profil formu ve rail doğrulaması). [EN] Single source for SEPA countries.
+// [TR] Backend alanı (owner_banned_until: unix sn / ms / ISO) → unix saniye; yoksa null (bilinmiyor).
+export const parseOwnerBannedUntil = (order) => {
+  const raw = order?.owner_banned_until ?? order?.ownerBannedUntil ?? null;
+  if (raw === null || raw === undefined || raw === '') return null;
+  const asNumber = Number(raw);
+  if (Number.isFinite(asNumber)) return asNumber > 1e12 ? Math.floor(asNumber / 1000) : Math.floor(asNumber);
+  const ms = new Date(raw).getTime();
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
+};
+
 export const SEPA_COUNTRY_CODES = ['DE', 'FR', 'NL', 'BE', 'ES', 'IT', 'AT', 'PT', 'IE', 'LU', 'FI', 'GR'];
 
 const RAIL_DEFAULT_COUNTRY = { TR_IBAN: 'TR', US_ACH: 'US', SEPA_IBAN: 'DE' };
@@ -182,7 +192,7 @@ export const getMakerModalCopy = (side, lang = 'TR') => {
 export const buildMakerPreview = ({ side, amountUi, bondPct, bondBps = null, decimals = 6 }) => {
   const safeAmount = Number(amountUi || 0);
   const bps = bondBps != null ? Number(bondBps) : Math.round(Number(bondPct || 0) * 100);
-  let reserveAmount = 0;
+  let reserveAmount;
   try {
     const scale = 10 ** decimals;
     const amountBase = BigInt(Math.round(safeAmount * scale));
@@ -446,6 +456,10 @@ export const mapApiOrderToUi = ({ order, lang = 'TR', bondMap = {}, tokenMap = {
     onchainId: order?.onchain_order_id ?? null,
     ownerAddress,
     ownerDisplay: formatAddress(ownerAddress),
+    // [TR] Emir sahibinin ban bitişi (unix sn). Backend göndermiyorsa null = BİLİNMİYOR (0 değil); bu durumda
+    //      kontratın MakerBanActive revert'i çevrilerek gösterilir.
+    // [EN] Order owner's ban end (unix s). null = UNKNOWN (not 0); the contract's MakerBanActive revert is translated.
+    ownerBannedUntil: parseOwnerBannedUntil(order),
     maker: formatAddress(ownerAddress),
     makerFull: ownerAddress,
     side,

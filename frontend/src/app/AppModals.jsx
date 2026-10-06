@@ -4,7 +4,7 @@ import { buildMakerPreview, getMakerModalCopy, getOrderSideCopy, resolveEffectiv
 import { resolveTierMaxAmounts } from './actions/orderCreationActions';
 import { TERMS_ACKNOWLEDGEMENTS, TERMS_SECTIONS, TERMS_VERSION } from './legal/terms';
 import PaymentRiskBadge from '../components/PaymentRiskBadge';
-import { fmtBps, fmtNum } from './copy';
+import { fmtBps, isKnownNumber, fmtNum } from './copy';
 
 function TermsModal({ lang = 'EN', onAcceptTerms, onDeclineTerms }) {
   const isTR = lang === 'TR';
@@ -390,7 +390,10 @@ export const buildAppModals = (ctx) => {
                 <span>{modalCopy.totalLabel}:</span>
                 <span className="font-mono">{preview.totalAmount > 0 ? `${fmt(preview.totalAmount, decimals)} ${makerToken}` : '—'}</span>
               </div>
-              {Number.isFinite(Number(feeBps)) && (
+              {!isKnownNumber(feeBps) && (
+                <p className="text-[11px] text-textMuted pt-0.5" data-testid="maker-fee-unknown">{tr ? 'Protokol ücreti bilinmiyor (kontrattan okunamadı).' : 'Protocol fee unknown (could not be read from the contract).'}</p>
+              )}
+              {isKnownNumber(feeBps) && (
                 <p className="text-[11px] text-textMuted pt-0.5">{tr ? `Protokol ücreti işlem kapanışında kesilir: ${fmtBps(feeBps, lang)} (${feeBps} bps).` : `Protocol fee is taken at settlement: ${fmtBps(feeBps, lang)} (${feeBps} bps).`}</p>
               )}
             </div>

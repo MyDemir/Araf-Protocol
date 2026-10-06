@@ -1,6 +1,8 @@
 import React from 'react';
 import {
+  checkLiveProposalForAccept,
   getSettlementActionContext,
+  normalizeLiveProposal,
   validateSettlementProposalInput,
   validateSettlementTradeId,
 } from './settlementActionModel';
@@ -27,6 +29,20 @@ export const useSettlementActions = ({
     () => getSettlementActionContext({ activeTrade, userRole, address, ...(Number.isFinite(nowTs) ? { nowTs } : {}) }),
     [activeTrade, userRole, address, nowTs],
   );
+
+  // [TR] F3: kullanıcının onayladığı (önizlediği) teklifin zincirdeki anlık görüntüsü + değişiklik bilgisi.
+  // [EN] F3: on-chain snapshot of the offer the user confirmed/previewed, plus change-review info.
+  const [acceptSnapshot, setAcceptSnapshot] = React.useState(null);
+  const [acceptReview, setAcceptReview] = React.useState(null);
+
+  const readLiveProposal = React.useCallback(async (tradeId) => {
+    if (typeof contractFns.getSettlementProposal !== 'function') return null;
+    try {
+      return await contractFns.getSettlementProposal(tradeId);
+    } catch {
+      return null;
+    }
+  }, [contractFns]);
 
   const refreshTradesAfterTx = React.useCallback(async () => {
     await fetchMyTrades?.();
@@ -76,16 +92,69 @@ export const useSettlementActions = ({
     );
   }, [block, context.canPropose, context.onchainTradeId, contractFns, isContractLoading, lang, runTx]);
 
+  const reviewMessage = React.useCallback((reason) => {
+    const tr = lang === 'TR';
+    if (reason === 'UNREADABLE') return tr ? 'Teklif zincirden okunamadı; güvenli biçimde kabul edilemez. Tekrar deneyin.' : 'The offer could not be read from the chain, so it cannot be accepted safely. Try again.';
+    if (reason === 'NOT_PROPOSED') return tr ? 'Teklif artık aktif değil (geri çekilmiş, reddedilmiş ya da sonuçlanmış). Sayfayı yenileyin.' : 'The offer is no longer active (withdrawn, rejected or finalized). Refresh the page.';
+    if (reason === 'EXPIRED') return tr ? 'Teklifin süresi doldu; kabul edilemez.' : 'The offer has expired and cannot be accepted.';
+    return tr ? 'Teklif siz onaylamadan değişti. Güncel değerleri kontrol edip yeniden onaylayın.' : 'The offer changed before you confirmed. Check the current values and confirm again.';
+  }, [lang]);
+
+  // [TR] Önizleme adımı: güncel teklifi zincirden okur ve kullanıcının göreceği/onaylayacağı değeri sabitler.
+  // [EN] Preview step: reads the live offer and pins the values the user will see and confirm.
+  const prepareAccept = React.useCallback(async () => {
+    const { tradeId, error } = requireTradeId();
+    if (error) return { ok: false, error };
+    const live = await readLiveProposal(tradeId);
+    const nowSec = Number.isFinite(nowTs) ? nowTs : Math.floor(Date.now() / 1000);
+    const normalized = normalizeLiveProposal(live);
+    const check = checkLiveProposalForAccept({
+      live,
+      expected: normalized ? { id: normalized.id, makerShareBps: normalized.makerShareBps } : null,
+      nowTs: nowSec,
+    });
+    if (!check.ok) {
+      setAcceptSnapshot(null);
+      setAcceptReview({ reason: check.reason, live: check.live });
+      return { ok: false, error: reviewMessage(check.reason), reason: check.reason };
+    }
+    setAcceptReview(null);
+    setAcceptSnapshot({ id: check.live.id, makerShareBps: check.live.makerShareBps });
+    return { ok: true, live: check.live };
+  }, [nowTs, readLiveProposal, requireTradeId, reviewMessage]);
+
+  // [TR] Değişiklik sonrası kullanıcı güncel teklifi bilerek onaylar (tx göndermez; yalnız anlık görüntüyü günceller).
+  // [EN] After a change the user knowingly re-confirms the live offer (no tx; only refreshes the snapshot).
+  const confirmAcceptReview = React.useCallback(() => {
+    if (acceptReview?.reason !== 'CHANGED' || !acceptReview.live) return null;
+    const live = acceptReview.live;
+    setAcceptSnapshot({ id: live.id, makerShareBps: live.makerShareBps });
+    setAcceptReview(null);
+    return live;
+  }, [acceptReview]);
+
   const accept = React.useCallback(async () => {
     if (isContractLoading) return false;
     if (!context.canAccept) return block(lang === 'TR' ? 'Settlement teklifi kabul edilemez.' : 'Settlement proposal cannot be accepted.');
     const { tradeId, error } = requireTradeId();
     if (error) return block(error);
+    // [TR] Kabul edilecek değer: önizlemede sabitlenen; yoksa ekrandaki (backend) teklif.
+    const expected = acceptSnapshot || (context.proposal
+      ? { id: context.proposal.id ?? context.proposal.proposal_id ?? null, makerShareBps: context.proposal.makerShareBps ?? context.proposal.maker_share_bps }
+      : null);
+    const live = await readLiveProposal(tradeId);
+    const nowSec = Number.isFinite(nowTs) ? nowTs : Math.floor(Date.now() / 1000);
+    const check = checkLiveProposalForAccept({ live, expected, nowTs: nowSec });
+    if (!check.ok) {
+      setAcceptReview({ reason: check.reason, live: check.live });
+      return block(reviewMessage(check.reason));
+    }
+    setAcceptReview(null);
     return runTx(
-      () => contractFns.acceptSettlement(tradeId),
+      () => contractFns.acceptSettlement(tradeId, check.live.id),
       lang === 'TR' ? 'Settlement kabul edildi ve işlem on-chain kapanacak.' : 'Settlement accepted; trade will close on-chain.',
     );
-  }, [block, context.canAccept, contractFns, isContractLoading, lang, requireTradeId, runTx]);
+  }, [acceptSnapshot, block, context.canAccept, context.proposal, contractFns, isContractLoading, lang, nowTs, readLiveProposal, requireTradeId, reviewMessage, runTx]);
 
   const reject = React.useCallback(async () => {
     if (isContractLoading) return false;
@@ -124,10 +193,15 @@ export const useSettlementActions = ({
     ...context,
     propose,
     accept,
+    prepareAccept,
+    confirmAcceptReview,
+    acceptSnapshot,
+    acceptReview,
+    acceptReviewMessage: acceptReview ? reviewMessage(acceptReview.reason) : '',
     reject,
     withdraw,
     expire,
-  }), [accept, context, expire, propose, reject, withdraw]);
+  }), [accept, acceptReview, acceptSnapshot, confirmAcceptReview, context, expire, prepareAccept, propose, reject, reviewMessage, withdraw]);
 };
 
 export default useSettlementActions;

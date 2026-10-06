@@ -210,7 +210,7 @@ describe('buildTradeDecisionModel', () => {
     // Maker: unlocking becomes the primary action. Taker: it stays secondary and names the bond penalty.
     expect(expired.primaryAction.key).toBe('expire_payment_window');
     const takerExpired = buildTradeDecisionModel({ ...base, userRole: 'taker', paymentWindowExpired: true });
-    expect(takerExpired.primaryAction.key).toBe('report_payment');
+    expect(takerExpired.primaryAction.key).toBe('payment_window_closed'); // K10: reportPayment reverts after the window
     expect(takerExpired.secondaryActions.find((a) => a.key === 'expire_payment_window').label).toMatch(/penalty/);
     const withCancel = buildTradeDecisionModel({ ...base, cancelStatus: 'proposed_by_other' });
     expect(withCancel.secondaryActions.map((a) => a.key)).not.toContain('propose_cancel');

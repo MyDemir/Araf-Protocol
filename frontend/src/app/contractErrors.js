@@ -57,6 +57,9 @@ export const ARAF_CONTRACT_ERROR_ABI = [
   'error OrderSideMismatch()',
   'error TokenDirectionNotAllowed()',
   'error InvalidTransferAmount()',
+  'error SettlementProposalMismatch(uint256 expectedProposalId, uint256 liveProposalId)',
+  'error PaymentWindowClosed(uint256 expiredAt)',
+  'error NoCancelConsent()',
   'error EnforcedPause()',
   // ArafRewards / ArafRevenueVault
   'error RecordingWindowClosed()',
@@ -74,7 +77,10 @@ export const ARAF_CONTRACT_ERROR_ABI = [
 ];
 
 const MESSAGES = {
-  NotTradeParty: { TR: 'Bu işlemin tarafı değilsiniz.', EN: 'You are not a party to this trade.' },
+  NotTradeParty: { TR: 'Bu işlemin tarafı değilsiniz; yalnızca alıcı ya da satıcı bu adımı yapabilir.', EN: 'You are not a party to this trade; only the buyer or seller can do this.' },
+  SettlementProposalMismatch: { TR: 'Uzlaşma teklifi siz onaylamadan değişti. Güncel teklifi görüntüleyip yeniden onaylayın.', EN: 'The settlement offer changed before you confirmed. Review the current offer and confirm again.' },
+  PaymentWindowClosed: { TR: 'Ödeme süresi doldu; ödeme bildirilemez. Kilidin çözülmesi gerekir.', EN: 'The payment window has closed; payment can no longer be reported. The lock must be unwound.' },
+  NoCancelConsent: { TR: 'Geri çekilecek bir iptal onayınız yok.', EN: 'You have no cancel consent to withdraw.' },
   InvalidState: { TR: 'İşlem bu adım için uygun durumda değil. Sayfayı yenileyin.', EN: 'Trade is not in the right state. Refresh the page.' },
   CannotReleaseInState: { TR: 'İşlem bu adım için uygun durumda değil. Sayfayı yenileyin.', EN: 'Trade is not in the right state. Refresh the page.' },
   TakerBanActive: { TR: 'Alıcı kısıtlamanız aktif.', EN: 'Your taker restriction is active.' },

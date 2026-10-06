@@ -1,8 +1,9 @@
 import { useCallback, useMemo } from 'react';
-import { usePublicClient, useWalletClient, useChainId } from 'wagmi';
+import { usePublicClient, useWalletClient, useAccount } from 'wagmi';
 import { parseAbi, getAddress } from 'viem';
 import { getSupportedChainsMap } from '../app/chainPolicy';
 import { decorateContractError } from '../app/contractErrors';
+import { resolveChainMismatch } from './useArafContract';
 
 const REWARDS_ADDRESS = import.meta.env.VITE_REWARDS_ADDRESS;
 const VAULT_ADDRESS = import.meta.env.VITE_REVENUE_VAULT_ADDRESS;
@@ -140,8 +141,12 @@ export async function readRewardsSnapshot(publicClient, { address, user, tokens,
 export function useRewardsContract() {
   const publicClient = usePublicClient();
   const { data: walletClient } = useWalletClient();
-  const chainId = useChainId();
-  const isSupportedChain = Boolean(getSupportedChainsMap()[chainId]);
+  // [TR] Ağ kontrolü CÜZDANIN gerçek zincirine bakar (useAccount().chainId). useChainId() yapılandırmanın aktif zincirini
+  //      verir; cüzdan yanlış ağdayken bile "doğru" görünürdü. Bağlı cüzdan yoksa zincir bilinmez → güvenli tarafta engel.
+  // [EN] The guard checks the WALLET's chain (useAccount().chainId); useChainId() is the config chain and let a wallet
+  //      on the wrong network through. No connected wallet = unknown chain = blocked.
+  const { chainId: walletChainId } = useAccount();
+  const isSupportedChain = !resolveChainMismatch({ walletChainId, supportedChains: getSupportedChainsMap() });
   const isConfigured = _isValid(REWARDS_ADDRESS);
 
   const readRewards = useCallback(async (functionName, args = []) => {
