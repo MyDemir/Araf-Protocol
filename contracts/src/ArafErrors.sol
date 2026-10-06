@@ -80,4 +80,6 @@ interface IArafEscrowErrors {
     error PaymentWindowClosed(uint256 expiredAt);
     // K11: geri çekilecek iptal onayı yok / no cancel consent to revoke.
     error NoCancelConsent();
+    // K2(B): maker challenge penceresini kaçırdı, ping düştü / maker missed the challenge window, the ping lapsed.
+    error ChallengeWindowExpired();
 }
