@@ -60,6 +60,12 @@ export const buildTradeRoomPanelCallbacks = ({
     // Contract: ConflictingPingPath — the taker already opened the auto-release path.
     makerChallengeBlocked = true;
     makerChallengeReason = tr ? 'Alıcı sizi zaten uyardı; itiraz yolu kapandı. Ödemeyi kontrol edip onaylayın.' : 'The taker already pinged you; the challenge path is closed. Check the payment and release.';
+  } else if (flags.makerChallengeWindowClosed) {
+    // Contract: ChallengeWindowExpired — T+48h passed; the ping lapsed and the taker's pingMaker path is open.
+    makerChallengeBlocked = true;
+    makerChallengeReason = tr
+      ? 'İtiraz süresi doldu: ping düştü. Artık itiraz açamazsınız; ödeme geldiyse fonları serbest bırakabilirsiniz.'
+      : 'Challenge window closed: your ping lapsed. You can no longer open a challenge; you can still release the funds.';
   } else if (makerPinged || activeTrade?.challengePingedAt) {
     makerChallengeBlocked = hasPaidAt ? !flags.canMakerChallenge : !canMakerChallenge;
     if (makerChallengeBlocked) makerChallengeReason = tr ? 'İtiraz için uyarıdan sonra 24 saat bekleyin.' : 'Wait 24h after your ping to challenge.';
@@ -69,7 +75,9 @@ export const buildTradeRoomPanelCallbacks = ({
   }
 
   let pingReason = null;
-  if (makerPinged) pingReason = tr ? 'Satıcı itiraz yolunu başlattı; uyarı yolu kapandı.' : 'The maker started the challenge path; the ping path is closed.';
+  if (makerPinged && !flags.pingLapsed) pingReason = tr
+    ? 'Satıcının ping\'i geçerli: uyarı yolu şimdilik kapalı. Satıcı 48. saate kadar itiraz açmazsa ping düşer ve bu yol açılır.'
+    : 'The maker\'s ping is still valid, so the ping path is closed for now. If the maker does not challenge in time the ping lapses and this path opens.';
   else if (takerPinged) pingReason = tr ? 'Satıcıyı zaten uyardınız.' : 'You already pinged the maker.';
   else if (!flags.canTakerPing) pingReason = tr ? 'Satıcıyı uyarmak için ödeme bildiriminden sonra 48 saat bekleyin.' : 'Wait 48h after reporting payment to ping the maker.';
   const autoReleaseReason = !takerPinged
@@ -93,7 +101,14 @@ export const buildTradeRoomPanelCallbacks = ({
         ? [lang === 'TR' ? 'Chargeback onayı gerekli.' : 'Chargeback acknowledgement is required.']
         : [],
     }),
-    start_challenge: withGuard(handleChallenge, {
+    start_challenge: withGuard(() => {
+      // [TR] Ping atmadan önce kuralı anlatan onay: ping bir iddiadır, 24 saatlik pencere kaçarsa düşer.
+      // [EN] Before pinging, confirm the rule: a ping is a claim and lapses if the 24h window is missed.
+      if (!makerPinged && !activeTrade?.challengePingedAt && !confirmFn(tr
+        ? 'Ping bir iddiadır: ping attıktan 24 saat sonra, sonraki 24 saat içinde itiraz açmazsan ping düşer ve alıcı ödemeyi otomatik serbest bırakma yoluna geçebilir. Ödeme gelmediyse devam et. Onaylıyor musunuz?'
+        : 'A ping is a claim: if you do not open a challenge in the 24h window that starts 24h after your ping, the ping lapses and the buyer may move to the auto-release path. Continue only if the payment did not arrive. Confirm?')) return undefined;
+      return handleChallenge();
+    }, {
       disabled: isContractLoading || makerChallengeBlocked,
       disabledReasons: makerChallengeBlocked && makerChallengeReason ? [makerChallengeReason] : [],
     }),

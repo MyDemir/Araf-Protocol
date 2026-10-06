@@ -676,7 +676,7 @@ export const buildTradeRoomActions = ({
         const pingedAt = new Date().toISOString();
         setActiveTrade((prev) => (isSameTrade(prev, onchainId) ? { ...prev, challengePingedAt: pingedAt } : prev));
         await refreshTrades();
-        showToast(lang === 'TR' ? 'Alıcı uyarıldı. İtiraz için 24 saat beklemeniz gerekiyor.' : 'Taker pinged. You must wait 24h to challenge.', 'success');
+        showToast(lang === 'TR' ? 'Alıcı uyarıldı. İtiraz, 24. ile 48. saat arasında açılabilir; kaçırırsanız ping düşer.' : 'Taker pinged. You can challenge between hour 24 and hour 48; if you miss it the ping lapses.', 'success');
       } catch (err) {
         console.error('pingTakerForChallenge error:', err);
         const errorMessage = getTxErrorMessage(err, lang === 'TR' ? 'Uyarı gönderilemedi.' : 'Failed to send ping.');

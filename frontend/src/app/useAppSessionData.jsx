@@ -1377,7 +1377,9 @@ export function useAppSessionData({
   }, [readMakerChallengeTimers]);
   const readCanMakerChallenge = React.useCallback(() => {
     const t = readMakerChallengeTimers();
-    return t.makerChallenge ? t.makerChallenge.isFinished : true;
+    // [TR] Pencere [T+24s, T+48s): açılış sayacı bitmiş VE son süre sayacı bitmemiş olmalı.
+    if (!t.makerChallenge) return true;
+    return t.makerChallenge.isFinished && !(t.makerChallengeDeadline?.isFinished);
   }, [readMakerChallengeTimers]);
   // Render-time snapshots (yalnız paidAt bilinmeyen eski veride yedek olarak kullanılır).
   const canMakerStartChallengeFlow = readCanMakerStartChallengeFlow();

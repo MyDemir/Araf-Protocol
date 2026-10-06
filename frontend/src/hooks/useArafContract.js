@@ -58,6 +58,7 @@ const ArafEscrowABI = parseAbi([
   'function getOrder(uint256 _orderId) view returns ((uint64 id, address owner, uint8 side, address tokenAddress, uint256 totalAmount, uint256 remainingAmount, uint256 minFillAmount, uint256 remainingMakerBondReserve, uint256 remainingTakerBondReserve, uint16 takerFeeBpsSnapshot, uint16 makerFeeBpsSnapshot, uint8 tier, uint8 paymentRiskLevel, uint8 state, bytes32 orderRef))',
   'function getCurrentAmounts(uint256 _tradeId) view returns (uint256 currentCrypto, uint256 currentMakerBond, uint256 currentTakerBond, uint256 totalDecayed)',
   'function paused() view returns (bool)',
+  'function MAKER_CHALLENGE_WINDOW() view returns (uint256)',
   'event OrderCreated(uint256 indexed orderId, address indexed owner, uint8 side, address token, uint256 totalAmount, uint256 minFillAmount, uint8 tier, uint8 paymentRiskLevel, bytes32 orderRef)',
   'event OrderFilled(uint256 indexed orderId, uint256 indexed tradeId, address indexed filler, uint256 fillAmount, uint256 remainingAmount, uint8 paymentRiskLevelSnapshot, bytes32 childListingRef)',
   // [TR] Custom error tanımları: bunlar olmadan viem revert nedenini çözemez ("execution reverted").
