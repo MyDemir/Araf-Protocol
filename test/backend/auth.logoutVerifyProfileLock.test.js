@@ -215,11 +215,20 @@ describe("PUT /api/auth/profile active-trade lock (B18)", () => {
     };
   }
 
-  test("first-ever profile creation is allowed while a trade is active (lock check skipped)", async () => {
-    const { app, Trade } = loadApp({ user: makeUser(undefined), tradeExists: true });
+  test("first-ever profile creation is ALSO locked while a trade is active", async () => {
+    const user = makeUser(undefined);
+    const { app, Trade } = loadApp({ user, tradeExists: true });
+    const res = await request(app).put("/api/auth/profile").set("x-test-auth", "1").send(body);
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe("BANK_PROFILE_LOCKED_DURING_ACTIVE_TRADE");
+    expect(Trade.exists).toHaveBeenCalled();
+    expect(user.save).not.toHaveBeenCalled();
+  });
+
+  test("first-ever profile creation is allowed when no trade is active", async () => {
+    const { app } = loadApp({ user: makeUser(undefined), tradeExists: false });
     const res = await request(app).put("/api/auth/profile").set("x-test-auth", "1").send(body);
     expect(res.status).toBe(200);
-    expect(Trade.exists).not.toHaveBeenCalled();
   });
 
   test("changing an existing profile is still locked during an active trade", async () => {
