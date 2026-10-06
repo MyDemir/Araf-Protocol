@@ -341,4 +341,21 @@ describe("ArafRevenueVault", function () {
       vault.connect(stranger).fundProductRewards(productId, await token.getAddress(), AMOUNT, 1, ethers.id("pause-product"))
     ).to.be.revertedWithCustomError(vault, "EnforcedPause");
   });
+
+  it("test_onArafRevenue_consumed_intent_is_cleared_second_hook_in_same_tx_reverts_MissingRevenueIntent", async function () {
+    const { vault, token, owner } = await loadFixture(deployFixture);
+    const dbl = await (await ethers.getContractFactory("MockRevenueEscrowDoubleHook")).deploy();
+    await dbl.waitForDeployment();
+    const Vault = await ethers.getContractFactory("ArafRevenueVault");
+    const [, , finalTreasury, rewards] = await ethers.getSigners();
+    const v2 = await Vault.deploy(await dbl.getAddress(), finalTreasury.address, owner.address);
+    await v2.connect(owner).setSupportedToken(await token.getAddress(), true);
+    await v2.connect(owner).setRewards(rewards.address);
+
+    await token.mint(await dbl.getAddress(), AMOUNT);
+    await expect(
+      dbl.pushRevenueTwice(await v2.getAddress(), await token.getAddress(), AMOUNT, 0, 777)
+    ).to.be.revertedWithCustomError(v2, "MissingRevenueIntent");
+    expect(await v2.totalEscrowRevenue(await token.getAddress())).to.equal(0n);
+  });
 });

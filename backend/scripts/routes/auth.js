@@ -27,6 +27,7 @@ const { authLimiter, nonceLimiter } = require("../middleware/rateLimiter");
 const { ACCEPTED_TERMS_VERSIONS, CURRENT_TERMS_VERSION, parseTermsAcceptance } = require("../config/terms");
 const TermsAcceptance = require("../models/TermsAcceptance");
 const { requireAuth, requireSessionWalletMatch } = require("../middleware/auth");
+const { isAdminWallet } = require("../utils/adminWallets");
 const {
   generateNonce,
   verifySiweSignature,
@@ -557,7 +558,7 @@ router.get("/me", requireAuth, async (req, res) => {
     }
   }
 
-  return res.json({ wallet: req.wallet, authenticated: true });
+  return res.json({ wallet: req.wallet, authenticated: true, isAdmin: isAdminWallet(req.wallet) });
 });
 
 /**

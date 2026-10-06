@@ -11,8 +11,8 @@ pragma solidity ^0.8.24;
 // ═══════════════════════════════════════════════════
 //  ÖZEL HATALAR — require() string'lerine göre daha az gaz harcar
 //  CUSTOM ERRORS — cheaper gas than require() strings
-//  [TR] ArafEscrow ve ArafReputationLib ortak kullanır; ABI'de hepsi ArafEscrow'da da görünür
-//       (IArafEscrowErrors kalıtımı; library'ler IArafEscrowErrors.X ile revert eder). [EN] Shared by ArafEscrow and ArafReputationLib; all of them stay in
+//  [TR] ArafEscrow, ArafReputationLib ve ArafSettlementLib ortak kullanır; ABI'de hepsi ArafEscrow'da da görünür
+//       (IArafEscrowErrors kalıtımı; library'ler IArafEscrowErrors.X ile revert eder). [EN] Shared by ArafEscrow, ArafReputationLib and ArafSettlementLib; all of them stay in
 //       the ArafEscrow ABI via the IArafEscrowErrors base.
 // ═══════════════════════════════════════════════════
 interface IArafEscrowErrors {

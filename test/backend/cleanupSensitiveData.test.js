@@ -32,4 +32,13 @@ describe('cleanupSensitiveData terminal-state guards', () => {
       'payout_snapshot.taker.reputation_context_at_lock.disputed_resolved_count': null,
     });
   });
+
+  it('unsets snapshot_delete_at (sparse index) instead of writing null', async () => {
+    await runPIISnapshotCleanup(new Date('2026-01-01T00:00:00Z'));
+    const [query, update] = Trade.updateMany.mock.calls[1];
+    expect(update.$unset).toEqual({ 'payout_snapshot.snapshot_delete_at': '' });
+    expect(update.$set).not.toHaveProperty('payout_snapshot.snapshot_delete_at');
+    // a missing field never matches the lte deadline, so cleaned docs are not re-selected
+    expect(query['payout_snapshot.snapshot_delete_at']).toEqual({ $lte: new Date('2026-01-01T00:00:00Z') });
+  });
 });

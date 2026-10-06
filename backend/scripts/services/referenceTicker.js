@@ -21,6 +21,12 @@ const CRYPTO_TTL_SECONDS = Number(process.env.REFERENCE_TICKER_CRYPTO_TTL_SECOND
 const FIAT_TTL_SECONDS = Number(process.env.REFERENCE_TICKER_FIAT_TTL_SECONDS || 21600);
 const LAST_GOOD_TTL_SECONDS = Number(process.env.REFERENCE_TICKER_LAST_GOOD_TTL_SECONDS || 604800);
 
+// [TR] Bayat satır üst sınırı: son taze güncellemesinden bu kadar zaman geçen satır last-good'dan da düşer.
+//      Aksi halde her başarılı yenileme last-good TTL'ini yenileyip bayat satırı sonsuza dek taşırdı.
+// [EN] Staleness cap: a row older than this (by its original updatedAt) is dropped instead of being carried
+//      forward; otherwise each refresh would renew the last-good TTL and keep stale rows forever.
+const MAX_STALE_SECONDS = Number(process.env.REFERENCE_TICKER_MAX_STALE_SECONDS || 86400);
+
 const PAIRS = Object.freeze([
   "BTC/USDT",
   "BTC/USDC",
@@ -391,11 +397,15 @@ async function cacheGet(key) {
  * [EN] Per-row last-good: any symbol missing from the fresh set is filled from the last good payload,
  *      flagged stale and keeping its original updatedAt.
  */
-function mergeWithLastGood(freshItems, lastGood) {
+function mergeWithLastGood(freshItems, lastGood, nowMs = Date.now()) {
   const fresh = normalizeAndOrderItems(freshItems);
   const have = new Set(fresh.map((item) => item.symbol));
+  const isWithinCap = (item) => {
+    const at = Date.parse(item.updatedAt || lastGood?.generatedAt || "");
+    return Number.isFinite(at) && nowMs - at <= MAX_STALE_SECONDS * 1000;
+  };
   const fallback = (lastGood?.items || [])
-    .filter((item) => item && PAIRS.includes(item.symbol) && !have.has(item.symbol))
+    .filter((item) => item && PAIRS.includes(item.symbol) && !have.has(item.symbol) && isWithinCap(item))
     .map((item) => ({ ...item, stale: true, updatedAt: item.updatedAt || lastGood.generatedAt || nowIso() }));
   return { items: normalizeAndOrderItems([...fresh, ...fallback]), freshCount: fresh.length };
 }
@@ -489,4 +499,6 @@ module.exports = {
   CACHE_KEYS,
   refreshReferenceTicker,
   getReferenceTickerPayload,
+  _mergeWithLastGood: mergeWithLastGood,
+  MAX_STALE_SECONDS,
 };

@@ -86,6 +86,15 @@ describe("encryption Vault provider (B7) + HMAC fingerprint (B33)", () => {
     await expect(enc.encryptField(PLAINTEXT, WALLET)).rejects.toThrow("Vault HTTP 403");
   });
 
+  test("Vault HTTP error body never leaks into the thrown message", async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 500, text: async () => "SECRET-INTERNAL-DETAIL s.tok" });
+    const enc = require("../../backend/scripts/services/encryption");
+    let message = "";
+    try { await enc.encryptField(PLAINTEXT, WALLET); } catch (e) { message = e.message; }
+    expect(message).toContain("Vault HTTP 500");
+    expect(message).not.toContain("SECRET-INTERNAL-DETAIL");
+  });
+
   test("payout fingerprint is master-key HMAC, differs from legacy unsalted SHA-256, and keeps legacy compare path", async () => {
     global.fetch = vaultOk();
     const enc = require("../../backend/scripts/services/encryption");

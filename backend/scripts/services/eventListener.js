@@ -29,6 +29,7 @@ const Trade = require("../models/Trade");
 const Order = require("../models/Order");
 const User = require("../models/User");
 const RevenueEvent = require("../models/RevenueEvent");
+const { recordTerminalTradeStat } = require("./terminalStats");
 const RewardFunding = require("../models/RewardFunding");
 const RewardEpoch = require("../models/RewardEpoch");
 const RewardClaim = require("../models/RewardClaim");
@@ -93,7 +94,7 @@ const ESCROW_EVENT_NAMES = [
   "WalletRegistered",
   "PaymentReported",
   "EscrowReleased", "DisputeOpened",
-  "CancelProposed", "EscrowCanceled", "PaymentWindowExpired",
+  "CancelProposed", "CancelRevoked", "EscrowCanceled", "PaymentWindowExpired",
   "MakerPinged", "ReputationUpdated",
   "BleedingDecayed", "EscrowBurned",
   "SettlementProposed", "SettlementRejected", "SettlementWithdrawn", "SettlementExpired", "SettlementFinalized",
@@ -132,6 +133,7 @@ const ARAF_ABI = [
   "event EscrowReleased(uint256 indexed tradeId, address indexed maker, address indexed taker, uint256 takerFee, uint256 makerFee)",
   "event DisputeOpened(uint256 indexed tradeId, address indexed challenger, uint256 timestamp)",
   "event CancelProposed(uint256 indexed tradeId, address indexed proposer)",
+  "event CancelRevoked(uint256 indexed tradeId, address indexed revoker)",
   "event EscrowCanceled(uint256 indexed tradeId, uint256 makerRefund, uint256 takerRefund)",
   "event PaymentWindowExpired(uint256 indexed tradeId, uint256 makerRefund, uint256 takerRefund, uint256 takerPenalty)",
   "event MakerPinged(uint256 indexed tradeId, address indexed pinger, uint256 timestamp)",
@@ -201,6 +203,7 @@ const EVENT_ARG_KEYS = {
   EscrowReleased: ["tradeId", "maker", "taker", "takerFee", "makerFee"],
   DisputeOpened: ["tradeId", "challenger", "timestamp"],
   CancelProposed: ["tradeId", "proposer"],
+  CancelRevoked: ["tradeId", "revoker"],
   EscrowCanceled: ["tradeId", "makerRefund", "takerRefund"],
   PaymentWindowExpired: ["tradeId", "makerRefund", "takerRefund", "takerPenalty"],
   MakerPinged: ["tradeId", "pinger", "timestamp"],
@@ -1700,6 +1703,7 @@ class EventWorker {
       EscrowReleased: this._onEscrowReleased.bind(this),
       DisputeOpened: this._onDisputeOpened.bind(this),
       CancelProposed: this._onCancelProposed.bind(this),
+      CancelRevoked: this._onCancelRevoked.bind(this),
       EscrowCanceled: this._onEscrowCanceled.bind(this),
       PaymentWindowExpired: this._onPaymentWindowExpired.bind(this),
       MakerPinged: this._onMakerPinged.bind(this),
@@ -2049,6 +2053,11 @@ class EventWorker {
 
     if (!trade) return null;
 
+    // [TR] B23: kalıcı kümülatif sayaç (trade başına bir kez, idempotent). Trade 1 yıl sonra TTL ile silinse de
+    //      istatistik geriye gitmez. Aynı session/transaction içinde; hata olursa terminal geçiş de geri alınır.
+    // [EN] B23: permanent cumulative counter row (once per trade, idempotent) so stats survive the Trade TTL.
+    await recordTerminalTradeStat(trade, { session });
+
     if (trade.parent_order_id) {
       await Order.findOneAndUpdate(
         _buildIdentityLookup("onchain_order_id", trade.parent_order_id),
@@ -2350,6 +2359,61 @@ class EventWorker {
     // [EN] B15: do not silently ignore a missing mirror; throw (retry/DLQ).
     if (!updated) {
       throw new Error("CancelProposed geldi ama trade mirror bulunamadı.");
+    }
+  }
+
+  /**
+   * [TR] K11: Taraf karşı taraf yürütmeden önce kendi iptal onayını geri çekti. Zincir durumu okunmaz;
+   *      sonuç event'ten (revoker) ve mirror'ın mevcut alanlarından türetilir, bu yüzden tekrar uygulama
+   *      aynı sonucu verir (idempotent). Mirror yoksa throw (retry/DLQ).
+   * [EN] K11: a party withdrew its own cancel consent. No chain read; the result is derived from the event
+   *      (revoker) and the current mirror fields, so re-applying yields the same state (idempotent).
+   *      Missing mirror throws (retry/DLQ).
+   */
+  async _onCancelRevoked(event) {
+    const { tradeId, revoker } = event.args;
+    const tradeLookup = _buildIdentityLookup("onchain_escrow_id", tradeId);
+    const revokerAddress = String(revoker).toLowerCase();
+
+    const mirror = await Trade.findOne(tradeLookup)
+      .select("maker_address taker_address cancel_proposal")
+      .lean();
+    if (!mirror) {
+      throw new Error("CancelRevoked geldi ama trade mirror bulunamadı.");
+    }
+
+    const makerAddress = mirror.maker_address ? String(mirror.maker_address).toLowerCase() : null;
+    const takerAddress = mirror.taker_address ? String(mirror.taker_address).toLowerCase() : null;
+    const prev = mirror.cancel_proposal || {};
+
+    let makerSigned = Boolean(prev.maker_signed);
+    let takerSigned = Boolean(prev.taker_signed);
+    if (revokerAddress === makerAddress) makerSigned = false;
+    else if (revokerAddress === takerAddress) takerSigned = false;
+    else {
+      throw new Error("CancelRevoked revoker trade tarafı değil.");
+    }
+
+    let update;
+    if (!makerSigned && !takerSigned) {
+      update = { ...CLEARED_CANCEL_PROPOSAL };
+    } else {
+      const remaining = makerSigned ? makerAddress : takerAddress;
+      update = {
+        "cancel_proposal.maker_signed": makerSigned,
+        "cancel_proposal.taker_signed": takerSigned,
+      };
+      if (String(prev.proposed_by || "").toLowerCase() === revokerAddress) {
+        update["cancel_proposal.proposed_by"] = remaining;
+      }
+      if (String(prev.approved_by || "").toLowerCase() === revokerAddress) {
+        update["cancel_proposal.approved_by"] = null;
+      }
+    }
+
+    const updated = await Trade.findOneAndUpdate(tradeLookup, { $set: update });
+    if (!updated) {
+      throw new Error("CancelRevoked geldi ama trade mirror bulunamadı.");
     }
   }
 
