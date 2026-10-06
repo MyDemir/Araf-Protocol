@@ -28,7 +28,7 @@ function load({ tradeTotals = {}, counterTotals = {}, tradeCount = 3, counterCou
         return [{ _id: null, total: dec(counterTotals.all || "999999999999999999999999") }];
       }
       if (group._id === null && group.count !== undefined || group.count) {
-        return [{ _id: null, totalVolumeApprox: 5_000_000, count: 2, totalDurationMs: 7_200_000 }];
+        return [{ _id: null, totalVolumeApprox: 5_000_000, count: 2, totalDurationMs: 7_200_000, durationKnownCount: 2 }];
       }
       return [];
     }),
@@ -96,6 +96,31 @@ describe("statsSnapshot aggregate sums (B23)", () => {
     const burned = pipelines.find((p) => p[0].$match?.status === "BURNED");
     const expr = burned[1].$group.total.$sum;
     expect(expr.$convert).toMatchObject({ input: "$burned_amount", to: "decimal", onError: 0, onNull: 0 });
+  });
+
+  test("avg_trade_hours uses only rows with a known duration (duration_ms > 0)", async () => {
+    const { mod, Counter } = load();
+    await mod.computeCurrentStats();
+    const resolvedPipeline = Counter.aggregate.mock.calls.map((c) => c[0]).find((p) => p[1]?.$group?.durationKnownCount);
+    expect(resolvedPipeline[1].$group.durationKnownCount).toEqual({ $sum: { $cond: [{ $gt: ["$duration_ms", 0] }, 1, 0] } });
+
+    // 3 resolved, only 1 with a known 3h duration -> average 3h (not 1h)
+    Counter.aggregate.mockImplementation(async (pipeline) => {
+      const group = pipeline.find((st) => st.$group)?.$group || {};
+      if (group.durationKnownCount) return [{ _id: null, totalVolumeApprox: 0, count: 3, totalDurationMs: 3 * 3600_000, durationKnownCount: 1 }];
+      if (group._id === null && group.total) return [{ _id: null, total: dec("0") }];
+      return [];
+    });
+    expect((await mod.computeCurrentStats()).avg_trade_hours).toBe(3);
+
+    // no known durations at all -> null, not 0
+    Counter.aggregate.mockImplementation(async (pipeline) => {
+      const group = pipeline.find((st) => st.$group)?.$group || {};
+      if (group.durationKnownCount) return [{ _id: null, totalVolumeApprox: 0, count: 2, totalDurationMs: 0, durationKnownCount: 0 }];
+      if (group._id === null && group.total) return [{ _id: null, total: dec("0") }];
+      return [];
+    });
+    expect((await mod.computeCurrentStats()).avg_trade_hours).toBeNull();
   });
 
   test("decimal128 text normalisation", () => {

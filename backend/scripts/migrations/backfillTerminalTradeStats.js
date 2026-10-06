@@ -5,9 +5,10 @@
  *
  * - Idempotent: satırlar trade_key üzerinden $setOnInsert ile upsert edilir; mevcut satırlara dokunulmaz,
  *   tekrar çalıştırmak hiçbir şeyi iki kez saymaz.
- * - Varsayılan DRY-RUN: yazmaz, kaç satır eklenecğini raporlar. Yazmak için --apply.
- * - ÖNEMLİ: statsSnapshot terminal kümülatifleri artık yalnız sayaçtan okur. Bu script, yeni backend
- *   sürümü yayınlanmadan ÖNCE (ya da hemen ardından, bir sonraki snapshot'tan önce) --apply ile çalışmalıdır.
+ * - Varsayılan DRY-RUN: yazmaz, kaç satır eklenecek olduğunu raporlar. Yazmak için --apply.
+ * - DEPLOY SIRASI: ÖNCE yeni backend deploy edilir, SONRA bu script --apply ile çalıştırılır. Gerekçe: eski
+ *   backend sayaç yazmaz, o yüzden sayaç ancak yeni backend yayında iken kayıpsız dolar; backfill idempotent
+ *   olduğundan deploy sırasında yeni backend'in yazdığı satırlarla çakışmaz, tekrar çalıştırmak güvenlidir.
  *
  * Kullanım / Usage:
  *   node scripts/migrations/backfillTerminalTradeStats.js            (dry-run)

@@ -26,6 +26,12 @@ describe("terminal trade counter (B23)", () => {
     });
   });
 
+  it("writes duration_ms=0 (unknown) when resolved_at is missing so snapshots can exclude it", () => {
+    const t = trade(3);
+    t.timers = { locked_at: new Date("2026-01-01T00:00:00Z") };
+    expect(buildTerminalStatDoc(t)).toMatchObject({ resolved_at: null, duration_ms: 0 });
+  });
+
   it("ignores non-terminal trades and rows without identity", () => {
     expect(buildTerminalStatDoc(trade(1, "LOCKED"))).toBeNull();
     expect(buildTerminalStatDoc({ ...trade(1), onchain_escrow_id: null })).toBeNull();

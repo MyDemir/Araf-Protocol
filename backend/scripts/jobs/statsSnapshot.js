@@ -161,6 +161,8 @@ async function computeCurrentStats() {
           totalVolumeApprox: { $sum: "$crypto_amount_num" },
           count: { $sum: 1 },
           totalDurationMs: { $sum: "$duration_ms" },
+          // [TR] resolved_at/locked_at eksik satırlar duration_ms=0 taşır; ortalamaya yalnız süresi bilinenler girer.
+          durationKnownCount: { $sum: { $cond: [{ $gt: ["$duration_ms", 0] }, 1, 0] } },
         },
       },
     ]),
@@ -219,10 +221,10 @@ async function computeCurrentStats() {
   const executedByToken = _mergeTokenRows(executedTerminalByToken, executedLiveByToken, "volume");
   const burnedByToken = _mergeTokenRows(burnedTerminalByToken, burnedLiveByToken, "burned");
 
-  const resolved = resolvedAgg[0] || { totalVolumeApprox: 0, count: 0, totalDurationMs: 0 };
+  const resolved = resolvedAgg[0] || { totalVolumeApprox: 0, count: 0, totalDurationMs: 0, durationKnownCount: 0 };
 
-  const avgTradeHours = resolved.count > 0
-    ? _toSafeFixedNumber(resolved.totalDurationMs / resolved.count / (1000 * 3600), 2)
+  const avgTradeHours = resolved.durationKnownCount > 0
+    ? _toSafeFixedNumber(resolved.totalDurationMs / resolved.durationKnownCount / (1000 * 3600), 2)
     : null;
 
   return {
