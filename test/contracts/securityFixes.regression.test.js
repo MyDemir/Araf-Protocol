@@ -208,7 +208,8 @@ describe("Security fixes regression (K1–K14, G1/G2)", function () {
     it("K2(B): while the ping is valid (before ping+48h) taker pingMaker reverts with ConflictingPingPath", async function () {
       const c = await loadFixture(base);
       const { tid, lapsesAt } = await pingedTrade(c);
-      // paidAt + GRACE_PERIOD (48h) already passed? ping >= paidAt+24h, so ensure we are past grace too.
+      // The ping is at least paidAt+24h; waiting one more day also puts us past paidAt+GRACE_PERIOD (48h),
+      // so only the still-valid ping (not the grace period) is what blocks the taker here.
       await time.increase(DAY);
       await expect(c.escrow.connect(c.taker).pingMaker(tid)).to.be.revertedWithCustomError(c.escrow, "ConflictingPingPath");
       await time.setNextBlockTimestamp(lapsesAt - 1n);
@@ -270,14 +271,29 @@ describe("Security fixes regression (K1–K14, G1/G2)", function () {
       expect((await c.escrow.getReputation(c.taker.address)).disputeWinCount).to.equal(1n);
     });
 
-    it("K2(B): silent maker cannot lock the trade — lapsed ping -> pingMaker -> +24h autoRelease, funds conserved", async function () {
+    it("K2(B): silent maker cannot lock the trade — tier>0: lapsed ping -> pingMaker -> +24h autoRelease, penalties measured, funds conserved", async function () {
       const c = await loadFixture(base);
-      const totalBefore = await balances(c);
-      const escBefore = await c.token.balanceOf(await c.escrow.getAddress());
-      const takerBefore = await c.token.balanceOf(c.taker.address);
+      // Tier>0 trade so both bonds are non-zero and the 2% auto-release penalty is a real amount.
+      await liftAll(c, [[c.maker, c.helper], [c.taker, c.helper2]]);
+      const esc = await c.escrow.getAddress();
+      const vaultAddr = await c.vault.getAddress();
 
-      const { tid, lapsesAt } = await pingedTrade(c);
+      const tid = await sellTrade(c, U(1000), 1);
+      await toPaid(c, tid);
+      await pingChallenge(c, tid);
       const tr0 = await c.escrow.getTrade(tid);
+      expect(tr0.makerBond).to.be.gt(0n);
+      expect(tr0.takerBond).to.be.gt(0n);
+      const lapsesAt = tr0.challengePingedAt + RESPONSE + WINDOW;
+
+      // Snapshot after both bonds and the crypto are locked in escrow.
+      const totalBefore = await balances(c);
+      const escLocked = await c.token.balanceOf(esc);
+      expect(escLocked).to.be.gte(tr0.cryptoAmount + tr0.makerBond + tr0.takerBond);
+      const makerBefore = await c.token.balanceOf(c.maker.address);
+      const takerBefore = await c.token.balanceOf(c.taker.address);
+      const vaultBefore = await c.token.balanceOf(vaultAddr);
+
       await time.increaseTo(lapsesAt);
       await c.escrow.connect(c.taker).pingMaker(tid);
       const pingedAt = (await c.escrow.getTrade(tid)).pingedAt;
@@ -287,13 +303,19 @@ describe("Security fixes regression (K1–K14, G1/G2)", function () {
       await time.setNextBlockTimestamp(pingedAt + RESPONSE);
       await c.escrow.connect(c.taker).autoRelease(tid);
 
-      const tr = await c.escrow.getTrade(tid);
-      expect(tr.state).to.equal(TradeState.RESOLVED);
-      // AUTO_RELEASE_PENALTY (2% of each bond) applies as before.
+      expect((await c.escrow.getTrade(tid)).state).to.equal(TradeState.RESOLVED);
+      // AUTO_RELEASE_PENALTY (2% of each bond) applies as before and is a non-zero amount here.
+      const makerPenalty = (tr0.makerBond * 200n) / 10_000n;
       const takerPenalty = (tr0.takerBond * 200n) / 10_000n;
-      expect((await c.token.balanceOf(c.taker.address)) - takerBefore).to.equal(tr0.cryptoAmount - takerPenalty);
-      // Conservation: nothing left in escrow for the trade, nothing created or lost.
-      expect(await c.token.balanceOf(await c.escrow.getAddress())).to.equal(escBefore);
+      expect(makerPenalty).to.be.gt(0n);
+      expect(takerPenalty).to.be.gt(0n);
+      // Maker gets the bond back minus the penalty; taker gets the crypto + bond minus the penalty.
+      expect((await c.token.balanceOf(c.maker.address)) - makerBefore).to.equal(tr0.makerBond - makerPenalty);
+      expect((await c.token.balanceOf(c.taker.address)) - takerBefore).to.equal(tr0.cryptoAmount + tr0.takerBond - takerPenalty);
+      // Both penalties go to the treasury vault.
+      expect((await c.token.balanceOf(vaultAddr)) - vaultBefore).to.equal(makerPenalty + takerPenalty);
+      // Conservation: this trade's escrow balance is fully paid out; nothing created or lost.
+      expect(await c.token.balanceOf(esc)).to.equal(escLocked - (tr0.cryptoAmount + tr0.makerBond + tr0.takerBond));
       expect(await balances(c)).to.equal(totalBefore);
       expect((await c.escrow.getReputation(c.maker.address)).autoReleaseCount).to.equal(1n);
     });
