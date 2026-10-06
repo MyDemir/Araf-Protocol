@@ -221,6 +221,20 @@ describe('contract lifecycle action builders', () => {
     expect(executed.setCurrentView).toHaveBeenCalledWith('home');
   });
 
+  it('profile update: a successful save marks the saved profile as present', async () => {
+    const setHasPayoutProfile = vi.fn();
+    const deps = {
+      lang: 'EN', isContractLoading: false, isRegisteringWallet: false, isWalletRegistered: false, payoutProfileDraft: {},
+      requireSignedSessionForActiveWallet: vi.fn(() => true),
+      authenticatedFetch: vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) }),
+      canonicalizePayoutProfileDraft: vi.fn(() => ({})),
+      registerWallet: vi.fn(), showToast: vi.fn(), setIsContractLoading: vi.fn(), setIsRegisteringWallet: vi.fn(), setIsWalletRegistered: vi.fn(),
+      setHasPayoutProfile,
+    };
+    await buildProfileActions(deps).handleUpdatePII({ preventDefault: vi.fn() });
+    expect(setHasPayoutProfile).toHaveBeenCalledWith(true);
+  });
+
   it('profile update: a non-session 409 shows the active-trade message; SESSION_WALLET_MISMATCH stays silent; bad JSON is safe (F1, F22)', async () => {
     const make = (res) => ({
       lang: 'EN', isContractLoading: false, isRegisteringWallet: false, isWalletRegistered: false, payoutProfileDraft: {},
@@ -232,7 +246,7 @@ describe('contract lifecycle action builders', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const locked = make({ ok: false, status: 409, json: async () => ({ code: 'BANK_PROFILE_LOCKED_DURING_ACTIVE_TRADE' }) });
     await buildProfileActions(locked).handleUpdatePII({ preventDefault: vi.fn() });
-    expect(locked.showToast).toHaveBeenCalledWith('Payout profile cannot be changed during active trades.', 'error');
+    expect(locked.showToast).toHaveBeenCalledWith('Payout profile cannot be created or changed during active trades.', 'error');
 
     const mismatch = make({ ok: false, status: 409, json: async () => ({ code: 'SESSION_WALLET_MISMATCH' }) });
     await buildProfileActions(mismatch).handleUpdatePII({ preventDefault: vi.fn() });

@@ -49,7 +49,9 @@ Request:
 ```
 
 ### `GET /api/auth/me`
-Returns `{ wallet, authenticated: true }` for valid session cookie.
+Returns `{ wallet, authenticated: true, isAdmin, hasPayoutProfile }` for a valid session cookie.
+
+`hasPayoutProfile`: whether the user has a SAVED payout profile on the backend (boolean only, no PII). If the lookup fails it is `null`; clients treat `null` as "unknown" and keep order creation/filling blocked (fail-closed).
 
 ### `POST /api/auth/refresh`
 Rotates refresh session and issues new cookie pair.
@@ -66,7 +68,7 @@ Revokes refresh family and clears cookies.
 Updates encrypted payout profile (rail-aware) in `User.payout_profile`.
 
 Key behavior:
-- Bank-profile changes are blocked while active trades exist (`LOCKED/PAID/CHALLENGED`).
+- Payout-profile writes are blocked while an active trade exists (`LOCKED/PAID/CHALLENGED`), including first-ever creation (`409 BANK_PROFILE_LOCKED_DURING_ACTIVE_TRADE`). The snapshot is taken when the trade locks and must not change for the trade's lifetime (fraud prevention).
 - Bank profile version/counters are updated for risk signaling.
 
 Accepted request body:
@@ -137,6 +139,8 @@ Public order feed with filters:
 - `token_address`
 - `owner_address`
 - pagination (`page`, `limit`)
+
+Each order carries `owner_has_payout_profile` (boolean): whether the order owner has a saved payout profile. No PII/encrypted fields are returned; the UI disables filling when false.
 
 ### `GET /api/orders/my`
 Authenticated paginated list of caller-owned orders.

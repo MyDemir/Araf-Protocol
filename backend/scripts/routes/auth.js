@@ -558,7 +558,26 @@ router.get("/me", requireAuth, async (req, res) => {
     }
   }
 
-  return res.json({ wallet: req.wallet, authenticated: true, isAdmin: isAdminWallet(req.wallet) });
+  // [TR] Kayıtlı ödeme profili var mı? Yalnız boolean (PII yok). Okuma hatasında alan eksik/null döner;
+  //      istemci bilinmeyen durumda fail-closed davranır.
+  // [EN] Boolean only, no PII. On lookup failure the field is null so clients fail closed.
+  let hasPayoutProfile = null;
+  try {
+    const u = await User.exists({
+      wallet_address: req.wallet,
+      "payout_profile.payout_details_enc": { $exists: true, $nin: [null, ""] },
+    });
+    hasPayoutProfile = Boolean(u);
+  } catch (err) {
+    logger.warn(`[Auth] /me hasPayoutProfile lookup failed: ${err.message}`);
+  }
+
+  return res.json({
+    wallet: req.wallet,
+    authenticated: true,
+    isAdmin: isAdminWallet(req.wallet),
+    hasPayoutProfile,
+  });
 });
 
 /**
@@ -622,14 +641,11 @@ router.put("/profile", requireAuth, requireSessionWalletMatch, authLimiter, asyn
 
     const bankProfileChanged = railChanged || countryChanged || detailsChanged;
 
-    // [TR] Mevcut (şifreli) profil yoksa bu bir İLK oluşturmadır: değiştirilecek bir şey olmadığı için
-    //      aktif trade kilidinden muaftır (profilsiz kullanıcı aktif trade'de profil oluşturabilir).
-    //      Mevcut profilin değiştirilmesi aktif trade sırasında kilitli kalır.
-    // [EN] First-ever profile creation is exempt from the active-trade lock; changing an existing one is not.
-    const isFirstProfileCreation = !user.payout_profile?.payout_details_enc;
-
+    // [TR] Ürün kararı: aktif trade varken (ilk oluşturma dahil) ödeme profili yazımı yapılamaz;
+    //      snapshot kilit anında alınır ve işlem boyunca değişmemelidir (dolandırıcılık önleme).
+    // [EN] No payout-profile write during an active trade, including first-ever creation.
     // [TR] Contact değişimi serbest; payout details değişimi aktif trade sırasında kilitli.
-    if (bankProfileChanged && !isFirstProfileCreation) {
+    if (bankProfileChanged) {
       const activeTradeExists = await Trade.exists({
         status: { $in: ACTIVE_TRADE_STATUSES_FOR_BANK_PROFILE_LOCK },
         $or: [

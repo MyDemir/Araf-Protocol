@@ -13,6 +13,7 @@ const baseCtx = {
   setLang: vi.fn(),
   isConnected: true,
   isAuthenticated: true,
+  hasPayoutProfile: true,
   isLoggingIn: false,
   isContractLoading: false,
   loadingText: '',
@@ -207,5 +208,33 @@ describe('P2: inline components keep their identity across renders', () => {
 
     expect(screen.getByRole('button', { name: /USDT/ })).toBe(row);
     expect(document.activeElement).toBe(row);
+  });
+});
+
+describe('payout profile gate on market fill', () => {
+  it.each([[false], [null], [undefined]])('locks the fill CTA and offers the profile link when hasPayoutProfile=%s (fail-closed)', (flag) => {
+    const openProfilePage = vi.fn();
+    renderMarketWith({ hasPayoutProfile: flag, openProfilePage, filteredOrders: [makeOrder()] });
+    expect(screen.getByRole('button', { name: /Profile needed/i })).toBeDisabled();
+    const link = screen.getByTestId('fill-needs-profile');
+    expect(link).toHaveTextContent('Fill in your payout profile first.');
+    link.click();
+    expect(openProfilePage).toHaveBeenCalledWith('account');
+  });
+
+  it('shows the Turkish copy', () => {
+    renderMarketWith({ lang: 'TR', hasPayoutProfile: false, filteredOrders: [makeOrder()] });
+    expect(screen.getByTestId('fill-needs-profile')).toHaveTextContent('Önce ödeme profilini doldurun.');
+  });
+
+  it('locks fill when the order owner has no saved payout profile', () => {
+    renderMarketWith({ hasPayoutProfile: true, filteredOrders: [makeOrder({ ownerHasPayoutProfile: false })] });
+    expect(screen.getByRole('button', { name: /No profile/i })).toBeDisabled();
+    expect(screen.getByTestId('fill-owner-no-profile')).toHaveTextContent("The seller has no payout profile.");
+  });
+
+  it('keeps the fill CTA enabled when both sides have profiles', () => {
+    renderMarketWith({ hasPayoutProfile: true, filteredOrders: [makeOrder({ ownerHasPayoutProfile: true })] });
+    expect(screen.getByRole('button', { name: 'Buy' })).toBeEnabled();
   });
 });

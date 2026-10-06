@@ -1,4 +1,5 @@
 import React from 'react';
+import { isPayoutProfileSaved } from '../../payoutProfileGate';
 import {
   buildCreateOrderAction,
   getMakerOrderValidationError,
@@ -35,6 +36,9 @@ export const useMakerOrderForm = ({
   // [TR] Tam approve tutarı için backend bondMap + cüzdan itibarı okuyucusu (yoksa muhafazakâr üst sınır).
   bondMap = null,
   getReputation = null,
+  // [TR] Backend'deki kayıtlı ödeme profili durumu (true/false/null) ve profil sayfasına yönlendirme.
+  hasPayoutProfile = null,
+  openProfilePage = null,
 }) => {
   const [makerTier, setMakerTier] = React.useState(MAKER_ORDER_DEFAULTS.makerTier);
   const [makerAmount, setMakerAmount] = React.useState(MAKER_ORDER_DEFAULTS.makerAmount);
@@ -119,6 +123,8 @@ export const useMakerOrderForm = ({
     tokenPolicy,
     bondMap,
     getReputation,
+    hasPayoutProfile,
+    openProfilePage,
   }), [
     getFormState,
     resetMakerOrderForm,
@@ -148,6 +154,8 @@ export const useMakerOrderForm = ({
     tokenPolicy,
     bondMap,
     getReputation,
+    hasPayoutProfile,
+    openProfilePage,
   ]);
 
   const handleOpenMakerModal = React.useCallback(() => {
@@ -174,6 +182,7 @@ export const useMakerOrderForm = ({
     tokenPolicy,
     payoutRiskEntry,
     isCreateTemporarilyDisabledByRisk,
+    isPayoutProfileGateBlocked: !isPayoutProfileSaved(hasPayoutProfile),
     handleCreateOrder,
     handleOpenMakerModal,
   };

@@ -639,6 +639,13 @@ flowchart TD
 - Snapshot-first politika: payout snapshot yoksa controlled hata döner; current profile fallback kapalıdır.
 - Hassas PII yanıtları `Cache-Control: no-store` / `Pragma: no-cache` ile döndürülür.
 
+
+### 12.4.1 Ödeme profili kapısı ve tek seferlik snapshot
+- İlke: ödeme profilini doldurmayan taraf işleme girmemeli; snapshot işlem kilitlendiği anda alınır ve işlem süresince değiştirilemez.
+- Snapshot TEK SEFERLİDİR: `_captureLockedTradeSnapshot`, yalnız `payout_snapshot.captured_at` boşsa, atomik koşullu güncellemeyle yazar. Worker replay, DLQ re-drive ya da aynı `OrderFilled`'ın tekrar işlenmesi mevcut snapshot'ı yeniden yazmaz; eksik (`is_complete=false`) snapshot da sonradan "tamamlanmaz".
+- Kapı (emir oluşturma/doldurma için "kayıtlı ödeme profili yok → işlem yok") YALNIZ arayüz ve API düzeyindedir: karar `/api/auth/me.hasPayoutProfile` (kayıtlı profil; taslak form değil) ve pazar listesindeki `owner_has_payout_profile` boolean'ına dayanır, durum bilinmiyorsa kapalıdır. Kontrat doğrudan çağrılarak bu kapı ATLANABİLİR.
+- Asıl güvence kuraldır: **eksik snapshot → PII kapalı, işlem ödeme penceresinde çözülür.** Profili olmayan taraf için snapshot eksik kalır, `/api/pii/*` erişimi açılmaz ve işlem ödeme penceresi içinde (zamanaşımı/iptal akışıyla) çözülür.
+
 ### 12.5 Şifreleme modeli
 - PII ve receipt payload alanları AES-256-GCM ile şifrelenmiş saklanır.
 - Key türetme/yönetim tarafında HKDF + KMS/Vault tabanlı model hedeflenir.

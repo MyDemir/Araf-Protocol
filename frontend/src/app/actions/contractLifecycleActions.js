@@ -6,6 +6,7 @@ import { WALLET_AGE_MIN_DAYS } from '../walletAge';
 import { mapChainTradeState, resolveConfirmedState } from '../tradeStateSync';
 import { computeFillAllowance } from './allowanceMath';
 import { clearAppHashRoute } from './tradeNavigationActions';
+import { isOwnerPayoutProfileMissing, isPayoutProfileSaved, ownerProfileMissingMessage, profileRequiredMessage } from '../payoutProfileGate';
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
@@ -123,9 +124,23 @@ export const buildStartTradeAction = ({
   // [TR] Tam approve tutarı için (yoksa muhafazakâr üst sınır): backend bondMap + cüzdan itibarı okuyucusu.
   bondMap = null,
   getReputation = null,
+  // [TR] Backend'deki KAYITLI profil durumu (true/false/null=bilinmiyor) — yalnız true iken doldurulabilir (fail-closed).
+  hasPayoutProfile = null,
+  openProfilePage = null,
   confirmFn = null,
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 }) => async (order) => {
+  // [TR] Ödeme profili kapısı (arayüz düzeyi): kayıtlı profili olmayan ya da durumu bilinmeyen kullanıcı doldurmaz;
+  //      emir sahibinin kayıtlı profili yoksa da doldurma kapalıdır.
+  if (!isPayoutProfileSaved(hasPayoutProfile)) {
+    showToast(profileRequiredMessage(lang), 'error');
+    if (typeof openProfilePage === 'function') openProfilePage('account');
+    return;
+  }
+  if (isOwnerPayoutProfileMissing(order)) {
+    showToast(ownerProfileMissingMessage(lang), 'error');
+    return;
+  }
   const confirm = confirmFn || getConfirm();
   if (!confirm) {
     showToast(
@@ -773,6 +788,7 @@ export const buildProfileActions = ({
   setIsContractLoading,
   setIsRegisteringWallet,
   setIsWalletRegistered,
+  setHasPayoutProfile = null,
 }) => {
   const handleUpdatePII = async (e) => {
     e.preventDefault();
@@ -793,12 +809,14 @@ export const buildProfileActions = ({
         // Oturum-cüzdan uyuşmazlığı authenticatedFetch tarafından zaten işlendi (çıkış + bildirim); yanıltıcı
         // "aktif trade" mesajı gösterme.
         if (body.code === 'SESSION_WALLET_MISMATCH') return;
-        throw new Error(lang === 'TR' ? 'Aktif trade varken payout profili değiştirilemez.' : 'Payout profile cannot be changed during active trades.');
+        throw new Error(lang === 'TR' ? 'Aktif trade varken ödeme profili oluşturulamaz ya da değiştirilemez.' : 'Payout profile cannot be created or changed during active trades.');
       }
       if (!res.ok) {
         const body = await readBody();
         throw new Error(body.error || (lang === 'TR' ? 'Güncelleme başarısız oldu.' : 'Update failed.'));
       }
+      // [TR] Kayıt başarılı: kayıtlı profil artık var (emir oluşturma/doldurma kapısı açılır).
+      if (typeof setHasPayoutProfile === 'function') setHasPayoutProfile(true);
       showToast(lang === 'TR' ? 'Ödeme profili güncellendi.' : 'Payout profile updated.', 'success');
     } catch (err) {
       console.error('PII update error:', err);

@@ -15,6 +15,7 @@ import { mapResolutionTypeLabel } from './useAppSessionData';
 import TradeRoomPage from './contexts/trade-room/TradeRoomPage';
 import ThemeToggle from './shell/ThemeToggle';
 import NowBoundary from './shell/NowBoundary';
+import { isOwnerPayoutProfileMissing, isPayoutProfileSaved, ownerProfileMissingMessage, profileRequiredMessage } from './payoutProfileGate';
 import { deriveTradeTimeline } from './contexts/trade-room/tradeTimeline';
 import { isViewInNav, NAV_ORDER, VIEW_REGISTRY } from './viewRegistry';
 import {
@@ -143,6 +144,7 @@ export const buildAppViews = (ctx) => {
     loading,
     SUPPORTED_TOKEN_ADDRESSES,
     handleStartTrade,
+    hasPayoutProfile = null,
     handleMint,
     isFaucetEnabled,
     isSupportedChainId,
@@ -698,7 +700,10 @@ export const buildAppViews = (ctx) => {
               //      buton kapanır; bilinmiyorsa (null) tx denenir ve revert mesajı çevrilir.
               const ownerBanKnown = isSellSide && Number.isFinite(order.ownerBannedUntil);
               const isOwnerBanned = ownerBanKnown && order.ownerBannedUntil > Math.floor((Number.isFinite(chainNowMs) ? chainNowMs : Date.now() + chainOffsetMs) / 1000);
-              const finalCanTakeOrder = canTakeOrder && !isOwnerBanned && isCooldownOk && isFunded && isAged && !isPaused && isTokenConfigured && isCorrectChain;
+              // [TR] Ödeme profili kapısı: kayıtlı profilin yoksa (ya da durum bilinmiyorsa) ve emir sahibinin profili yoksa doldurma kapalı.
+              const needsOwnProfile = isConnected && isAuthenticated && !isPayoutProfileSaved(hasPayoutProfile);
+              const ownerProfileMissing = isOwnerPayoutProfileMissing(order);
+              const finalCanTakeOrder = canTakeOrder && !needsOwnProfile && !ownerProfileMissing && !isOwnerBanned && isCooldownOk && isFunded && isAged && !isPaused && isTokenConfigured && isCorrectChain;
               // [TR] Renk kullanıcının yapacağı işi anlatır: "Satın Al" yeşil, "Sat" kırmızı. Emir yönü rozeti nötrdür;
               //      renkli rozet (ör. yeşil "Satış emri") yanındaki butonla çelişiyordu.
               // [EN] Colour follows the viewer's action (buy green, sell red); the order-side badge stays neutral.
@@ -716,6 +721,8 @@ export const buildAppViews = (ctx) => {
                 !isTokenConfigured  ? <>{icon(Settings)} {tr ? 'Token ayarlanmadı' : 'Token not set'}</> :
                 isMyOwnAd           ? <>{tr ? 'Sizin emriniz' : 'Your order'}</> :
                 isTierLocked        ? <>{icon(Lock)} {tr ? `Tier ${order.tier} gerekli` : `Tier ${order.tier} required`}</> :
+                needsOwnProfile     ? <>{icon(Lock)} {tr ? 'Profil gerekli' : 'Profile needed'}</> :
+                ownerProfileMissing ? <>{icon(Lock)} {tr ? 'Profil yok' : 'No profile'}</> :
                 isOwnerBanned       ? <>{icon(Lock)} {tr ? 'Satıcı kısıtlı' : 'Seller restricted'}</> :
                 !canTakeOrder       ? <>{icon(Lock)} {tr ? 'Kilitli' : 'Locked'}</> :
                 !isAged             ? <>{icon(Hourglass)} {tr ? 'Cüzdan çok yeni' : 'Wallet too new'}</> :
@@ -757,6 +764,14 @@ export const buildAppViews = (ctx) => {
                       <button onClick={() => (needsSignIn ? handleAuthAction() : handleStartTrade(order))} disabled={isDisabled} title={needsSignIn ? (tr ? 'Önce cüzdanınızı bağlayıp giriş yapın' : 'Connect your wallet and sign in first') : undefined} className={`h-9 min-w-[5.5rem] px-4 rounded-lg text-sm font-semibold transition inline-flex items-center justify-center gap-1.5 ${ctaTone}`}>
                         {ctaContent}
                       </button>
+                      {needsOwnProfile && (
+                        <button type="button" data-testid="fill-needs-profile" onClick={() => openProfilePage?.('account')} className="max-w-[10rem] text-right text-[11px] leading-tight text-brand underline">
+                          {profileRequiredMessage(lang)}
+                        </button>
+                      )}
+                      {!needsOwnProfile && ownerProfileMissing && (
+                        <p data-testid="fill-owner-no-profile" className="max-w-[10rem] text-right text-[11px] leading-tight text-danger">{ownerProfileMissingMessage(lang)}</p>
+                      )}
                     </div>
                   </div>
 

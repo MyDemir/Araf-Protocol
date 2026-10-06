@@ -460,6 +460,8 @@ export const mapApiOrderToUi = ({ order, lang = 'TR', bondMap = {}, tokenMap = {
     //      kontratın MakerBanActive revert'i çevrilerek gösterilir.
     // [EN] Order owner's ban end (unix s). null = UNKNOWN (not 0); the contract's MakerBanActive revert is translated.
     ownerBannedUntil: parseOwnerBannedUntil(order),
+    // [TR] Backend boolean'ı: emir sahibinin KAYITLI ödeme profili var mı. Bilgi yoksa null (engelleme yok).
+    ownerHasPayoutProfile: typeof order?.owner_has_payout_profile === 'boolean' ? order.owner_has_payout_profile : null,
     maker: formatAddress(ownerAddress),
     makerFull: ownerAddress,
     side,

@@ -11,6 +11,7 @@ const baseCtx = {
   setLang: vi.fn(),
   isConnected: true,
   isAuthenticated: true,
+  hasPayoutProfile: true,
   isLoggingIn: false,
   isContractLoading: false,
   loadingText: '',
