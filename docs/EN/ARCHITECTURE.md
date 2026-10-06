@@ -642,6 +642,13 @@ flowchart TD
 - Snapshot-first policy: if payout snapshot is missing, endpoint returns controlled error; current-profile fallback is disabled.
 - Sensitive PII responses set `Cache-Control: no-store` / `Pragma: no-cache`.
 
+
+### 12.4.1 Payout-profile gate and one-shot snapshot
+- Principle: a party that has not filled in a payout profile must not enter a trade; the snapshot is taken when the trade locks and cannot change for the trade's lifetime.
+- The snapshot is ONE-SHOT: `_captureLockedTradeSnapshot` writes only when `payout_snapshot.captured_at` is empty, through an atomic conditional update. Worker replay, DLQ re-drive, or re-processing of the same `OrderFilled` never rewrites an existing snapshot; an incomplete (`is_complete=false`) snapshot is never "completed" later either.
+- The gate ("no saved payout profile -> cannot create/fill an order") exists ONLY at the UI and API level: it relies on `/api/auth/me.hasPayoutProfile` (the saved profile, not the draft form) and the market list's `owner_has_payout_profile` boolean, and fails closed when the state is unknown. Calling the contract directly BYPASSES this gate.
+- The real safeguard is the rule: **missing snapshot -> PII stays closed, the trade is resolved within the payment window.** A party without a profile leaves the snapshot incomplete, `/api/pii/*` access is not opened, and the trade is resolved inside the payment window (timeout/cancel flow).
+
 ### 12.5 Encryption model
 - PII and receipt payload fields are persisted encrypted via AES-256-GCM.
 - Key derivation/governance follows HKDF + KMS/Vault-oriented design.
