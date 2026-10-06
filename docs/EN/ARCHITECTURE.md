@@ -139,6 +139,7 @@ This yields a Web2.5 model: on-chain authority + off-chain operational accelerat
 ### 2.3 Non-custodial backend model
 - Backend does not hold user-fund custody authority.
 - Backend cannot fabricate release/challenge/cancel outcomes against contract rules.
+- The optional `RELAYER_PRIVATE_KEY` is only for permissionless maintenance calls (`decayReputation`, `ArafRewards.recordTradeOutcomes`); it cannot move funds or create authority.
 - Backend strength lies in coordination, observability, and secure PII boundaries.
 - Araf does not decide who is right; split settlement is a dispute-only tool and is available only in `CHALLENGED`.
 
@@ -197,6 +198,14 @@ The contract is the single authoritative V3 state machine surface. The following
 - `setTokenConfig` (decimals 1–18 and equal to the token's `decimals()`; all four tier caps > 0)
 - `setReputationPolicy`, `setReputationTierThresholds` (bounds in §8.4)
 - `pause` / `unpause`
+
+Owner powers per contract (none has a timelock; detailed runbook: [GOVERNANCE_READINESS.md](./GOVERNANCE_READINESS.md)):
+
+| Contract | Owner functions | Code bound |
+|---|---|---|
+| `ArafEscrow` | `setTreasury`, `setFeeConfig`, `setCooldownConfig`, `setTokenConfig`, `setReputationPolicy`, `setReputationTierThresholds`, `pause`/`unpause` | Fee ≤ 2000 bps; cooldown ≤ 30 days; decimals must match the token; policy bounds §8.4; pause only stops create/fill |
+| `ArafRevenueVault` | `setRewardBps`, `setFinalTreasury`, `setRewards` (one-shot), `setSupportedToken`, `setProductPool`, `withdrawTreasuryShare`, `withdrawTreasuryShareToFinal`, `pause`/`unpause` | `rewardBps` 4000–7000; withdrawals only from the treasury reserve; pause only stops sponsor funding |
+| `ArafRewards` | `allocateEpochRewards`, `pause`/`unpause` | Source is the vault only; recording, finalize, claim and sweep are not pausable and no recipient can be chosen |
 
 ### 3.5 Read surface
 - `getOrder`, `getTrade`, `getReputation`, `getTokenConfig`, `getSettlementProposal`
@@ -299,6 +308,15 @@ No universal “maker=seller, taker=buyer” rule:
 - `SELL_CRYPTO`: owner→maker, filler→taker
 - `BUY_CRYPTO`: owner→taker, filler→maker
 
+| Side | Role | Locks | Entry gate | Powers in the trade |
+|---|---|---|---|---|
+| `SELL_CRYPTO` | Owner = maker (crypto seller) | at create: inventory + full maker bond reserve | active ban at create and fill; tier ≤ effective tier at create, re-checked at fill | `releaseFunds`, `pingTakerForChallenge`, `challengeTrade`, cancel, settlement |
+| `SELL_CRYPTO` | Filler = taker (crypto buyer) | at fill: taker bond | taker entry gate + tier | `reportPayment`, `pingMaker`, `autoRelease`, cancel, settlement |
+| `BUY_CRYPTO` | Owner = taker (crypto buyer) | at create: full taker bond reserve | taker entry gate + tier at create and fill | `reportPayment`, `pingMaker`, `autoRelease`, cancel, settlement |
+| `BUY_CRYPTO` | Filler = maker (crypto seller) | at fill: crypto + maker bond | active ban + tier | `releaseFunds`, `pingTakerForChallenge`, `challengeTrade`, cancel, settlement |
+
+Either party may call `expirePaymentWindow`; `burnExpired` and `expireSettlement` are open to anyone.
+
 ---
 
 ## 6. Anti-sybil enforcement semantics (V3)
@@ -386,6 +404,14 @@ only decays for the final 96 hours, so ≈ 34.7% of it is still there to settle 
 
 ### 7.3 Challenge and liveness ping semantics
 - Ping paths are mutually exclusive (conflict guard). Exception: the maker ping lapses at `challengePingedAt + 24h + MAKER_CHALLENGE_WINDOW`; from that second `challengeTrade` reverts with `ChallengeWindowExpired` and the taker may call `pingMaker`.
+`T = challengePingedAt` (at the earliest `paidAt + 24h`):
+
+| Time | Maker `challengeTrade` | Taker `pingMaker` | Maker `releaseFunds` |
+|---|---|---|---|
+| `T ≤ t < T+24h` | `ResponseWindowActive` | `ConflictingPingPath` | open |
+| `T+24h ≤ t < T+48h` | **open** → `CHALLENGED` | `ConflictingPingPath` | open |
+| `t ≥ T+48h` (ping lapsed) | `ChallengeWindowExpired` | **open** (under the `paidAt + 48h` rule) → `autoRelease` 24h later | open |
+
 - The lapse is not announced by an event; off-chain code derives it from the `getTrade` fields (`challengePingedByMaker`, `challengePingedAt`, `pingedByTaker`).
 - Required wait windows are enforced by state guards.
 
@@ -523,6 +549,7 @@ The constants `MAX_CANCEL_DEADLINE` (7 days) and `MIN_SETTLEMENT_EXPIRY` are dec
 - `contracts/scripts/deploy.js` order: `ArafReputationLib` → `ArafSettlementLib` → linked `ArafEscrow(treasury)` → `setTokenConfig` for USDT/USDC (6 decimals, sell+buy enabled, tier caps 150 / 1,500 / 7,500 / 30,000 tokens) verified via `getTokenConfig` → `transferOwnership(FINAL_OWNER_ADDRESS)`. The manifest also records the library addresses.
 - Public chains require `CONFIRM_PUBLIC_DEPLOY=yes`; in public/custom mode `FINAL_OWNER_ADDRESS` must differ from `TREASURY_ADDRESS`.
 - `ArafRevenueVault` + `ArafRewards` are deployed by a separate script (`deployRewards.js`); switching the escrow treasury to the vault is a separate, explicit operation (`rewardsOps.js`).
+- The compile target is `cancun` (`hardhat.config.js`): `ArafRevenueVault` keeps the escrow revenue intent in EIP-1153 transient storage (`tstore`/`tload`); the network the vault is deployed on must support EIP-1153.
 - Production guidance assumes owner governance key is managed by multisig to reduce key risk.
 
 ---
@@ -533,20 +560,23 @@ Backend behavior is defined not only by chosen technologies, but also by bootstr
 
 ```mermaid
 flowchart LR
-    A[env/security prechecks] --> B[Mongo connect]
+    A[Env / security checks + KMS self-test] --> B[Mongo connect]
     B --> C[Redis connect]
-    C --> D[worker init + config load]
-    D --> E[route mount]
-    E --> F[health/readiness]
+    C --> D[Identity guard + protocol config load]
+    D --> E[Scheduler + route mount + health/ready]
+    E --> F[app.listen]
+    F --> G[Worker start + replay in background]
 ```
 
-### 10.1 Backend bootstrap ordering
-1. env/security prechecks
+### 10.1 Backend bootstrap ordering (`backend/scripts/app.js`)
+1. env/security prechecks (e.g. `SIWE_DOMAIN` cannot be localhost in production) + production KMS self-test
 2. Mongo connect
 3. Redis connect
-4. worker init + protocol config load
-5. route mount
-6. health/readiness activation
+4. identity-normalization guard (enforced by default in production) and loading of the mutable protocol config mirror (a load failure does not crash the process; affected routes may return `CONFIG_UNAVAILABLE`)
+5. scheduler jobs
+6. route mount + `/health`, `/ready`
+7. `app.listen`
+8. the worker starts via `startInBackground`: connect + replay continue in the background after HTTP starts listening, while `/ready` reports "replaying"
 
 ### 10.2 Readiness-first operations
 - Liveness (`/health`) answers “is process alive?”.
@@ -558,28 +588,35 @@ flowchart LR
 - Security boundaries prefer fail-closed semantics (auth/session/PII).
 
 ### 10.4 Timeout/connectivity policy
-- Mongo uses tuned `maxPoolSize`, `socketTimeoutMS`, and `serverSelectionTimeoutMS` values for combined worker+API load.
-- Mongo disconnect path favors fail-fast restart to reduce stale/partial-connection drift.
+- Mongo uses `maxPoolSize: 100`, `socketTimeoutMS: 20000`, and `serverSelectionTimeoutMS: 5000` for combined worker+API load.
+- An unexpected Mongo disconnect triggers a fail-fast restart via `process.exit(1)` to reduce stale/partial-connection drift.
 - Redis `isReady` is explicitly treated as distinct from mere connectivity.
 - Redis TLS (`rediss://`) and managed-service assumptions are part of runtime configuration behavior.
 
 ### 10.5 Graceful shutdown ordering
-- stop new requests
+- zero the AES master key cache, clear scheduler timers
+- stop new requests (`server.close`)
 - stop worker
-- clear scheduler timers
 - close Mongo/Redis
-- controlled process exit
+- controlled process exit (forced exit on timeout)
 
 ### 10.6 Scheduler and cleanup jobs
-- reputation decay trigger job
-- stats snapshot job
-- receipt + PII retention cleanup
-- user bank-risk metadata cleanup
-- DLQ processing
+Default intervals can be changed with the `JOB_*_MS` env variables.
+
+| Job | Default interval | Note |
+|---|---|---|
+| DLQ processing | 60 s | See §11.4 |
+| Reputation decay trigger | 24h (first run after 30 s) | Does not run without `RELAYER_PRIVATE_KEY` + `BASE_RPC_URL` |
+| Reward outcome recorder | 1h | `ArafRewards.recordTradeOutcomes`; same relayer requirement |
+| Stats snapshot | 24h | |
+| Receipt & PII snapshot retention cleanup | 30 min | |
+| User bank-risk metadata cleanup | 6h | |
+| Reference rate ticker | periodic | Informational only; does not affect settlement |
+| Reconciliation report | 10 min | On by default in production (`JOB_RECONCILIATION_ENABLED`) |
 
 ### 10.7 Operational meaning of health vs ready
-- `/health`: process liveness only.
-- `/ready`: dependency + config + worker lag/replay safety gate.
+- `/health`: is the process alive and is the worker still seeing new blocks? (`503 stale` once the worker passes its last-block threshold)
+- `/ready`: Mongo/Redis + config + chain id + worker lag (default max 25 blocks, `WORKER_MAX_LAG_BLOCKS`) + replay safety gate. The result is cached for a few seconds; unauthenticated callers get a redacted view, full detail only with `READY_INTERNAL_TOKEN`.
 - During replay/high lag, liveness may be true while readiness is intentionally false.
 
 ---
@@ -601,14 +638,16 @@ flowchart TD
 Worker consumes contract events and updates Mongo without becoming authority.
 
 ### 11.2 Checkpoint approach
-- last processed block
-- last safe checkpoint
+- last processed block (`worker:last_block`) and last safe checkpoint (`worker:last_safe_block`)
+- finality depth: 6 blocks by default in production (`WORKER_FINALITY_DEPTH`)
+- without a checkpoint, production requires `WORKER_START_BLOCK` or `ARAF_DEPLOYMENT_BLOCK`
 - replay-safe startup logic
 
 ### 11.3 Replay and batch processing
-- block-batch processing
-- idempotent mirror intent
-- state-regression guards to prevent backward drift
+- block-batch processing (default 1,000 blocks, `WORKER_BLOCK_BATCH_SIZE`; checkpoint at least every 50 blocks, `WORKER_CHECKPOINT_INTERVAL_BLOCKS`)
+- if a range cannot be read or a batch fails, the checkpoint does not move; replay stops at the first failed batch
+- idempotent mirror intent; the last applied `(blockNumber, logIndex)` is kept per scope so an older event cannot write back
+- state-regression guards prevent backward drift; terminal states are never reopened
 
 ### 11.3.1 Last-safe-block semantics
 - Worker tracks not only last seen block, but also last safe checkpoint block.
@@ -616,8 +655,9 @@ Worker consumes contract events and updates Mongo without becoming authority.
 - This prevents “appears alive but silently behind” operational blind spots.
 
 ### 11.4 DLQ and poison-event visibility
-- unprocessable events go to DLQ
-- retry/backoff applies
+- an event is first retried in place (5 attempts); unprocessable events go to the DLQ. Entries are unique per `txHash:logIndex` (live DLQ, archive and quarantine index sets)
+- the DLQ processor re-drives entries; a successful re-drive acks the event and clears the block's unsafe flag
+- past `MAX_REDRIVE_ATTEMPTS` (10) an entry moves to **permanent quarantine** (no TTL, manual review): the event counts as "acked-poison" and no longer blocks the checkpoint; the alarm is `logger.error` + a quarantine counter. The archive is kept for 7 days
 - operational logs preserve observability of failure modes
 
 ### 11.5 Identity normalization
@@ -625,7 +665,13 @@ Worker consumes contract events and updates Mongo without becoming authority.
 - explicit lookup strategy prevents parent/child identity confusion
 
 ### 11.6 OrderFilled + getTrade linkage
-Child-trade authority is mirrored through explicit event + getter linkage rather than heuristics.
+Child-trade authority is mirrored through explicit event + getter linkage rather than heuristics. The contract never emits `EscrowCreated` / `EscrowLocked`; the mirror is created as `LOCKED` on `OrderFilled`, and the one-shot payout snapshot is taken in the same step (§12.4.1).
+
+### 11.6.1 Mirrored events and terminal counter
+- Escrow events: orders (`OrderCreated/Filled/Canceled`), trade lifecycle (`PaymentReported`, `EscrowReleased`, `DisputeOpened`, `MakerPinged`, `CancelProposed`, `CancelRevoked`, `EscrowCanceled`, `PaymentWindowExpired`, `BleedingDecayed`, `EscrowBurned`), settlement (`SettlementProposed/Rejected/Withdrawn/Expired/Finalized`), reputation/config (`ReputationUpdated`, `FeeConfigUpdated`, `CooldownConfigUpdated`, `TokenConfigUpdated`, `ReputationPolicyUpdated`, `ReputationTierThresholdsUpdated`), `WalletRegistered`, `ProtocolRevenueSent`. Vault events (`EscrowRevenueReceived`, `ExternalRewardFunded`, `ProductRewardFunded`) are read separately from the vault address.
+- `CancelRevoked` clears the revoking party's consent flag in `cancel_proposal`; a missing mirror sends the event to retry/DLQ.
+- Manual vs auto release is read from the contract's terminal snapshot (`getRewardableTrade`), never inferred; a read error writes no permanent "UNKNOWN" and the event goes to retry/DLQ.
+- The terminal transition (`resolved_at` marker) is applied once per trade and writes a **permanent terminal counter** row (`TerminalTradeStat`, unique `trade_key`) in the same operation, so stats survive the Trade document's 1-year TTL.
 
 ### 11.7 Mirror-authority warning
 - Event worker does not define protocol rules; it only projects authoritative chain state.
@@ -662,7 +708,7 @@ sequenceDiagram
 
 #### 12.1.2 Session token lifecycle
 - Auth JWT cookie (`araf_jwt`) is short-lived by default (configurable; default 15m).
-- Refresh cookie (`araf_refresh`) is longer-lived (default 7 days) and path-scoped to `/api/auth`.
+- Refresh cookie (`araf_refresh`) is longer-lived (sliding window default 7 days, absolute per-session cap default 30 days, `REFRESH_ABSOLUTE_TTL_SECS`) and path-scoped to `/api/auth`.
 - The model remains httpOnly + sameSite=lax + credentials:include; bearer header is not normal auth authority.
 
 ### 12.2 Cookie-only boundary and session-wallet mismatch behavior
@@ -697,6 +743,7 @@ flowchart TD
 - `requirePIIToken` enforces token type=`pii`, tradeId match, and token-wallet == cookie-session-wallet.
 - Token alone is insufficient; route handlers re-check live trade state (`LOCKED/PAID/CHALLENGED` window).
 - Snapshot-first policy: if payout snapshot is missing, endpoint returns controlled error; current-profile fallback is disabled.
+- The PII token lifetime defaults to 15 minutes (`PII_TOKEN_EXPIRES_IN`).
 - Sensitive PII responses set `Cache-Control: no-store` / `Pragma: no-cache`.
 
 
@@ -705,6 +752,7 @@ flowchart TD
 - The snapshot is ONE-SHOT: `_captureLockedTradeSnapshot` writes only when `payout_snapshot.captured_at` is empty, through an atomic conditional update. Worker replay, DLQ re-drive, or re-processing of the same `OrderFilled` never rewrites an existing snapshot; an incomplete (`is_complete=false`) snapshot is never "completed" later either.
 - The gate ("no saved payout profile -> cannot create/fill an order") exists ONLY at the UI and API level: it relies on `/api/auth/me.hasPayoutProfile` (the saved profile, not the draft form) and the market list's `owner_has_payout_profile` boolean, and fails closed when the state is unknown. Calling the contract directly BYPASSES this gate.
 - The real safeguard is the rule: **missing snapshot -> PII stays closed, the trade is resolved within the payment window.** A party without a profile leaves the snapshot incomplete, `/api/pii/*` access is not opened, and the trade is resolved inside the payment window (timeout/cancel flow).
+- **Profile lock during an active trade:** while the wallet has a `LOCKED`/`PAID`/`CHALLENGED` trade, `PUT /api/auth/profile` cannot write the payout profile (first creation included): `409 BANK_PROFILE_LOCKED_DURING_ACTIVE_TRADE`.
 
 ### 12.5 Encryption model
 - PII and receipt payload fields are persisted encrypted via AES-256-GCM.
@@ -712,13 +760,13 @@ flowchart TD
 - Plaintext is not persisted; contract receives only hash traces for receipt proof linking.
 
 ### 12.6 Rate-limit classes and fallback behavior
-- Limiter classes are separated by surface: auth, nonce, market read, orders/trades read-write, PII, feedback, logs.
-- Sensitive surfaces (auth/PII) use in-memory fallback protection when Redis is unavailable (minimizing fail-open posture).
-- Public/read surfaces may allow controlled fail-open choices for availability, without relaxing auth/PII boundaries.
+- Limiter classes are separated by surface: auth, nonce, market read, stats read, orders read/write, trade-room read, receipt upload, coordination write, PII (profile / taker-name / token / fetch), admin read, feedback, client logs.
+- Some of them (orders/room read, receipt upload, coordination write, feedback) apply limits tiered by the user's effective tier.
+- When Redis is unavailable the limiters keep protecting through a process-local (in-memory) fallback; no surface, auth/PII included, is deliberately fail-open.
 
 ### 12.7 Client-error logging boundary (scrub semantics)
 - Frontend telemetry is accepted only via `/api/logs/client-error`.
-- Message/stack text is scrubbed by regex redaction for IBAN-like values, wallet addresses, emails, bearer/JWT-like tokens.
+- Message/stack text is scrubbed by regex redaction for IBAN-like values, wallet addresses, emails, bearer/JWT-like tokens; fields are truncated (message 500, stack 2,000, componentStack 1,000, url/user-agent 200 characters).
 - Size limits + rate limits support both data minimization and abuse resistance.
 
 ### 12.8 Trust-boundary summary
@@ -808,6 +856,7 @@ erDiagram
   - `financials.maker_bond`
   - `financials.taker_bond`
   - `financials.total_decayed`
+  - `financials.burned_amount`
 - `*_num` caches are for UI/aggregation convenience only; not enforcement inputs.
 
 ### PII / receipt / payout snapshot fields
@@ -815,10 +864,12 @@ erDiagram
 - `evidence.receipt_encrypted`
 - `evidence.receipt_timestamp`
 - `evidence.receipt_delete_at`
+- `evidence.receipt_delete_at` is set to 30 days after the receipt upload.
 - `payout_snapshot.{maker,taker,...}` carries lock-time risk context like `profile_version_at_lock`, `bank_change_count_*_at_lock`, `fingerprint_hash_at_lock`.
+- `payout_snapshot.{captured_at, snapshot_delete_at, is_complete, incomplete_reason}`: once `captured_at` is set the snapshot is never rewritten (one-shot); a missing profile stays as `is_complete=false` + reason.
 
 ### Cancel / chargeback audit fields
-- `cancel_proposal.{proposed_by, proposed_at, approved_by, maker_signed, taker_signed, maker_signature, taker_signature, deadline}`
+- `cancel_proposal.{proposed_by, proposed_at, approved_by, maker_signed, taker_signed}` — a mirror of on-chain `CancelProposed` / `CancelRevoked`; there are no signature or deadline fields (cancel coordination is fully on-chain)
 - `chargeback_ack.{acknowledged, acknowledged_by, acknowledged_at, ip_hash}`
 - `settlement_proposal` mirrors party-signed partial-settlement lifecycle:
   - `NONE -> PROPOSED -> REJECTED/WITHDRAWN/EXPIRED/FINALIZED`
@@ -827,12 +878,13 @@ erDiagram
   - backend stores mirror/audit context only; contract remains settlement authority
 
 ### Retention and terminal-TTL separation
-- Trade document lifecycle uses terminal-state TTL policy.
+- Trade documents in terminal states are removed by a 365-day TTL index on `timers.resolved_at`; cumulative stats remain in `TerminalTradeStat` rows.
 - Receipt/snapshot payload minimization uses separate cleanup fields (`receipt_delete_at`, `snapshot_delete_at`) and jobs.
 - This separation distinguishes “document lifecycle TTL” from “sensitive payload retention”.
 
 ## 13.4 Feedback / stats snapshot layer
 - Feedback is a separate operational/user-signal surface.
+- Other models: `TerminalTradeStat` (permanent terminal counter), `HistoricalStat`, `RevenueEvent` (vault/escrow revenue mirror), `RewardEpoch`, `RewardClaim`, `RewardFunding`, `RewardEpochAllocationEvent` (reward read-model), `TermsAcceptance` (terms-of-use acceptance).
 - Stats/snapshot layer (daily aggregates, dashboard counters) supports observability and decisions, not protocol authority.
 - Read-model snapshots do not replace contract state; they improve operator visibility.
 
@@ -844,12 +896,14 @@ The V3 backend surface does not manufacture authority; routes apply projection, 
 
 | Route group | Surface | Meaning |
 |---|---|---|
-| Orders | parent-order read/config surfaces, owner-scoped child-trade list/read route | market read-model and owner visibility |
-| Trades | active/history/by-escrow reads, cancel-signature coordination, chargeback-ack audit surface | child-trade operations and audit helpers |
-| Auth | nonce/verify/refresh/logout/me/profile | session and wallet-bound auth boundary |
-| PII | `/my`, `taker-name`, request-token, trade-scoped retrieval | snapshot-first, role-bound sensitive-data access |
-| Receipts | file validation + encryption + hash storage | receipt-carrying surface for taker while `LOCKED` |
-| Logs / stats / feedback | client error logs, protocol stats, feedback intake | observability and product feedback |
+| Orders (`/api/orders`) | `GET /config`, `GET /payment-risk-config`, `GET /`, `GET /my`, `POST /market-meta`, `GET /:id/trades`, `GET /:id` | Market read-model, owner visibility and off-chain market metadata |
+| Trades (`/api/trades`) | `GET /my`, `GET /history`, `GET /by-escrow/:onchainId`, `GET /:id`, `GET /:id/settlement-proposal`, `POST /:id/settlement-proposal/preview`, `POST /:id/chargeback-ack` | Child-trade reads, settlement preview and audit helpers |
+| Auth (`/api/auth`) | `GET /nonce`, `POST /verify`, `POST /refresh`, `POST /logout`, `GET /me`, `PUT /profile` | Session and wallet-bound auth boundary |
+| PII (`/api/pii`) | `GET /my`, `GET /taker-name/:onchainId`, `POST /request-token/:tradeId`, trade-scoped retrieval | Snapshot-first, role-bound sensitive-data access |
+| Receipts (`/api/receipts`) | `POST /upload` | One-shot receipt upload for the taker while `LOCKED` |
+| Rewards (`/api/rewards`) | epochs, funding, `/:wallet/claimable`, `/:wallet/history`, `/health` | Read-only reward view; recording/claims live in the contract |
+| Admin (`/api/admin`) | `GET /revenue`, `/rewards/health`, `/summary`, `/feedback`, `/trades`, `/settlement-proposals` | Read-only observation, open only to sessions in the `ADMIN_WALLETS` list; no protocol authority |
+| Logs / stats / feedback / reference rates | `POST /api/logs/client-error`, `GET /api/stats`, `POST /api/feedback`, `GET /api/reference-rates/ticker` | Observability, product feedback and an informational rate ticker |
 
 ### 14.1 Orders routes
 - parent-order read/config surfaces
@@ -857,8 +911,8 @@ The V3 backend surface does not manufacture authority; routes apply projection, 
 
 ### 14.2 Trades routes
 - active/history/by-escrow reads
-- cancel-signature coordination
-- chargeback-ack audit surface
+- cancel coordination is not in the backend: `proposeOrApproveCancel` / `revokeCancel` go straight to the contract and the backend only mirrors the events
+- chargeback-ack audit surface (maker only, `PAID`/`CHALLENGED`; never vetoes the on-chain flow)
 - settlement-proposal preview + mirror reads are informational and non-authoritative
 - preview availability is `CHALLENGED`-only; non-challenged requests are rejected
 - backend role: preview, event mirror, read-model, audit/observability
@@ -879,8 +933,8 @@ The V3 backend surface does not manufacture authority; routes apply projection, 
 - snapshot-first and role-bound access
 
 ### 14.5 Receipts routes
-- file validation + encryption + hash storage
-- restricted to taker while `LOCKED`
+- file validation (magic bytes / MIME match) + encryption + SHA-256 hash storage
+- restricted to taker while `LOCKED`; one receipt per trade (overwrite returns `409`)
 
 ### 14.6 Logs/stats/feedback
 - client error logs
@@ -938,25 +992,46 @@ flowchart TD
 ### 15.6 Enforcement boundary
 Frontend does not replace contract enforcement; it is a guardrail/orchestration layer.
 
+### 15.7 Code layout (`frontend/src`)
+- `hooks/`: `useArafContract` (escrow reads/writes), `usePII`, `useRewardsContract`
+- `app/providers/`: `SessionProvider` (SIWE session), `AppProviders`, `ThemeProvider`; `app/useAppSessionData.jsx` (`authenticatedFetch`, pending-tx recovery, return to the active trade)
+- `app/contexts/`: context-based screens — `marketplace`, `trade-room` (decision model, timeline, primary/secondary actions), `operations`, `profile` (payout profile, active trades, rewards), `settlement`, `admin` (read-only panel)
+- `app/actions/`: contract lifecycle and order-creation actions; `app/payoutProfileGate.js`: payout-profile gate (§12.4.1); `app/chainPolicy.js`, `app/apiConfig.js`: chain and API-path policy; `app/copy/`: user-facing copy
+
 ---
 
 ## 16. Attack vectors and known limitations
 
 ### 16.1 Mitigated / reduced risks
-- **Backend authority confusion (partially reduced):** documentation + route projection boundaries + worker mirror warnings narrow the chance that backend is treated as adjudicator.
-- **Session/account confusion:** cookie-wallet ↔ header-wallet mismatch now triggers request denial + refresh-family revoke + cookie clear chain.
-- **PII overexposure:** trade-scoped token + role/state/session triple checks + snapshot-first + no-store response semantics.
-- **API-path drift:** canonical path helper usage reduces silent endpoint mismatch risks.
-- **Wrong-network tx risk (UX layer):** chain/address preflight guards fail fast before write submission.
+
+| Risk | Mitigation |
+|---|---|
+| Maker pings and goes silent to hold a PAID trade hostage | The ping lapses at `ping+48h` (`MAKER_CHALLENGE_WINDOW`); the taker uses `pingMaker` → `autoRelease` |
+| Bond-free (Tier 0) taker holding a LOCKED trade hostage | `PAYMENT_WINDOW` (48h) + `expirePaymentWindow`; `reportPayment` reverts with `PaymentWindowClosed` afterwards |
+| Settlement split changed right before acceptance | `acceptSettlement(tradeId, expectedProposalId)`; mismatch reverts with `SettlementProposalMismatch` |
+| Owner repoints rewards to drain the reward reserve | `ArafRevenueVault.setRewards` is one-shot (`RewardsAlreadySet`) |
+| Wrong token decimals corrupting tier caps / reward notional | `setTokenConfig` verifies the token's `decimals()` on-chain (`InvalidDecimals`) |
+| Decayed value locked forever in the escrow on burn | `burnExpired` sends the trade's full balance to treasury |
+| Filling the order of an owner penalized after create | The owner's ban and effective tier are re-checked at fill time |
+| Backend authority confusion (partially reduced) | documentation + route projection boundaries + worker mirror warnings narrow the chance that backend is treated as adjudicator. |
+| Session/account confusion | cookie-wallet ↔ header-wallet mismatch now triggers request denial + refresh-family revoke + cookie clear chain. |
+| PII overexposure | trade-scoped token + role/state/session triple checks + snapshot-first + no-store response semantics. |
+| API-path drift | canonical path helper usage reduces silent endpoint mismatch risks. |
+| Wrong-network tx risk (UX layer) | chain/address preflight guards fail fast before write submission. |
 
 ### 16.2 Remaining / open risks
-- **Governance key risk:** mutable fee/cooldown/token-direction surfaces remain owner-controlled and require multisig/ops discipline.
-- **Fake receipt / off-chain payment ambiguity:** encrypted receipt + hash trace raises fraud cost but cannot cryptographically prove fiat transfer truth.
-- **Chargeback reality:** banking reversals/disputes can make off-chain finality differ from on-chain expectations.
-- **Off-chain signature staleness:** cancel-signature domain/nonce/deadline checks help, but user-side stale-sign UX risk remains.
-- **Backend mirror interpreted as authority:** operators/integrators may still mistake Mongo/cache as source of truth.
-- **Frontend wrong-network/wrong-address configuration risk:** guardrails do not fully eliminate deployment/env misconfiguration risk.
-- **Operator/documentation misunderstanding risk:** legacy mental models (“listing-first”, “backend is arbiter”) can still cause operational errors.
+
+| Risk | Description |
+|---|---|
+| Governance key risk | mutable fee/cooldown/token config/reputation policy/treasury surfaces remain owner-controlled without a timelock and require multisig/ops discipline. |
+| `renounceOwnership` | The inherited `Ownable` function is not disabled; calling it locks owner surfaces (pause included) permanently. |
+| Fake receipt / off-chain payment ambiguity | encrypted receipt + hash trace raises fraud cost but cannot cryptographically prove fiat transfer truth. |
+| Chargeback reality | banking reversals/disputes can make off-chain finality differ from on-chain expectations. |
+| Lingering cancel consent | cancel coordination is on-chain (no signature/deadline). A given consent stays valid, as long as the state does not change, until the counterparty adds the second consent; a user who changes their mind must withdraw it with `revokeCancel` (`reportPayment` / `challengeTrade` already reset consents). |
+| The payout-profile gate lives only in the UI/API | it can be bypassed by calling the contract directly; the safeguard is the missing snapshot → PII closed → payment window rule (§12.4.1). |
+| Backend mirror interpreted as authority | operators/integrators may still mistake Mongo/cache as source of truth. |
+| Frontend wrong-network/wrong-address configuration risk | guardrails do not fully eliminate deployment/env misconfiguration risk. |
+| Operator/documentation misunderstanding risk | legacy mental models (“listing-first”, “backend is arbiter”) can still cause operational errors. |
 
 ### 16.3 Conscious limitations (oracle-free model)
 - Oracle-free design intentionally does not prove fiat transfer truth fully on-chain.

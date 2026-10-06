@@ -136,6 +136,7 @@ graph TB
 ### 2.3 Non-custodial backend modeli
 - Backend kullanıcı fonlarını hareket ettiren custody anahtarı taşımaz.
 - Backend, kontrat adına release/challenge/cancel sonucu “uyduramaz”.
+- Opsiyonel `RELAYER_PRIVATE_KEY` yalnız permissionless bakım çağrıları içindir (`decayReputation`, `ArafRewards.recordTradeOutcomes`); bu anahtar fon hareket ettiremez ve yetki üretmez.
 - Backend’in güçlü olduğu yer: session/policy/PII access boundary ve operasyonel görünürlük.
 - Araf kimin haklı olduğuna karar vermez; split settlement normal kapanış yolu değildir ve yalnız `CHALLENGED` dispute safhasında kullanılabilir.
 
@@ -194,6 +195,14 @@ Kontrat, V3’ün tek authoritative state machine yüzeyidir. Aşağıdaki fonks
 - `setTokenConfig` (decimals 1–18 ve token'ın `decimals()` değerine eşit; dört tier tavanı > 0)
 - `setReputationPolicy`, `setReputationTierThresholds` (sınırlar §8.4)
 - `pause` / `unpause`
+
+Kontrata göre owner yetkileri (hiçbirinde zaman kilidi yoktur; ayrıntılı runbook: [GOVERNANCE_READINESS.md](./GOVERNANCE_READINESS.md)):
+
+| Kontrat | Owner fonksiyonları | Kod sınırı |
+|---|---|---|
+| `ArafEscrow` | `setTreasury`, `setFeeConfig`, `setCooldownConfig`, `setTokenConfig`, `setReputationPolicy`, `setReputationTierThresholds`, `pause`/`unpause` | Fee ≤ 2000 bps; cooldown ≤ 30 gün; decimals token'la eşleşmeli; politika sınırları §8.4; pause yalnız create/fill |
+| `ArafRevenueVault` | `setRewardBps`, `setFinalTreasury`, `setRewards` (tek seferlik), `setSupportedToken`, `setProductPool`, `withdrawTreasuryShare`, `withdrawTreasuryShareToFinal`, `pause`/`unpause` | `rewardBps` 4000–7000; çekim yalnız treasury rezervinden; pause yalnız sponsor fonlamasını durdurur |
+| `ArafRewards` | `allocateEpochRewards`, `pause`/`unpause` | Kaynak yalnız vault; kayıt, finalize, claim ve sweep pause edilemez ve alıcı seçilemez |
 
 ### 3.5 Read surface
 - `getOrder`, `getTrade`, `getReputation`, `getTokenConfig`, `getSettlementProposal`
@@ -296,6 +305,15 @@ Mutlak “maker=seller, taker=buyer” yoktur:
 - `SELL_CRYPTO`: owner→maker, filler→taker
 - `BUY_CRYPTO`: owner→taker, filler→maker
 
+| Yön | Rol | Kilitlediği | Giriş kapısı | Trade'deki yetkileri |
+|---|---|---|---|---|
+| `SELL_CRYPTO` | Owner = maker (kripto satıcısı) | create'te envanter + toplam maker bond rezervi | create ve fill anında aktif ban; create'te tier ≤ efektif tier, fill'de tekrar | `releaseFunds`, `pingTakerForChallenge`, `challengeTrade`, iptal, settlement |
+| `SELL_CRYPTO` | Filler = taker (kripto alıcısı) | fill'de taker bond | taker giriş kapısı + tier | `reportPayment`, `pingMaker`, `autoRelease`, iptal, settlement |
+| `BUY_CRYPTO` | Owner = taker (kripto alıcısı) | create'te toplam taker bond rezervi | create ve fill anında taker giriş kapısı + tier | `reportPayment`, `pingMaker`, `autoRelease`, iptal, settlement |
+| `BUY_CRYPTO` | Filler = maker (kripto satıcısı) | fill'de kripto + maker bond | aktif ban + tier | `releaseFunds`, `pingTakerForChallenge`, `challengeTrade`, iptal, settlement |
+
+Her iki taraf `expirePaymentWindow` çağırabilir; `burnExpired` ve `expireSettlement` herkese açıktır.
+
 ---
 
 ## 6. Anti-sybil enforcement semantiği (V3)
@@ -383,6 +401,14 @@ yalnız son 96 saatte erir; bu yüzden yakılma anına kadar yaklaşık %34,7'si
 
 ### 7.3 Challenge ve liveness ping semantiği
 - Ping yolları birbirini dışlayan şekilde tasarlanır (conflicting path koruması). İstisna: maker pingi `challengePingedAt + 24 saat + MAKER_CHALLENGE_WINDOW` anında düşer; o saniyeden itibaren `challengeTrade` `ChallengeWindowExpired` verir ve taker `pingMaker` çağırabilir.
+`T = challengePingedAt` (en erken `paidAt + 24 saat`):
+
+| Zaman | Maker `challengeTrade` | Taker `pingMaker` | Maker `releaseFunds` |
+|---|---|---|---|
+| `T ≤ t < T+24sa` | `ResponseWindowActive` | `ConflictingPingPath` | açık |
+| `T+24sa ≤ t < T+48sa` | **açık** → `CHALLENGED` | `ConflictingPingPath` | açık |
+| `t ≥ T+48sa` (ping düştü) | `ChallengeWindowExpired` | **açık** (`paidAt + 48 saat` kuralıyla) → 24 saat sonra `autoRelease` | açık |
+
 - Ping'in düşmesi event ile duyurulmaz; off-chain taraf `getTrade` alanlarından (`challengePingedByMaker`, `challengePingedAt`, `pingedByTaker`) hesaplar.
 - Bekleme pencereleri state-guard ile enforce edilir.
 
@@ -520,6 +546,7 @@ Bu bölüm immutable parametreler ile runtime’da owner tarafından değiştiri
 - `contracts/scripts/deploy.js` sırası: `ArafReputationLib` → `ArafSettlementLib` → linkli `ArafEscrow(treasury)` → USDT/USDC için `setTokenConfig` (6 ondalık, sell+buy açık, tier tavanları 150 / 1.500 / 7.500 / 30.000 token) ve `getTokenConfig` ile doğrulama → `transferOwnership(FINAL_OWNER_ADDRESS)`. Manifest library adreslerini de kaydeder.
 - Public ağda `CONFIRM_PUBLIC_DEPLOY=yes` zorunludur; public/custom modda `FINAL_OWNER_ADDRESS` ile `TREASURY_ADDRESS` aynı olamaz.
 - `ArafRevenueVault` + `ArafRewards` ayrı script'le (`deployRewards.js`) kurulur; escrow treasury'nin vault'a çevrilmesi ayrı ve açık bir operasyondur (`rewardsOps.js`).
+- Derleme hedefi `cancun`'dur (`hardhat.config.js`): `ArafRevenueVault` escrow gelir niyetini EIP-1153 transient storage'da (`tstore`/`tload`) tutar; vault'un deploy edildiği ağ EIP-1153'ü desteklemelidir.
 - Production rehberinde owner key’in multisig altında tutulması governance risk azaltımı için varsayımdır.
 
 ---
@@ -530,20 +557,23 @@ Backend davranışı yalnız teknoloji seçimiyle değil, bootstrap, readiness v
 
 ```mermaid
 flowchart LR
-    A[Env / security checks] --> B[Mongo connect]
+    A[Env / security checks + KMS self-test] --> B[Mongo connect]
     B --> C[Redis connect]
-    C --> D[Worker init + config load]
-    D --> E[Route mount]
-    E --> F[Health / readiness]
+    C --> D[Identity guard + protocol config load]
+    D --> E[Scheduler + route mount + health/ready]
+    E --> F[app.listen]
+    F --> G[Worker start + replay arka planda]
 ```
 
-### 10.1 Bootstrap sırası (backend)
-1. Env ve güvenlik kontrolleri
+### 10.1 Bootstrap sırası (backend, `backend/scripts/app.js`)
+1. Env ve güvenlik kontrolleri (ör. production'da `SIWE_DOMAIN` localhost olamaz) + production KMS self-test
 2. Mongo bağlantısı
 3. Redis bağlantısı
-4. Worker init + protocol config load
-5. Route mount
-6. Health/readiness aktiflenmesi
+4. Kimlik normalizasyonu guard'ı (production'da varsayılan enforce) ve mutable protocol config mirror'ının yüklenmesi (yüklenemezse süreç çökmez; ilgili route'lar `CONFIG_UNAVAILABLE` dönebilir)
+5. Scheduler job'ları
+6. Route mount + `/health`, `/ready`
+7. `app.listen`
+8. Worker `startInBackground` ile başlar: bağlan + replay HTTP dinlemeye başladıktan sonra arka planda sürer, bu sırada `/ready` "replaying" raporlar
 
 ### 10.2 Readiness-first yaklaşımı
 - Liveness (`/health`) süreç ayakta mı sorusuna bakar.
@@ -555,28 +585,35 @@ flowchart LR
 - Güvenlik sınırında fail-open yerine fail-closed tercih edilir (ör. auth/session sınırları).
 
 ### 10.4 Timeout ve bağlantı politikaları
-- Mongo tarafında `maxPoolSize`, `socketTimeoutMS`, `serverSelectionTimeoutMS` ayarları worker+API yükünü birlikte kaldıracak şekilde kullanılır.
-- Mongo kopuşunda fail-fast yaklaşımıyla süreç yeniden başlatma tercih edilir (stale/yarım bağlantı drift’ini azaltmak için).
+- Mongo tarafında `maxPoolSize: 100`, `socketTimeoutMS: 20000`, `serverSelectionTimeoutMS: 5000` ayarları worker+API yükünü birlikte kaldıracak şekilde kullanılır.
+- Beklenmeyen Mongo kopuşunda `process.exit(1)` ile fail-fast yeniden başlatma tercih edilir (stale/yarım bağlantı drift’ini azaltmak için).
 - Redis tarafında `isReady` sinyali `connected` durumundan ayrı ele alınır; middleware kararları buna göre verilir.
 - Redis TLS (`rediss://`) ve managed servis senaryoları runtime config’te dikkate alınır.
 
 ### 10.5 Graceful shutdown sırası
-- Yeni istekleri kes
+- AES master key önbelleğini sıfırla, scheduler interval/timeout’larını temizle
+- Yeni istekleri kes (`server.close`)
 - Worker’ı durdur
-- scheduler interval/timeout’ları temizle
 - Mongo/Redis bağlantılarını kapat
-- süreçten kontrollü çık
+- süreçten kontrollü çık (zaman aşımında zorla çıkış)
 
 ### 10.6 Scheduler / cleanup jobs
-- reputation decay tetikleyicileri
-- stats snapshot
-- receipt & PII retention cleanup
-- user bank risk metadata cleanup
-- DLQ processing
+Varsayılan aralıklar `JOB_*_MS` env'leriyle değiştirilebilir.
+
+| Job | Varsayılan aralık | Not |
+|---|---|---|
+| DLQ processing | 60 sn | Bkz. §11.4 |
+| Reputation decay tetikleyicisi | 24 saat (ilk çalışma 30 sn sonra) | `RELAYER_PRIVATE_KEY` + `BASE_RPC_URL` yoksa çalışmaz |
+| Reward outcome recorder | 1 saat | `ArafRewards.recordTradeOutcomes`; aynı relayer koşulu |
+| Stats snapshot | 24 saat | |
+| Receipt & PII snapshot retention cleanup | 30 dk | |
+| User bank risk metadata cleanup | 6 saat | |
+| Referans kur şeridi | periyodik | Yalnız bilgilendirme; settlement'i etkilemez |
+| Reconciliation raporu | 10 dk | Production'da varsayılan açık (`JOB_RECONCILIATION_ENABLED`) |
 
 ### 10.7 Health vs ready operasyonel anlamı
-- `/health`: süreç ayakta mı? (process liveness)
-- `/ready`: bağımlılıklar + config + worker lag + replay durumu güvenli mi? (traffic gate)
+- `/health`: süreç ayakta mı ve worker yeni blok görüyor mu? (worker son blok eşiğini aşarsa `503 stale`)
+- `/ready`: Mongo/Redis + config + chain id + worker lag (varsayılan en çok 25 blok, `WORKER_MAX_LAG_BLOCKS`) + replay durumu güvenli mi? (traffic gate). Sonuç birkaç saniye önbelleklenir; kimliksiz çağrıya redakte görünüm döner, ayrıntı yalnız `READY_INTERNAL_TOKEN` ile.
 - Worker replay veya yüksek lag durumunda liveness true kalsa bile readiness false olabilir; bu bilinçli tasarım tercihidir.
 
 ---
@@ -598,14 +635,16 @@ flowchart TD
 Worker kontrat event’lerini consume eder, Mongo’yu authoritative olmadan günceller.
 
 ### 11.2 Checkpoint yaklaşımı
-- son işlenen blok
-- last safe checkpoint
+- son işlenen blok (`worker:last_block`) ve son güvenli checkpoint (`worker:last_safe_block`)
+- finality derinliği: production'da varsayılan 6 blok (`WORKER_FINALITY_DEPTH`)
+- checkpoint yoksa production'da `WORKER_START_BLOCK` veya `ARAF_DEPLOYMENT_BLOCK` zorunludur
 - replay başlangıç güvenliği
 
 ### 11.3 Replay ve batch işleme
-- bloklar batch halinde işlenir
-- replay’de idempotent davranış hedeflenir
-- state regression guard’larıyla geriye düşüş engellenir
+- bloklar batch halinde işlenir (varsayılan 1.000 blok, `WORKER_BLOCK_BATCH_SIZE`; checkpoint en az 50 blokta bir, `WORKER_CHECKPOINT_INTERVAL_BLOCKS`)
+- bir aralık okunamazsa ya da bir batch başarısız olursa checkpoint ilerletilmez; replay ilk başarısız batch'te durur
+- replay’de idempotent davranış hedeflenir; scope başına son uygulanan `(blockNumber, logIndex)` tutulur, daha eski event geri yazamaz
+- state regression guard’larıyla geriye düşüş engellenir; terminal state'ler geri açılmaz
 
 ### 11.3.1 Last-safe-block semantiği
 - Worker yalnız son görülen blok değil, son güvenli checkpoint bloğunu da izler.
@@ -613,8 +652,9 @@ Worker kontrat event’lerini consume eder, Mongo’yu authoritative olmadan gü
 - Bu yaklaşım “işleniyor gibi görünüp geride kalma” durumunu operasyonel olarak görünür kılar.
 
 ### 11.4 DLQ ve poison event görünürlüğü
-- işlemeye alınamayan event’ler DLQ’ya taşınır
-- tekrar deneme/backoff uygulanır
+- event önce yerinde yeniden denenir (5 deneme); işlenemeyen event DLQ’ya taşınır. Kayıt `txHash:logIndex` anahtarıyla tekildir (canlı DLQ, arşiv ve karantina indeks setleri)
+- DLQ işlemcisi kayıtları yeniden sürer; başarılı re-drive event'i ack'ler ve bloğun unsafe bayrağını kaldırır
+- `MAX_REDRIVE_ATTEMPTS` (10) aşılırsa kayıt **kalıcı karantinaya** alınır (TTL yok, manuel inceleme): event "acked-poison" sayılır, checkpoint onun yüzünden takılmaz; alarm `logger.error` + karantina sayacı ile verilir. Arşiv 7 gün tutulur
 - operasyonel görünürlük için log/metric izi korunur
 
 ### 11.5 Kimlik normalizasyonu
@@ -622,7 +662,13 @@ Worker kontrat event’lerini consume eder, Mongo’yu authoritative olmadan gü
 - parent order id ve child trade id karışmasını önleyen explicit lookup stratejisi uygulanır
 
 ### 11.6 OrderFilled + getTrade linkage
-Child trade authority worker tarafında heuristik yerine explicit event+getter kombinasyonuyla mirror edilir.
+Child trade authority worker tarafında heuristik yerine explicit event+getter kombinasyonuyla mirror edilir. Kontrat `EscrowCreated` / `EscrowLocked` yayınlamaz; mirror `OrderFilled` anında `LOCKED` olarak kurulur ve tek seferlik payout snapshot aynı adımda alınır (§12.4.1).
+
+### 11.6.1 Mirror edilen event'ler ve terminal sayaç
+- Escrow event'leri: order (`OrderCreated/Filled/Canceled`), trade lifecycle (`PaymentReported`, `EscrowReleased`, `DisputeOpened`, `MakerPinged`, `CancelProposed`, `CancelRevoked`, `EscrowCanceled`, `PaymentWindowExpired`, `BleedingDecayed`, `EscrowBurned`), settlement (`SettlementProposed/Rejected/Withdrawn/Expired/Finalized`), reputation/config (`ReputationUpdated`, `FeeConfigUpdated`, `CooldownConfigUpdated`, `TokenConfigUpdated`, `ReputationPolicyUpdated`, `ReputationTierThresholdsUpdated`), `WalletRegistered`, `ProtocolRevenueSent`. Vault event'leri (`EscrowRevenueReceived`, `ExternalRewardFunded`, `ProductRewardFunded`) vault adresinden ayrıca okunur.
+- `CancelRevoked` ilgili tarafın `cancel_proposal` onay bayrağını geri alır; mirror yoksa event retry/DLQ'ya gider.
+- Manuel/otomatik release ayrımı heuristikle değil kontratın terminal snapshot'ından (`getRewardableTrade`) okunur; okuma hatası kalıcı "UNKNOWN" yazmaz, event retry/DLQ'ya gider.
+- Terminal geçiş (`resolved_at` işareti) trade başına bir kez uygulanır ve aynı işlemde **kalıcı terminal sayaç** satırı (`TerminalTradeStat`, `trade_key` tekil) yazılır; Trade belgesi 1 yıllık TTL ile silinse de istatistik geriye gitmez.
 
 ### 11.7 Mirror authority uyarısı
 - Event worker, protokol kuralı üretmez; yalnız authoritative zincir durumunu operasyonel modele taşır.
@@ -659,7 +705,7 @@ sequenceDiagram
 
 #### 12.1.2 Session token lifecycle
 - Auth JWT cookie (`araf_jwt`) varsayılan kısa ömürlüdür (konfigürasyonla; default 15m).
-- Refresh cookie (`araf_refresh`) daha uzun ömürlüdür (default 7 gün) ve `/api/auth` path scope’u ile sınırlandırılır.
+- Refresh cookie (`araf_refresh`) daha uzun ömürlüdür (kayan pencere default 7 gün, oturum başına mutlak üst sınır default 30 gün, `REFRESH_ABSOLUTE_TTL_SECS`) ve `/api/auth` path scope’u ile sınırlandırılır.
 - Cookie modeli httpOnly + sameSite=lax + credentials:include çizgisini korur; header bearer normal auth authority üretmez.
 
 ### 12.2 Cookie-only auth boundary ve session-wallet mismatch davranışı
@@ -694,6 +740,7 @@ flowchart TD
 - `requirePIIToken` token type=`pii`, tradeId eşleşmesi ve token wallet == cookie session wallet koşullarını birlikte doğrular.
 - Token tek başına yeterli değildir; route tekrar canlı trade state kontrolü yapar (`LOCKED/PAID/CHALLENGED` penceresi).
 - Snapshot-first politika: payout snapshot yoksa controlled hata döner; current profile fallback kapalıdır.
+- PII token ömrü varsayılan 15 dakikadır (`PII_TOKEN_EXPIRES_IN`).
 - Hassas PII yanıtları `Cache-Control: no-store` / `Pragma: no-cache` ile döndürülür.
 
 
@@ -702,6 +749,7 @@ flowchart TD
 - Snapshot TEK SEFERLİDİR: `_captureLockedTradeSnapshot`, yalnız `payout_snapshot.captured_at` boşsa, atomik koşullu güncellemeyle yazar. Worker replay, DLQ re-drive ya da aynı `OrderFilled`'ın tekrar işlenmesi mevcut snapshot'ı yeniden yazmaz; eksik (`is_complete=false`) snapshot da sonradan "tamamlanmaz".
 - Kapı (emir oluşturma/doldurma için "kayıtlı ödeme profili yok → işlem yok") YALNIZ arayüz ve API düzeyindedir: karar `/api/auth/me.hasPayoutProfile` (kayıtlı profil; taslak form değil) ve pazar listesindeki `owner_has_payout_profile` boolean'ına dayanır, durum bilinmiyorsa kapalıdır. Kontrat doğrudan çağrılarak bu kapı ATLANABİLİR.
 - Asıl güvence kuraldır: **eksik snapshot → PII kapalı, işlem ödeme penceresinde çözülür.** Profili olmayan taraf için snapshot eksik kalır, `/api/pii/*` erişimi açılmaz ve işlem ödeme penceresi içinde (zamanaşımı/iptal akışıyla) çözülür.
+- **Aktif işlemde profil kilidi:** cüzdanın `LOCKED`/`PAID`/`CHALLENGED` trade'i varken `PUT /api/auth/profile` ödeme profilini yazamaz (ilk oluşturma dahil): `409 BANK_PROFILE_LOCKED_DURING_ACTIVE_TRADE`.
 
 ### 12.5 Şifreleme modeli
 - PII ve receipt payload alanları AES-256-GCM ile şifrelenmiş saklanır.
@@ -709,13 +757,13 @@ flowchart TD
 - Kontrat tarafına plaintext yazılmaz; receipt için zincire yalnız hash izi taşınır.
 
 ### 12.6 Rate-limit sınıfları ve fallback davranışı
-- Limiter sınıfları yüzeye göre ayrılır: auth, nonce, market read, orders/trades read-write, PII, feedback, logs.
-- Auth/PII gibi hassas yüzeylerde Redis yoksa in-memory fallback koruması devrededir (fail-open minimize edilir).
-- Public/read yüzeylerinde availability için kontrollü fail-open tercihleri bulunabilir; bu security boundary’yi auth/PII tarafında gevşetmez.
+- Limiter sınıfları yüzeye göre ayrılır: auth, nonce, market read, stats read, orders read/write, trade room read, receipt upload, coordination write, PII (profil / taker-name / token / fetch), admin read, feedback, client logs.
+- Bir kısmı (orders/room read, receipt upload, coordination write, feedback) kullanıcının efektif tier'ına göre kademeli sınır uygular.
+- Redis yoksa limiter'lar süreç-içi (in-memory) fallback ile korunmaya devam eder; auth/PII dahil hiçbir yüzey bilinçli olarak fail-open değildir.
 
 ### 12.7 Client-error logging boundary (scrub semantiği)
 - Frontend telemetry yalnız `/api/logs/client-error` endpoint’ine gider.
-- Mesaj/stack alanlarında regex scrub ile IBAN, wallet, email, bearer/JWT benzeri duyarlı parçalar redakte edilir.
+- Mesaj/stack alanlarında regex scrub ile IBAN, wallet, email, bearer/JWT benzeri duyarlı parçalar redakte edilir; alanlar kırpılır (mesaj 500, stack 2.000, componentStack 1.000, url/user-agent 200 karakter).
 - Log boyutu sınırları ve rate-limit birlikte kullanılarak hem veri minimizasyonu hem abuse direnci sağlanır.
 
 ### 12.8 Trust boundary özeti
@@ -805,6 +853,7 @@ erDiagram
   - `financials.maker_bond`
   - `financials.taker_bond`
   - `financials.total_decayed`
+  - `financials.burned_amount`
 - `*_num` alanları yalnız UI/aggregation kolaylığı içindir; enforcement input’u değildir.
 
 #### PII / receipt / payout snapshot alanları
@@ -812,10 +861,12 @@ erDiagram
 - `evidence.receipt_encrypted`
 - `evidence.receipt_timestamp`
 - `evidence.receipt_delete_at`
+- `evidence.receipt_delete_at` dekont yüklemesinden 30 gün sonrasına ayarlanır.
 - `payout_snapshot.{maker,taker,...}` altında lock-time `profile_version_at_lock`, `bank_change_count_*_at_lock`, `fingerprint_hash_at_lock` gibi risk bağlamı alanları tutulur.
+- `payout_snapshot.{captured_at, snapshot_delete_at, is_complete, incomplete_reason}`: `captured_at` doluysa snapshot bir daha yazılmaz (tek seferlik); eksik profil `is_complete=false` + gerekçe olarak kalır.
 
 #### Cancel / chargeback audit alanları
-- `cancel_proposal.{proposed_by, proposed_at, approved_by, maker_signed, taker_signed, maker_signature, taker_signature, deadline}`
+- `cancel_proposal.{proposed_by, proposed_at, approved_by, maker_signed, taker_signed}` — on-chain `CancelProposed` / `CancelRevoked` mirror'ıdır; ayrı imza ya da deadline alanı yoktur (iptal koordinasyonu tamamen on-chain)
 - `chargeback_ack.{acknowledged, acknowledged_by, acknowledged_at, ip_hash}`
 - `settlement_proposal` taraf-imzalı partial-settlement lifecycle mirror’ını taşır:
   - `NONE -> PROPOSED -> REJECTED/WITHDRAWN/EXPIRED/FINALIZED`
@@ -824,12 +875,13 @@ erDiagram
   - backend yalnız mirror/audit tutar; settlement authority kontratta kalır
 
 #### Retention ve terminal TTL ayrımı
-- Trade dokümanı terminal state’lerde ayrı TTL index politikasıyla temizlenir.
+- Trade dokümanı terminal state’lerde `timers.resolved_at` üzerinden 365 günlük TTL index ile temizlenir; kümülatif istatistik `TerminalTradeStat` satırlarında kalır.
 - Receipt/snapshot alanları için ayrı cleanup alanları (`receipt_delete_at`, `snapshot_delete_at`) ve job’lar kullanılır.
 - Bu ayrım “belge yaşam döngüsü” ile “hassas payload minimizasyonu”nu birbirinden ayırır.
 
 ### 13.4 Feedback / stats/snapshot katmanı
 - Feedback modeli ürün geri bildirimi için ayrı operational yüzeydir.
+- Diğer modeller: `TerminalTradeStat` (kalıcı terminal sayaç), `HistoricalStat`, `RevenueEvent` (vault/escrow gelir mirror'ı), `RewardEpoch`, `RewardClaim`, `RewardFunding`, `RewardEpochAllocationEvent` (ödül read-model'i), `TermsAcceptance` (kullanım koşulları onayı).
 - Stats/snapshot katmanı (daily aggregates, dashboard counters) karar desteği üretir; protocol authority üretmez.
 - Read-model snapshot’ları kontrat state’inin yerini almaz; yalnız operatör görünürlüğünü artırır.
 
@@ -841,12 +893,14 @@ V3 backend yüzeyi authority üretmez; route’lar projection, coordination ve g
 
 | Route grubu | Yüzey | Anlam |
 |---|---|---|
-| Orders | Parent order read/config yüzeyi, owner-scope child-trade list/read yüzeyi | Market read-model ve owner görünürlüğü |
-| Trades | active/history/by-escrow, cancel signature coordination, chargeback ack | Child-trade operasyonları ve audit yardımcı yüzeyi |
-| Auth | nonce/verify/refresh/logout/me/profile | Session ve wallet-bound auth authority sınırı |
-| PII | `/my`, `taker-name`, request-token, trade-scoped retrieve | Snapshot-first, role-bound hassas veri erişimi |
-| Receipts | file validation + encryption + hash | Taker + `LOCKED` state için receipt taşıma yüzeyi |
-| Logs / stats / feedback | client error logs, protocol stats, feedback intake | Observability ve ürün geri bildirimi |
+| Orders (`/api/orders`) | `GET /config`, `GET /payment-risk-config`, `GET /`, `GET /my`, `POST /market-meta`, `GET /:id/trades`, `GET /:id` | Market read-model, owner görünürlüğü ve off-chain pazar metadata'sı |
+| Trades (`/api/trades`) | `GET /my`, `GET /history`, `GET /by-escrow/:onchainId`, `GET /:id`, `GET /:id/settlement-proposal`, `POST /:id/settlement-proposal/preview`, `POST /:id/chargeback-ack` | Child-trade okuma, settlement önizleme ve audit yardımcı yüzeyi |
+| Auth (`/api/auth`) | `GET /nonce`, `POST /verify`, `POST /refresh`, `POST /logout`, `GET /me`, `PUT /profile` | Session ve wallet-bound auth authority sınırı |
+| PII (`/api/pii`) | `GET /my`, `GET /taker-name/:onchainId`, `POST /request-token/:tradeId`, trade-scoped retrieve | Snapshot-first, role-bound hassas veri erişimi |
+| Receipts (`/api/receipts`) | `POST /upload` | Taker + `LOCKED` state için tek seferlik dekont yükleme |
+| Rewards (`/api/rewards`) | epoch, funding, `/:wallet/claimable`, `/:wallet/history`, `/health` | Salt-okunur ödül görünümü; kayıt/claim kontratta |
+| Admin (`/api/admin`) | `GET /revenue`, `/rewards/health`, `/summary`, `/feedback`, `/trades`, `/settlement-proposals` | Yalnız `ADMIN_WALLETS` listesindeki oturumlara açık, salt-okunur gözlem; hiçbir protokol yetkisi yoktur |
+| Logs / stats / feedback / reference rates | `POST /api/logs/client-error`, `GET /api/stats`, `POST /api/feedback`, `GET /api/reference-rates/ticker` | Observability, ürün geri bildirimi ve bilgilendirme amaçlı kur şeridi |
 
 ### 14.1 Orders routes
 - Parent order read/config yüzeyi
@@ -854,8 +908,8 @@ V3 backend yüzeyi authority üretmez; route’lar projection, coordination ve g
 
 ### 14.2 Trades routes
 - active/history/by-escrow kimlikli okuma
-- cancel signature coordination
-- chargeback ack audit surface
+- iptal koordinasyonu backend'de değildir: `proposeOrApproveCancel` / `revokeCancel` doğrudan kontrata gönderilir, backend yalnız event'leri mirror eder
+- chargeback ack audit surface (yalnız maker, `PAID`/`CHALLENGED`; on-chain akışa veto uygulamaz)
 - settlement-proposal preview + mirror read yüzeyi bilgilendirme/non-authoritative amaçlıdır
 - preview yalnız `CHALLENGED` trade için açıktır; non-challenged istekler reddedilir
 - backend rolü: preview, event mirror, read-model, audit/observability
@@ -876,8 +930,8 @@ V3 backend yüzeyi authority üretmez; route’lar projection, coordination ve g
 - snapshot-first ve role-bound access
 
 ### 14.5 Receipts routes
-- file validation + encryption + hash
-- yalnız taker + `LOCKED` state kabulü
+- file validation (magic byte / MIME eşleşmesi) + encryption + SHA-256 hash
+- yalnız taker + `LOCKED` state kabulü; trade başına tek dekont (üzerine yazma `409`)
 
 ### 14.6 Logs/stats/feedback
 - client error logs
@@ -935,25 +989,46 @@ flowchart TD
 ### 15.6 Frontend enforcement sınırı
 Frontend kontratın yerine geçmez; enforcement kontrattadır. Frontend guardrail/orchestration katmanıdır.
 
+### 15.7 Kod yerleşimi (`frontend/src`)
+- `hooks/`: `useArafContract` (escrow okuma/yazma), `usePII`, `useRewardsContract`
+- `app/providers/`: `SessionProvider` (SIWE oturumu), `AppProviders`, `ThemeProvider`; `app/useAppSessionData.jsx` (`authenticatedFetch`, pending tx kurtarma, aktif trade'e dönüş)
+- `app/contexts/`: bağlam bazlı ekranlar — `marketplace`, `trade-room` (karar modeli, zaman çizelgesi, birincil/ikincil aksiyonlar), `operations`, `profile` (ödeme profili, aktif trade'ler, ödüller), `settlement`, `admin` (salt-okunur panel)
+- `app/actions/`: kontrat yaşam döngüsü ve order oluşturma aksiyonları; `app/payoutProfileGate.js`: ödeme profili kapısı (§12.4.1); `app/chainPolicy.js`, `app/apiConfig.js`: zincir ve API yolu politikası; `app/copy/`: kullanıcı metinleri
+
 ---
 
 ## 16. Saldırı vektörleri ve bilinen sınırlamalar
 
 ### 16.1 Azaltılmış / mitigated riskler
-- **Backend authority confusion (kısmen azaltıldı):** doküman + route projection sınırları + worker mirror uyarıları ile backend’in “hakem” gibi yorumlanma riski daraltıldı.
-- **Session/account confusion:** cookie wallet ↔ header wallet mismatch durumunda request reddi + refresh family revoke + cookie clear zinciri uygulanır.
-- **PII overexposure:** trade-scoped token + role/state/session üçlü kontrolü + snapshot-first + no-store semantiği.
-- **API path drift:** frontend canonical path helper kullanımıyla farklı endpoint kökü kaynaklı sessiz hatalar azaltıldı.
-- **Wrong-network tx riski (UX düzeyinde):** chain/address preflight guard’ları ile işlem başlamadan fail-fast.
+
+| Risk | Azaltım |
+|---|---|
+| Maker'ın ping atıp susarak PAID trade'i rehin tutması | Ping `ping+48sa`'te düşer (`MAKER_CHALLENGE_WINDOW`), taker `pingMaker` → `autoRelease` yolunu kullanır |
+| Bond'suz (Tier 0) taker'ın LOCKED trade'i rehin tutması | `PAYMENT_WINDOW` (48 saat) + `expirePaymentWindow`; `reportPayment` pencere sonrası `PaymentWindowClosed` |
+| Settlement oranının kabul öncesi değiştirilmesi | `acceptSettlement(tradeId, expectedProposalId)`; uyuşmazlıkta `SettlementProposalMismatch` |
+| Owner'ın rewards adresini değiştirip ödül rezervini çekmesi | `ArafRevenueVault.setRewards` tek seferlik (`RewardsAlreadySet`) |
+| Yanlış token decimals ile tier tavanı / ödül notional'ı bozulması | `setTokenConfig` token'ın `decimals()` değerini zincirde doğrular (`InvalidDecimals`) |
+| Burn'de erimiş kısmın escrow'da kalıcı kilitlenmesi | `burnExpired` trade'in tüm bakiyesini hazineye gönderir |
+| Create sonrası cezalanan order sahibinin order'ının doldurulması | Fill anında sahibin ban'ı ve efektif tier'ı yeniden kontrol edilir |
+| Backend authority confusion (kısmen azaltıldı) | doküman + route projection sınırları + worker mirror uyarıları ile backend’in “hakem” gibi yorumlanma riski daraltıldı. |
+| Session/account confusion | cookie wallet ↔ header wallet mismatch durumunda request reddi + refresh family revoke + cookie clear zinciri uygulanır. |
+| PII overexposure | trade-scoped token + role/state/session üçlü kontrolü + snapshot-first + no-store semantiği. |
+| API path drift | frontend canonical path helper kullanımıyla farklı endpoint kökü kaynaklı sessiz hatalar azaltıldı. |
+| Wrong-network tx riski (UX düzeyinde) | chain/address preflight guard’ları ile işlem başlamadan fail-fast. |
 
 ### 16.2 Kalan / open riskler
-- **Governance key risk:** mutable fee/cooldown/token-direction surface owner kontrolündedir; multisig ve operasyon disiplini gerektirir.
-- **Fake receipt / off-chain payment ambiguity:** dekont hash’i ve encrypted payload fraud’u pahalılaştırır ama fiat transferin maddi gerçekliğini matematiksel kanıtlamaz.
-- **Chargeback reality:** bankacılık katmanındaki geri alma/itiraz süreçleri zincir üstü finaliteyi dış dünyada tartışmalı hale getirebilir.
-- **Off-chain signature staleness:** cancel signature akışında domain/nonce/deadline kontrollerine rağmen kullanıcı tarafında gecikmiş/onaysız imza UX riski kalır.
-- **Backend mirror’in authority sanılması:** operatör veya entegratör, Mongo/state cache’i yanlışlıkla source-of-truth okuyabilir.
-- **Frontend wrong-network/wrong-address configuration riski:** guardrail’e rağmen yanlış env/config dağıtımı kullanıcıyı yanıltabilir.
-- **Operator/doc misunderstanding riski:** eski listing-first veya “backend hakemdir” gibi mental model kalıntıları operasyonel hataya yol açabilir.
+
+| Risk | Açıklama |
+|---|---|
+| Governance key risk | mutable fee/cooldown/token config/reputation politikası/treasury yüzeyi owner kontrolündedir; zaman kilidi yoktur, multisig ve operasyon disiplini gerektirir. |
+| `renounceOwnership` | `Ownable` mirası kapatılmamıştır; çağrılırsa owner yüzeyleri (pause dahil) kalıcı kilitlenir. |
+| Fake receipt / off-chain payment ambiguity | dekont hash’i ve encrypted payload fraud’u pahalılaştırır ama fiat transferin maddi gerçekliğini matematiksel kanıtlamaz. |
+| Chargeback reality | bankacılık katmanındaki geri alma/itiraz süreçleri zincir üstü finaliteyi dış dünyada tartışmalı hale getirebilir. |
+| Açık kalan iptal onayı | iptal koordinasyonu on-chain'dir (imza/deadline yok). Verilen onay, state değişmedikçe karşı taraf ikinci onayı verene kadar geçerli kalır; kullanıcı vazgeçerse `revokeCancel` ile geri çekmelidir (`reportPayment` / `challengeTrade` onayları zaten sıfırlar). |
+| Ödeme profili kapısı yalnız UI/API'dedir | kontrat doğrudan çağrılarak atlanabilir; güvence eksik snapshot → PII kapalı → ödeme penceresi kuralıdır (§12.4.1). |
+| Backend mirror’in authority sanılması | operatör veya entegratör, Mongo/state cache’i yanlışlıkla source-of-truth okuyabilir. |
+| Frontend wrong-network/wrong-address configuration riski | guardrail’e rağmen yanlış env/config dağıtımı kullanıcıyı yanıltabilir. |
+| Operator/doc misunderstanding riski | eski listing-first veya “backend hakemdir” gibi mental model kalıntıları operasyonel hataya yol açabilir. |
 
 ### 16.3 Bilinçli sınırlamalar (oracle-free model)
 - Oracle-free tasarım gereği fiat transferin “gerçekten yapıldı mı” sorusu kontrat içinde kesin doğrulanmaz.
