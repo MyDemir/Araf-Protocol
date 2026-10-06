@@ -9,14 +9,15 @@
  * - createSellOrder / fillSellOrder / cancelSellOrder
  * - createBuyOrder / fillBuyOrder / cancelBuyOrder
  * - reportPayment / releaseFunds / challengeTrade / autoRelease / burnExpired / expirePaymentWindow
- * - Karşılıklı iptal: her taraf kendi proposeOrApproveCancel(tradeId) işlemini gönderir (imza yok)
+ * - Karşılıklı iptal: her taraf kendi proposeOrApproveCancel(tradeId) işlemini gönderir (imza yok);
+ *   karşı taraf onaylamadan önce revokeCancel(tradeId) ile geri çekilebilir
  *
  * Kullanım (App.jsx'te):
  * const { releaseFunds, proposeOrApproveCancel } = useArafContract();
  */
 
 import { useCallback } from 'react';
-import { usePublicClient, useWalletClient, useChainId } from 'wagmi';
+import { usePublicClient, useWalletClient, useChainId, useAccount } from 'wagmi';
 import { parseAbi, getAddress, decodeEventLog } from 'viem';
 import { resolveClientErrorLogUrl } from '../app/apiConfig';
 import { getSupportedChainsMap, isMintTokenEnabled } from '../app/chainPolicy';
@@ -37,11 +38,12 @@ const ArafEscrowABI = parseAbi([
   'function burnExpired(uint256 _tradeId)',
   'function expirePaymentWindow(uint256 _tradeId)',
   'function proposeOrApproveCancel(uint256 _tradeId)',
+  'function revokeCancel(uint256 _tradeId)',
   'function proposeSettlement(uint256 _tradeId, uint16 _makerShareBps, uint64 _expiresAt)',
   'function rejectSettlement(uint256 _tradeId)',
   'function withdrawSettlement(uint256 _tradeId)',
   'function expireSettlement(uint256 _tradeId)',
-  'function acceptSettlement(uint256 _tradeId)',
+  'function acceptSettlement(uint256 _tradeId, uint256 _expectedProposalId)',
   'function pingMaker(uint256 _tradeId)',
   'function pingTakerForChallenge(uint256 _tradeId)',
   'function decayReputation(address _wallet)',
@@ -56,6 +58,7 @@ const ArafEscrowABI = parseAbi([
   'function getOrder(uint256 _orderId) view returns ((uint64 id, address owner, uint8 side, address tokenAddress, uint256 totalAmount, uint256 remainingAmount, uint256 minFillAmount, uint256 remainingMakerBondReserve, uint256 remainingTakerBondReserve, uint16 takerFeeBpsSnapshot, uint16 makerFeeBpsSnapshot, uint8 tier, uint8 paymentRiskLevel, uint8 state, bytes32 orderRef))',
   'function getCurrentAmounts(uint256 _tradeId) view returns (uint256 currentCrypto, uint256 currentMakerBond, uint256 currentTakerBond, uint256 totalDecayed)',
   'function paused() view returns (bool)',
+  'function MAKER_CHALLENGE_WINDOW() view returns (uint256)',
   'event OrderCreated(uint256 indexed orderId, address indexed owner, uint8 side, address token, uint256 totalAmount, uint256 minFillAmount, uint8 tier, uint8 paymentRiskLevel, bytes32 orderRef)',
   'event OrderFilled(uint256 indexed orderId, uint256 indexed tradeId, address indexed filler, uint256 fillAmount, uint256 remainingAmount, uint8 paymentRiskLevelSnapshot, bytes32 childListingRef)',
   // [TR] Custom error tanımları: bunlar olmadan viem revert nedenini çözemez ("execution reverted").
@@ -163,6 +166,19 @@ export function normalizeTradeIdOrThrow(tradeId) {
   }
 }
 
+// [TR] K5: acceptSettlement teklif kimliğini ister; 0 "teklif yok" demektir, kabul edilemez.
+// [EN] K5: acceptSettlement takes the proposal id; 0 means "no proposal" and is never acceptable.
+export function normalizeProposalIdOrThrow(proposalId) {
+  try {
+    if (proposalId === null || proposalId === undefined || String(proposalId).trim() === '') throw new Error('empty');
+    const normalized = BigInt(proposalId);
+    if (normalized <= 0n) throw new Error('non-positive');
+    return normalized;
+  } catch {
+    throw new Error('Geçersiz teklif kimliği (proposalId). Teklifi yenileyin.');
+  }
+}
+
 export function normalizeMakerShareBpsOrThrow(makerShareBps) {
   const value = Number(makerShareBps);
   if (!Number.isInteger(value) || value < 0 || value > 10000) {
@@ -246,25 +262,54 @@ export function extractOrderFilledArgs(receipt, expectedOrderId, escrowAddress =
 //Kontrat adresi geçerlilik kontrolü — hem write hem read fonksiyonları için
 const _isValidAddress = ESCROW_ADDRESS && ESCROW_ADDRESS !== "0x0000000000000000000000000000000000000000";
 
-export function useArafContract() {
+/**
+ * [TR] Ağ kontrolü CÜZDANIN gerçek zincirine bakar. wagmi useChainId() cüzdanın değil yapılandırmanın (config)
+ *      aktif zincirini döndürür; cüzdan yanlış ağdayken bile "doğru" görünürdü. useAccount().chainId cüzdanın
+ *      zinciridir. Backend deployment zinciri biliniyorsa onunla da eşleşmelidir.
+ * [EN] The network guard checks the WALLET's real chain. useChainId() returns the config's chain, so a wallet on
+ *      the wrong network still looked fine. Also compares with the backend deployment chain when known.
+ * @returns {string|null} hata mesajı; null = uygun
+ */
+export function resolveChainMismatch({ walletChainId, expectedChainId = null, supportedChains = {} }) {
+  const chain = Number(walletChainId);
+  const supportedNames = Object.values(supportedChains).join(' veya ');
+  if (walletChainId === null || walletChainId === undefined || !Number.isFinite(chain) || !supportedChains[chain]) {
+    return `Yanlış ağ! Cüzdanınız şu an Chain ID ${walletChainId ?? 'bilinmiyor'} üzerinde. ` +
+      `Araf Protocol sadece ${supportedNames} üzerinde çalışır. ` +
+      `Lütfen cüzdanınızdan ağı değiştirin.`;
+  }
+  const expected = Number(expectedChainId);
+  if (Number.isFinite(expected) && expected > 0 && expected !== chain) {
+    return `Yanlış ağ! Bu dağıtım Chain ID ${expected} üzerinde çalışıyor, cüzdanınız ${chain} üzerinde. ` +
+      `Lütfen cüzdanınızdan ağı değiştirin.`;
+  }
+  return null;
+}
+
+/**
+ * [TR] Okuma hataları varsayılan değerle maskelenmez: bilinmeyen durum çağırana hata olarak iletilir.
+ * [EN] Read failures are surfaced to the caller instead of being masked by defaults.
+ */
+const requireEscrowConfigured = () => {
+  if (!_isValidAddress) throw new Error('VITE_ESCROW_ADDRESS tanımlı değil.');
+};
+
+export function useArafContract({ expectedChainId = null } = {}) {
   const publicClient = usePublicClient();
   const { data: walletClient } = useWalletClient();
-  const chainId = useChainId();
+  const configChainId = useChainId();
+  const account = useAccount();
+  // [TR] Cüzdan bağlı değilse (chainId yok) config zincirine düşülür; yazma zaten walletClient ister.
+  const chainId = account?.chainId ?? configChainId;
   const supportedChains = getSupportedChainsMap();
 
   /*
    * @throws {Error} Desteklenmeyen ağ algılandığında
    */
   const _validateChain = useCallback(() => {
-    if (!supportedChains[chainId]) {
-      const supportedNames = Object.values(supportedChains).join(" veya ");
-      throw new Error(
-        `Yanlış ağ! Cüzdanınız şu an Chain ID ${chainId} üzerinde. ` +
-        `Araf Protocol sadece ${supportedNames} üzerinde çalışır. ` +
-        `Lütfen cüzdanınızdan ağı değiştirin.`
-      );
-    }
-  }, [chainId, supportedChains]);
+    const message = resolveChainMismatch({ walletChainId: chainId, expectedChainId, supportedChains });
+    if (message) throw new Error(message);
+  }, [chainId, expectedChainId, supportedChains]);
 
   /**
    * @dev Temel kontrat çağrısı yardımcisi ve Her işlem öncesi chain ID doğrulanır.
@@ -286,6 +331,7 @@ export function useArafContract() {
       _validateChain();
     };
 
+    let submittedHash = null;
     try {
       // İşlem göndermeden önce tüm kontrolleri yap
       preflightChecks();
@@ -298,6 +344,7 @@ export function useArafContract() {
         args,
       });
 
+      submittedHash = hash;
       // [TR] Pending tx hash'ini sakla — sayfa yenilense bile işlem izi kaybolmasın
       // [EN] Persist pending tx hash so refresh does not lose transaction trace
       if (typeof window !== "undefined") {
@@ -317,6 +364,18 @@ export function useArafContract() {
       }
       return assertReceiptSucceeded(receipt, functionName);
     } catch (error) {
+      // [TR] Kesin başarısız olan işlemin izi silinir; aksi halde yenilemede "bekleyen işlem onaylandı" kurtarması
+      //      başarısız işlemi de başarı gibi gösterirdi. Yalnız bu çağrının kaydı silinir; sonucu belirsiz
+      //      (zaman aşımı) işlemler kurtarma için saklanır.
+      // [EN] Definitively failed txs drop their pending record; timeouts keep it (outcome unknown).
+      if (submittedHash && typeof window !== "undefined" && !/Timeout|NotFound/i.test(String(error?.name || ''))) {
+        try {
+          const stored = JSON.parse(localStorage.getItem("araf_pending_tx") || 'null');
+          if (stored?.hash === submittedHash) localStorage.removeItem("araf_pending_tx");
+        } catch {
+          localStorage.removeItem("araf_pending_tx");
+        }
+      }
       decorateContractError(error);
       //Revert hatalarını daha okunabilir hale getir
       const errorMessage = error.shortMessage || error.reason || error.message || "Bilinmeyen Kontrat Hatası";
@@ -451,8 +510,11 @@ export function useArafContract() {
    * [TR] Karşı taraf aktif settlement teklifini kabul edip split payout'u finalize eder.
    * [EN] Counterparty accepts active settlement proposal and finalizes split payout.
    */
-  const acceptSettlement = useCallback((tradeId) =>
-    writeContract("acceptSettlement", [normalizeTradeIdOrThrow(tradeId)]), [writeContract]);
+  const acceptSettlement = useCallback((tradeId, expectedProposalId) =>
+    writeContract("acceptSettlement", [
+      normalizeTradeIdOrThrow(tradeId),
+      normalizeProposalIdOrThrow(expectedProposalId),
+    ]), [writeContract]);
 
   // ── ERC-20 Token Onayı ──
   /**
@@ -572,7 +634,7 @@ export function useArafContract() {
 
       return normalizeTokenDecimalsOrThrow(decimals);
     } catch (error) {
-      throw new Error(error?.message || "Token decimals could not be read safely.");
+      throw new Error(error?.message || "Token decimals could not be read safely.", { cause: error });
     }
   }, [publicClient]);
 
@@ -585,6 +647,14 @@ export function useArafContract() {
    */
   const proposeOrApproveCancel = useCallback((tradeId) =>
     writeContract("proposeOrApproveCancel", [BigInt(tradeId)]),
+  [writeContract]);
+
+  /**
+   * [TR] Kendi iptal onayını geri çeker (karşı taraf ikinci onayı vermeden önce).
+   * [EN] Withdraws the caller's own cancel consent (before the counterparty's second consent).
+   */
+  const revokeCancel = useCallback((tradeId) =>
+    writeContract("revokeCancel", [BigInt(tradeId)]),
   [writeContract]);
 
   /**
@@ -614,6 +684,7 @@ export function useArafContract() {
     pingTakerForChallenge, //App.jsx için export listesine eklendi
     decayReputation,
     proposeOrApproveCancel,
+    revokeCancel,
     proposeSettlement,
     rejectSettlement,
     withdrawSettlement,
@@ -690,54 +761,42 @@ export function useArafContract() {
     ),
     getCooldownRemaining: useCallback(
       async (address) => {
-        if (!_isValidAddress) return 0n;
-        try {
-          return await publicClient.readContract({
-            address: getAddress(ESCROW_ADDRESS),
-            abi: ArafEscrowABI,
-            functionName: 'getCooldownRemaining',
-            args: [getAddress(address)],
-          });
-        } catch {
-          return 0n;
-        }
+        requireEscrowConfigured();
+        return publicClient.readContract({
+          address: getAddress(ESCROW_ADDRESS),
+          abi: ArafEscrowABI,
+          functionName: 'getCooldownRemaining',
+          args: [getAddress(address)],
+        });
       },
       [publicClient]
     ),
     getWalletRegisteredAt: useCallback(
       async (address) => {
-        if (!_isValidAddress) return 0n;
-        try {
-          return await publicClient.readContract({
-            address: getAddress(ESCROW_ADDRESS),
-            abi: ArafEscrowABI,
-            functionName: 'walletRegisteredAt',
-            args: [getAddress(address)],
-          });
-        } catch {
-          return 0n;
-        }
+        // [TR] Hata 0n'e çevrilmez: 0n "kayıtsız" demektir; okunamayan durum çağırana fırlatılır.
+        requireEscrowConfigured();
+        return publicClient.readContract({
+          address: getAddress(ESCROW_ADDRESS),
+          abi: ArafEscrowABI,
+          functionName: 'walletRegisteredAt',
+          args: [getAddress(address)],
+        });
       },
       [publicClient]
     ),
     getTakerFeeBps: useCallback(
       async () => {
-        if (!_isValidAddress) return 15n;
-        try {
-          const feeConfig = await publicClient.readContract({
-            address: getAddress(ESCROW_ADDRESS),
-            abi: ArafEscrowABI,
-            functionName: 'getFeeConfig',
-          });
-          const takerFee = typeof feeConfig.currentTakerFeeBps !== 'undefined'
-            ? feeConfig.currentTakerFeeBps
-            : feeConfig[0];
-          return BigInt(takerFee ?? 15);
-        } catch {
-          // [TR] Kontrat varsayılanı DEFAULT_TAKER_FEE_BPS = 15.
-          // [EN] Contract default DEFAULT_TAKER_FEE_BPS = 15.
-          return 15n;
-        }
+        requireEscrowConfigured();
+        const feeConfig = await publicClient.readContract({
+          address: getAddress(ESCROW_ADDRESS),
+          abi: ArafEscrowABI,
+          functionName: 'getFeeConfig',
+        });
+        const takerFee = typeof feeConfig?.currentTakerFeeBps !== 'undefined'
+          ? feeConfig.currentTakerFeeBps
+          : feeConfig?.[0];
+        if (takerFee === undefined || takerFee === null) throw new Error('getFeeConfig yanıtı geçersiz.');
+        return BigInt(takerFee);
       },
       [publicClient]
     ),
@@ -774,18 +833,13 @@ export function useArafContract() {
     
     getFirstSuccessfulTradeAt: useCallback(
       async (address) => {
-        if (!_isValidAddress) return 0n;
-        try {
-          return await publicClient.readContract({
-            address: getAddress(ESCROW_ADDRESS),
-            abi: ArafEscrowABI,
-            functionName: 'getFirstSuccessfulTradeAt',
-            args: [getAddress(address)],
-          });
-        } catch (err) {
-          console.error("[ArafContract] getFirstSuccessfulTradeAt hatası:", err.message);
-          return 0n;
-        }
+        requireEscrowConfigured();
+        return publicClient.readContract({
+          address: getAddress(ESCROW_ADDRESS),
+          abi: ArafEscrowABI,
+          functionName: 'getFirstSuccessfulTradeAt',
+          args: [getAddress(address)],
+        });
       },
       [publicClient]
     ),

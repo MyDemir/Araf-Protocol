@@ -4,7 +4,8 @@ import { buildMakerPreview, getMakerModalCopy, getOrderSideCopy, resolveEffectiv
 import { resolveTierMaxAmounts } from './actions/orderCreationActions';
 import { TERMS_ACKNOWLEDGEMENTS, TERMS_SECTIONS, TERMS_VERSION } from './legal/terms';
 import PaymentRiskBadge from '../components/PaymentRiskBadge';
-import { fmtBps, fmtNum } from './copy';
+import { fmtBps, isKnownNumber, fmtNum } from './copy';
+import { profileRequiredMessage } from './payoutProfileGate';
 
 function TermsModal({ lang = 'EN', onAcceptTerms, onDeclineTerms }) {
   const isTR = lang === 'TR';
@@ -122,6 +123,8 @@ export const buildAppModals = (ctx) => {
     makerValidationError,
     makerPayoutRiskEntry,
     isCreateTemporarilyDisabledByRisk,
+    isPayoutProfileGateBlocked = false,
+    openProfilePage,
     isContractLoading,
     loadingText,
     isConnected,
@@ -283,7 +286,7 @@ export const buildAppModals = (ctx) => {
     const modalCopy = getMakerModalCopy(makerSide, lang);
     const payoutRiskEntry = makerPayoutRiskEntry;
     const validationError = makerValidationError || null;
-    const isSubmitDisabled = isContractLoading || validationError !== null || isCreateTemporarilyDisabledByRisk;
+    const isSubmitDisabled = isContractLoading || validationError !== null || isCreateTemporarilyDisabledByRisk || isPayoutProfileGateBlocked;
     const seg = (active) => `flex-1 h-9 rounded-lg text-sm font-semibold transition ${active ? 'bg-surface text-textPrimary shadow-sm' : 'text-textMuted hover:text-textPrimary'} disabled:opacity-40 disabled:cursor-not-allowed`;
 
     return (
@@ -390,7 +393,10 @@ export const buildAppModals = (ctx) => {
                 <span>{modalCopy.totalLabel}:</span>
                 <span className="font-mono">{preview.totalAmount > 0 ? `${fmt(preview.totalAmount, decimals)} ${makerToken}` : '—'}</span>
               </div>
-              {Number.isFinite(Number(feeBps)) && (
+              {!isKnownNumber(feeBps) && (
+                <p className="text-[11px] text-textMuted pt-0.5" data-testid="maker-fee-unknown">{tr ? 'Protokol ücreti bilinmiyor (kontrattan okunamadı).' : 'Protocol fee unknown (could not be read from the contract).'}</p>
+              )}
+              {isKnownNumber(feeBps) && (
                 <p className="text-[11px] text-textMuted pt-0.5">{tr ? `Protokol ücreti işlem kapanışında kesilir: ${fmtBps(feeBps, lang)} (${feeBps} bps).` : `Protocol fee is taken at settlement: ${fmtBps(feeBps, lang)} (${feeBps} bps).`}</p>
               )}
             </div>
@@ -405,6 +411,14 @@ export const buildAppModals = (ctx) => {
               <p className="text-sm text-danger bg-danger/10 border border-danger/30 rounded-lg p-3 leading-relaxed">
                 {tr ? 'Bu ödeme yöntemi şu an kısıtlı. Bu bir kontrat hükmü değildir.' : 'This payment method is currently restricted. This is not a contract authority rule.'}
               </p>
+            )}
+            {isPayoutProfileGateBlocked && (
+              <div data-testid="create-needs-profile" className="text-sm text-danger bg-danger/10 border border-danger/30 rounded-lg p-3 leading-relaxed">
+                <p>{profileRequiredMessage(lang)}</p>
+                <button type="button" onClick={() => { setShowMakerModal(false); openProfilePage?.('account'); }} className="mt-1 underline font-semibold">
+                  {tr ? 'Profil sayfasını aç' : 'Open profile page'}
+                </button>
+              </div>
             )}
             {validationError && (
               <p className="text-danger text-sm bg-danger/10 p-3 rounded-lg border border-danger/30 leading-relaxed">{validationError}</p>

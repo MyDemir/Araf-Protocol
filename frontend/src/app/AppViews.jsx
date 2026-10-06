@@ -1,5 +1,5 @@
 import PIIDisplay from '../components/PIIDisplay';
-import { fmtBps, fmtNum, fmtPct, getStateLabel, localeOf } from './copy';
+import { fmtBps, isKnownNumber, fmtNum, fmtPct, getStateLabel, localeOf } from './copy';
 import ReferenceRateTicker from '../components/ReferenceRateTicker';
 import SettlementProposalCard from '../components/SettlementProposalCard';
 import { normalizeSettlementState } from './contexts/settlement/settlementActionModel';
@@ -14,6 +14,9 @@ import { countActiveMarketFilters, MARKET_FIAT_OPTIONS, MARKET_FILTER_DEFAULTS }
 import { mapResolutionTypeLabel } from './useAppSessionData';
 import TradeRoomPage from './contexts/trade-room/TradeRoomPage';
 import ThemeToggle from './shell/ThemeToggle';
+import NowBoundary from './shell/NowBoundary';
+import { isOwnerPayoutProfileMissing, isPayoutProfileSaved, ownerProfileMissingMessage, profileRequiredMessage } from './payoutProfileGate';
+import { deriveTradeTimeline } from './contexts/trade-room/tradeTimeline';
 import { isViewInNav, NAV_ORDER, VIEW_REGISTRY } from './viewRegistry';
 import {
   Banknote, ChevronDown, CircleCheck, CirclePause, Clock, Droplets, Flame, Handshake, History, Hourglass, Layers, ListPlus, LoaderCircle, Lock, Menu, Paperclip, Plus, RotateCcw, Search, Settings, Store, Swords,
@@ -30,6 +33,46 @@ const StatChange = ({ value }) => {
   return <span className={`text-[10px] ml-2 font-bold ${isPositive ? 'text-success' : 'text-danger'}`}>{isPositive ? '▲' : '▼'}{Math.abs(value).toFixed(1)}%</span>;
 };
 
+// [TR] P2 — Modül düzeyi bileşenler: render içinde tanımlanınca her render'da yeni tip oluşur, alt ağaç yeniden
+//      mount olur (odak/kaydırma kaybı). Burada kimlikleri sabit.
+// [EN] P2 — Module-level components: defining them inside render creates a new type per render and remounts the
+//      subtree (lost focus/scroll). Here their identity is stable.
+// [TR] Tek satır bileşeni: ikon + etiket + sayaç. Tüm drawer aynı ritimde görünür.
+// [EN] One row primitive (icon + label + count) so every drawer row shares one rhythm.
+const Row = ({ icon, label, count, active, tone = 'default', onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    aria-pressed={active ? 'true' : undefined}
+    className={`w-full h-10 flex items-center gap-3 px-3 rounded-lg text-sm font-medium transition ${active ? 'bg-elevated text-textPrimary' : 'text-textSecondary hover:text-textPrimary hover:bg-elevated/60'}`}
+  >
+    <span className={`shrink-0 flex items-center justify-center w-5 ${tone === 'danger' ? 'text-danger' : active ? 'text-textPrimary' : 'text-textMuted'}`}>{icon}</span>
+    <span className="min-w-0 flex-1 truncate text-left">{label}</span>
+    {count != null && (
+      <span className={`min-w-[1.5rem] h-5 px-1.5 rounded-md text-[11px] font-semibold tabular-nums flex items-center justify-center ${typeof count === 'number' && count > 0 ? (tone === 'danger' ? 'bg-danger/15 text-danger' : 'bg-elevated text-textPrimary') : 'text-textMuted'}`}>{count}</span>
+    )}
+  </button>
+);
+const SectionLabel = ({ children }) => (
+  <p className="px-3 mb-1.5 text-[11px] font-semibold tracking-wider text-textMuted">{children}</p>
+);
+
+const Segmented = ({ items, value, onChange, label }) => (
+  <div role="tablist" aria-label={label} className="flex min-w-0 bg-surface border border-borderSubtle rounded-lg p-1">
+    {items.map((it) => (
+      <span
+        key={it.value}
+        role="tab"
+        tabIndex={0}
+        aria-selected={value === it.value}
+        onClick={() => onChange(it.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onChange(it.value); } }}
+        className={`flex-1 min-w-0 md:flex-none cursor-pointer select-none text-center px-2 md:px-3 h-8 leading-8 rounded-md text-xs font-semibold transition ${value === it.value ? (it.activeClass || 'bg-elevated text-textPrimary shadow-sm') : 'text-textMuted hover:text-textPrimary'}`}
+      >{it.label}</span>
+    ))}
+  </div>
+);
+
 // [TR] Ayarlanmamış sosyal linkler gösterilmez (önceden github.com / x.com ana sayfasına gidiyordu).
 // [EN] Unconfigured social links are hidden (they used to point at bare github.com / x.com).
 const SOCIAL_LINKS = {
@@ -43,9 +86,9 @@ const SOCIAL_LINKS = {
 // [EN] FAQ answers follow contract constants; the fee comes from the contract fee config.
 const buildFaqItems = (lang, protocolFeeConfig) => {
   const feeText = (() => {
-    const tb = Number(protocolFeeConfig?.takerFeeBps);
-    const mb = Number(protocolFeeConfig?.makerFeeBps);
-    if (!Number.isFinite(tb) || !Number.isFinite(mb)) return null;
+    if (!isKnownNumber(protocolFeeConfig?.takerFeeBps) || !isKnownNumber(protocolFeeConfig?.makerFeeBps)) return null;
+    const tb = Number(protocolFeeConfig.takerFeeBps);
+    const mb = Number(protocolFeeConfig.makerFeeBps);
     return lang === 'TR' ? `alıcıdan ${fmtBps(tb, lang)}, satıcıdan ${fmtBps(mb, lang)}` : `${fmtBps(tb, lang)} from the buyer and ${fmtBps(mb, lang)} from the seller`;
   })();
   return lang === 'TR'
@@ -101,6 +144,7 @@ export const buildAppViews = (ctx) => {
     loading,
     SUPPORTED_TOKEN_ADDRESSES,
     handleStartTrade,
+    hasPayoutProfile = null,
     handleMint,
     isFaucetEnabled,
     isSupportedChainId,
@@ -130,6 +174,7 @@ export const buildAppViews = (ctx) => {
     handleFileUpload,
     handleReportPayment,
     handleProposeCancel,
+    handleRevokeCancel,
     cancelStatus,
     chargebackAccepted,
     handleChargebackAck,
@@ -139,7 +184,8 @@ export const buildAppViews = (ctx) => {
     handleAutoRelease,
     canMakerStartChallengeFlow,
     canMakerChallenge,
-    tradeTimers = {},
+    // [TR] tradeTimers artık yalnız GEÇERSİZ KILMA (lab/test) içindir; gerçek sayaçlar saat sınırında türetilir (P1).
+    tradeTimers: tradeTimerOverrides = {},
     chainNowMs,
     chainOffsetMs = 0,
     bleedingAmounts,
@@ -154,17 +200,16 @@ export const buildAppViews = (ctx) => {
     settlementContractFns,
   } = ctx;
 
-  // [TR] Frontend admin menü görünürlüğü yalnız UX katmanıdır.
-  //      Nihai yetki doğrulaması backend ADMIN_WALLETS + auth chain tarafındadır.
-  // [EN] Frontend admin menu visibility is UX-only; backend remains authority.
-  const adminWalletAllowlist = String(import.meta.env.VITE_ADMIN_WALLETS || "")
-    .split(",")
-    .map((w) => w.trim().toLowerCase())
-    .filter(Boolean);
+  // [TR] Admin menü görünürlüğü yalnız UX katmanıdır; nihai yetki backend ADMIN_WALLETS + auth zincirindedir.
+  //      Tek doğru kaynak sunucudur: /api/auth/me yanıtındaki `isAdmin` (boolean) → ctx.isAdmin. Yanıt yoksa (null)
+  //      ya da false ise giriş gizlenir (fail-closed). Admin cüzdan listesi istemci paketine GİRMEZ: eski
+  //      VITE_ADMIN_WALLETS env yedeği kaldırıldı (her VITE_* değeri herkese açık bundle'a gömülür).
+  // [EN] Admin menu visibility is UX-only; the server decides. `isAdmin` from /api/auth/me → ctx.isAdmin. A missing
+  //      (null) or false answer hides the entry (fail-closed). The admin wallet list never ships in the client bundle:
+  //      the VITE_ADMIN_WALLETS fallback was removed (every VITE_* value is embedded in the public bundle).
   const connectedWalletLower = typeof address === "string" ? address.toLowerCase() : null;
-  const isLikelyAdminWallet =
-    Boolean(connectedWalletLower) && adminWalletAllowlist.includes(connectedWalletLower);
-  const canSeeAdminEntry = Boolean(isConnected && isAuthenticated && connectedWalletLower);
+  const isLikelyAdminWallet = ctx.isAdmin === true;
+  const canSeeAdminEntry = Boolean(isConnected && isAuthenticated && connectedWalletLower && isLikelyAdminWallet);
   // [TR] İşlem Odası, Takip, Profil ve Geçmiş yalnız imzalı oturumla anlamlıdır; oturum yokken gezinmede
   //      gösterilmez (App.jsx de bu görünümlerden ana sayfaya yönlendirir). UI Lab senaryoları istisnadır.
   // [EN] Trade room, tracking, profile and history need a signed session; hidden from navigation otherwise.
@@ -224,25 +269,6 @@ export const buildAppViews = (ctx) => {
     const goToRoom = (escrow) => buildGoToTradeRoomAction({
       escrow, setActiveTrade, setUserRole, setTradeState, setChargebackAccepted, setCurrentView, setSidebarOpen,
     });
-    // [TR] Tek satır bileşeni: ikon + etiket + sayaç. Tüm drawer aynı ritimde görünür.
-    // [EN] One row primitive (icon + label + count) so every drawer row shares one rhythm.
-    const Row = ({ icon, label, count, active, tone = 'default', onClick }) => (
-      <button
-        type="button"
-        onClick={onClick}
-        aria-pressed={active ? 'true' : undefined}
-        className={`w-full h-10 flex items-center gap-3 px-3 rounded-lg text-sm font-medium transition ${active ? 'bg-elevated text-textPrimary' : 'text-textSecondary hover:text-textPrimary hover:bg-elevated/60'}`}
-      >
-        <span className={`shrink-0 flex items-center justify-center w-5 ${tone === 'danger' ? 'text-danger' : active ? 'text-textPrimary' : 'text-textMuted'}`}>{icon}</span>
-        <span className="min-w-0 flex-1 truncate text-left">{label}</span>
-        {count != null && (
-          <span className={`min-w-[1.5rem] h-5 px-1.5 rounded-md text-[11px] font-semibold tabular-nums flex items-center justify-center ${typeof count === 'number' && count > 0 ? (tone === 'danger' ? 'bg-danger/15 text-danger' : 'bg-elevated text-textPrimary') : 'text-textMuted'}`}>{count}</span>
-        )}
-      </button>
-    );
-    const SectionLabel = ({ children }) => (
-      <p className="px-3 mb-1.5 text-[11px] font-semibold tracking-wider text-textMuted">{children}</p>
-    );
     const tokenMark = (letter, cls) => (
       <span className={`w-4 h-4 rounded-full text-[9px] font-bold text-white flex items-center justify-center ${cls}`} aria-hidden="true">{letter}</span>
     );
@@ -535,22 +561,6 @@ export const buildAppViews = (ctx) => {
         <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-textMuted" strokeWidth={1.8} aria-hidden="true" />
       </label>
     );
-    const Segmented = ({ items, value, onChange, label }) => (
-      <div role="tablist" aria-label={label} className="flex min-w-0 bg-surface border border-borderSubtle rounded-lg p-1">
-        {items.map((it) => (
-          <span
-            key={it.value}
-            role="tab"
-            tabIndex={0}
-            aria-selected={value === it.value}
-            onClick={() => onChange(it.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onChange(it.value); } }}
-            className={`flex-1 min-w-0 md:flex-none cursor-pointer select-none text-center px-2 md:px-3 h-8 leading-8 rounded-md text-xs font-semibold transition ${value === it.value ? (it.activeClass || 'bg-elevated text-textPrimary shadow-sm') : 'text-textMuted hover:text-textPrimary'}`}
-          >{it.label}</span>
-        ))}
-      </div>
-    );
-
     return (
       <div className="w-full max-w-[1200px] min-w-0 p-4 md:p-8">
         <div className="mb-4 flex items-center justify-between gap-3">
@@ -677,10 +687,23 @@ export const buildAppViews = (ctx) => {
               const tokenAddr    = SUPPORTED_TOKEN_ADDRESSES[order.crypto || 'USDT'];
               const isTokenConfigured = Boolean(tokenAddr);
               const isCorrectChain    = isSupportedChainId(chainId);
-              const isFunded          = sybilStatus ? sybilStatus.funded : true;
-              const isCooldownOk      = sybilStatus ? sybilStatus.cooldownOk : true;
-              const finalCanTakeOrder = canTakeOrder && isCooldownOk && isFunded && !isPaused && isTokenConfigured && isCorrectChain;
               const isSellSide = order.side === 'SELL_CRYPTO';
+              // [TR] F13 — Taker giriş kapıları (yaş / dust / cooldown) yalnız SATIŞ emrini dolduran kişiye uygulanır:
+              //      alış emrini dolduran kontratta maker'dır (_enforceTakerEntry emir sahibine bakar). Tier kilidi iki yönde de geçerli.
+              //      Cooldown yalnız Tier 0/1 emirlerinde zorlanır (_getCooldownForTier).
+              // [EN] F13 — Taker entry gates (age / dust / cooldown) apply only when filling a SELL order; the filler of a
+              //      BUY order is the maker on-chain. The tier lock stays in both directions. Cooldown is enforced for tier 0/1 only.
+              const isFunded          = !isSellSide || (sybilStatus ? sybilStatus.funded !== false : true);
+              const isAged            = !isSellSide || (sybilStatus ? sybilStatus.aged !== false : true);
+              const isCooldownOk      = !isSellSide || Number(order.tier) >= 2 || (sybilStatus ? sybilStatus.cooldownOk !== false : true);
+              // [TR] K6: SELL emrinde emir sahibi (maker) kısıtlıysa kontrat fill'i MakerBanActive ile reddeder. Bilgi varsa
+              //      buton kapanır; bilinmiyorsa (null) tx denenir ve revert mesajı çevrilir.
+              const ownerBanKnown = isSellSide && Number.isFinite(order.ownerBannedUntil);
+              const isOwnerBanned = ownerBanKnown && order.ownerBannedUntil > Math.floor((Number.isFinite(chainNowMs) ? chainNowMs : Date.now() + chainOffsetMs) / 1000);
+              // [TR] Ödeme profili kapısı: kayıtlı profilin yoksa (ya da durum bilinmiyorsa) ve emir sahibinin profili yoksa doldurma kapalı.
+              const needsOwnProfile = isConnected && isAuthenticated && !isPayoutProfileSaved(hasPayoutProfile);
+              const ownerProfileMissing = isOwnerPayoutProfileMissing(order);
+              const finalCanTakeOrder = canTakeOrder && !needsOwnProfile && !ownerProfileMissing && !isOwnerBanned && isCooldownOk && isFunded && isAged && !isPaused && isTokenConfigured && isCorrectChain;
               // [TR] Renk kullanıcının yapacağı işi anlatır: "Satın Al" yeşil, "Sat" kırmızı. Emir yönü rozeti nötrdür;
               //      renkli rozet (ör. yeşil "Satış emri") yanındaki butonla çelişiyordu.
               // [EN] Colour follows the viewer's action (buy green, sell red); the order-side badge stays neutral.
@@ -698,9 +721,13 @@ export const buildAppViews = (ctx) => {
                 !isTokenConfigured  ? <>{icon(Settings)} {tr ? 'Token ayarlanmadı' : 'Token not set'}</> :
                 isMyOwnAd           ? <>{tr ? 'Sizin emriniz' : 'Your order'}</> :
                 isTierLocked        ? <>{icon(Lock)} {tr ? `Tier ${order.tier} gerekli` : `Tier ${order.tier} required`}</> :
+                needsOwnProfile     ? <>{icon(Lock)} {tr ? 'Profil gerekli' : 'Profile needed'}</> :
+                ownerProfileMissing ? <>{icon(Lock)} {tr ? 'Profil yok' : 'No profile'}</> :
+                isOwnerBanned       ? <>{icon(Lock)} {tr ? 'Satıcı kısıtlı' : 'Seller restricted'}</> :
                 !canTakeOrder       ? <>{icon(Lock)} {tr ? 'Kilitli' : 'Locked'}</> :
+                !isAged             ? <>{icon(Hourglass)} {tr ? 'Cüzdan çok yeni' : 'Wallet too new'}</> :
                 !isFunded           ? <>{icon(TriangleAlert)} {tr ? 'Bakiye yetersiz' : 'Low balance'}</> :
-                !isCooldownOk       ? <>{icon(Hourglass)} {tr ? `${Math.ceil((sybilStatus?.cooldownRemaining || 0) / 60)} dk` : `${Math.ceil((sybilStatus?.cooldownRemaining || 0) / 60)} min`}</> :
+                !isCooldownOk       ? <>{icon(Hourglass)} {sybilStatus?.cooldownUnknown ? (tr ? 'Bekleme bilinmiyor' : 'Cooldown unknown') : (tr ? `${Math.ceil((sybilStatus?.cooldownRemaining || 0) / 60)} dk` : `${Math.ceil((sybilStatus?.cooldownRemaining || 0) / 60)} min`)}</> :
                 isContractLoading   ? <>{icon(LoaderCircle, true)}{loadingText || (tr ? 'İşleniyor…' : 'Processing…')}</> :
                 (order.ctaLabel || (tr ? 'İşlem yap' : 'Trade'));
               const ctaTone = isDisabled
@@ -737,6 +764,14 @@ export const buildAppViews = (ctx) => {
                       <button onClick={() => (needsSignIn ? handleAuthAction() : handleStartTrade(order))} disabled={isDisabled} title={needsSignIn ? (tr ? 'Önce cüzdanınızı bağlayıp giriş yapın' : 'Connect your wallet and sign in first') : undefined} className={`h-9 min-w-[5.5rem] px-4 rounded-lg text-sm font-semibold transition inline-flex items-center justify-center gap-1.5 ${ctaTone}`}>
                         {ctaContent}
                       </button>
+                      {needsOwnProfile && (
+                        <button type="button" data-testid="fill-needs-profile" onClick={() => openProfilePage?.('account')} className="max-w-[10rem] text-right text-[11px] leading-tight text-brand underline">
+                          {profileRequiredMessage(lang)}
+                        </button>
+                      )}
+                      {!needsOwnProfile && ownerProfileMissing && (
+                        <p data-testid="fill-owner-no-profile" className="max-w-[10rem] text-right text-[11px] leading-tight text-danger">{ownerProfileMissingMessage(lang)}</p>
+                      )}
                     </div>
                   </div>
 
@@ -801,7 +836,7 @@ export const buildAppViews = (ctx) => {
   //      Bleeding Escrow görsel barı, zamanlayıcılar, iptal/serbest bırakma ve PII bölümü içerir.
   // [EN] Trade room — shows taker/maker actions based on LOCKED/PAID/CHALLENGED state.
   //      Contains Bleeding Escrow visual bar, timers, cancel/release and PII section.
-  const renderTradeRoom = () => {
+  const renderTradeRoomAt = (clockNowMs) => {
     // [TR] Session invalidation sonrası activeTrade temizlenmiş olabilir.
     //      Bu durumda fallback "0.00/undefined" ile kırık oda render etmek yerine
     //      kullanıcıya deterministik empty-state gösterip güvenli aksiyon sunuyoruz.
@@ -872,14 +907,18 @@ export const buildAppViews = (ctx) => {
       : (Number(activeTrade?.max) > 0 && Number(activeTrade?.rate) > 0 ? Number(activeTrade.max) / Number(activeTrade.rate) : 0);
     // [TR] Ücret, global config değil trade'in kilitlendiği andaki fee snapshot'ından hesaplanır.
     // [EN] Fee uses the trade's lock-time fee snapshot, not the current global config.
-    const effectiveTakerFeeBps = Number.isFinite(Number(activeTrade?.takerFeeBps)) && activeTrade?.takerFeeBps !== null
+    // [TR] Ne snapshot ne kontrat ücreti okunabildiyse ücret "bilinmiyor" gösterilir (0 sanılmaz).
+    const effectiveTakerFeeBps = isKnownNumber(activeTrade?.takerFeeBps)
       ? Number(activeTrade.takerFeeBps)
-      : Number(takerFeeBps || 0);
-    const protocolFee  = rawCryptoAmt * (effectiveTakerFeeBps / 10000);
+      : (isKnownNumber(takerFeeBps) ? Number(takerFeeBps) : null);
+    const feeUnknown = effectiveTakerFeeBps === null;
+    const protocolFee  = feeUnknown ? 0 : rawCryptoAmt * (effectiveTakerFeeBps / 10000);
     const netAmount    = rawCryptoAmt - protocolFee;
     const asset        = activeTrade?.crypto || 'USDT';
     const fmt = (value, digits = 2) => fmtNum(value, lang, digits);
-    const feeBreakdownText = lang === 'TR'
+    const feeBreakdownText = feeUnknown
+      ? (lang === 'TR' ? `Kilitli ${fmt(rawCryptoAmt)} ${asset} · Ücret bilinmiyor` : `Locked ${fmt(rawCryptoAmt)} ${asset} · Fee unknown`)
+      : lang === 'TR'
       ? `Kilitli ${fmt(rawCryptoAmt)} ${asset} · Ücret ${fmt(protocolFee, 4)} · Alıcıya net ${fmt(netAmount)} ${asset}`
       : `Locked ${fmt(rawCryptoAmt)} ${asset} · Fee ${fmt(protocolFee, 4)} · Net to taker ${fmt(netAmount)} ${asset}`;
     // [TR] Karşı taraf adresi her zaman kısaltılır; ham 42 karakterlik adres mobilde taşıyordu.
@@ -890,7 +929,9 @@ export const buildAppViews = (ctx) => {
     const hasOnchainTradeId = activeTrade?.onchainId !== null && activeTrade?.onchainId !== undefined && activeTrade?.onchainId !== '';
     const missingOnchainIdReason = lang === 'TR' ? 'On-chain trade ID bulunamadı.' : 'Missing on-chain trade ID.';
     // [TR] Zincir saati (yoksa cihaz saati). [EN] Chain time, falling back to the device clock.
-    const nowMs = Number.isFinite(chainNowMs) ? chainNowMs : Date.now();
+    const nowMs = clockNowMs;
+    // [TR] Sayaçlar bu render'ın saatinden türetilir (App kökünde saniyelik state yok).
+    const tradeTimers = { ...deriveTradeTimeline(activeTrade, { state: roomState, now: nowMs }).timers, ...tradeTimerOverrides };
     const burnExpiredDeadlinePassed = getBurnExpiredDeadlinePassed({ activeTrade, roomState, now: new Date(nowMs) });
     const handleBurnExpired = ctx.handleBurnExpired || ctx.tradeRoomActions?.handleBurnExpired;
     const paymentWindowExpired = getPaymentWindowExpired({ activeTrade, roomState, now: new Date(nowMs) });
@@ -915,6 +956,7 @@ export const buildAppViews = (ctx) => {
       handlePingMaker: labHandlers?.handlePingMaker || handlePingMaker,
       handleAutoRelease: labHandlers?.handleAutoRelease || handleAutoRelease,
       handleProposeCancel: labHandlers?.handleProposeCancel || handleProposeCancel,
+      handleRevokeCancel: labHandlers?.handleRevokeCancel || handleRevokeCancel,
       handleBurnExpired: labHandlers?.handleBurnExpired || handleBurnExpired,
       handleExpirePaymentWindow: labHandlers?.handleExpirePaymentWindow || handleExpirePaymentWindow,
       paymentWindowExpired,
@@ -928,6 +970,7 @@ export const buildAppViews = (ctx) => {
       chargebackAccepted,
       paymentIpfsHash,
       timers: tradeTimers,
+      nowMs,
       isConnected,
       isAuthenticated,
       isSupportedChain: isSupportedChainId(chainId),
@@ -1004,7 +1047,7 @@ export const buildAppViews = (ctx) => {
             const showTakerPii = isTaker && ['LOCKED', 'PAID'].includes(roomState);
             const beforeActions = showTakerPii ? (
               <div className="mb-4">
-                <PIIDisplay tradeId={activeTrade?.id} lang={lang} authenticatedFetch={authenticatedFetch} />
+                <PIIDisplay key={activeTrade?.id} tradeId={activeTrade?.id} lang={lang} authenticatedFetch={authenticatedFetch} />
               </div>
             ) : null;
 
@@ -1078,7 +1121,17 @@ export const buildAppViews = (ctx) => {
                 {['LOCKED', 'PAID', 'CHALLENGED'].includes(roomState) && cancelStatus === 'proposed_by_me' && (
                   <div className="mb-4 py-3 px-4 bg-warning/10 border border-warning/30 rounded-xl flex items-center gap-3">
                     <div className="w-4 h-4 border-2 border-warning border-t-transparent rounded-full animate-spin shrink-0"></div>
-                    <span className="text-sm font-semibold text-textPrimary">{lang === 'TR' ? 'İptal teklifiniz gönderildi; karşı taraf bekleniyor.' : 'Cancel proposed; waiting for the counterparty.'}</span>
+                    <span className="text-sm font-semibold text-textPrimary flex-1">{lang === 'TR' ? 'İptal teklifiniz gönderildi; karşı taraf bekleniyor.' : 'Cancel proposed; waiting for the counterparty.'}</span>
+                    {handleRevokeCancel && (
+                      <button
+                        onClick={tradeActionCallbacks.revoke_cancel.onClick}
+                        disabled={tradeActionCallbacks.revoke_cancel.disabled}
+                        data-testid="revoke-cancel-button"
+                        className="shrink-0 px-3 py-1.5 rounded-lg border border-warning/60 text-warning text-xs font-bold hover:bg-warning hover:text-white transition disabled:opacity-50"
+                      >
+                        {lang === 'TR' ? 'İptal onayımı geri çek' : 'Withdraw my cancel consent'}
+                      </button>
+                    )}
                   </div>
                 )}
                 {['LOCKED', 'PAID', 'CHALLENGED'].includes(roomState) && cancelStatus === 'proposed_by_other' && (
@@ -1109,6 +1162,13 @@ export const buildAppViews = (ctx) => {
 
   // [TR] Mobil alt navigasyon çubuğu — yalnızca mobil cihazlarda görünür
   // [EN] Mobile bottom navigation bar — visible only on mobile devices
+
+  // [TR] P1: işlem odası saat sınırı içinde render edilir; yalnız bu alt ağaç saniyede bir güncellenir.
+  // [EN] P1: the trade room renders inside a clock boundary; only this subtree updates each second.
+  const renderTradeRoom = () => (
+    <NowBoundary fixedNowMs={chainNowMs} render={renderTradeRoomAt} />
+  );
+
   const renderMobileNav = () => {
     // [TR] Her ikonun altında kısa etiket: yalnız emoji ile menü tahmin oyununa dönüyordu. Giriş yapınca
     //      cüzdan düğmesi profil ikonuyla aynı görünüyordu; artık cüzdan ikonu + yeşil nokta.
@@ -1169,6 +1229,7 @@ export const buildAppViews = (ctx) => {
         reputationPolicy={lp ? lp.reputationPolicy : ctx.reputationPolicy}
         sybilStatus={lp ? lp.sybilStatus : sybilStatus}
         walletAgeRemainingDays={lp ? lp.walletAgeRemainingDays : walletAgeRemainingDays}
+        isWalletRegistered={lp ? (lp.isWalletRegistered ?? true) : ctx.isWalletRegistered}
         isBanned={lp ? lp.isBanned : Boolean(ctx.isBanned)}
         decayReputation={ctx.decayReputation}
         myOrders={lp ? lp.myOrders : (ctx.myOrders || [])}

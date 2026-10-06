@@ -49,7 +49,9 @@ SIWE imzasını doğrular ve auth/refresh cookie’lerini set eder.
 ```
 
 ### `GET /api/auth/me`
-Geçerli session cookie için `{ wallet, authenticated: true }` döner.
+Geçerli session cookie için `{ wallet, authenticated: true, isAdmin, hasPayoutProfile }` döner.
+
+`hasPayoutProfile`: kullanıcının backend'e KAYITLI ödeme profili var mı (yalnız boolean, PII yok). Sorgu başarısız olursa `null` döner; istemci `null`'ı "bilinmiyor" sayıp emir oluşturma/doldurmayı kapalı tutar (fail-closed).
 
 ### `POST /api/auth/refresh`
 Refresh oturumunu çevirir, yeni cookie çifti üretir.
@@ -66,7 +68,7 @@ Refresh token family kaydını iptal eder ve cookie’leri temizler.
 Rail-aware payout profilini `User.payout_profile` altında şifreli günceller.
 
 Kilit davranışlar:
-- Aktif trade (`LOCKED/PAID/CHALLENGED`) varken banka profil değişimi engellenir.
+- Aktif trade (`LOCKED/PAID/CHALLENGED`) varken ödeme profili yazımı engellenir; İLK oluşturma dahil (`409 BANK_PROFILE_LOCKED_DURING_ACTIVE_TRADE`). Snapshot işlem kilitlendiği anda alınır ve işlem süresince değişmemelidir (dolandırıcılığı önleme).
 - Bank profile version/sayaçları risk sinyali için güncellenir.
 
 Kabul edilen request body:
@@ -138,6 +140,8 @@ Public order feed + filtreler:
 - `owner_address`
 - sayfalama (`page`, `limit`)
 
+Her order'a `owner_has_payout_profile` (boolean) eklenir: emir sahibinin kayıtlı ödeme profili var mı. PII/şifreli alan döndürülmez; arayüz false ise doldurmayı kapatır.
+
 ### `GET /api/orders/my`
 Session wallet’a ait order’ların sayfalı listesi.
 
@@ -191,7 +195,7 @@ On-chain child-trade kimliği (`onchain_escrow_id`) ile trade döner.
 Mongo `_id` ile trade döner (party-restricted).
 
 ### İptal koordinasyonu (backend route'u yok)
-Karşılıklı iptal tamamen on-chain yürür: her taraf kendi `proposeOrApproveCancel(tradeId)` işlemini gönderir, ikinci onay iptali yürütür.
+Karşılıklı iptal tamamen on-chain yürür: her taraf kendi `proposeOrApproveCancel(tradeId)` işlemini gönderir, ikinci onay iptali yürütür. İkinci onaydan önce taraf kendi onayını `revokeCancel(tradeId)` ile geri çekebilir (`CancelRevoked` event'i).
 Worker `CancelProposed` event'ini `cancel_proposal` alanına mirror'lar. Backend imza saklamaz; eski `POST /api/trades/propose-cancel` kaldırıldı.
 
 ### `POST /api/trades/:id/chargeback-ack`

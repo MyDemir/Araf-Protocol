@@ -59,6 +59,7 @@ export default function SettlementPreviewModal({
   lang,
   isLoading,
   error,
+  notice = null,
   makerShareBps,
   takerShareBps,
   previewData,
@@ -142,6 +143,8 @@ export default function SettlementPreviewModal({
             ? 'Araf bu oranı sizin yerinize belirlemez. Karşı taraf kabul ederse işlem bu oranla zincirde kapanır.'
             : 'Araf does not pick this split for you. If the counterparty accepts, the trade closes on-chain with it.'}
         </p>
+
+        {notice && <p className="mt-3 text-xs text-warning bg-warning/10 border border-warning/40 rounded-lg p-2" role="status" data-testid="settlement-review-notice">{notice}</p>}
 
         {error && <p className="mt-3 text-xs text-danger bg-danger/10 border border-danger/40 rounded-lg p-2" role="alert">{error}</p>}
 

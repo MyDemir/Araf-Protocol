@@ -21,6 +21,12 @@ const CRYPTO_TTL_SECONDS = Number(process.env.REFERENCE_TICKER_CRYPTO_TTL_SECOND
 const FIAT_TTL_SECONDS = Number(process.env.REFERENCE_TICKER_FIAT_TTL_SECONDS || 21600);
 const LAST_GOOD_TTL_SECONDS = Number(process.env.REFERENCE_TICKER_LAST_GOOD_TTL_SECONDS || 604800);
 
+// [TR] Bayat satır üst sınırı: son taze güncellemesinden bu kadar zaman geçen satır last-good'dan da düşer.
+//      Aksi halde her başarılı yenileme last-good TTL'ini yenileyip bayat satırı sonsuza dek taşırdı.
+// [EN] Staleness cap: a row older than this (by its original updatedAt) is dropped instead of being carried
+//      forward; otherwise each refresh would renew the last-good TTL and keep stale rows forever.
+const MAX_STALE_SECONDS = Number(process.env.REFERENCE_TICKER_MAX_STALE_SECONDS || 86400);
+
 const PAIRS = Object.freeze([
   "BTC/USDT",
   "BTC/USDC",
@@ -264,8 +270,18 @@ function buildCryptoItems(coinbaseRates, updatedAt) {
   return items.filter(Boolean);
 }
 
-function buildFiatAndStableItems({ fiatRates, coinbaseRates, updatedAt }) {
+function _olderIso(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  return Date.parse(a) <= Date.parse(b) ? a : b;
+}
+
+function buildFiatAndStableItems({ fiatRates, coinbaseRates, updatedAt, fiatUpdatedAt = null }) {
   const items = [];
+  // [TR] Fiat satırları fiat verisinin GERÇEK zamanını taşır; stablecoin/TRY satırları iki kaynaktan
+  //      türetildiği için ikisinin eskisini taşır (taze görünen eski veri üretmemek için).
+  const fiatTime = fiatUpdatedAt || updatedAt;
+  const stableTime = _olderIso(fiatUpdatedAt, updatedAt) || updatedAt;
   const usdTry = parsePositiveRate(fiatRates?.usdTry);
   const eurTry = parsePositiveRate(fiatRates?.eurTry);
   const gbpTry = parsePositiveRate(fiatRates?.gbpTry);
@@ -274,13 +290,13 @@ function buildFiatAndStableItems({ fiatRates, coinbaseRates, updatedAt }) {
   const usdcUsd = parsePositiveRate(coinbaseRates?.["USDC-USD"]);
 
   if (usdTry) {
-    items.push(createItem({ symbol: "USD/TRY", rate: usdTry, source: "frankfurter", sourceKind: SOURCE_KIND.FIAT, derived: false, updatedAt }));
+    items.push(createItem({ symbol: "USD/TRY", rate: usdTry, source: "frankfurter", sourceKind: SOURCE_KIND.FIAT, derived: false, updatedAt: fiatTime }));
   }
   if (eurTry) {
-    items.push(createItem({ symbol: "EUR/TRY", rate: eurTry, source: "derived:frankfurter", sourceKind: SOURCE_KIND.FIAT, derived: true, updatedAt }));
+    items.push(createItem({ symbol: "EUR/TRY", rate: eurTry, source: "derived:frankfurter", sourceKind: SOURCE_KIND.FIAT, derived: true, updatedAt: fiatTime }));
   }
   if (gbpTry) {
-    items.push(createItem({ symbol: "GBP/TRY", rate: gbpTry, source: "derived:frankfurter", sourceKind: SOURCE_KIND.FIAT, derived: true, updatedAt }));
+    items.push(createItem({ symbol: "GBP/TRY", rate: gbpTry, source: "derived:frankfurter", sourceKind: SOURCE_KIND.FIAT, derived: true, updatedAt: fiatTime }));
   }
 
   if (usdTry && usdtUsd) {
@@ -290,7 +306,7 @@ function buildFiatAndStableItems({ fiatRates, coinbaseRates, updatedAt }) {
       source: "derived:coinbase+frankfurter",
       sourceKind: SOURCE_KIND.STABLE_TRY,
       derived: true,
-      updatedAt,
+      updatedAt: stableTime,
     }));
   }
 
@@ -301,7 +317,7 @@ function buildFiatAndStableItems({ fiatRates, coinbaseRates, updatedAt }) {
       source: "derived:coinbase+frankfurter",
       sourceKind: SOURCE_KIND.STABLE_TRY,
       derived: true,
-      updatedAt,
+      updatedAt: stableTime,
     }));
   }
 
@@ -325,14 +341,6 @@ function toTickerPayload(items, generatedAt = nowIso()) {
     nonAuthoritative: true,
     canAffectSettlement: false,
   };
-}
-
-function markStale(payload) {
-  const generatedAt = nowIso();
-  return toTickerPayload(
-    (payload?.items || []).map((item) => ({ ...item, stale: true, updatedAt: item.updatedAt || generatedAt })),
-    generatedAt
-  );
 }
 
 function getRedisHandleSafe() {
@@ -382,7 +390,38 @@ async function cacheGet(key) {
   return null;
 }
 
-async function refreshReferenceTicker() {
+/**
+ * [TR] Satır bazında last-good: taze olmayan her sembol, son başarılı veriden `stale: true` ve ORİJİNAL
+ *      updatedAt ile doldurulur. Böylece bir kaynağın çökmesi yalnız o satırları bayatlatır; geri kalanlar
+ *      taze kalır ve bayat veri taze görünmez.
+ * [EN] Per-row last-good: any symbol missing from the fresh set is filled from the last good payload,
+ *      flagged stale and keeping its original updatedAt.
+ */
+function mergeWithLastGood(freshItems, lastGood, nowMs = Date.now()) {
+  const fresh = normalizeAndOrderItems(freshItems);
+  const have = new Set(fresh.map((item) => item.symbol));
+  const isWithinCap = (item) => {
+    const at = Date.parse(item.updatedAt || lastGood?.generatedAt || "");
+    return Number.isFinite(at) && nowMs - at <= MAX_STALE_SECONDS * 1000;
+  };
+  const fallback = (lastGood?.items || [])
+    .filter((item) => item && PAIRS.includes(item.symbol) && !have.has(item.symbol) && isWithinCap(item))
+    .map((item) => ({ ...item, stale: true, updatedAt: item.updatedAt || lastGood.generatedAt || nowIso() }));
+  return { items: normalizeAndOrderItems([...fresh, ...fallback]), freshCount: fresh.length };
+}
+
+let refreshInFlight = null;
+
+/** Tekil in-flight: eşzamanlı çağrılar aynı yenilemeyi paylaşır (dış API'lere çoklu istek yok). */
+function refreshReferenceTicker() {
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = _refreshReferenceTicker().finally(() => {
+    refreshInFlight = null;
+  });
+  return refreshInFlight;
+}
+
+async function _refreshReferenceTicker() {
   const generatedAt = nowIso();
 
   let cachedFiat = await cacheGet(CACHE_KEYS.fiat);
@@ -408,24 +447,26 @@ async function refreshReferenceTicker() {
     logger.warn(`[ReferenceTicker] Crypto refresh failed: ${err.message}`);
   }
 
-  const items = [
+  const freshItems = [
     ...buildCryptoItems(coinbaseRates, generatedAt),
-    ...buildFiatAndStableItems({ fiatRates, coinbaseRates, updatedAt: generatedAt }),
+    ...buildFiatAndStableItems({
+      fiatRates,
+      coinbaseRates,
+      updatedAt: generatedAt,
+      fiatUpdatedAt: fiatRates ? cachedFiat?.generatedAt || generatedAt : null,
+    }),
   ];
 
-  const payload = toTickerPayload(items, generatedAt);
-
-  if (payload.items.length > 0) {
-    await cacheSet(CACHE_KEYS.lastGood, payload, LAST_GOOD_TTL_SECONDS);
-    return payload;
-  }
-
   const lastGood = await cacheGet(CACHE_KEYS.lastGood);
-  if (lastGood?.items?.length) {
-    return markStale(lastGood);
+  const merged = mergeWithLastGood(freshItems, lastGood);
+  const payload = toTickerPayload(merged.items, generatedAt);
+
+  // Yalnız en az bir taze satır varsa last-good güncellenir (tamamen bayat veri "taze" sayılmasın).
+  if (merged.freshCount > 0) {
+    await cacheSet(CACHE_KEYS.lastGood, payload, LAST_GOOD_TTL_SECONDS);
   }
 
-  return toTickerPayload([], generatedAt);
+  return payload;
 }
 
 async function getReferenceTickerPayload() {
@@ -434,17 +475,20 @@ async function getReferenceTickerPayload() {
 
   if (cryptoCache?.coinbaseRates || fiatCache?.fiatRates) {
     const generatedAt = nowIso();
-    const payload = toTickerPayload([
-      ...buildCryptoItems(cryptoCache?.coinbaseRates || {}, generatedAt),
+    const cryptoAt = cryptoCache?.generatedAt || generatedAt;
+    const freshItems = [
+      ...buildCryptoItems(cryptoCache?.coinbaseRates || {}, cryptoAt),
       ...buildFiatAndStableItems({
         fiatRates: fiatCache?.fiatRates || null,
         coinbaseRates: cryptoCache?.coinbaseRates || {},
-        updatedAt: generatedAt,
+        updatedAt: cryptoAt,
+        fiatUpdatedAt: fiatCache?.fiatRates ? fiatCache.generatedAt || generatedAt : null,
       }),
-    ], generatedAt);
+    ];
 
-    if (payload.items.length > 0) {
-      return payload;
+    if (freshItems.length > 0) {
+      const lastGood = await cacheGet(CACHE_KEYS.lastGood);
+      return toTickerPayload(mergeWithLastGood(freshItems, lastGood).items, generatedAt);
     }
   }
 
@@ -455,4 +499,6 @@ module.exports = {
   CACHE_KEYS,
   refreshReferenceTicker,
   getReferenceTickerPayload,
+  _mergeWithLastGood: mergeWithLastGood,
+  MAX_STALE_SECONDS,
 };

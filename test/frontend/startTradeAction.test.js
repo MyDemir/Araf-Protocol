@@ -13,6 +13,7 @@ const makeDeps = (overrides = {}) => ({
     tokenAddress: '0x0000000000000000000000000000000000000002',
     remainingAmount: 100_000_000n,
     minFillAmount: 10_000_000n,
+    tier: 1,
   })),
   getAllowance: vi.fn(async () => 1_000_000_000n),
   approveToken: vi.fn(async () => undefined),
@@ -31,6 +32,7 @@ const makeDeps = (overrides = {}) => ({
   setCancelStatus: vi.fn(),
   setChargebackAccepted: vi.fn(),
   setCurrentView: vi.fn(),
+  hasPayoutProfile: true,
   confirmFn: vi.fn(() => true),
   sleep: vi.fn(async () => undefined),
   ...overrides,
@@ -47,6 +49,23 @@ const sellOrder = (overrides = {}) => ({
 const runAction = async (deps, order = sellOrder()) => buildStartTradeAction(deps)(order);
 
 describe('start trade action', () => {
+  it.each([[false], [null], [undefined]])('blocks fill without a saved payout profile (hasPayoutProfile=%s), fail-closed, before confirm and chain', async (flag) => {
+    const deps = makeDeps({ hasPayoutProfile: flag, openProfilePage: vi.fn() });
+    await runAction(deps);
+    expect(deps.showToast).toHaveBeenCalledWith('Fill in your payout profile first.', 'error');
+    expect(deps.openProfilePage).toHaveBeenCalledWith('account');
+    expect(deps.confirmFn).not.toHaveBeenCalled();
+    expect(deps.getOrder).not.toHaveBeenCalled();
+    expect(deps.fillSellOrder).not.toHaveBeenCalled();
+  });
+
+  it('blocks fill when the order owner has no saved payout profile', async () => {
+    const deps = makeDeps();
+    await runAction(deps, sellOrder({ ownerHasPayoutProfile: false }));
+    expect(deps.showToast).toHaveBeenCalledWith('The seller has no payout profile.', 'error');
+    expect(deps.fillSellOrder).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
   });
@@ -135,7 +154,8 @@ describe('start trade action', () => {
     await runAction(deps, sellOrder({ fillAmountRaw: '50000000' }));
 
     expect(deps.getAllowance).toHaveBeenCalledWith('0x0000000000000000000000000000000000000002', deps.address);
-    expect(deps.approveToken).toHaveBeenCalledWith('0x0000000000000000000000000000000000000002', 100_000_000n);
+    // Tier 1 taker bond 10%, itibar okunamadığı için muhafazakâr +3% => 13% of 50 USDT (tam tutar, 2x değil)
+    expect(deps.approveToken).toHaveBeenCalledWith('0x0000000000000000000000000000000000000002', 6_500_000n);
     expect(deps.fillSellOrder).toHaveBeenCalledTimes(1);
     expect(deps.fillSellOrder.mock.calls[0][0]).toBe(12n);
     expect(deps.fillSellOrder.mock.calls[0][1]).toBe(50_000_000n);
@@ -187,14 +207,139 @@ describe('start trade action', () => {
     expect(deps.fillSellOrder).not.toHaveBeenCalled();
   });
 
-  it('fails closed when fill result has no child trade id', async () => {
-    const deps = makeDeps({ fillSellOrder: vi.fn(async () => ({})) });
+  it('does not ask for a retry (double fill) when the fill is on chain but no child trade id can be found (F14)', async () => {
+    const deps = makeDeps({
+      fillSellOrder: vi.fn(async () => ({})),
+      authenticatedFetch: vi.fn(async () => ({ ok: true, json: async () => ({ trades: [] }) })),
+      fetchMyTrades: vi.fn(async () => undefined),
+    });
 
     await runAction(deps);
 
-    expect(deps.authenticatedFetch).not.toHaveBeenCalled();
+    expect(deps.fillSellOrder).toHaveBeenCalledTimes(1);
     expect(deps.setActiveTrade).not.toHaveBeenCalled();
-    expect(deps.showToast).toHaveBeenCalledWith('Failed to read child trade id from OrderFilled event. Please retry.', 'error');
+    expect(deps.showToast).toHaveBeenCalledWith(expect.stringContaining('Do not retry'), 'info');
+    expect(deps.showToast).not.toHaveBeenCalledWith(expect.stringContaining('Please retry'), 'error');
+    expect(deps.fetchMyTrades).toHaveBeenCalledTimes(1);
+    expect(deps.approveToken).not.toHaveBeenCalledWith(expect.anything(), 0n);
+  });
+
+  it('finds the child trade via /trades/my when the OrderFilled event could not be decoded (F14)', async () => {
+    const me = '0xabc0000000000000000000000000000000000000';
+    const trades = [
+      // aynı emirden başka bir kullanıcının doldurması ve başka tutar: elenmeli
+      { _id: 'x1', onchain_escrow_id: '5', parent_order_id: '12', taker_address: '0xother', financials: { crypto_amount: '100000000' } },
+      { _id: 'x2', onchain_escrow_id: '6', parent_order_id: '12', taker_address: me, financials: { crypto_amount: '1' } },
+      { _id: 'db-9', onchain_escrow_id: '9', parent_order_id: '12', taker_address: me.toUpperCase().replace('0X', '0x'), financials: { crypto_amount: '100000000' } },
+    ];
+    const deps = makeDeps({
+      fillSellOrder: vi.fn(async () => ({ receipt: {}, tradeId: null })),
+      authenticatedFetch: vi.fn(async (url) => (String(url).includes('trades/my')
+        ? { ok: true, json: async () => ({ trades }) }
+        : { ok: false, json: async () => ({}) })),
+    });
+
+    await runAction(deps);
+
+    expect(deps.fillSellOrder).toHaveBeenCalledTimes(1);
+    expect(deps.setActiveTrade).toHaveBeenCalledWith(expect.objectContaining({ id: 'db-9', onchainId: '9' }));
+    expect(deps.setCurrentView).toHaveBeenCalledWith('tradeRoom');
+    expect(deps.showToast).toHaveBeenCalledWith('Trade locked successfully!', 'success');
+  });
+
+  it('sets the room role from the order side after a fill: buy order filler is maker, sell order filler is taker (F4)', async () => {
+    const buyDeps = makeDeps({ setUserRole: vi.fn() });
+    await runAction(buyDeps, sellOrder({ side: 'BUY_CRYPTO' }));
+    expect(buyDeps.setUserRole).toHaveBeenCalledWith('maker');
+
+    const sellDeps = makeDeps({ setUserRole: vi.fn() });
+    await runAction(sellDeps, sellOrder({ side: 'SELL_CRYPTO' }));
+    expect(sellDeps.setUserRole).toHaveBeenCalledWith('taker');
+  });
+
+  it('sets the role in the pending-backend-sync branch as well (F4)', async () => {
+    const deps = makeDeps({
+      setUserRole: vi.fn(),
+      authenticatedFetch: vi.fn(async () => ({ ok: false, json: async () => ({}) })),
+    });
+    await runAction(deps, sellOrder({ side: 'BUY_CRYPTO' }));
+    expect(deps.setActiveTrade).toHaveBeenCalledWith(expect.objectContaining({ _pendingBackendSync: true }));
+    expect(deps.setUserRole).toHaveBeenCalledWith('maker');
+  });
+
+  it('approves exactly the taker bond when filling a sell order, using the wallet reputation (F14)', async () => {
+    // riskPoints == 0 && successful > 0 => -100 bps: tier 1 taker 1000 - 100 = 900 bps of 100 USDT
+    const deps = makeDeps({
+      getAllowance: vi.fn(async () => 0n),
+      getReputation: vi.fn(async () => ({ successful: 3n, riskPoints: 0n })),
+    });
+
+    await runAction(deps);
+
+    expect(deps.getReputation).toHaveBeenCalledWith(deps.address);
+    expect(deps.approveToken).toHaveBeenCalledTimes(1);
+    expect(deps.approveToken).toHaveBeenCalledWith('0x0000000000000000000000000000000000000002', 9_000_000n);
+  });
+
+  it('approves fill amount + maker bond when filling a buy order (F14)', async () => {
+    // tier 1 maker 800 bps, riskPoints > 0 => +300 => 1100 bps; 100 USDT + 11 USDT
+    const deps = makeDeps({
+      getAllowance: vi.fn(async () => 0n),
+      getReputation: vi.fn(async () => ({ successful: 1n, riskPoints: 5n })),
+    });
+
+    await runAction(deps, sellOrder({ side: 'BUY_CRYPTO' }));
+
+    expect(deps.approveToken).toHaveBeenCalledWith('0x0000000000000000000000000000000000000002', 111_000_000n);
+  });
+
+  it('floors the bond like the contract (no rounding up) (F14)', async () => {
+    // 900 bps of 33_333_333 = 2_999_999.97 -> 2_999_999
+    const deps = makeDeps({
+      getAllowance: vi.fn(async () => 0n),
+      getReputation: vi.fn(async () => ({ successful: 3n, riskPoints: 0n })),
+    });
+
+    await runAction(deps, sellOrder({ fillAmountRaw: '33333333' }));
+
+    expect(deps.approveToken).toHaveBeenCalledWith('0x0000000000000000000000000000000000000002', 2_999_999n);
+  });
+
+  it('needs no approval for a tier 0 taker (bond is zero) and skips approve entirely (F14)', async () => {
+    const deps = makeDeps({
+      getOrder: vi.fn(async () => ({ tokenAddress: '0x0000000000000000000000000000000000000002', remainingAmount: 100_000_000n, minFillAmount: 1n, tier: 0 })),
+      getAllowance: vi.fn(async () => 0n),
+    });
+
+    await runAction(deps);
+
+    expect(deps.approveToken).not.toHaveBeenCalled();
+    expect(deps.fillSellOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to the highest conservative rate when the order tier is unknown (F14)', async () => {
+    const deps = makeDeps({
+      getOrder: vi.fn(async () => ({ tokenAddress: '0x0000000000000000000000000000000000000002', remainingAmount: 100_000_000n, minFillAmount: 1n })),
+      getAllowance: vi.fn(async () => 0n),
+    });
+
+    await runAction(deps);
+
+    expect(deps.approveToken).toHaveBeenCalledWith('0x0000000000000000000000000000000000000002', 13_000_000n);
+  });
+
+  it('tells the user when window.confirm is unavailable instead of silently returning (F22)', async () => {
+    const original = window.confirm;
+    // eslint-disable-next-line no-global-assign
+    window.confirm = undefined;
+    try {
+      const deps = makeDeps({ confirmFn: undefined });
+      await runAction(deps);
+      expect(deps.getOrder).not.toHaveBeenCalled();
+      expect(deps.showToast).toHaveBeenCalledWith(expect.stringContaining('Confirmation dialogs are unavailable'), 'error');
+    } finally {
+      window.confirm = original;
+    }
   });
 
   it('uses pending backend sync state when backend record is not ready without fake ids', async () => {
@@ -229,7 +374,7 @@ describe('start trade action', () => {
     }));
   });
 
-  it('rolls allowance back to zero when a failure occurs after approve', async () => {
+  it('does not request an automatic approve(0) rollback when a failure occurs after approve (F14)', async () => {
     const deps = makeDeps({
       getAllowance: vi.fn(async () => 0n),
       fillSellOrder: vi.fn(async () => { throw new Error('fill failed'); }),
@@ -237,8 +382,9 @@ describe('start trade action', () => {
 
     await runAction(deps);
 
-    expect(deps.approveToken).toHaveBeenNthCalledWith(1, '0x0000000000000000000000000000000000000002', 200_000_000n);
-    expect(deps.approveToken).toHaveBeenNthCalledWith(2, '0x0000000000000000000000000000000000000002', 0n);
+    expect(deps.approveToken).toHaveBeenCalledTimes(1);
+    expect(deps.approveToken).toHaveBeenCalledWith('0x0000000000000000000000000000000000000002', 13_000_000n);
+    expect(deps.approveToken).not.toHaveBeenCalledWith(expect.anything(), 0n);
     expect(deps.showToast).toHaveBeenCalledWith('fill failed', 'error');
   });
 
@@ -249,5 +395,48 @@ describe('start trade action', () => {
     expect(appSource).not.toMatch(/const\s+handleStartTrade\s*=\s*async/);
     expect(appSource).not.toContain('childListingRef');
     expect(appSource).not.toContain('trades/by-escrow/${onchainTradeId}');
+  });
+});
+
+describe('item 6: fill reverts caused by the order owner ban are translated', () => {
+  it('SELL fill + MakerBanActive explains that the order owner (seller) is restricted', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const err = Object.assign(new Error('x'), { arafErrorName: 'MakerBanActive', shortMessage: 'Your restriction is active; you cannot open orders now.' });
+    const deps = makeDeps({ fillSellOrder: vi.fn(async () => { throw err; }) });
+    await buildStartTradeAction(deps)({ id: 'o', onchainId: 12, crypto: 'USDT', side: 'SELL_CRYPTO' });
+    expect(deps.showToast).toHaveBeenCalledWith(expect.stringContaining('order owner (seller) is currently restricted'), 'error');
+  });
+});
+
+describe('item 13: findFilledTradeViaBackend paginates /trades/my', () => {
+  const me = '0xabc0000000000000000000000000000000000000';
+  const filler = (i) => ({ _id: `f${i}`, onchain_escrow_id: String(1000 + i), parent_order_id: '99', taker_address: '0xother', financials: { crypto_amount: '1' } });
+  const page = (n) => Array.from({ length: 50 }, (_, i) => filler(n * 50 + i));
+
+  it('finds the trade on page 3 (not only the first page)', async () => {
+    const target = { _id: 'db-77', onchain_escrow_id: '77', parent_order_id: '12', taker_address: me, financials: { crypto_amount: '100000000' } };
+    const pages = { 1: page(0), 2: page(1), 3: [target] };
+    const authenticatedFetch = vi.fn(async (url) => {
+      const m = String(url).match(/trades\/my\?page=(\d+)&limit=50/);
+      if (!m) return { ok: false, json: async () => ({}) };
+      return { ok: true, json: async () => ({ trades: pages[Number(m[1])] || [], total: 101, page: Number(m[1]), limit: 50 }) };
+    });
+    const deps = makeDeps({ fillSellOrder: vi.fn(async () => ({ receipt: {}, tradeId: null })), authenticatedFetch });
+    await runAction(deps);
+    expect(deps.setActiveTrade).toHaveBeenCalledWith(expect.objectContaining({ id: 'db-77', onchainId: '77' }));
+    const calls = authenticatedFetch.mock.calls.map((c) => String(c[0]));
+    expect(calls.some((u) => u.includes('page=3'))).toBe(true);
+  });
+
+  it('is bounded: never requests more than the page cap per attempt, then asks the user not to retry', async () => {
+    const authenticatedFetch = vi.fn(async (url) => (String(url).includes('trades/my')
+      ? { ok: true, json: async () => ({ trades: page(0), total: 100000, page: 1, limit: 50 }) }
+      : { ok: false, json: async () => ({}) }));
+    const deps = makeDeps({ fillSellOrder: vi.fn(async () => ({ receipt: {}, tradeId: null })), authenticatedFetch });
+    await runAction(deps);
+    const tradeCalls = authenticatedFetch.mock.calls.filter((c) => String(c[0]).includes('trades/my'));
+    expect(tradeCalls.length).toBeLessThanOrEqual(10 * 6);
+    expect(tradeCalls.length).toBeGreaterThan(6);
+    expect(deps.showToast).toHaveBeenCalledWith(expect.stringContaining('Do not retry'), 'info');
   });
 });

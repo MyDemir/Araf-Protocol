@@ -154,6 +154,19 @@ describe('AppModals side-aware behaviors', () => {
     expect(screen.getByRole('button', { name: 'Kripto Alıyor' })).toBeInTheDocument();
   });
 
+  it('locks create, shows the profile-required message and links to the profile page when no saved profile', async () => {
+    const user = userEvent.setup();
+    const openProfilePage = vi.fn();
+    const setShowMakerModal = vi.fn();
+    const modals = buildAppModals(makeCtx({ profileTab: 'ayarlar', showProfileModal: false, isPayoutProfileGateBlocked: true, openProfilePage, setShowMakerModal }));
+    render(<div>{modals.renderMakerModal()}</div>);
+    expect(screen.getByRole('button', { name: /Open Sell Order/i })).toBeDisabled();
+    expect(screen.getByTestId('create-needs-profile')).toHaveTextContent('Fill in your payout profile first.');
+    await user.click(screen.getByRole('button', { name: 'Open profile page' }));
+    expect(openProfilePage).toHaveBeenCalledWith('account');
+    expect(setShowMakerModal).toHaveBeenCalledWith(false);
+  });
+
   it('keeps submit disabled and readable when maker validation error exists', () => {
     const modals = buildAppModals(makeCtx({
       profileTab: 'ayarlar',
@@ -235,5 +248,20 @@ describe('AppModals side-aware behaviors', () => {
   it('no longer ships a duplicate profile modal (Profile Center page is the only profile surface)', () => {
     const modals = buildAppModals(makeCtx({ showMakerModal: false }));
     expect(modals.renderProfileModal).toBeUndefined();
+  });
+
+  it('item 9: maker modal shows "fee unknown" when the protocol fee config is missing, and the fee when known', () => {
+    const unknown = buildAppModals(makeCtx({ profileTab: 'ayarlar', showProfileModal: false, protocolFeeConfig: null }));
+    const { unmount } = render(<div>{unknown.renderMakerModal()}</div>);
+    expect(screen.getByTestId('maker-fee-unknown')).toBeInTheDocument();
+    unmount();
+    const nullFee = buildAppModals(makeCtx({ profileTab: 'ayarlar', showProfileModal: false, protocolFeeConfig: { makerFeeBps: null, takerFeeBps: null } }));
+    const second = render(<div>{nullFee.renderMakerModal()}</div>);
+    expect(screen.getByTestId('maker-fee-unknown')).toBeInTheDocument();
+    second.unmount();
+    const known = buildAppModals(makeCtx({ profileTab: 'ayarlar', showProfileModal: false, protocolFeeConfig: { makerFeeBps: 10, takerFeeBps: 10 } }));
+    render(<div>{known.renderMakerModal()}</div>);
+    expect(screen.queryByTestId('maker-fee-unknown')).not.toBeInTheDocument();
+    expect(screen.getByText(/Protocol fee is taken at settlement: 0\.1%/)).toBeInTheDocument();
   });
 });

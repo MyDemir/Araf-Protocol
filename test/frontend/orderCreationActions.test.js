@@ -41,6 +41,7 @@ const makeDeps = (overrides = {}) => {
     canonicalizePayoutProfileDraft: vi.fn((v) => ({ rail: v.rail || 'TR_IBAN', country: v.country || 'TR' })),
     payoutProfileDraft: { rail: 'TR_IBAN', country: 'TR' },
     paymentRiskConfig: { TR: { TR_IBAN: { riskLevel: 'MEDIUM', enabled: true } } },
+    hasPayoutProfile: true,
     ...overrides,
   };
 };
@@ -48,6 +49,15 @@ const makeDeps = (overrides = {}) => {
 const runAction = async (deps) => buildCreateOrderAction(deps)();
 
 describe('order creation actions', () => {
+  it.each([[false], [null], [undefined]])('blocks order creation without a saved payout profile (hasPayoutProfile=%s), fail-closed', async (flag) => {
+    const deps = makeDeps({ hasPayoutProfile: flag, openProfilePage: vi.fn() });
+    await runAction(deps);
+    expect(deps.showToast).toHaveBeenCalledWith('Fill in your payout profile first.', 'error');
+    expect(deps.openProfilePage).toHaveBeenCalledWith('account');
+    expect(deps.createSellOrder).not.toHaveBeenCalled();
+    expect(deps.approveToken).not.toHaveBeenCalled();
+  });
+
   it('SELL_CRYPTO calls the createSellOrder path with raw side-driven contract values', async () => {
     const deps = makeDeps({ state: { makerSide: 'SELL_CRYPTO' } });
 
@@ -72,6 +82,63 @@ describe('order creation actions', () => {
     expect(deps.getFormState().makerSide).toBe('BUY_CRYPTO');
     expect(deps.createBuyOrder).toHaveBeenCalledTimes(1);
     expect(deps.createSellOrder).not.toHaveBeenCalled();
+  });
+
+  it('approves exactly amount + maker bond for a sell order (no 2x over-approval) (F14)', async () => {
+    // tier 1 maker 8%, no reputation known => conservative +3% => 11% of 100 USDT
+    const deps = makeDeps({ getAllowance: vi.fn(async () => 0n) });
+
+    await runAction(deps);
+
+    expect(deps.approveToken).toHaveBeenCalledTimes(1);
+    expect(deps.approveToken).toHaveBeenCalledWith('0x0000000000000000000000000000000000000001', 111_000_000n);
+  });
+
+  it('approves exactly the taker bond for a buy order, using reputation when provided (F14)', async () => {
+    // tier 1 taker 10%, riskPoints 0 and successful > 0 => -1% => 9% of 100 USDT
+    const deps = makeDeps({
+      state: { makerSide: 'BUY_CRYPTO' },
+      getAllowance: vi.fn(async () => 0n),
+      getReputation: vi.fn(async () => ({ successful: 4n, riskPoints: 0n })),
+    });
+
+    await runAction(deps);
+
+    expect(deps.approveToken).toHaveBeenCalledWith('0x0000000000000000000000000000000000000001', 9_000_000n);
+    expect(deps.createBuyOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not request approve(0) when the create call fails after approve (F14)', async () => {
+    const deps = makeDeps({
+      getAllowance: vi.fn(async () => 0n),
+      createSellOrder: vi.fn(async () => { throw new Error('create failed'); }),
+    });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await runAction(deps);
+
+    expect(deps.approveToken).toHaveBeenCalledTimes(1);
+    expect(deps.approveToken).not.toHaveBeenCalledWith(expect.anything(), 0n);
+    expect(deps.showToast).toHaveBeenCalledWith('create failed', 'error');
+  });
+
+  it('parses amounts as decimal strings: tiny and huge values never go through exponent notation (F22)', async () => {
+    const tiny = makeDeps({ state: { makerAmount: '0.000001', makerRate: '34', makerMinLimit: '' } });
+    await runAction(tiny);
+    expect(tiny.createSellOrder.mock.calls[0][1]).toBe(1n);
+
+    // 1e-7 tokens is below 6 decimals and (as text) is rejected instead of being mis-parsed
+    const exp = makeDeps({ state: { makerAmount: '1e-7', makerRate: '34', makerMinLimit: '' } });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await runAction(exp);
+    expect(exp.createSellOrder).not.toHaveBeenCalled();
+    expect(exp.showToast).toHaveBeenCalledWith(expect.stringContaining('valid amount'), 'error');
+  });
+
+  it('keeps every fractional digit that floating point would round away (F22)', async () => {
+    const deps = makeDeps({ state: { makerAmount: '123.456789', makerRate: '34', makerMinLimit: '', makerTier: 4 } });
+    await runAction(deps);
+    expect(deps.createSellOrder.mock.calls[0][1]).toBe(123_456_789n);
   });
 
   it('preserves tier validation thresholds including unrestricted tier 4 behavior', () => {

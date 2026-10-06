@@ -48,6 +48,89 @@ Full clean Tier 2 lifecycle (create + fill + report + release): **991,978 → 80
 | `finalizeEpochToken` | 58,688 | 58,688 | +0 | +0.0% |
 | `claim` | 126,626 | 126,626 | +0 | +0.0% |
 
+## Security fixes + library split (2026-09, fix/kontrat-guvenlik)
+
+Changes: G1 (terminal fee snapshot 3 → 2 slots, `uint128` fees), G2 (vault intent handshake in transient storage),
+G3 (rewards durations are constants), G4 (treasury/code-length cache), G9 (`unchecked ++i`), G10 (single
+`maxAllowedTier` write). Security fixes add work on some paths: K3/K6 read the effective tier of both order owner
+and filler at fill time (cold reputation/threshold slots of a second wallet, ≈+19k on sell fills), and the
+reputation/payout logic now runs in linked libraries (`ArafReputationLib`, `ArafSettlementLib`) via DELEGATECALL
+(≈2.6k cold-address + ABI copy per call). Terminal paths with fees still net ≈-18k thanks to G1; zero-fee terminal
+paths (LOCKED mutual cancel, burn) pay the library overhead without a G1 saving.
+
+Güvenlik düzeltmeleri bazı yollara iş ekler: K3/K6 fill anında hem order sahibinin hem filler'ın efektif tier'ını
+okur (ikinci cüzdanın soğuk slotları, satış fill'inde ≈+19k); reputation/payout mantığı DELEGATECALL ile linkli
+library'lerde çalışır (çağrı başına ≈2,6k). Ücretli terminal yollar G1 sayesinde net ≈-18k.
+
+| Operation | Before | After | Δ gas | Δ % |
+|---|---:|---:|---:|---:|
+| `createSellOrder_t0` | 255,028 | 255,330 | +302 | +0.1% |
+| `fillSellOrder_t0` | 201,383 | 203,737 | +2,354 | +1.2% |
+| `reportPayment_t0` | 37,696 | 37,844 | +148 | +0.4% |
+| `releaseFunds_t0` | 212,134 | 193,967 | -18,167 | -8.6% |
+| `createSellOrder_t2` | 277,580 | 277,883 | +303 | +0.1% |
+| `fillSellOrder_t2` | 254,271 | 273,545 | +19,274 | +7.6% |
+| `reportPayment_t2` | 37,696 | 37,844 | +148 | +0.4% |
+| `releaseFunds_t2` | 240,382 | 221,994 | -18,388 | -7.6% |
+| `createBuyOrder_t2` | 262,653 | 262,940 | +287 | +0.1% |
+| `fillBuyOrder_t2` | 268,934 | 276,760 | +7,826 | +2.9% |
+| `fillSellOrder_t2_partial` | 261,293 | 280,566 | +19,273 | +7.4% |
+| `pingTakerForChallenge` | 53,841 | 53,893 | +52 | +0.1% |
+| `challengeTrade` | 36,193 | 36,275 | +82 | +0.2% |
+| `proposeSettlement` | 144,813 | 147,015 | +2,202 | +1.5% |
+| `acceptSettlement` | 295,202 | 276,924 | -18,278 | -6.2% |
+| `pingMaker` | 53,861 | 53,915 | +54 | +0.1% |
+| `autoRelease` | 292,948 | 274,702 | -18,246 | -6.2% |
+| `proposeOrApproveCancel_first` | 35,959 | 35,986 | +27 | +0.1% |
+| `proposeOrApproveCancel_final` | 208,780 | 219,217 | +10,437 | +5.0% |
+| `expirePaymentWindow` | 245,105 | 228,119 | -16,986 | -6.9% |
+| `burnExpired` | 226,772 | 229,653 | +2,881 | +1.3% |
+| `recordTradeOutcome_single` | 149,406 | 142,975 | -6,431 | -4.3% |
+| `recordTradeOutcomes_batch10` | 601,666 | 573,356 | -28,310 | -4.7% |
+| `recordTradeOutcomes_perTrade` | 60,167 | 57,336 | -2,831 | -4.7% |
+| `finalizeEpochToken` | 58,688 | 54,461 | -4,227 | -7.2% |
+| `claim` | 126,626 | 120,223 | -6,403 | -5.1% |
+
+## K2(B) "ping lapses" (2026-10, fix/kontrat-k2-ping-duser)
+
+`challengeTrade` is maker-only again and gets one extra timestamp comparison (`ChallengeWindowExpired`);
+`pingMaker` checks the maker ping's age before `ConflictingPingPath`. No new storage. Other rows move by
+±22–220 gas only because the function dispatcher layout shifted (new `MAKER_CHALLENGE_WINDOW` getter).
+ArafEscrow runtime bytecode: 22,175 → 22,061 bytes (EIP-170 limit 24,576).
+
+`challengeTrade` yeniden yalnız maker'a açık ve tek bir ek zaman karşılaştırması yapar; `pingMaker`
+`ConflictingPingPath`'ten önce maker pinginin yaşına bakar. Yeni storage yok. Diğer satırlardaki ±22–220 gaz
+fark yalnız dispatcher yerleşiminin kaymasındandır.
+
+| Operation | Before | After | Δ gas | Δ % |
+|---|---:|---:|---:|---:|
+| `createSellOrder_t0` | 255,330 | 255,243 | -87 | -0.0% |
+| `fillSellOrder_t0` | 203,737 | 203,737 | +0 | +0.0% |
+| `reportPayment_t0` | 37,844 | 37,866 | +22 | +0.1% |
+| `releaseFunds_t0` | 193,967 | 193,989 | +22 | +0.0% |
+| `createSellOrder_t2` | 277,883 | 277,796 | -87 | -0.0% |
+| `fillSellOrder_t2` | 273,545 | 273,327 | -218 | -0.1% |
+| `reportPayment_t2` | 37,844 | 37,866 | +22 | +0.1% |
+| `releaseFunds_t2` | 221,994 | 222,016 | +22 | +0.0% |
+| `createBuyOrder_t2` | 262,940 | 262,853 | -87 | -0.0% |
+| `fillBuyOrder_t2` | 276,760 | 276,564 | -196 | -0.1% |
+| `fillSellOrder_t2_partial` | 280,566 | 280,348 | -218 | -0.1% |
+| `pingTakerForChallenge` | 53,893 | 53,915 | +22 | +0.0% |
+| `challengeTrade` | 36,275 | 36,409 | +134 | +0.4% |
+| `proposeSettlement` | 147,015 | 147,037 | +22 | +0.0% |
+| `acceptSettlement` | 276,924 | 276,946 | +22 | +0.0% |
+| `pingMaker` | 53,915 | 53,954 | +39 | +0.1% |
+| `autoRelease` | 274,702 | 274,724 | +22 | +0.0% |
+| `proposeOrApproveCancel_first` | 35,986 | 36,008 | +22 | +0.1% |
+| `proposeOrApproveCancel_final` | 219,217 | 219,239 | +22 | +0.0% |
+| `expirePaymentWindow` | 228,119 | 228,141 | +22 | +0.0% |
+| `burnExpired` | 229,653 | 229,675 | +22 | +0.0% |
+| `recordTradeOutcome_single` | 142,975 | 142,975 | +0 | +0.0% |
+| `recordTradeOutcomes_batch10` | 573,356 | 573,356 | +0 | +0.0% |
+| `recordTradeOutcomes_perTrade` | 57,336 | 57,336 | +0 | +0.0% |
+| `finalizeEpochToken` | 54,461 | 54,461 | +0 | +0.0% |
+| `claim` | 120,223 | 120,223 | +0 | +0.0% |
+
 ## Considered and not done / Değerlendirilip yapılmayanlar
 
 - Shrinking `ReputationUpdated`: saves ≈2.5k gas per event but the backend would then need an RPC read per

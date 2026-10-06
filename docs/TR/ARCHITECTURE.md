@@ -145,7 +145,7 @@ Kontrat, V3’ün tek authoritative state machine yüzeyidir. Aşağıdaki fonks
 | Surface | Fonksiyonlar | Mimari anlam |
 |---|---|---|
 | Parent-order write surface | `createSellOrder`, `fillSellOrder`, `cancelSellOrder`, `createBuyOrder`, `fillBuyOrder`, `cancelBuyOrder` | Kamusal market ve fill primitive’i |
-| Child-trade lifecycle write surface | `reportPayment`, `releaseFunds`, `challengeTrade`, `autoRelease`, `burnExpired`, `proposeOrApproveCancel`, `expirePaymentWindow` | Gerçek escrow lifecycle ve ekonomik state geçişleri |
+| Child-trade lifecycle write surface | `reportPayment`, `releaseFunds`, `challengeTrade`, `autoRelease`, `burnExpired`, `proposeOrApproveCancel`, `revokeCancel`, `expirePaymentWindow`, `proposeSettlement`, `acceptSettlement(tradeId, expectedProposalId)` | Gerçek escrow lifecycle ve ekonomik state geçişleri |
 | Liveness / yardımcı write surface | `registerWallet`, `pingMaker`, `pingTakerForChallenge`, `decayReputation` | Entry gate, liveness ve clean-slate bakım yüzeyi |
 | Governance / mutable admin surface | `setTreasury`, `setFeeConfig`, `setCooldownConfig`, `setTokenConfig`, `pause`, `unpause` | Runtime policy ve governance kontrol yüzeyi |
 | Read surface | `getOrder`, `getTrade`, `getReputation`, `getFeeConfig`, `getCooldownConfig`, `getCurrentAmounts`, `antiSybilCheck`, `getCooldownRemaining`, `getFirstSuccessfulTradeAt` | Doğrulama, görünürlük ve runtime read yüzeyi |
@@ -157,6 +157,7 @@ Kontrat, V3’ün tek authoritative state machine yüzeyidir. Aşağıdaki fonks
 - `createBuyOrder`
 - `fillBuyOrder`
 - `cancelBuyOrder`
+- Fill anında hem filler'ın hem order sahibinin efektif tier'ı order tier'ına yetmeli (`TierNotAllowed`); maker rolündeki taraf için aktif ban `MakerBanActive` ile, taker rolündeki için giriş kapısı (ban/yaş/dust/cooldown) ile yeniden kontrol edilir. Create sonrası ceza alan sahibin açık order'ı böylece doldurulamaz.
 
 ### 3.2 Child-trade lifecycle write surface
 - `reportPayment`
@@ -164,7 +165,14 @@ Kontrat, V3’ün tek authoritative state machine yüzeyidir. Aşağıdaki fonks
 - `challengeTrade`
 - `autoRelease`
 - `burnExpired`
-- `proposeOrApproveCancel`
+- `proposeOrApproveCancel` / `revokeCancel`
+- `proposeSettlement` / `acceptSettlement(tradeId, expectedProposalId)` / `rejectSettlement` / `withdrawSettlement` / `expireSettlement`
+
+> **Bytecode ayrımı (EIP-170):** `ArafEscrow` iki external library'ye linklenir: `ArafReputationLib` (sonuç kaydı, risk puanı,
+> ban/tier tavanı, reputation politika setter doğrulaması) ve `ArafSettlementLib` (terminal payout + treasury hook'ları,
+> settlement teklif yönetimi). Library'ler DELEGATECALL ile escrow storage'ında çalışır; event'ler escrow adresinden aynı
+> imzalarla yayınlanır, yetki kontrolleri escrow'da kalır, adresler deploy anında bytecode'a gömülür (upgrade yolu yok).
+> Deploy sırası: `ArafReputationLib` → `ArafSettlementLib` → linkli `ArafEscrow` (`contracts/scripts/deploy.js`).
 
 ### 3.3 Liveness / yardımcı write surface
 - `registerWallet`
@@ -329,10 +337,11 @@ stateDiagram-v2
 
 ### 7.1 `PAID` sonrası çözüm yolları
 - **Normal kapanış:** maker `releaseFunds`
-- **Dispute hattı:** maker `pingTakerForChallenge` → bekleme → `challengeTrade`
-- **Liveness hattı:** taker `pingMaker` → bekleme → `autoRelease`
-- **Mutual cancel:** her iki taraf kendi `proposeOrApproveCancel(tradeId)` işlemini gönderir (ayrı imza yok)
-- **Ödeme penceresi aşımı:** LOCKED'da 48 saat içinde ödeme bildirilmezse taraflardan biri `expirePaymentWindow` çağırır; maker tam iade alır, taker bond'undan %2 liveness cezası + negatif itibar sinyali
+- **Dispute hattı:** maker `pingTakerForChallenge` → 24 saat cevap penceresi → `challengeTrade` (yalnız maker). Ping bir iddiadır: maker challenge'ı `[ping+24sa, ping+48sa)` aralığında (`MAKER_CHALLENGE_WINDOW` = 24 saat, sabit) açmazsa ping **düşer**; `ping+48sa` saniyesinden itibaren `challengeTrade` `ChallengeWindowExpired` ile reddedilir. Maker trade başına tek ping atabilir (`AlreadyPinged`).
+- **Liveness hattı:** taker `pingMaker` (`paidAt + GRACE_PERIOD` sonrası) → 24 saat → `autoRelease` (`AUTO_RELEASE_PENALTY` dahil). Maker'ın pingi geçerliyken (`ping+48sa` öncesi) `pingMaker` `ConflictingPingPath` ile reddedilir; ping düştüğü saniyeden itibaren açılır. Böylece ping atıp susan maker PAID trade'i süresiz kilitleyemez. Ters yönde, taker `pingMaker` attıysa maker'ın `pingTakerForChallenge`'ı `ConflictingPingPath` ile reddedilir.
+- **Maker her zaman release edebilir:** `PAID`'den `releaseFunds` ping'den bağımsız her an açıktır (clean release); `CHALLENGED`'dan release `DISPUTED_RELEASE` + maker dispute kaybıdır.
+- **Mutual cancel:** her iki taraf kendi `proposeOrApproveCancel(tradeId)` işlemini gönderir (ayrı imza yok); ikinci onay gelmeden önce taraf kendi onayını `revokeCancel(tradeId)` ile geri çekebilir (`CancelRevoked`)
+- **Ödeme penceresi aşımı:** `reportPayment` yalnız `lockedAt + 48 saat`'ten önce kabul edilir (sınır saniyesinde `PaymentWindowClosed`). LOCKED'da 48 saat içinde ödeme bildirilmezse taraflardan biri `expirePaymentWindow` çağırır; maker tam iade alır, taker bond'undan %2 liveness cezası + negatif itibar sinyali
 - **Terminal burn:** challenge sonrası süre dolunca `burnExpired`
 
 ### 7.2 Bleeding bileşenleri
@@ -348,7 +357,7 @@ Kesin zaman çizelgesi (tüm süreler `challengedAt`'ten itibaren, `getCurrentAm
 | 48–240 saat | maker bond | saatte %0,26 | ≈ %49,9 |
 | 48–240 saat | taker bond | saatte %0,42 | ≈ %80,6 |
 | 144–240 saat | ana para (kripto) | saatte %0,68 | ≈ %65,3 |
-| 240. saat | `burnExpired` çağrılabilir; kalan her şey hazineye gider | — | %100 |
+| 240. saat | `burnExpired` çağrılabilir; trade'in tüm bakiyesi (erimiş kısım dahil: `cryptoAmount + makerBond + takerBond`) hazineye gider | — | %100 |
 
 `MAX_BLEEDING` (240 saat) challenge'dan itibaren toplam süredir, ana paranın erime süresi değildir: ana para
 yalnız son 96 saatte erir; bu yüzden yakılma anına kadar yaklaşık %34,7'si uzlaşmaya konu olarak durur.
@@ -356,16 +365,19 @@ yalnız son 96 saatte erir; bu yüzden yakılma anına kadar yaklaşık %34,7'si
 `getCurrentAmounts(tradeId)`, o anki ekonomik bakiyeyi kanonik olarak çıkarır.
 
 ### 7.3 Challenge ve liveness ping semantiği
-- Ping yolları birbirini dışlayan şekilde tasarlanır (conflicting path koruması).
+- Ping yolları birbirini dışlayan şekilde tasarlanır (conflicting path koruması). İstisna: maker pingi `challengePingedAt + 24 saat + MAKER_CHALLENGE_WINDOW` anında düşer; o saniyeden itibaren `challengeTrade` `ChallengeWindowExpired` verir ve taker `pingMaker` çağırabilir.
 - Bekleme pencereleri state-guard ile enforce edilir.
 
 ### 7.4 Burn semantiği
 - `burnExpired` permissionless pattern’e yakındır: challenge süresi dolan state’i finalize eder.
-- Kalan ekonomik değer treasury yönüne gider.
+- Trade'in escrow'daki tüm bakiyesi (erimiş kısım dahil) treasury'ye gider; burn sonrası escrow'da o trade'e ait bakiye kalmaz. `EscrowBurned.burnedAmount` bu toplamdır; `burnExpired` `BleedingDecayed` yaymaz.
 
 ### 7.5 Cancel semantiği
 - `proposeOrApproveCancel` onayı msg.sender ile kanıtlanır; onaylar yalnız verildikleri state için geçerlidir (`reportPayment` / `challengeTrade` sıfırlar).
-- Her iki taraf imzası tamamlanmadan cancel finalize edilmez.
+- Her iki taraf imzası tamamlanmadan cancel finalize edilmez; tamamlanmadan önce verilen onay `revokeCancel` ile geri alınabilir.
+
+### 7.6 Settlement kabul semantiği
+- `acceptSettlement(tradeId, expectedProposalId)`: karşı taraf gördüğü teklifin `id`'sini verir. Teklif sahibi withdraw + yeniden teklif ile oranı değiştirirse `id` değişir ve kabul `SettlementProposalMismatch` ile revert eder.
 
 <details>
 <summary>📄 Teknik notlar</summary>
@@ -374,10 +386,10 @@ yalnız son 96 saatte erir; bu yüzden yakılma anına kadar yaklaşık %34,7'si
 - taker bond decay  
 - belirli eşik sonrası crypto side decay  
 - `getCurrentAmounts(tradeId)`, o anki ekonomik bakiyeyi kanonik olarak çıkarır.  
-- Ping yolları birbirini dışlayan şekilde tasarlanır (conflicting path koruması).  
+- Ping yolları birbirini dışlayan şekilde tasarlanır (conflicting path koruması); maker pingi `ping + 48 saat`te düşer.  
 - Bekleme pencereleri state-guard ile enforce edilir.  
 - `burnExpired` permissionless pattern’e yakındır: challenge süresi dolan state’i finalize eder.  
-- Kalan ekonomik değer treasury yönüne gider.  
+- Trade'in escrow'daki tüm bakiyesi (erimiş kısım dahil) treasury'ye gider.  
 - `proposeOrApproveCancel` onayı msg.sender ile kanıtlanır; onaylar yalnız verildikleri state için geçerlidir (`reportPayment` / `challengeTrade` sıfırlar).  
 - Her iki taraf imzası tamamlanmadan cancel finalize edilmez.
 
@@ -627,6 +639,13 @@ flowchart TD
 - Token tek başına yeterli değildir; route tekrar canlı trade state kontrolü yapar (`LOCKED/PAID/CHALLENGED` penceresi).
 - Snapshot-first politika: payout snapshot yoksa controlled hata döner; current profile fallback kapalıdır.
 - Hassas PII yanıtları `Cache-Control: no-store` / `Pragma: no-cache` ile döndürülür.
+
+
+### 12.4.1 Ödeme profili kapısı ve tek seferlik snapshot
+- İlke: ödeme profilini doldurmayan taraf işleme girmemeli; snapshot işlem kilitlendiği anda alınır ve işlem süresince değiştirilemez.
+- Snapshot TEK SEFERLİDİR: `_captureLockedTradeSnapshot`, yalnız `payout_snapshot.captured_at` boşsa, atomik koşullu güncellemeyle yazar. Worker replay, DLQ re-drive ya da aynı `OrderFilled`'ın tekrar işlenmesi mevcut snapshot'ı yeniden yazmaz; eksik (`is_complete=false`) snapshot da sonradan "tamamlanmaz".
+- Kapı (emir oluşturma/doldurma için "kayıtlı ödeme profili yok → işlem yok") YALNIZ arayüz ve API düzeyindedir: karar `/api/auth/me.hasPayoutProfile` (kayıtlı profil; taslak form değil) ve pazar listesindeki `owner_has_payout_profile` boolean'ına dayanır, durum bilinmiyorsa kapalıdır. Kontrat doğrudan çağrılarak bu kapı ATLANABİLİR.
+- Asıl güvence kuraldır: **eksik snapshot → PII kapalı, işlem ödeme penceresinde çözülür.** Profili olmayan taraf için snapshot eksik kalır, `/api/pii/*` erişimi açılmaz ve işlem ödeme penceresi içinde (zamanaşımı/iptal akışıyla) çözülür.
 
 ### 12.5 Şifreleme modeli
 - PII ve receipt payload alanları AES-256-GCM ile şifrelenmiş saklanır.

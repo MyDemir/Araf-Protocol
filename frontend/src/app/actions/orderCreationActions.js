@@ -1,6 +1,10 @@
+import { keccak256, stringToHex } from 'viem';
 import { normalizeOrderSide, resolveOrderActionFns, resolvePaymentRiskEntry } from '../orderUiModel';
 import { buildApiUrl } from '../apiConfig';
 import { fmtNum } from '../copy';
+import { computeCreateAllowance } from './allowanceMath';
+import { computeMinFillRaw, parseDecimalToUnits } from './decimalUnits';
+import { isPayoutProfileSaved, profileRequiredMessage } from '../payoutProfileGate';
 
 export const MAKER_ORDER_DEFAULTS = {
   makerTier: 1,
@@ -117,8 +121,22 @@ export const buildCreateOrderAction = ({
   authenticatedFetch = null,
   tierMaxAmounts = MAKER_TIER_MAX_AMOUNTS,
   tokenPolicy = null,
+  // [TR] Tam approve tutarı için: backend bondMap + cüzdan itibarı (yoksa muhafazakâr üst sınır kullanılır).
+  bondMap = null,
+  getReputation = null,
+  // [TR] Backend'deki KAYITLI profil durumu (true/false/null=bilinmiyor). Yalnız true iken emir açılır (fail-closed).
+  hasPayoutProfile = null,
+  openProfilePage = null,
 }) => async () => {
   if (!requireSignedSessionForActiveWallet()) return;
+
+  // [TR] Ödeme profili kapısı: kayıtlı profili olmayan (ya da durumu bilinmeyen) kullanıcı emir oluşturamaz.
+  if (!isPayoutProfileSaved(hasPayoutProfile)) {
+    showToast(profileRequiredMessage(lang), 'error');
+    setShowMakerModal(false);
+    if (typeof openProfilePage === 'function') openProfilePage('account');
+    return;
+  }
 
   const formState = getFormState();
   const {
@@ -186,27 +204,52 @@ export const buildCreateOrderAction = ({
 
   if (isContractLoading()) return;
 
-  let didIncreaseAllowance = false;
-
   try {
     setIsContractLoading(true);
 
     const tokenDecimals = await getTokenDecimals(tokenAddress);
-    const { parseUnits, keccak256, stringToHex } = await import('viem');
-    const cryptoAmountRaw = parseUnits(String(cryptoAmt), tokenDecimals);
-
-    // [TR] Frontend maker bond authority üretmez; kontrat authoritative hesap yapar.
-    //      Approve aşamasında conservative upper-bound kullanırız: amount * 2.
-    // [EN] Frontend does not author maker-bond authority; contract computes it.
-    //      Use conservative upper-bound for approve: amount * 2.
-    const requiredAllowance = cryptoAmountRaw * 2n;
+    // [TR] Dize tabanlı ayrıştırma: parseFloat/parseUnits(String(x)) üstel gösterimde ("1e-7") hatalıydı.
+    const cryptoAmountRaw = parseDecimalToUnits(makerAmount, tokenDecimals);
+    if (cryptoAmountRaw === null || cryptoAmountRaw <= 0n) {
+      throw new Error(
+        lang === 'TR'
+          ? `Geçerli bir miktar girin (en fazla ${tokenDecimals} ondalık, üstel gösterim yok).`
+          : `Enter a valid amount (up to ${tokenDecimals} decimals, no exponent notation).`
+      );
+    }
     const rateNum = parseFloat(makerRate);
-    const minFiat = parseFloat(makerMinLimit) || 0;
-    const minFillUi = minFiat > 0 && rateNum > 0 ? (minFiat / rateNum) : cryptoAmt;
-    const minFillAmountRaw = parseUnits(String(Math.max(0, minFillUi)), tokenDecimals);
+    const minFillAmountRaw = computeMinFillRaw({
+      minFiat: makerMinLimit,
+      rate: makerRate,
+      totalAmountRaw: cryptoAmountRaw,
+      tokenDecimals,
+    });
+    if (minFillAmountRaw === null) {
+      throw new Error(lang === 'TR' ? 'Kur veya minimum limit geçerli bir ondalık sayı değil.' : 'Rate or min limit is not a valid decimal number.');
+    }
     const boundedMinFill = minFillAmountRaw > cryptoAmountRaw ? cryptoAmountRaw : minFillAmountRaw;
     const orderRefSeed = `order:${address}:${makerToken}:${makerTier}:${cryptoAmountRaw.toString()}:${Date.now()}`;
     const orderRef = keccak256(stringToHex(orderRefSeed));
+
+    const normalizedSide = normalizeOrderSide(makerSide);
+    if (normalizedSide === 'UNKNOWN') {
+      throw new Error(lang === 'TR' ? 'Geçersiz order side. Order oluşturulamadı.' : 'Invalid order side. Order creation blocked.');
+    }
+
+    // [TR] Kontrat: sell → tutar + maker teminatı; buy → yalnız taker teminatı (tier + itibara göre, aşağı yuvarlı).
+    //      Tam tutar onaylanır; başarısızlıkta otomatik approve(0) istenmez (kullanıcıya ikinci cüzdan onayı yükü).
+    // [EN] Approve the exact contract requirement; no automatic approve(0) rollback on failure.
+    let reputation = null;
+    if (typeof getReputation === 'function') {
+      try { reputation = await getReputation(address); } catch (_) { reputation = null; }
+    }
+    const requiredAllowance = computeCreateAllowance({
+      side: normalizedSide,
+      totalAmountRaw: cryptoAmountRaw,
+      tier: makerTier,
+      bondMap,
+      reputation,
+    });
 
     const currentAllowance = await getAllowance(tokenAddress, address);
     if (currentAllowance < requiredAllowance) {
@@ -216,13 +259,8 @@ export const buildCreateOrderAction = ({
           : `Step 1/2: Approving ${makerToken}...`
       );
       await approveToken(tokenAddress, requiredAllowance);
-      didIncreaseAllowance = true;
     }
 
-    const normalizedSide = normalizeOrderSide(makerSide);
-    if (normalizedSide === 'UNKNOWN') {
-      throw new Error(lang === 'TR' ? 'Geçersiz order side. Order oluşturulamadı.' : 'Invalid order side. Order creation blocked.');
-    }
     const { createFn } = resolveOrderActionFns(normalizedSide, { fillBuyOrder, fillSellOrder, createBuyOrder, createSellOrder, cancelBuyOrder, cancelSellOrder });
     const createLabel = normalizedSide === 'BUY_CRYPTO' ? 'Buy' : 'Sell';
     const selectedPaymentRiskLevel = String(selectedRiskEntry?.riskLevel || 'MEDIUM').toUpperCase();
@@ -261,10 +299,6 @@ export const buildCreateOrderAction = ({
     resetForm();
   } catch (err) {
     console.error('handleCreateOrder error:', err);
-
-    if (didIncreaseAllowance && tokenAddress) {
-      try { await approveToken(tokenAddress, 0n); } catch (_) {}
-    }
 
     let errorMessage = err.shortMessage || err.reason || err.message || (lang === 'TR' ? 'Order oluşturulamadı.' : 'Failed to create order.');
     if (errorMessage.includes('Efektif tier') || errorMessage.includes('effective tier')) {

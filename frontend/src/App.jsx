@@ -21,7 +21,7 @@ import { checkDeploymentAlignment, getSupportedChainsMap, isMintTokenEnabled, is
 import { useMakerOrderForm } from './app/contexts/marketplace/useMakerOrderForm';
 import { useMarketFilters } from './app/contexts/marketplace/marketFilters';
 import { buildMintAction, buildOrderActions, buildProfileActions, buildStartTradeAction, buildTradeRoomActions } from './app/actions/contractLifecycleActions';
-import { buildNextActiveTrade, findEscrowByRouteTradeId, getEscrowRouteId, parseAppHashRoute, writeAppHashRoute } from './app/actions/tradeNavigationActions';
+import { buildNextActiveTrade, clearAppHashRoute, findEscrowByRouteTradeId, getEscrowRouteId, parseAppHashRoute, writeAppHashRoute } from './app/actions/tradeNavigationActions';
 
 // [TR] Uygulama başlangıcında kritik env değişkenlerini doğrula
 // [EN] Validate critical env variables on app start
@@ -107,15 +107,19 @@ function App() {
   // 2. WEB3 BAĞLANTI VE KONTRAT HOOK'LARI
   //    Wallet connection + all contract methods
   // ═══════════════════════════════════════════
-  const { address, isConnected, connector } = useAccount();
+  const { address, isConnected, connector, chainId: walletChainId } = useAccount();
   const { connect, connectors } = useConnect();
   const { disconnect } = useDisconnect();
   const { signMessageAsync } = useSignMessage();
-  const chainId = useChainId();
+  const configChainId = useChainId();
+  // [TR] Ağ kontrolü cüzdanın gerçek zincirine (useAccount().chainId) bakar; useChainId() config zinciridir (F11).
+  const chainId = walletChainId ?? configChainId;
   const publicClient = usePublicClient();
   const supportedChains = getSupportedChainsMap();
   const isFaucetEnabled = isMintTokenEnabled();
-  const isSupportedChain = isSupportedChainId(chainId);
+  // [TR] Backend deployment zinciri /orders/config'ten gelir; hook'tan sonra bilindiği için state ile taşınır.
+  const [deploymentChainId, setDeploymentChainId] = useState(null);
+  const isSupportedChain = isSupportedChainId(chainId) && (!deploymentChainId || Number(chainId) === deploymentChainId);
 
   const connectedWallet = address?.toLowerCase?.() || null;
 
@@ -139,6 +143,8 @@ function App() {
     cancelSellOrder,
     cancelBuyOrder,
     proposeOrApproveCancel,
+    revokeCancel,
+    getSettlementProposal,
     expirePaymentWindow,
     getReputation,
     getCurrentAmounts,
@@ -164,7 +170,8 @@ function App() {
     getTakerFeeBps,
     mintToken,
     getFirstSuccessfulTradeAt,
-  } = useArafContract();
+    getTrade,
+  } = useArafContract({ expectedChainId: deploymentChainId });
 
   const {
     isAuthenticated,
@@ -174,6 +181,9 @@ function App() {
     setAuthenticatedWallet,
     isWalletRegistered,
     setIsWalletRegistered,
+    isAdmin,
+    hasPayoutProfile,
+    setHasPayoutProfile,
     isRegisteringWallet,
     setIsRegisteringWallet,
     isLoggingIn,
@@ -226,6 +236,8 @@ function App() {
     userRole,
     setUserRole,
     isBanned,
+    refreshReputation,
+    pinTradeState,
     cancelStatus,
     setCancelStatus,
     chargebackAccepted,
@@ -234,11 +246,11 @@ function App() {
     filteredOrders,
     marketOrdersTotal,
     activeEscrowCounts,
-    tradeTimers,
-    chainNowMs,
     chainOffsetMs,
     canMakerStartChallengeFlow,
     canMakerChallenge,
+    readCanMakerStartChallengeFlow,
+    readCanMakerChallenge,
   } = useAppSessionData({
     address,
     isConnected,
@@ -273,7 +285,8 @@ function App() {
     devScenarioActive && uiLab ? uiLab.createLabRuntime(devScenario, { authenticatedFetch }) : null
   ), [devScenarioActive, devScenario, uiLab, authenticatedFetch]);
   // [TR] Lab'da kontrat çağrısı yapılmaz, yalnız günlüğe yazılır. [EN] In the lab contract calls are only logged.
-  const labOr = (actionKey, fn) => (lab ? lab.noop(actionKey) : fn);
+  // [TR] Kimliği `lab`e bağlı sabit tutulur: useMemo bağımlılıklarında güvenle kullanılır (davranış aynı).
+  const labOr = React.useCallback((actionKey, fn) => (lab ? lab.noop(actionKey) : fn), [lab]);
   const effectiveActiveEscrows = lab?.activeEscrows ?? activeEscrows;
   const effectiveActiveEscrowCounts = lab?.activeEscrowCounts ?? activeEscrowCounts;
   const effectiveAuthenticatedFetch = lab?.authenticatedFetch ?? authenticatedFetch;
@@ -288,6 +301,25 @@ function App() {
   }) : null), [lab, uiLab, activeTrade, resolvedTradeState, userRole, chargebackAccepted, paymentIpfsHash, isConnected, isAuthenticated, chainId, isPaused, lang]);
   const room = labTradeRoom || { activeTrade, tradeState: resolvedTradeState, userRole, chargebackAccepted, paymentIpfsHash, bleedingAmounts };
 
+  // [TR] Hash rotası yalnız ilk yüklemede ve hashchange'de uygulanır (F5). Eskiden activeEscrows her değiştiğinde
+  //      yeniden çalışıp kullanıcıyı odaya zorluyordu. Ref'ler callback kimliğini sabit tutar.
+  const escrowsRef = React.useRef(effectiveActiveEscrows);
+  escrowsRef.current = effectiveActiveEscrows;
+  const activeTradeRef = React.useRef(activeTrade);
+  activeTradeRef.current = activeTrade;
+  const currentViewRef = React.useRef(currentView);
+  currentViewRef.current = currentView;
+  // Odası henüz çözülemeyen (escrow listesi gelmedi) rota; bulunursa bir kez uygulanıp bırakılır.
+  const pendingTradeRouteRef = React.useRef(null);
+
+  const openEscrowFromRoute = React.useCallback((escrow) => {
+    setActiveTrade(buildNextActiveTrade(escrow));
+    setUserRole(escrow.role);
+    setTradeState(escrow.state);
+    setChargebackAccepted(escrow.rawTrade?.chargebackAcked === true);
+    setCurrentView('tradeRoom');
+  }, [setActiveTrade, setUserRole, setTradeState, setChargebackAccepted, setCurrentView]);
+
   const applyHashRoute = React.useCallback(() => {
     if (devScenarioActive) return;
     const route = parseAppHashRoute(window.location.hash);
@@ -301,25 +333,49 @@ function App() {
     }
 
     if (route.view === 'tradeRoom') {
-      const escrow = findEscrowByRouteTradeId(effectiveActiveEscrows, route.tradeId);
+      // Uygulamanın kendi yazdığı hash (zaten bu oda açık): tekrar uygulama.
+      const open = activeTradeRef.current;
+      if (open && currentViewRef.current === 'tradeRoom'
+        && String(open.onchainId ?? '') === String(route.tradeId ?? '').replace(/^#/, '')) return;
+      const escrow = findEscrowByRouteTradeId(escrowsRef.current, route.tradeId);
       if (!escrow) {
+        pendingTradeRouteRef.current = route.tradeId;
         setActiveTrade(null);
         setCurrentView('tradeRoom');
         return;
       }
-      setActiveTrade(buildNextActiveTrade(escrow));
-      setUserRole(escrow.role);
-      setTradeState(escrow.state);
-      setChargebackAccepted(escrow.rawTrade?.chargebackAcked === true);
-      setCurrentView('tradeRoom');
+      pendingTradeRouteRef.current = null;
+      openEscrowFromRoute(escrow);
     }
-  }, [devScenarioActive, effectiveActiveEscrows, setActiveTrade, setUserRole, setTradeState, setChargebackAccepted, setCurrentView, setActiveTradesFilter, setProfileContextTab]);
+  }, [devScenarioActive, openEscrowFromRoute, setActiveTrade, setCurrentView, setActiveTradesFilter, setProfileContextTab]);
 
   useEffect(() => {
     applyHashRoute();
     window.addEventListener('hashchange', applyHashRoute);
     return () => window.removeEventListener('hashchange', applyHashRoute);
   }, [applyHashRoute]);
+
+  // Bekleyen derin bağlantı: escrow listesi yüklenince bir kez uygulanır.
+  useEffect(() => {
+    const pendingId = pendingTradeRouteRef.current;
+    if (pendingId === null || devScenarioActive) return;
+    const escrow = findEscrowByRouteTradeId(effectiveActiveEscrows, pendingId);
+    if (!escrow) return;
+    pendingTradeRouteRef.current = null;
+    openEscrowFromRoute(escrow);
+  }, [effectiveActiveEscrows, devScenarioActive, openEscrowFromRoute]);
+
+  // Odadan/profilden çıkınca hash temizlenir (history.replaceState); bekleyen rota bırakılır.
+  const prevViewRef = React.useRef(currentView);
+  useEffect(() => {
+    const prev = prevViewRef.current;
+    prevViewRef.current = currentView;
+    if (devScenarioActive || prev === currentView) return;
+    if ((prev === 'tradeRoom' && currentView !== 'tradeRoom') || (prev === 'profile' && currentView !== 'profile')) {
+      pendingTradeRouteRef.current = null;
+      clearAppHashRoute();
+    }
+  }, [currentView, devScenarioActive]);
 
   useEffect(() => {
     if (devScenarioActive) return;
@@ -332,6 +388,11 @@ function App() {
       if (routeId) writeAppHashRoute(`#/trade/${encodeURIComponent(String(routeId))}`);
     }
   }, [devScenarioActive, currentView, profileContextTab, activeTrade]);
+
+  useEffect(() => {
+    const id = Number(backendDeployment?.chainId);
+    setDeploymentChainId(Number.isFinite(id) && id > 0 ? id : null);
+  }, [backendDeployment]);
 
   // [TR] Admin "Kontrat" sekmesi zincirden okur; lab'da sahte okuyucu kullanılır.
   const readLiveProtocolConfig = React.useCallback(() => (
@@ -408,6 +469,8 @@ function App() {
   }, [authChecked, devScenarioActive, isConnected, isAuthenticated, currentView]);
 
 
+  const handleTermsRequired = React.useCallback((wallet) => setTermsPromptWallet(String(wallet || '').toLowerCase()), []);
+
   const {
     loginWithSIWE,
     handleAuthAction,
@@ -432,7 +495,7 @@ function App() {
     clearLocalSessionState,
     setShowWalletModal,
     openProfilePage,
-    onTermsRequired: (wallet) => setTermsPromptWallet(String(wallet || '').toLowerCase()),
+    onTermsRequired: handleTermsRequired,
   });
 
 
@@ -467,6 +530,7 @@ function App() {
     validationError: makerValidationError,
     payoutRiskEntry: makerPayoutRiskEntry,
     isCreateTemporarilyDisabledByRisk,
+    isPayoutProfileGateBlocked,
     handleCreateOrder,
     handleOpenMakerModal,
   } = useMakerOrderForm({
@@ -494,6 +558,10 @@ function App() {
     paymentRiskConfig,
     authenticatedFetch,
     onchainTokenMap: labMaker?.tokenMap || onchainTokenMap,
+    bondMap: onchainBondMap,
+    getReputation,
+    hasPayoutProfile,
+    openProfilePage,
   });
 
   // [TR] Lab "Emir oluşturma": formu senaryo değerleriyle doldurup modalı açar (kontrat çağrısı yapılmaz).
@@ -524,7 +592,8 @@ function App() {
     rejectSettlement,
     withdrawSettlement,
     expireSettlement,
-  }), [proposeSettlement, acceptSettlement, rejectSettlement, withdrawSettlement, expireSettlement]);
+    getSettlementProposal,
+  }), [proposeSettlement, acceptSettlement, rejectSettlement, withdrawSettlement, expireSettlement, getSettlementProposal]);
   const handleMint = React.useMemo(() => buildMintAction({
     lang,
     isConnected,
@@ -534,7 +603,7 @@ function App() {
     showToast,
     setIsContractLoading,
     setLoadingText,
-  }), [lang, isConnected, isFaucetEnabled, SUPPORTED_TOKEN_ADDRESSES, mintToken, showToast]);
+  }), [lang, isConnected, isFaucetEnabled, mintToken, showToast]);
 
   const handleStartTrade = React.useMemo(() => buildStartTradeAction({
     lang,
@@ -560,12 +629,23 @@ function App() {
     setCancelStatus,
     setChargebackAccepted,
     setCurrentView,
+    setUserRole,
+    fetchMyTrades,
+    bondMap: onchainBondMap,
+    getReputation,
+    hasPayoutProfile,
+    openProfilePage,
   }), [
+    hasPayoutProfile,
+    openProfilePage,
+    setUserRole,
+    fetchMyTrades,
+    onchainBondMap,
+    getReputation,
     lang,
     address,
     isBanned,
     isContractLoading,
-    SUPPORTED_TOKEN_ADDRESSES,
     getOrder,
     getAllowance,
     approveToken,
@@ -581,7 +661,7 @@ function App() {
     setTradeState,
     setCancelStatus,
     setChargebackAccepted,
-    lab,
+    labOr,
   ]);
 
   const tradeRoomActions = React.useMemo(() => buildTradeRoomActions({
@@ -592,10 +672,11 @@ function App() {
     resolvedTradeState,
     chargebackAccepted,
     isContractLoading,
-    canMakerStartChallengeFlow,
-    canMakerChallenge,
+    canMakerStartChallengeFlow: readCanMakerStartChallengeFlow,
+    canMakerChallenge: readCanMakerChallenge,
     reportPayment: labOr('report_payment', reportPayment),
     proposeOrApproveCancel: labOr('propose_cancel', proposeOrApproveCancel),
+    revokeCancel: labOr('revoke_cancel', revokeCancel),
     expirePaymentWindow: labOr('expire_payment_window', expirePaymentWindow),
     cancelStatus,
     releaseFunds: labOr('release_funds', releaseFunds),
@@ -614,7 +695,11 @@ function App() {
     setCancelStatus,
     setChargebackAccepted,
     setCurrentView,
+    getTrade,
+    pinTradeState,
   }), [
+    getTrade,
+    pinTradeState,
     lang,
     activeTrade,
     effectiveActiveEscrows,
@@ -622,10 +707,11 @@ function App() {
     resolvedTradeState,
     chargebackAccepted,
     isContractLoading,
-    canMakerStartChallengeFlow,
-    canMakerChallenge,
+    readCanMakerStartChallengeFlow,
+    readCanMakerChallenge,
     reportPayment,
     proposeOrApproveCancel,
+    revokeCancel,
     expirePaymentWindow,
     cancelStatus,
     releaseFunds,
@@ -642,7 +728,7 @@ function App() {
     setPaymentIpfsHash,
     setCancelStatus,
     setChargebackAccepted,
-    lab,
+    labOr,
   ]);
 
   const profileActions = React.useMemo(() => buildProfileActions({
@@ -659,6 +745,7 @@ function App() {
     setIsContractLoading,
     setIsRegisteringWallet,
     setIsWalletRegistered,
+    setHasPayoutProfile,
   }), [
     lang,
     isContractLoading,
@@ -671,7 +758,8 @@ function App() {
     showToast,
     setIsRegisteringWallet,
     setIsWalletRegistered,
-    lab,
+    setHasPayoutProfile,
+    labOr,
   ]);
 
   const orderActions = React.useMemo(() => buildOrderActions({
@@ -691,7 +779,6 @@ function App() {
     setConfirmDeleteId,
   }), [
     lang,
-    address,
     isContractLoading,
     requireSignedSessionForActiveWallet,
     fillSellOrder,
@@ -703,13 +790,14 @@ function App() {
     showToast,
     setOrders,
     setMyOrders,
-    lab,
+    labOr,
   ]);
 
   const {
     handleFileUpload,
     handleReportPayment,
     handleProposeCancel,
+    handleRevokeCancel,
     handleChargebackAck,
     handleRelease,
     handleChallenge,
@@ -741,6 +829,13 @@ function App() {
     ordersFeedError,
     lang,
   }), [envErrors, ordersFeedError, isPaused, isConnected, isAuthenticated, authChecked, chainId, isSupportedChain, supportedChains, isWalletRegistered, isRegisteringWallet, handleRegisterWallet, sybilStatus, walletAgeRemainingDays, activeTrade, lang]);
+
+  // [TR] decayReputation sonrası itibar/ban/tier yeniden okunur (F9).
+  const decayReputationAndRefresh = React.useCallback(async (...args) => {
+    const result = await decayReputation(...args);
+    if (typeof refreshReputation === 'function') await refreshReputation();
+    return result;
+  }, [decayReputation, refreshReputation]);
 
   const FEEDBACK_MIN_LENGTH = 12;
 
@@ -870,6 +965,8 @@ function App() {
     walletAgeRemainingDays,
     takerFeeBps,
     protocolFeeConfig,
+    isAdmin: lab?.isAdmin ?? isAdmin,
+    hasPayoutProfile,
     activeTrade: room.activeTrade,
     setActiveTrade,
     userRole: room.userRole,
@@ -883,6 +980,7 @@ function App() {
     handleFileUpload,
     handleReportPayment,
     handleProposeCancel,
+    handleRevokeCancel,
     cancelStatus: effectiveCancelStatus,
     chargebackAccepted: room.chargebackAccepted,
     handleChargebackAck,
@@ -891,8 +989,8 @@ function App() {
     handlePingMaker,
     handleAutoRelease,
     handleBurnExpired,
-    tradeTimers: labTradeRoom ? { ...tradeTimers, ...labTradeRoom.timers } : tradeTimers,
-    chainNowMs,
+    // [TR] Gerçek sayaçlar saat sınırında (AppViews/NowBoundary) türetilir; burada yalnız lab geçersiz kılmaları taşınır.
+    tradeTimers: labTradeRoom ? labTradeRoom.timers : undefined,
     chainOffsetMs,
     canMakerStartChallengeFlow,
     canMakerChallenge,
@@ -922,7 +1020,7 @@ function App() {
     labProfile: lab?.profile ?? null,
     reputationPolicy,
     isBanned,
-    decayReputation: lab?.profile ? lab.setter('decay_reputation') : decayReputation,
+    decayReputation: lab?.profile ? lab.setter('decay_reputation') : decayReputationAndRefresh,
     historyLoading,
     tradeHistoryPage,
     setTradeHistoryPage,
@@ -983,6 +1081,8 @@ function App() {
     makerValidationError,
     makerPayoutRiskEntry,
     isCreateTemporarilyDisabledByRisk,
+    isPayoutProfileGateBlocked: labMaker ? false : isPayoutProfileGateBlocked,
+    openProfilePage,
     isContractLoading,
     loadingText,
     address,

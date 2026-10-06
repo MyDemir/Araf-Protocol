@@ -20,7 +20,7 @@ describe('AppViews reference ticker placement', () => {
   it('mounts ReferenceRateTicker in renderTradeRoom for active transaction context', () => {
     const source = fs.readFileSync(path.resolve(process.cwd(), 'src/app/AppViews.jsx'), 'utf8');
 
-    const tradeRoomStart = source.indexOf('const renderTradeRoom = () => {');
+    const tradeRoomStart = source.indexOf('const renderTradeRoomAt = (clockNowMs) => {');
     const tickerLine = source.indexOf('<ReferenceRateTicker lang={lang} />', tradeRoomStart);
     const roomCardLine = source.indexOf('border rounded-2xl p-4 md:p-6 shadow-xl', tradeRoomStart);
 

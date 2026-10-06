@@ -1,4 +1,5 @@
 import { getTradeTerm, langKey, tx as t } from '../../copy';
+import { deriveTradeTimeline } from './tradeTimeline';
 
 const labels = {
   state: {
@@ -20,7 +21,8 @@ const timerLabels = {
   gracePeriod: { TR: getTradeTerm('gracePeriod', 'TR'), EN: getTradeTerm('gracePeriod', 'EN') },
   makerPing: { TR: 'Satıcı uyarı penceresi', EN: 'Maker ping window' },
   makerChallengePing: { TR: 'Alıcı uyarı penceresi', EN: 'Buyer ping window' },
-  makerChallenge: { TR: 'İtiraz penceresi', EN: 'Challenge window' },
+  makerChallenge: { TR: 'İtiraz penceresi açılışı', EN: 'Challenge window opens' },
+  makerChallengeDeadline: { TR: 'İtiraz için son süre', EN: 'Challenge deadline' },
   bleeding: { TR: getTradeTerm('bleedingEscrow', 'TR'), EN: getTradeTerm('bleedingEscrow', 'EN') },
   principalProtection: { TR: 'Ana para koruması', EN: 'Principal protection' },
 };
@@ -43,7 +45,7 @@ const formatTimerValue = (timer, lang) => {
 // [EN] Only timers that affect a decision in the current state/role are shown; the rest is noise.
 const RELEVANT_TIMERS = {
   LOCKED: { taker: ['paymentWindow'], maker: ['paymentWindow'] },
-  PAID: { taker: ['gracePeriod', 'makerPing'], maker: ['gracePeriod', 'makerChallengePing', 'makerChallenge'] },
+  PAID: { taker: ['gracePeriod', 'makerPing'], maker: ['gracePeriod', 'makerChallengePing', 'makerChallenge', 'makerChallengeDeadline'] },
   CHALLENGED: { taker: ['bleeding', 'principalProtection'], maker: ['bleeding', 'principalProtection'] },
 };
 
@@ -64,6 +66,10 @@ const buildTimerCards = (timers = {}, lang = 'EN', state = null, role = 'taker')
     })
     .filter(Boolean);
 };
+
+const MAKER_PING_RULE = (lang) => t(lang,
+  'Ping bir iddiadır: 24 saatlik pencere içinde itiraz açmazsan ping düşer ve alıcı ödemeyi otomatik serbest bırakma yoluna geçebilir.',
+  'A ping is a claim: if you do not open a challenge within the 24-hour window the ping lapses and the buyer may move to the auto-release path.');
 
 const action = (type, key, label, description, extra = {}) => ({ type, key, label, description, ...extra });
 
@@ -158,6 +164,7 @@ export function buildTradeDecisionModel({
   canBurnExpired = false,
   paymentWindowExpired = false,
   cancelStatus = null,
+  nowMs = Date.now(),
 }) {
   const normalizedState = String(tradeState || trade?.state || 'LOCKED').toUpperCase();
   const normalizedRole = String(userRole || 'taker').toLowerCase();
@@ -173,6 +180,7 @@ export function buildTradeDecisionModel({
   let primaryAction = action('waiting', 'waiting', t(lang, 'Bekle', 'Wait'), t(lang, 'Bir sonraki kontrat aksiyonu mevcut durum tarafından belirlenir.', 'Next contract action is determined by the current state.'));
   let secondaryActions = [];
   const guidance = [];
+  const { flags } = deriveTradeTimeline(trade || {}, { state: normalizedState, now: nowMs });
 
   if (normalizedState === 'LOCKED' && normalizedRole === 'taker') {
     primaryAction = action(
@@ -195,21 +203,30 @@ export function buildTradeDecisionModel({
     primaryAction = action('contract', 'release_funds', t(lang, 'Ödemeyi Onayla', 'Release Funds'), trade?.pingedAt
       ? t(lang, 'Alıcı sizi uyardı: 24 saat içinde onaylamazsanız alıcı fonları otomatik serbest bırakabilir.', 'The taker pinged you: if you do not release within 24h, the taker can auto-release.')
       : null);
-    // [TR] Aynı buton iki kontrat adımıdır: önce pingTakerForChallenge, 24 saat sonra challengeTrade.
+    // [TR] Aynı buton iki kontrat adımıdır: önce pingTakerForChallenge, 24 saat sonra (ve 48. saatten önce) challengeTrade.
     const makerPinged = Boolean(trade?.challengePingedAt);
     secondaryActions = [action('contract', 'start_challenge', makerPinged
       ? t(lang, 'İtiraz Başlat', 'Open Challenge')
       : t(lang, 'Ödeme Gelmedi — Alıcıyı Uyar', 'Payment Not Received — Ping Taker'), null)];
+    if (!makerPinged) guidance.push(MAKER_PING_RULE(lang));
+    else if (flags.pingLapsed) guidance.push(t(lang, 'İtiraz süresi doldu: ping düştü; alıcı artık sizi uyarıp otomatik serbest bırakma yoluna geçebilir. Ödeme geldiyse fonları serbest bırakın.', 'The challenge window closed: your ping lapsed; the taker can now ping you and move to auto-release. Release the funds if the payment arrived.'));
+    else guidance.push(MAKER_PING_RULE(lang));
   }
 
   if (normalizedState === 'PAID' && normalizedRole === 'taker') {
-    primaryAction = action('waiting', 'waiting_for_maker', t(lang, 'Satıcı Bekleniyor', 'Waiting for Maker'), trade?.challengePingedAt
-      ? t(lang, 'Satıcı ödemenin gelmediğini bildirdi; 24 saat sonra itiraz açabilir. Ödeme kanıtınızı kontrol edin veya iptal teklif edin.', 'The maker reported the payment as missing and can open a challenge after 24h. Check your proof or propose a cancel.')
+    const makerPinged = Boolean(trade?.challengePingedAt);
+    primaryAction = action('waiting', 'waiting_for_maker', t(lang, 'Satıcı Bekleniyor', 'Waiting for Maker'), makerPinged && !flags.pingLapsed
+      ? t(lang, 'Satıcı ödemenin gelmediğini bildirdi; 24. ile 48. saat arasında itiraz açabilir. Ödeme kanıtınızı kontrol edin veya iptal teklif edin.', 'The maker reported the payment as missing and can open a challenge between hour 24 and hour 48. Check your proof or propose a cancel.')
       : null);
-    // [TR] Uyarı öncesi yalnız "Satıcıyı Uyar", sonrası yalnız "Otomatik Serbest Bırak" anlamlıdır.
+    // [TR] Ping geçerliyken taker uyarı yolu kapalıdır; ping düşünce (T+48s) pingMaker açılır.
+    //      Uyarı öncesi yalnız "Satıcıyı Uyar", sonrası yalnız "Otomatik Serbest Bırak" anlamlıdır.
     secondaryActions = [trade?.pingedAt
       ? action('conditional', 'auto_release', t(lang, 'Otomatik Serbest Bırak', 'Auto-Release Funds'), null)
-      : action('conditional', 'ping_maker', t(lang, 'Satıcıyı Uyar', 'Ping Maker'), null)];
+      : action('conditional', 'ping_maker', t(lang, 'Satıcıyı Uyar', 'Ping Maker'), flags.pingLapsed
+        ? t(lang, 'Satıcının itiraz süresi doldu — artık satıcıyı uyarabilirsin.', 'The maker\'s challenge window has passed — you can now ping the maker.')
+        : null)];
+    if (flags.pingLapsed) guidance.push(t(lang, 'Satıcının itiraz süresi doldu — artık satıcıyı uyarabilirsin.', 'The maker\'s challenge window has passed — you can now ping the maker.'));
+    else if (makerPinged) guidance.push(t(lang, 'Satıcının ping\'i geçerli olduğu sürece uyarı yolu kapalıdır. Satıcı 48. saate kadar itiraz açmazsa ping düşer ve yol açılır.', 'While the maker\'s ping is valid the ping path is closed. If the maker does not challenge by hour 48 the ping lapses and the path opens.'));
   }
 
   if (normalizedState === 'CHALLENGED') {
@@ -224,10 +241,9 @@ export function buildTradeDecisionModel({
     // [TR] Kontrat: süre dolunca iki taraf da kilidi çözebilir; alıcı teminatından küçük ceza kesilir ve
     //      alıcıya negatif sinyal yazılır. Taker ödeme bildirimi hâlâ mümkündür ama satıcıyla yarışır.
     if (normalizedRole === 'taker') {
-      primaryAction = {
-        ...primaryAction,
-        description: t(lang, '48 saatlik ödeme süresi doldu: satıcı işlemi her an iptal edebilir. Ödediyseniz hemen bildirin.', 'The 48h payment window has passed: the maker can unwind the trade at any time. If you paid, report it now.'),
-      };
+      // [TR] K10: süre dolduktan sonra ödeme bildirilemez (PaymentWindowClosed); birincil buton kapanır.
+      primaryAction = action('waiting', 'payment_window_closed', t(lang, 'Süre doldu', 'Time expired'),
+        t(lang, '48 saatlik ödeme süresi doldu: ödeme artık bildirilemez, satıcı işlemi her an iptal edebilir. Ödediyseniz satıcıyla iptali birlikte onaylayın.', 'The 48h payment window has passed: payment can no longer be reported and the maker can unwind the trade at any time. If you paid, agree on a mutual cancel with the maker.'));
       secondaryActions.push(action('contract', 'expire_payment_window', t(lang, 'Ödemedim — kilidi çöz (teminattan ceza)', 'I did not pay — unlock (bond penalty)'), null));
     } else {
       primaryAction = action('contract', 'expire_payment_window', t(lang, 'Kilidi Çöz (48 saat doldu)', 'Unlock (48h passed)'), t(lang, 'Alıcı süresinde ödeme bildirmedi. Kilidi çözerseniz fonlarınız ve teminatınız iade edilir.', 'The taker did not report payment in time. Unlocking returns your funds and bond.'));

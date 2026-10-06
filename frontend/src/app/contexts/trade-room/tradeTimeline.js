@@ -7,7 +7,10 @@
 //   GRACE_PERIOD     48h  PAID    → pingMaker (taker)                           paidAt + 48h
 //   maker ping       24h  PAID    → pingTakerForChallenge (maker)               paidAt + 24h
 //   response window  24h  PAID    → autoRelease / challengeTrade                pingedAt|challengePingedAt + 24h
-//   ping paths are exclusive: ConflictingPingPath if the other side already pinged
+//   challenge window 24h  PAID    → challengeTrade only in [T+24h, T+48h), T = challengePingedAt
+//                                    (T+48h and later: ChallengeWindowExpired; the maker ping lapses)
+//   ping paths are exclusive while a ping is valid: ConflictingPingPath. A lapsed maker ping (t >= T+48h)
+//   re-opens the taker's pingMaker (still needs paidAt + GRACE_PERIOD), then +24h autoRelease.
 //   bleeding starts  48h  CHALLENGED bonds decay after challengedAt + GRACE_PERIOD
 //   USDT_DECAY_START 96h  principal decays after challengedAt + 48h + 96h
 //   MAX_BLEEDING    240h  CHALLENGED → burnExpired (anyone)                     challengedAt + 240h
@@ -17,6 +20,7 @@ export const TRADE_TIMING = Object.freeze({
   PAYMENT_WINDOW_MS: 48 * H,
   GRACE_PERIOD_MS: 48 * H,
   MAKER_CHALLENGE_PING_MS: 24 * H,
+  MAKER_CHALLENGE_WINDOW_MS: 24 * H, // contract MAKER_CHALLENGE_WINDOW()
   PING_RESPONSE_MS: 24 * H,
   PRINCIPAL_PROTECTION_MS: (48 + 96) * H,
   MAX_BLEEDING_MS: 240 * H,
@@ -55,14 +59,22 @@ export function deriveTradeTimeline(trade, { state = trade?.state, now = Date.no
   const takerPinged = pingedAt !== null;
   const makerPinged = challengePingedAt !== null;
 
+  // [TR] Ping düştü: maker ping'i attı, T+24h+MAKER_CHALLENGE_WINDOW geçti, taker uyarmadı (kontrat formülü).
+  // [EN] Ping lapsed: maker pinged, T+24h+MAKER_CHALLENGE_WINDOW passed, taker has not pinged (contract formula).
+  const challengeDeadlineSpan = TRADE_TIMING.PING_RESPONSE_MS + TRADE_TIMING.MAKER_CHALLENGE_WINDOW_MS;
+  const pingLapsed = state === 'PAID' && makerPinged && !takerPinged && passed(challengePingedAt, challengeDeadlineSpan);
+  const makerChallengeOpen = state === 'PAID' && makerPinged && passed(challengePingedAt, TRADE_TIMING.PING_RESPONSE_MS) && !passed(challengePingedAt, challengeDeadlineSpan);
+
   const flags = {
     takerPinged,
     makerPinged,
+    pingLapsed,
     paymentWindowExpired: state === 'LOCKED' && passed(lockedAt, TRADE_TIMING.PAYMENT_WINDOW_MS),
-    canTakerPing: state === 'PAID' && !takerPinged && !makerPinged && passed(paidAt, TRADE_TIMING.GRACE_PERIOD_MS),
+    canTakerPing: state === 'PAID' && !takerPinged && passed(paidAt, TRADE_TIMING.GRACE_PERIOD_MS) && (!makerPinged || pingLapsed),
     canAutoRelease: state === 'PAID' && takerPinged && passed(pingedAt, TRADE_TIMING.PING_RESPONSE_MS),
     canMakerPingTaker: state === 'PAID' && !makerPinged && !takerPinged && passed(paidAt, TRADE_TIMING.MAKER_CHALLENGE_PING_MS),
-    canMakerChallenge: state === 'PAID' && makerPinged && passed(challengePingedAt, TRADE_TIMING.PING_RESPONSE_MS),
+    canMakerChallenge: makerChallengeOpen,
+    makerChallengeWindowClosed: pingLapsed,
     canBurn: state === 'CHALLENGED' && passed(challengedAt, TRADE_TIMING.MAX_BLEEDING_MS),
     bleedingStarted: state === 'CHALLENGED' && passed(challengedAt, TRADE_TIMING.GRACE_PERIOD_MS),
     principalDecaying: state === 'CHALLENGED' && passed(challengedAt, TRADE_TIMING.PRINCIPAL_PROTECTION_MS),
@@ -76,6 +88,7 @@ export function deriveTradeTimeline(trade, { state = trade?.state, now = Date.no
     makerPing: countdownTo(at(pingedAt, TRADE_TIMING.PING_RESPONSE_MS), nowMs),
     makerChallengePing: countdownTo(at(paidAt, TRADE_TIMING.MAKER_CHALLENGE_PING_MS), nowMs),
     makerChallenge: countdownTo(at(challengePingedAt, TRADE_TIMING.PING_RESPONSE_MS), nowMs),
+    makerChallengeDeadline: countdownTo(at(challengePingedAt, challengeDeadlineSpan), nowMs),
     bleeding: countdownTo(at(challengedAt, TRADE_TIMING.MAX_BLEEDING_MS), nowMs),
     principalProtection: countdownTo(at(challengedAt, TRADE_TIMING.PRINCIPAL_PROTECTION_MS), nowMs),
   };

@@ -38,6 +38,7 @@ export const ARAF_CONTRACT_ERROR_ABI = [
   'error CleanPeriodNotElapsed()',
   'error NoBansToReset()',
   'error ConflictingPingPath()',
+  'error ChallengeWindowExpired()',
   'error InvalidSettlementSplit()',
   'error SettlementNotAllowedInState()',
   'error ActiveSettlementProposalExists()',
@@ -57,6 +58,9 @@ export const ARAF_CONTRACT_ERROR_ABI = [
   'error OrderSideMismatch()',
   'error TokenDirectionNotAllowed()',
   'error InvalidTransferAmount()',
+  'error SettlementProposalMismatch(uint256 expectedProposalId, uint256 liveProposalId)',
+  'error PaymentWindowClosed(uint256 expiredAt)',
+  'error NoCancelConsent()',
   'error EnforcedPause()',
   // ArafRewards / ArafRevenueVault
   'error RecordingWindowClosed()',
@@ -74,7 +78,10 @@ export const ARAF_CONTRACT_ERROR_ABI = [
 ];
 
 const MESSAGES = {
-  NotTradeParty: { TR: 'Bu işlemin tarafı değilsiniz.', EN: 'You are not a party to this trade.' },
+  NotTradeParty: { TR: 'Bu işlemin tarafı değilsiniz; yalnızca alıcı ya da satıcı bu adımı yapabilir.', EN: 'You are not a party to this trade; only the buyer or seller can do this.' },
+  SettlementProposalMismatch: { TR: 'Uzlaşma teklifi siz onaylamadan değişti. Güncel teklifi görüntüleyip yeniden onaylayın.', EN: 'The settlement offer changed before you confirmed. Review the current offer and confirm again.' },
+  PaymentWindowClosed: { TR: 'Ödeme süresi doldu; ödeme bildirilemez. Kilidin çözülmesi gerekir.', EN: 'The payment window has closed; payment can no longer be reported. The lock must be unwound.' },
+  NoCancelConsent: { TR: 'Geri çekilecek bir iptal onayınız yok.', EN: 'You have no cancel consent to withdraw.' },
   InvalidState: { TR: 'İşlem bu adım için uygun durumda değil. Sayfayı yenileyin.', EN: 'Trade is not in the right state. Refresh the page.' },
   CannotReleaseInState: { TR: 'İşlem bu adım için uygun durumda değil. Sayfayı yenileyin.', EN: 'Trade is not in the right state. Refresh the page.' },
   TakerBanActive: { TR: 'Alıcı kısıtlamanız aktif.', EN: 'Your taker restriction is active.' },
@@ -88,7 +95,7 @@ const MESSAGES = {
   ZeroUserWeight: { TR: 'Bu dönemde ödül ağırlığınız yok.', EN: 'You have no reward weight in this epoch.' },
   AlreadyClaimed: { TR: 'Bu ödülü zaten aldınız.', EN: 'Already claimed.' },
   StaleTargetEpoch: { TR: 'Geçmiş bir döneme fon gönderilemez.', EN: 'Cannot fund a past epoch.' },
-  OnlyMaker: { TR: 'Bu adımı yalnızca satıcı (maker) yapabilir.', EN: 'Only the maker can do this.' },
+  OnlyMaker: { TR: 'Bu adımı yalnızca satıcı (maker) yapabilir. Alıcıysanız itiraz açamazsınız; satıcı pasifse ping/otomatik serbest bırakma yolunu kullanın.', EN: 'Only the maker can do this. As the taker you cannot open a challenge; if the maker is inactive use the ping / auto-release path.' },
   OnlyTaker: { TR: 'Bu adımı yalnızca alıcı (taker) yapabilir.', EN: 'Only the taker can do this.' },
   AlreadyRegistered: { TR: 'Cüzdan zaten kayıtlı.', EN: 'Wallet already registered.' },
   ZeroAmount: { TR: 'Tutar sıfır olamaz.', EN: 'Amount cannot be zero.' },
@@ -103,6 +110,7 @@ const MESSAGES = {
   AlreadyPinged: { TR: 'Uyarı zaten gönderildi.', EN: 'Already pinged.' },
   MustPingFirst: { TR: 'Önce karşı tarafı uyarmalısınız.', EN: 'You must ping first.' },
   ResponseWindowActive: { TR: 'Karşı tarafın 24 saatlik yanıt süresi devam ediyor.', EN: 'The 24h response window is still open.' },
+  ChallengeWindowExpired: { TR: 'İtiraz süresi doldu: ping düştü, artık itiraz açılamaz. Alıcı satıcıyı uyarabilir; ödeme geldiyse fonları serbest bırakın.', EN: 'The challenge window has closed: the ping lapsed and a challenge can no longer be opened. The taker may now ping you; release the funds if payment arrived.' },
   ConflictingPingPath: { TR: 'Karşı taraf farklı bir uyarı yolu başlattı; bu adım artık kullanılamaz.', EN: 'Counterparty started another ping path; this action is no longer available.' },
   BurnPeriodNotReached: { TR: '10 günlük süre henüz dolmadı.', EN: 'The 10-day window has not passed yet.' },
   NoPriorBanHistory: { TR: 'Temizlenecek ceza geçmişi yok.', EN: 'No ban history to clear.' },

@@ -56,7 +56,7 @@ export const resolveApiBaseUrl = (env = import.meta.env) => {
 export const resolveApiPolicyDiagnostics = (env = import.meta.env) => {
   const errors = [];
   const infos = [];
-  let apiBaseUrl = null;
+  let apiBaseUrl;
 
   try {
     apiBaseUrl = resolveApiBaseUrl(env);

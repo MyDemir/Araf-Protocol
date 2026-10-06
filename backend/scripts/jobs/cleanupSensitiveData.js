@@ -108,10 +108,14 @@ async function runPIISnapshotCleanup(now = new Date()) {
           "payout_snapshot.taker.reputation_context_at_lock.dispute_loss_count": null,
           "payout_snapshot.taker.reputation_context_at_lock.risk_points": null,
           "payout_snapshot.captured_at": null,
-          "payout_snapshot.snapshot_delete_at": null,
           "payout_snapshot.is_complete": true,
           "payout_snapshot.incomplete_reason": null,
         },
+        // [TR] null yazmak sparse index'te kayıt bırakır; alan tamamen silinir. Sorgu (lte now) eksik alanla
+        //      eşleşmediği için temizlenmiş kayıt tekrar seçilmez.
+        // [EN] Writing null keeps the doc in the sparse index; unset drops the field. The lte query never
+        //      matches a missing field, so a cleaned doc is not selected again.
+        $unset: { "payout_snapshot.snapshot_delete_at": "" },
       }
     );
 

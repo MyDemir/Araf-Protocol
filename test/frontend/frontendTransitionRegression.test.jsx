@@ -382,7 +382,7 @@ describe('frontend transition regression invariants', () => {
     expect(`${appViewsSource}\n${settlementCardSource}`).not.toMatch(/(?:acceptSettlement|rejectSettlement|withdrawSettlement|expireSettlement|proposeSettlement)\(\s*\)/);
     expect(settlementCardSource).toContain('useSettlementActions');
     expect(settlementActionsSource).toContain('contractFns.proposeSettlement(BigInt(context.onchainTradeId), Number(makerShareBps), Number(expiresAt))');
-    expect(settlementActionsSource).toContain('contractFns.acceptSettlement(tradeId)');
+    expect(settlementActionsSource).toContain('contractFns.acceptSettlement(tradeId, check.live.id)');
     expect(settlementActionsSource).toContain('contractFns.rejectSettlement(tradeId)');
     expect(settlementActionsSource).toContain('contractFns.withdrawSettlement(tradeId)');
     expect(settlementActionsSource).toContain('contractFns.expireSettlement(tradeId)');

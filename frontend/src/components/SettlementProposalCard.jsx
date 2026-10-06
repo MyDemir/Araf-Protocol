@@ -10,6 +10,20 @@ const ACTIVE_ROOM_STATES = ['CHALLENGED'];
 const TERMINAL_ROOM_STATES = ['RESOLVED', 'CANCELED', 'BURNED'];
 const MIN_CUSTOM_EXPIRY_MINUTES = 10;
 const MAX_CUSTOM_EXPIRY_MINUTES = 7 * 24 * 60;
+// [TR] F18 — ArafEscrow.MIN_SETTLEMENT_EXPIRY (10 dk) aynası: `expiresAt >= blockNow + 10 dk` şartı. Tx onay bekleme,
+//      blok gecikmesi ve saat kayması için küçük güvenlik payı eklenir; pay yalnız bitişi uzatır.
+// [EN] F18 — mirror of ArafEscrow.MIN_SETTLEMENT_EXPIRY (10 min): `expiresAt >= blockNow + 10 min`. A small safety margin
+//      covers wallet-confirm delay, block latency and clock skew; it can only extend the deadline.
+export const SETTLEMENT_MIN_EXPIRY_SEC = 10 * 60;
+export const SETTLEMENT_EXPIRY_SAFETY_SEC = 90;
+
+// [TR] Bitiş anını TX ANINDAKİ zincir saatine göre hesaplar (render anındaki değer bayatlar).
+// [EN] Computes the deadline from chain time at TX time (a render-time value goes stale).
+export const computeSettlementExpiresAt = (chainNowSec, expiryMinutes) => {
+  const minutes = Number.isFinite(Number(expiryMinutes)) ? Number(expiryMinutes) : 0;
+  const floor = chainNowSec + SETTLEMENT_MIN_EXPIRY_SEC + SETTLEMENT_EXPIRY_SAFETY_SEC;
+  return Math.max(chainNowSec + Math.floor(minutes * 60), floor);
+};
 export const SETTLEMENT_NEUTRALITY_COPY = {
   TR: 'Araf karar vermez; teklif ancak iki taraf onaylarsa geçerli olur.',
   EN: 'Araf does not decide who is right; settlement is available only in the CHALLENGED dispute phase with both parties’ signatures.',
@@ -107,7 +121,6 @@ export default function SettlementProposalCard({
   const computedExpiryMinutes = expiryPreset === 'custom'
     ? Number(customMinutes)
     : (expiryPreset === '30m' ? 30 : expiryPreset === '2h' ? 120 : 24 * 60);
-  const computedExpiresAt = chainNowSec() + (Number.isFinite(computedExpiryMinutes) ? computedExpiryMinutes : 0) * 60;
   const expiresAt = toUnixSeconds(proposal?.expiresAt ?? proposal?.expires_at ?? 0);
   // [TR] Kontratla birebir: `now > expiresAt` dolmuş sayılır. [EN] Mirrors the contract: expired once now > expiresAt.
   const isExpired = expiresAt > 0 && nowTs > expiresAt;
@@ -186,19 +199,49 @@ export default function SettlementProposalCard({
   };
 
   const onConfirmCreate = async () => {
+    // [TR] F18 — Bitiş, önizleme modalında beklenen süre dahil TX anında yeniden hesaplanır.
     const ok = await settlementActions.propose({
       makerShareBps: normalizedMakerShareBps,
-      expiresAt: computedExpiresAt,
+      expiresAt: computeSettlementExpiresAt(chainNowSec(), computedExpiryMinutes),
     });
     if (ok) setPreviewOpen(false);
   };
 
+  // [TR] F3: önizleme ve kabul zincirdeki GÜNCEL tekliften beslenir; backend kopyası bayat olabilir.
+  // [EN] F3: preview and acceptance use the LIVE on-chain offer; the backend copy may be stale.
   const onPreviewAccept = async () => {
-    const makerBps = Number(proposal?.makerShareBps ?? proposal?.maker_share_bps ?? 0);
     setPreviewMode('accept');
-    const ok = await loadPreview(makerBps);
+    setPreviewError('');
+    const prepared = await settlementActions.prepareAccept();
+    if (!prepared.ok) {
+      // Değişiklik varsa kullanıcı güncel değerleri görüp onaylayabilsin diye modal açılır.
+      if (prepared.reason === 'CHANGED') setPreviewOpen(true);
+      else setPreviewError(prepared.error || '');
+      return;
+    }
+    const ok = await loadPreview(prepared.live.makerShareBps);
     if (ok) setPreviewOpen(true);
   };
+
+  const onConfirmAccept = async () => {
+    // [TR] Değişiklik bildirimi varsa ilk tık yalnız güncel teklifi onaylar (tx yok); ikinci tık gönderir.
+    if (settlementActions.acceptReview?.reason === 'CHANGED') {
+      const live = settlementActions.confirmAcceptReview();
+      if (live) await loadPreview(live.makerShareBps);
+      return;
+    }
+    const ok = await settlementActions.accept();
+    if (ok) setPreviewOpen(false);
+  };
+
+  // [TR] Kabul önizlemesinde gösterilen değerler: değişiklik incelemesindeki canlı teklif > sabitlenen anlık görüntü > ekrandaki teklif.
+  const acceptReviewChanged = settlementActions.acceptReview?.reason === 'CHANGED';
+  const acceptLive = settlementActions.acceptReview?.live || null;
+  const acceptSnap = settlementActions.acceptSnapshot;
+  const acceptShownMaker = acceptLive?.makerShareBps ?? acceptSnap?.makerShareBps ?? proposal?.makerShareBps ?? proposal?.maker_share_bps;
+  const acceptShown = Number.isFinite(Number(acceptShownMaker))
+    ? { makerShareBps: Number(acceptShownMaker), takerShareBps: 10000 - Number(acceptShownMaker) }
+    : null;
 
   if (!activeTrade) return null;
 
@@ -403,16 +446,20 @@ export default function SettlementProposalCard({
         lang={lang}
         isLoading={isContractLoading || previewLoading}
         error={previewError}
-        makerShareBps={previewMode === 'accept' ? (proposal?.makerShareBps ?? proposal?.maker_share_bps ?? '—') : normalizedMakerShareBps}
-        takerShareBps={previewMode === 'accept' ? (proposal?.takerShareBps ?? proposal?.taker_share_bps ?? '—') : normalizedTakerShareBps}
+        notice={previewMode === 'accept' ? settlementActions.acceptReviewMessage : ''}
+        makerShareBps={previewMode === 'accept' ? (acceptShown?.makerShareBps ?? '—') : normalizedMakerShareBps}
+        takerShareBps={previewMode === 'accept' ? (acceptShown?.takerShareBps ?? '—') : normalizedTakerShareBps}
         previewData={previewData}
         onConfirm={previewMode === 'accept'
-          ? settlementActions.accept
+          ? onConfirmAccept
           : onConfirmCreate}
         confirmLabel={previewMode === 'accept'
-          ? (lang === 'TR' ? 'Kabul et ve zincire gönder' : 'Accept and submit on-chain')
+          ? (acceptReviewChanged
+            ? (lang === 'TR' ? 'Güncel teklifi onayla' : 'Confirm updated offer')
+            : (lang === 'TR' ? 'Kabul et ve zincire gönder' : 'Accept and submit on-chain'))
           : (lang === 'TR' ? 'Teklifi zincire gönder' : 'Submit proposal on-chain')}
-        disableConfirm={previewLoading || Boolean(previewError) || !hasOnchainTradeId}
+        disableConfirm={previewLoading || (Boolean(previewError) && !acceptReviewChanged) || !hasOnchainTradeId
+          || (previewMode === 'accept' && Boolean(settlementActions.acceptReview) && !acceptReviewChanged)}
         userRole={userRole}
         tokenSymbol={activeTrade?.crypto || 'USDT'}
         decimals={activeTrade?.tokenDecimals ?? 6}
