@@ -194,7 +194,7 @@ async function _attachMarketTrustVisibilitySummary(orders = []) {
     ]);
   };
 
-  const [makerUsers, latestSellRows, latestBuyRows] = await Promise.all([
+  const [makerUsers, latestSellRows, latestBuyRows, ownersWithProfile] = await Promise.all([
     // [TR] B25: şifreli payout_profile blob'u çekilmez; risk sinyali yalnız fingerprint.version ister.
     User.find({ wallet_address: { $in: makerAddresses } })
       .select("wallet_address profileVersion payout_profile.fingerprint.version reputation_cache is_banned banned_until consecutive_bans")
@@ -206,7 +206,17 @@ async function _attachMarketTrustVisibilitySummary(orders = []) {
     //      encrypted payout fields) instead of $$ROOT; the sort matches the {maker_address, created_at} index.
     latestByRole("maker", sellOwners),
     latestByRole("taker", buyOwners),
+    // [TR] Ürün kararı: kayıtlı ödeme profili olmayan emir sahibiyle işleme girilmez. Yalnız boolean için
+    //      yalnız wallet_address projekte edilir; şifreli blob / PII çekilmez.
+    // [EN] Only a boolean is derived; the encrypted profile is never selected into the response path.
+    User.find({
+      wallet_address: { $in: makerAddresses },
+      "payout_profile.payout_details_enc": { $exists: true, $nin: [null, ""] },
+    })
+      .select("wallet_address")
+      .lean(),
   ]);
+  const profileSet = new Set((ownersWithProfile || []).map((u) => u.wallet_address));
 
   const userMap = new Map(makerUsers.map((u) => [u.wallet_address, u]));
   const toMap = (rows) => new Map(rows.filter((row) => row?._id && row?.trade).map((row) => [row._id, row.trade]));
@@ -227,6 +237,7 @@ async function _attachMarketTrustVisibilitySummary(orders = []) {
     return {
       ...order,
       trust_visibility_summary: _toCompactTrustSummary(signal),
+      owner_has_payout_profile: profileSet.has(maker),
     };
   });
 }

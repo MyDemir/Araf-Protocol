@@ -558,7 +558,26 @@ router.get("/me", requireAuth, async (req, res) => {
     }
   }
 
-  return res.json({ wallet: req.wallet, authenticated: true, isAdmin: isAdminWallet(req.wallet) });
+  // [TR] Kayıtlı ödeme profili var mı? Yalnız boolean (PII yok). Okuma hatasında alan eksik/null döner;
+  //      istemci bilinmeyen durumda fail-closed davranır.
+  // [EN] Boolean only, no PII. On lookup failure the field is null so clients fail closed.
+  let hasPayoutProfile = null;
+  try {
+    const u = await User.exists({
+      wallet_address: req.wallet,
+      "payout_profile.payout_details_enc": { $exists: true, $nin: [null, ""] },
+    });
+    hasPayoutProfile = Boolean(u);
+  } catch (err) {
+    logger.warn(`[Auth] /me hasPayoutProfile lookup failed: ${err.message}`);
+  }
+
+  return res.json({
+    wallet: req.wallet,
+    authenticated: true,
+    isAdmin: isAdminWallet(req.wallet),
+    hasPayoutProfile,
+  });
 });
 
 /**
