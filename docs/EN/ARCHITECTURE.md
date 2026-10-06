@@ -340,8 +340,9 @@ stateDiagram-v2
 
 ### 7.1 Resolution paths after `PAID`
 - **Normal close:** maker `releaseFunds`
-- **Dispute path:** maker `pingTakerForChallenge` → 24h wait window → `challengeTrade`. After the window either the maker or the taker may open the challenge, so a maker who pings and goes silent cannot lock a PAID trade forever (bleeding starts; `burnExpired` after `MAX_BLEEDING` at the latest).
-- **Liveness path:** taker `pingMaker` → wait window → `autoRelease`
+- **Dispute path:** maker `pingTakerForChallenge` → 24h response window → `challengeTrade` (maker only). The ping is a claim: if the maker does not open the challenge within `[ping+24h, ping+48h)` (`MAKER_CHALLENGE_WINDOW` = 24h, constant), the ping **lapses**; from second `ping+48h` on, `challengeTrade` reverts with `ChallengeWindowExpired`. The maker may ping once per trade (`AlreadyPinged`).
+- **Liveness path:** taker `pingMaker` (after `paidAt + GRACE_PERIOD`) → 24h → `autoRelease` (including `AUTO_RELEASE_PENALTY`). While the maker's ping is valid (before `ping+48h`) `pingMaker` reverts with `ConflictingPingPath`; it opens from the second the ping lapses. A maker who pings and goes silent therefore cannot lock a PAID trade forever. In the other direction, once the taker has called `pingMaker`, the maker's `pingTakerForChallenge` reverts with `ConflictingPingPath`.
+- **The maker can always release:** `releaseFunds` from `PAID` is open at any time regardless of the ping (clean release); a release from `CHALLENGED` is `DISPUTED_RELEASE` + a maker dispute loss.
 - **Mutual cancel:** each party sends its own `proposeOrApproveCancel(tradeId)` tx (no separate signature); before the second consent a party may withdraw its own consent with `revokeCancel(tradeId)` (`CancelRevoked`)
 - **Payment window expiry:** `reportPayment` is only accepted before `lockedAt + 48h` (`PaymentWindowClosed` from the boundary second). If no payment is reported within 48h of LOCKED, either party calls `expirePaymentWindow`; the maker is refunded in full, the taker bond pays a 2% liveness penalty and the taker gets a negative reputation signal
 - **Terminal burn:** `burnExpired` after challenge timeout
@@ -367,7 +368,7 @@ only decays for the final 96 hours, so ≈ 34.7% of it is still there to settle 
 `getCurrentAmounts(tradeId)` exposes authoritative real-time economics.
 
 ### 7.3 Challenge and liveness ping semantics
-- Ping paths are mutually exclusive (conflict guard).
+- Ping paths are mutually exclusive (conflict guard). Exception: the maker ping lapses at `challengePingedAt + 24h + MAKER_CHALLENGE_WINDOW`; from that second `challengeTrade` reverts with `ChallengeWindowExpired` and the taker may call `pingMaker`.
 - Required wait windows are enforced by state guards.
 
 ### 7.4 Burn semantics
@@ -388,7 +389,7 @@ only decays for the final 96 hours, so ≈ 34.7% of it is still there to settle 
 - taker bond decay  
 - post-threshold crypto-side decay  
 - `getCurrentAmounts(tradeId)` exposes authoritative real-time economics.  
-- Ping paths are mutually exclusive (conflict guard).  
+- Ping paths are mutually exclusive (conflict guard); the maker ping lapses at `ping + 48h`.  
 - Required wait windows are enforced by state guards.  
 - `burnExpired` finalizes stale challenged trades once max window elapses.  
 - The trade's entire escrow balance (decayed part included) goes to treasury.  

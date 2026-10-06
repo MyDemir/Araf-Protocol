@@ -337,8 +337,9 @@ stateDiagram-v2
 
 ### 7.1 `PAID` sonrası çözüm yolları
 - **Normal kapanış:** maker `releaseFunds`
-- **Dispute hattı:** maker `pingTakerForChallenge` → 24 saat bekleme → `challengeTrade`. Pencereden sonra challenge'ı maker da taker da açabilir; böylece ping atıp susan maker PAID trade'i süresiz kilitleyemez (bleeding başlar, en geç `MAX_BLEEDING` sonunda `burnExpired`).
-- **Liveness hattı:** taker `pingMaker` → bekleme → `autoRelease`
+- **Dispute hattı:** maker `pingTakerForChallenge` → 24 saat cevap penceresi → `challengeTrade` (yalnız maker). Ping bir iddiadır: maker challenge'ı `[ping+24sa, ping+48sa)` aralığında (`MAKER_CHALLENGE_WINDOW` = 24 saat, sabit) açmazsa ping **düşer**; `ping+48sa` saniyesinden itibaren `challengeTrade` `ChallengeWindowExpired` ile reddedilir. Maker trade başına tek ping atabilir (`AlreadyPinged`).
+- **Liveness hattı:** taker `pingMaker` (`paidAt + GRACE_PERIOD` sonrası) → 24 saat → `autoRelease` (`AUTO_RELEASE_PENALTY` dahil). Maker'ın pingi geçerliyken (`ping+48sa` öncesi) `pingMaker` `ConflictingPingPath` ile reddedilir; ping düştüğü saniyeden itibaren açılır. Böylece ping atıp susan maker PAID trade'i süresiz kilitleyemez. Ters yönde, taker `pingMaker` attıysa maker'ın `pingTakerForChallenge`'ı `ConflictingPingPath` ile reddedilir.
+- **Maker her zaman release edebilir:** `PAID`'den `releaseFunds` ping'den bağımsız her an açıktır (clean release); `CHALLENGED`'dan release `DISPUTED_RELEASE` + maker dispute kaybıdır.
 - **Mutual cancel:** her iki taraf kendi `proposeOrApproveCancel(tradeId)` işlemini gönderir (ayrı imza yok); ikinci onay gelmeden önce taraf kendi onayını `revokeCancel(tradeId)` ile geri çekebilir (`CancelRevoked`)
 - **Ödeme penceresi aşımı:** `reportPayment` yalnız `lockedAt + 48 saat`'ten önce kabul edilir (sınır saniyesinde `PaymentWindowClosed`). LOCKED'da 48 saat içinde ödeme bildirilmezse taraflardan biri `expirePaymentWindow` çağırır; maker tam iade alır, taker bond'undan %2 liveness cezası + negatif itibar sinyali
 - **Terminal burn:** challenge sonrası süre dolunca `burnExpired`
@@ -364,7 +365,7 @@ yalnız son 96 saatte erir; bu yüzden yakılma anına kadar yaklaşık %34,7'si
 `getCurrentAmounts(tradeId)`, o anki ekonomik bakiyeyi kanonik olarak çıkarır.
 
 ### 7.3 Challenge ve liveness ping semantiği
-- Ping yolları birbirini dışlayan şekilde tasarlanır (conflicting path koruması).
+- Ping yolları birbirini dışlayan şekilde tasarlanır (conflicting path koruması). İstisna: maker pingi `challengePingedAt + 24 saat + MAKER_CHALLENGE_WINDOW` anında düşer; o saniyeden itibaren `challengeTrade` `ChallengeWindowExpired` verir ve taker `pingMaker` çağırabilir.
 - Bekleme pencereleri state-guard ile enforce edilir.
 
 ### 7.4 Burn semantiği
@@ -385,7 +386,7 @@ yalnız son 96 saatte erir; bu yüzden yakılma anına kadar yaklaşık %34,7'si
 - taker bond decay  
 - belirli eşik sonrası crypto side decay  
 - `getCurrentAmounts(tradeId)`, o anki ekonomik bakiyeyi kanonik olarak çıkarır.  
-- Ping yolları birbirini dışlayan şekilde tasarlanır (conflicting path koruması).  
+- Ping yolları birbirini dışlayan şekilde tasarlanır (conflicting path koruması); maker pingi `ping + 48 saat`te düşer.  
 - Bekleme pencereleri state-guard ile enforce edilir.  
 - `burnExpired` permissionless pattern’e yakındır: challenge süresi dolan state’i finalize eder.  
 - Trade'in escrow'daki tüm bakiyesi (erimiş kısım dahil) treasury'ye gider.  
