@@ -43,7 +43,9 @@ flowchart TD
     auto_release --> resolved_penalty[RESOLVED auto-release]
 
     paid_state --> ping_taker[Maker pingTakerForChallenge cagirir]
-    ping_taker --> challenge_call[Pencere sonrasi maker ya da susan maker karsisinda taker challengeTrade cagirir]
+    ping_taker --> challenge_call[Maker ping+24sa ile ping+48sa arasinda challengeTrade cagirir]
+    ping_taker --> ping_lapsed[Maker ping+48 saate kadar challenge acmazsa ping duser]
+    ping_lapsed --> ping_maker
     challenge_call --> challenged_state[CHALLENGED]
 
     challenged_state --> release_after_challenge[Maker yine releaseFunds cagirabilir]
@@ -60,7 +62,23 @@ flowchart TD
     burn_call --> burn_terminal[BURNED]
 ```
 
-**Karşılıklı dışlayıcılık kuralı:** Protokol `ConflictingPingPath` tarzı bir koruma uygular. `PAID` durumundan bir ping yolu açıldığında karşıt yol paralel olarak açılamaz. Bu yaklaşım, yarış koşullu yol değiştirme ve MEV tipi sıralama manipülasyonunu engeller.
+**Karşılıklı dışlayıcılık kuralı:** Protokol `ConflictingPingPath` tarzı bir koruma uygular. `PAID` durumundan bir ping yolu açıldığında karşıt yol paralel olarak açılamaz. Bu yaklaşım, yarış koşullu yol değiştirme ve MEV tipi sıralama manipülasyonunu engeller. Tek istisna zamana bağlıdır: maker'ın challenge pingi `MAKER_CHALLENGE_WINDOW` içinde `challengeTrade` ile desteklenmezse düşer ve taker'ın liveness yolu açılır.
+
+### 1.1 Ping zaman çizelgesi (maker challenge pingi)
+
+`T = challengePingedAt` (maker'ın `pingTakerForChallenge` anı; en erken `paidAt + 24 saat`).
+
+| Zaman aralığı | Maker `challengeTrade` | Taker `pingMaker` | Maker `releaseFunds` |
+|---|---|---|---|
+| `T ≤ t < T+24sa` (cevap penceresi) | `ResponseWindowActive` | `ConflictingPingPath` | Açık (clean release) |
+| `T+24sa ≤ t < T+48sa` (challenge penceresi, `MAKER_CHALLENGE_WINDOW`) | **Açık** → `CHALLENGED` | `ConflictingPingPath` | Açık (clean release) |
+| `t ≥ T+48sa` (ping düştü) | `ChallengeWindowExpired` | **Açık** (`paidAt + GRACE_PERIOD` kuralı aynen) → 24 saat sonra `autoRelease` | Açık (clean release) |
+
+Sınır saniyesi tektir: `T+48sa` anında challenge reddedilir ve aynı saniyede `pingMaker` kabul edilir; boşluk ya da çakışma yoktur. Maker ikinci kez ping atamaz (`AlreadyPinged`), dolayısıyla döngü kurulamaz. Ping'in düştüğü bir event ile duyurulmaz; zamanla olur. Off-chain hesap `getTrade` alanlarından yapılır:
+
+`pingDüştü = state == PAID && challengePingedByMaker && !pingedByTaker && now >= challengePingedAt + 24sa + MAKER_CHALLENGE_WINDOW`
+
+> **Maker'a mesaj:** ping bir iddiadır. 24 saatlik cevap süresinden sonraki 24 saat içinde `challengeTrade` ile arkasında durmazsan düşer; trade taker'ın liveness yoluna (`pingMaker` → `autoRelease`) kalır.
 
 ---
 
@@ -71,12 +89,23 @@ flowchart TD
 | Hızlı clean release | Taker ödemeyi işaretler, maker hızlı onaylar | `releaseFunds` | `RESOLVED` | En iyi iş birliği dengesi | En yüksek pozitif weight |
 | Yavaş clean release | Taker ödemeyi işaretler, maker geç onaylar | `releaseFunds` | `RESOLVED` | Kabul edilebilir ama gecikmiş iş birliği | Daha düşük pozitif weight |
 | Liveness release | `PAID` sonrası maker inaktif kalır | `pingMaker` -> bekleme -> `autoRelease` | `RESOLVED` | İnaktiviteyi cezalandırmak ve dürüst taker'ı kilitten çıkarmak | Zero weight |
-| Dispute escalation | Maker ödeme sorununu bildirir | `pingTakerForChallenge` -> 24 saat -> `challengeTrade` (maker; maker susarsa taker da açabilir, böylece ping-and-ghost kilidi yoktur) | `CHALLENGED` | Çatışmayı deterministik decay penceresine taşımak | Henüz terminal reward yok |
+| Dispute escalation | Maker ödeme sorununu bildirir | `pingTakerForChallenge` -> 24 saat -> `challengeTrade` (yalnız maker, `[ping+24sa, ping+48sa)` içinde; kaçırırsa ping düşer ve taker `pingMaker` -> `autoRelease` yolunu kullanır) | `CHALLENGED` | Çatışmayı deterministik decay penceresine taşımak | Henüz terminal reward yok |
 | Disputed release | Maker challenge sonrası release eder | `CHALLENGED` durumundan `releaseFunds` | `RESOLVED` | Çatışma sonrası geç düzeltme | MVP'de zero weight |
 | Partial settlement | Taraflar dispute içinde split üzerinde anlaşır | `proposeSettlement` -> `acceptSettlement(tradeId, proposalId)` (görülen teklife bağlı) | `RESOLVED` | Hakemsiz pazarlıklı çıkış | Düşük pozitif weight |
 | Mutual cancel | Her iki taraf unwind konusunda uzlaşır | iki taraf da `proposeOrApproveCancel` çağırır (ikinci onaydan önce `revokeCancel` ile geri alınabilir) | `CANCELED` | Oracle yargısı olmadan çift taraflı çıkış | Zero weight |
 | Ödeme penceresi aşımı | `LOCKED` sonrası 48 saatte ödeme bildirilmez | taraflardan biri `expirePaymentWindow` çağırır | `CANCELED` | Bond'suz taker'ın maker fonunu rehin tutmasını zamanla bitirmek | Zero weight + taker negatif sinyal |
 | Terminal burn | Challenge ufku sonunda uzlaşma yok | `burnExpired` | `BURNED` | Permissionless deadlock kapanışı | Zero weight |
+
+### 2.1 Ping/challenge senaryoları
+
+| Senaryo | Ne olur | Sonuç |
+|---|---|---|
+| Dürüst maker, ödeme gerçekten gelmedi | Ping atar, `T+24sa`–`T+48sa` arasında `challengeTrade` açar | Bleeding başlar; uzlaşma, iptal ya da `burnExpired` ile biter. İddiasını zamanında desteklediği için ping kuralından ek kaybı yok |
+| Dürüst maker, ödeme sonradan geldi | Ping attıktan sonra da `releaseFunds` çağırır (her an açık) | Clean release; ping maliyetsizdir |
+| Kötü niyetli maker: ping atıp susar (fonu rehin tutmak) | `T+48sa` anında ping düşer; taker `pingMaker` → 24 saat → `autoRelease` | Taker kriptoyu alır; iki bond'dan `AUTO_RELEASE_PENALTY` kesilir, auto-release itibar sinyali. Süresiz kilit yok |
+| Kötü niyetli maker: ödeme geldiği halde challenge açar | Bleeding başlar, iki tarafın bond'u ve kripto erir | Maker de kaybeder; `CHALLENGED`'dan geç release `DISPUTED_RELEASE` + maker dispute kaybı |
+| Kötü niyetli taker: ödemeden `reportPayment` | Maker ping atar ve pencerede challenge açar | Bleeding taker bond'unu eritir; taker challenge açamaz, ping'i düşüremez, pencere boyunca `pingMaker` ile maker'ı aşamaz |
+| Taker önce `pingMaker` atar | Maker artık ping atamaz (`ConflictingPingPath`) | Maker 24 saat içinde `releaseFunds` (ya da iptal/uzlaşma) yapmazsa `autoRelease` |
 
 ---
 
@@ -86,7 +115,7 @@ flowchart TD
 |---|---|---|
 | `PAID` karar noktası | Trade'i pasif lock durumundan aktif çözüm oyununa taşır | Tüm ödeme-sonrası stratejiyi child-trade seviyesinde toplar |
 | Conflicting ping yolları | Aynı anda tek escalation şeridine izin verir | Eşzamanlı dal manipülasyonu riskini azaltır |
-| Zaman kilitli escalation | `autoRelease` ve `challengeTrade` öncesi bekleme zorunlu kılar | Sübjektif arbitraj yerine net yanıt pencereleri üretir |
+| Zaman kilitli escalation | `autoRelease` ve `challengeTrade` öncesi bekleme zorunlu kılar; maker'ın challenge pingi 24 saatlik challenge penceresinden sonra düşer | Sübjektif arbitraj yerine net yanıt pencereleri üretir; ping ile rehin tutmayı kapatır |
 | Dispute decay yüzeyi | Çözülmeyen anlaşmazlıkta ekonomik baskı zamanla artar | Oracle olmadan tarafları uzlaşmaya iter |
 | `getCurrentAmounts(tradeId)` | O anki dağıtılabilir tutarların kanonik on-chain görünümü | Decay/dispute sürecinde frontend/backend bu değeri esas almalıdır; off-chain hesaplar yalnızca yardımcıdır |
 | Permissionless burn | Süresi dolan çıkmazı herhangi biri `burnExpired` ile kapatabilir | İki taraf da kaybolsa dahi protokol liveness garantisini korur |

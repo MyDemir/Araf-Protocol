@@ -43,7 +43,9 @@ flowchart TD
     auto_release --> resolved_penalty[RESOLVED via auto-release]
 
     paid_state --> ping_taker[Maker calls pingTakerForChallenge]
-    ping_taker --> challenge_call[After window maker or, if maker is silent, taker calls challengeTrade]
+    ping_taker --> challenge_call[Maker calls challengeTrade between ping+24h and ping+48h]
+    ping_taker --> ping_lapsed[No challenge by ping+48h: ping lapses]
+    ping_lapsed --> ping_maker
     challenge_call --> challenged_state[CHALLENGED]
 
     challenged_state --> release_after_challenge[Maker still may releaseFunds]
@@ -60,7 +62,23 @@ flowchart TD
     burn_call --> burn_terminal[BURNED]
 ```
 
-**Mutual exclusivity rule:** the protocol enforces a `ConflictingPingPath` style guard. Once one ping path is opened from `PAID`, the opposite path cannot be opened in parallel. This prevents race-based path flipping and MEV-style ordering abuse.
+**Mutual exclusivity rule:** the protocol enforces a `ConflictingPingPath` style guard. Once one ping path is opened from `PAID`, the opposite path cannot be opened in parallel. This prevents race-based path flipping and MEV-style ordering abuse. The only exception is time-based: if the maker's challenge ping is not backed by `challengeTrade` within `MAKER_CHALLENGE_WINDOW`, it lapses and the taker's liveness path opens.
+
+### 1.1 Ping timeline (maker challenge ping)
+
+`T = challengePingedAt` (time of the maker's `pingTakerForChallenge`; at the earliest `paidAt + 24h`).
+
+| Interval | Maker `challengeTrade` | Taker `pingMaker` | Maker `releaseFunds` |
+|---|---|---|---|
+| `T ≤ t < T+24h` (response window) | `ResponseWindowActive` | `ConflictingPingPath` | Open (clean release) |
+| `T+24h ≤ t < T+48h` (challenge window, `MAKER_CHALLENGE_WINDOW`) | **Open** → `CHALLENGED` | `ConflictingPingPath` | Open (clean release) |
+| `t ≥ T+48h` (ping lapsed) | `ChallengeWindowExpired` | **Open** (`paidAt + GRACE_PERIOD` rule unchanged) → `autoRelease` 24h later | Open (clean release) |
+
+There is a single boundary second: at `T+48h` the challenge is rejected and `pingMaker` is accepted in that same second; no gap, no overlap. The maker cannot ping twice (`AlreadyPinged`), so no loop can be built. The lapse is not announced by an event; it happens with time. Off-chain code derives it from `getTrade` fields:
+
+`pingLapsed = state == PAID && challengePingedByMaker && !pingedByTaker && now >= challengePingedAt + 24h + MAKER_CHALLENGE_WINDOW`
+
+> **Message to the maker:** a ping is a claim. If you do not back it with `challengeTrade` within the 24 hours after the 24h response window, it lapses and the trade falls to the taker's liveness path (`pingMaker` → `autoRelease`).
 
 ---
 
@@ -71,12 +89,23 @@ flowchart TD
 | Fast clean release | Taker marked payment and maker confirms quickly | `releaseFunds` | `RESOLVED` | Best cooperative equilibrium | Highest positive weight |
 | Slow clean release | Taker marked payment and maker eventually confirms | `releaseFunds` | `RESOLVED` | Acceptable but delayed cooperation | Lower positive weight |
 | Liveness release | Maker is inactive after `PAID` | `pingMaker` -> wait -> `autoRelease` | `RESOLVED` | Penalize inactivity and unblock honest taker | Zero weight |
-| Dispute escalation | Maker claims payment issue after `PAID` | `pingTakerForChallenge` -> 24h -> `challengeTrade` (maker; the taker may open it too if the maker goes silent, so there is no ping-and-ghost lock) | `CHALLENGED` | Move conflict into deterministic decay window | No terminal reward yet |
+| Dispute escalation | Maker claims payment issue after `PAID` | `pingTakerForChallenge` -> 24h -> `challengeTrade` (maker only, within `[ping+24h, ping+48h)`; if missed the ping lapses and the taker uses `pingMaker` -> `autoRelease`) | `CHALLENGED` | Move conflict into deterministic decay window | No terminal reward yet |
 | Disputed release | Maker releases after challenge | `releaseFunds` from `CHALLENGED` | `RESOLVED` | Late correction after conflict | Zero weight in MVP |
 | Partial settlement | Both parties agree on split inside dispute | `proposeSettlement` -> `acceptSettlement(tradeId, proposalId)` (bound to the proposal seen) | `RESOLVED` | Humanless negotiated exit | Low positive weight |
 | Mutual cancel | Both parties agree to unwind | `proposeOrApproveCancel` by both sides (revocable with `revokeCancel` before the second consent) | `CANCELED` | Bilateral exit without oracle judgment | Zero weight |
 | Payment window expiry | No payment reported within 48h of `LOCKED` | either party calls `expirePaymentWindow` | `CANCELED` | End, by time, a bond-free taker holding maker funds hostage | Zero weight + taker negative signal |
 | Terminal burn | No settlement by end of challenge horizon | `burnExpired` | `BURNED` | Permissionless deadlock closure | Zero weight |
+
+### 2.1 Ping/challenge scenarios
+
+| Scenario | What happens | Outcome |
+|---|---|---|
+| Honest maker, payment really missing | Pings, opens `challengeTrade` between `T+24h` and `T+48h` | Bleeding starts; ends in settlement, cancel or `burnExpired`. Backed the claim in time, so no extra loss from the ping rule |
+| Honest maker, payment arrives late | Calls `releaseFunds` after pinging (always open) | Clean release; the ping costs nothing |
+| Malicious maker: pings and goes silent (hostage) | Ping lapses at `T+48h`; taker `pingMaker` → 24h → `autoRelease` | Taker receives the crypto; both bonds pay `AUTO_RELEASE_PENALTY`, auto-release reputation signal. No indefinite lock |
+| Malicious maker: challenges although paid | Bleeding starts, both bonds and the crypto decay | The maker loses too; a late release from `CHALLENGED` is `DISPUTED_RELEASE` + maker dispute loss |
+| Malicious taker: `reportPayment` without paying | Maker pings and challenges within the window | Bleeding eats the taker bond; the taker cannot challenge, cannot void the ping, and cannot bypass it with `pingMaker` during the window |
+| Taker calls `pingMaker` first | Maker can no longer ping (`ConflictingPingPath`) | Unless the maker releases (or cancel/settlement) within 24h, `autoRelease` |
 
 ---
 
@@ -86,7 +115,7 @@ flowchart TD
 |---|---|---|
 | `PAID` as decision point | Switches trade from passive lock to active resolution game | Concentrates all post-payment strategy at child-trade level |
 | Conflicting ping paths | Enforces one escalation lane at a time | Removes simultaneous-branch manipulation risk |
-| Time-gated escalation | Requires waits before `autoRelease` or `challengeTrade` | Creates explicit response windows instead of subjective arbitration |
+| Time-gated escalation | Requires waits before `autoRelease` or `challengeTrade`; the maker's challenge ping lapses after the 24h challenge window | Creates explicit response windows instead of subjective arbitration; closes ping-based hostage taking |
 | Dispute decay surface | Economic pressure increases over unresolved time | Pushes parties toward settlement without oracle truth claims |
 | `getCurrentAmounts(tradeId)` | Canonical on-chain view of current distributable amounts | Frontend/backend must read this during decay/dispute; off-chain math is advisory only |
 | Permissionless burn | Any actor can finalize expired deadlock with `burnExpired` | Guarantees liveness even if both original parties disappear |

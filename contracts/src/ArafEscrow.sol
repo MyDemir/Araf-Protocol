@@ -269,6 +269,14 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
     uint256 public constant PAYMENT_WINDOW       =  48 hours;
     uint256 public constant USDT_DECAY_START     =  96 hours;
     uint256 public constant MAX_BLEEDING         = 240 hours;
+    // [TR] K2(B) "ping düşer": maker'ın pingTakerForChallenge'ı bir iddiadır. Challenge ping+24h'de açılabilir hale
+    //      gelir; maker bundan sonraki bu süre içinde challengeTrade ile iddiasının arkasında durmazsa ping geçersiz
+    //      olur (ping+24h+MAKER_CHALLENGE_WINDOW anında ve sonrasında): challenge kapanır, taker'ın pingMaker yolu açılır.
+    //      Sabittir; owner değiştiremez.
+    // [EN] K2(B) "ping lapses": the maker's challenge ping is a claim. The challenge opens at ping+24h; if the maker
+    //      does not back it with challengeTrade within this window afterwards, the ping lapses (at and after
+    //      ping+24h+MAKER_CHALLENGE_WINDOW): challenge closes, the taker's pingMaker path opens. Constant; not owner-settable.
+    uint256 public constant MAKER_CHALLENGE_WINDOW = 24 hours;
     uint256 internal constant WALLET_AGE_MIN       =   2 days;
     uint256 internal constant DEFAULT_TIER0_TRADE_COOLDOWN = 4 hours;
     uint256 internal constant DEFAULT_TIER1_TRADE_COOLDOWN = 4 hours;
@@ -907,14 +915,10 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
         (uint256 currentCrypto, uint256 currentMakerBond, uint256 currentTakerBond, uint256 decayed) =
             _calculateCurrentAmounts(_tradeId);
 
-        // [TR] Sınıflama challenge'ı kimin açtığına değil state'e bağlıdır. CHALLENGED'a yalnız maker'ın
-        //      pingTakerForChallenge ("ödeme gelmedi" iddiası) sonrasında girilir; challengeTrade'i maker da, maker
-        //      susunca taker da (K2) açabilir. Her iki durumda maker'ın CHALLENGED'dan serbest bırakması o iddiadan
-        //      vazgeçmesidir: DISPUTED_RELEASE + maker dispute kaybı doğru sınıftır.
-        // [EN] Classification depends on state, not on who opened the challenge. CHALLENGED is only reachable after
-        //      the maker's pingTakerForChallenge ("not paid" claim); challengeTrade may be opened by the maker or, once
-        //      the maker goes silent, by the taker (K2). Either way, a maker release from CHALLENGED abandons that claim:
-        //      DISPUTED_RELEASE + maker dispute loss is the correct class.
+        // [TR] CHALLENGED'a yalnız maker'ın kendi challengeTrade çağrısıyla girilir ("ödeme gelmedi" iddiası).
+        //      Maker'ın CHALLENGED'dan serbest bırakması o iddiadan vazgeçmesidir: DISPUTED_RELEASE + maker dispute kaybı.
+        // [EN] CHALLENGED is only reachable through the maker's own challengeTrade ("not paid" claim). A maker release
+        //      from CHALLENGED abandons that claim: DISPUTED_RELEASE + maker dispute loss.
         bool disputed = (t.state == TradeState.CHALLENGED);
 
         t.state = TradeState.RESOLVED;
@@ -947,10 +951,13 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
     }
 
     /**
-     * @notice Maker, challenge açmadan önce taker'a uyarı pingi gönderir.
-     *         Challenge yolu ile auto-release yolunun aynı anda açılmaması için bu sinyal izlenir.
-     * @notice The maker sends a warning ping to the taker before opening a challenge.
-     *         This signal also prevents the challenge path and auto-release path from opening simultaneously.
+     * @notice Maker, challenge açmadan önce taker'a uyarı pingi gönderir. Ping bir iddiadır: trade başına tek kez
+     *         atılabilir ve maker ping+24h ile ping+24h+MAKER_CHALLENGE_WINDOW arasında challengeTrade çağırmazsa
+     *         düşer (taker'ın pingMaker/autoRelease yolu açılır). Taker pingMaker attıysa bu ping atılamaz.
+     * @notice The maker sends a warning ping to the taker before opening a challenge. The ping is a claim: it can be
+     *         sent once per trade and lapses unless the maker calls challengeTrade between ping+24h and
+     *         ping+24h+MAKER_CHALLENGE_WINDOW (the taker's pingMaker/autoRelease path then opens). Blocked once the
+     *         taker has pinged the maker.
      */
     function pingTakerForChallenge(uint256 _tradeId)
         external
@@ -969,15 +976,15 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
     }
 
     /**
-     * @notice Dispute (bleeding) akışını başlatır. Maker'ın pingTakerForChallenge çağrısı şarttır; cevap penceresi
-     *         (ping + 24 saat) dolduktan sonra challenge'ı maker ya da taker açabilir. Taker'ın bu yolu, maker ping
-     *         atıp susarsa (pingMaker/autoRelease ConflictingPingPath ile kapalıyken) PAID trade'in sonsuza dek
-     *         kilitli kalmasını önler: bleeding başlar ve en geç MAX_BLEEDING sonunda burnExpired garantilidir.
+     * @notice Maker dispute (bleeding) akışını başlatır. Önce pingTakerForChallenge şarttır; challenge yalnız
+     *         [ping+24h, ping+24h+MAKER_CHALLENGE_WINDOW) aralığında açılabilir. Pencere kaçarsa ping düşer
+     *         (ChallengeWindowExpired) ve trade taker'ın pingMaker/autoRelease yoluna kalır; böylece ping atıp susan
+     *         maker PAID trade'i süresiz kilitleyemez.
      *         Contract bu aşamada kimin haklı olduğunu söylemez; yalnız oyun teorik yolu açar.
-     * @notice Opens the dispute (bleeding) path. Requires the maker's pingTakerForChallenge; once the response window
-     *         (ping + 24h) has elapsed, either the maker or the taker may open it. The taker path prevents a PAID trade
-     *         from being locked forever when the maker pings and goes silent (pingMaker/autoRelease are blocked by
-     *         ConflictingPingPath): bleeding starts and burnExpired is guaranteed after MAX_BLEEDING at the latest.
+     * @notice Opens the dispute (bleeding) path for the maker. Requires a prior pingTakerForChallenge; the challenge can
+     *         only be opened within [ping+24h, ping+24h+MAKER_CHALLENGE_WINDOW). If missed, the ping lapses
+     *         (ChallengeWindowExpired) and the trade falls to the taker's pingMaker/autoRelease path, so a maker who
+     *         pings and goes silent cannot lock a PAID trade indefinitely.
      *         At this stage the contract does not decide who is right; it only opens the game-theoretic path.
      */
     function challengeTrade(uint256 _tradeId)
@@ -986,9 +993,10 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
         inState(_tradeId, TradeState.PAID)
     {
         Trade storage t = trades[_tradeId];
-        if (msg.sender != t.maker && msg.sender != t.taker) revert NotTradeParty();
+        if (msg.sender != t.maker) revert OnlyMaker();
         if (!t.challengePingedByMaker) revert MustPingFirst();
         if (block.timestamp < t.challengePingedAt + 24 hours) revert ResponseWindowActive();
+        if (block.timestamp >= t.challengePingedAt + 24 hours + MAKER_CHALLENGE_WINDOW) revert ChallengeWindowExpired();
 
         t.state        = TradeState.CHALLENGED;
         t.challengedAt = uint64(block.timestamp);
@@ -1085,9 +1093,11 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
 
     /**
      * @notice Taker, sessiz kalan maker için liveness pingi gönderir.
-     *         Bu ping auto-release yolunu açar; contract iki ping yolunun çakışmasına izin vermez.
+     *         Bu ping auto-release yolunu açar; contract iki ping yolunun çakışmasına izin vermez. Maker'ın
+     *         challenge pingi yalnız düşmüşse (ping+24h+MAKER_CHALLENGE_WINDOW ve sonrası) bu çağrıyı engellemez.
      * @notice The taker sends a liveness ping to an inactive maker.
-     *         This opens the auto-release path; the contract does not allow both ping paths to coexist.
+     *         This opens the auto-release path; the contract does not allow both ping paths to coexist. A maker
+     *         challenge ping no longer blocks it once lapsed (at and after ping+24h+MAKER_CHALLENGE_WINDOW).
      */
     function pingMaker(uint256 _tradeId)
         external
@@ -1098,7 +1108,12 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
         if (msg.sender != t.taker) revert OnlyTaker();
         if (block.timestamp < t.paidAt + GRACE_PERIOD) revert PingCooldownNotElapsed(t.paidAt + GRACE_PERIOD);
         if (t.pingedByTaker) revert AlreadyPinged();
-        if (t.challengePingedByMaker) revert ConflictingPingPath();
+        // [TR] Maker'ın pingi ancak düşmüşse (challenge penceresi kapanmışsa) bu yol açılır; sınır saniyesi
+        //      challengeTrade'in ChallengeWindowExpired eşiğiyle aynıdır (boşluk/çakışma yok).
+        // [EN] Only a lapsed maker ping (challenge window closed) unblocks this path; the boundary second equals
+        //      challengeTrade's ChallengeWindowExpired threshold (no gap, no overlap).
+        if (t.challengePingedByMaker &&
+            block.timestamp < t.challengePingedAt + 24 hours + MAKER_CHALLENGE_WINDOW) revert ConflictingPingPath();
 
         t.pingedByTaker = true;
         t.pingedAt      = uint64(block.timestamp);
