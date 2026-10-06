@@ -1994,7 +1994,7 @@ class EventWorker {
       updateSet.taker_address = normalizedTaker;
     }
 
-    await Trade.findOneAndUpdate(
+    const written = await Trade.findOneAndUpdate(
       {
         ..._buildIdentityLookup("onchain_escrow_id", tradeIdNum),
         // [TR] Monotonic state kuralı:
@@ -2002,10 +2002,20 @@ class EventWorker {
         //      PAID/CHALLENGED vb. ileri state'leri geriye sarmayız.
         // [EN] Enforce monotonicity for delayed/replayed EscrowLocked events.
         status: { $in: ["OPEN", "LOCKED"] },
+        // [TR] Snapshot TEK SEFERLİK: captured_at doluysa (tam ya da eksik) hiçbir şey yazılmaz.
+        //      Replay / DLQ re-drive / tekrar işlenen OrderFilled mevcut snapshot'ı asla yeniden yazamaz;
+        //      eksik snapshot sonradan "tamamlanmaz" (dolandırıcılık önleme). Koşul atomik (tek update).
+        // [EN] One-shot snapshot: atomic conditional write, never overwrites an existing snapshot.
+        "payout_snapshot.captured_at": null,
       },
       { $set: updateSet },
       { session }
     );
+
+    if (!written) {
+      logger.info(`[Worker] LOCKED snapshot already captured or trade not eligible; skipped: trade=${tradeIdNum}`);
+      return;
+    }
 
     if (!snapshotComplete) {
       logger.error(`[Worker] LOCKED snapshot incomplete: trade=${tradeIdNum} reason=${incompleteReason}`);
