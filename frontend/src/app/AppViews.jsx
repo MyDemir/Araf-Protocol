@@ -220,9 +220,9 @@ export const buildAppViews = (ctx) => {
   const renderSlimRail = () => (
     <div className="hidden md:flex w-16 bg-shell border-r border-borderSubtle flex-col items-center py-6 justify-between z-50 shrink-0 shadow-2xl">
       <div className="space-y-6 flex flex-col items-center w-full">
-        <div className="w-8 h-8 rounded bg-gradient-to-br from-white to-slate-400 flex items-center justify-center font-bold text-black mb-4 cursor-pointer" onClick={() => setCurrentView('home')}>
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="square" strokeLinejoin="miter" strokeWidth="3" d="M4 4h4v4H4zm12 0h4v4h-4zM4 16h4v4H4zm12 0h4v4h-4zM10 10h4v4h-4z" /></svg>
-        </div>
+        <button type="button" aria-label="Araf" onClick={() => setCurrentView('home')} className="w-8 h-8 mb-4 flex items-center justify-center cursor-pointer">
+          <img src="/logo-64.png" alt="" width="32" height="32" className="w-8 h-8" />
+        </button>
         <button onClick={toggleSidebar} title={lang === 'TR' ? 'Filtreler' : 'Filters'} className={`w-10 h-10 flex items-center justify-center rounded-xl transition ${sidebarOpen ? 'bg-elevated text-textPrimary border border-borderStrong' : 'text-textMuted hover:text-textPrimary hover:bg-elevated'}`}><Menu className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" /></button>
         {NAV_ORDER.rail.filter((key) => isViewInNav(key, { navUnlocked, canSeeAdminEntry })).map((key) => {
           const view = VIEW_REGISTRY[key];
@@ -282,7 +282,7 @@ export const buildAppViews = (ctx) => {
           className={`fixed md:relative inset-y-0 left-0 box-border h-dvh md:h-full max-w-full bg-shell border-r border-borderSubtle flex flex-col z-[60] md:z-40 shrink-0 overflow-x-hidden overflow-y-auto overscroll-contain transition-all duration-300 ease-in-out ${sidebarOpen ? 'w-[280px] max-w-[calc(100vw_-_3rem)] pl-[calc(0.75rem_+_env(safe-area-inset-left))] pr-3 pt-[calc(1rem_+_env(safe-area-inset-top))] pb-[calc(1rem_+_env(safe-area-inset-bottom))] opacity-100' : 'w-0 p-0 opacity-0'}`}
         >
           <div className="md:hidden flex items-center justify-between px-3 mb-4">
-            <span className="text-base font-bold tracking-tight text-textPrimary">Araf</span>
+            <span className="flex items-center gap-2 text-base font-bold tracking-tight text-textPrimary"><img src="/logo-64.png" alt="" width="28" height="28" className="w-7 h-7 shrink-0" />Araf</span>
             <button type="button" onClick={() => setSidebarOpen(false)} aria-label={tr ? 'Menüyü kapat' : 'Close menu'} className="w-9 h-9 -mr-2 flex items-center justify-center rounded-lg text-textMuted hover:text-textPrimary hover:bg-elevated">
               <X className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" />
             </button>
@@ -1277,7 +1277,7 @@ export const buildAppViews = (ctx) => {
       <footer className="w-full max-w-[1200px] px-4 md:px-8 pb-6 md:pb-8 mt-2" data-testid="app-footer">
         <div className="border-t border-borderSubtle pt-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div>
-            <p className="text-sm font-semibold text-textPrimary">Araf</p>
+            <p className="flex items-center gap-2 text-sm font-semibold text-textPrimary"><img src="/logo-64.png" alt="" width="24" height="24" className="w-6 h-6 shrink-0" />Araf</p>
             <p className="text-xs text-textMuted">{lang === 'TR' ? 'Hakem değil, oyun teorisi. Karar mercii kontrat.' : 'No arbitrator, only game theory. The contract is the final authority.'}</p>
             <p className="text-[11px] text-textMuted mt-1">{lang === 'TR' ? 'Deneysel yazılım; kendi sorumluluğunuzda kullanın.' : 'Experimental software; use at your own risk.'}</p>
           </div>

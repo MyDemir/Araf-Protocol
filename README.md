@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="frontend/public/icon.svg" alt="Araf Protocol logo" width="72" height="72">
+  <img src="frontend/public/icon.png" alt="Araf Protocol logo" width="72" height="72">
 </p>
 
 <h1 align="center">Araf Protocol</h1>
