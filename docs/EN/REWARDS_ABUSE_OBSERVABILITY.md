@@ -142,3 +142,22 @@ This plan does not:
 - choose reward recipient;
 - change multiplier, weight, epoch pool, or claimable amount;
 - convert Proof of Peace into cashback or a fixed rebate program.
+
+## 8) Implementation status (verified against the code)
+
+This document is a **plan**. No backend job, endpoint or dashboard computes the metrics in section 3 today; they have to be built on the read surfaces below, and several inputs do not exist in the mirror yet.
+
+What exists:
+
+- Public mirror routes `GET /api/rewards/*` (epoch rows, global/product funding, per-wallet claim history) and admin routes `GET /api/admin/revenue`, `GET /api/admin/rewards/health`, plus `resolutionAnalytics` and `settlementAnalytics` in `GET /api/admin/summary` (counts by terminal outcome, including `paymentWindowExpiredCount`).
+- Mongo mirror models (naming differs from the suggested dashboard fields): `RewardEpoch` (`epoch`, `token`, `epoch_pool`, `total_weight`, `status`), `RewardClaim` (`epoch`, `user`, `token`, `amount`, `user_weight`, `total_weight`), `RewardFunding` (`funder`, `token`, `amount`, `target_epoch`, `product_id`, `funding_ref`, `type` = `GLOBAL`/`PRODUCT`), `RewardEpochAllocationEvent`, `RevenueEvent`, and the child trades in `Trade`.
+
+What does **not** exist (gaps for any future dashboard):
+
+- `TradeOutcomeRecorded` weights are not persisted: the worker only stamps `Trade.timers.reward_recorded_at`. Per-user weight, weight share and `zero_weight_trade_count` must be derived from on-chain event logs (or `ArafRewards.userWeight(epoch, user)` / `totalWeight(epoch)`), not from Mongo.
+- `RewardEpoch.total_weight` stays `null` and `RewardEpoch.status` stays `OPEN` (the worker never updates them); finalization and dust-rollover events (`EpochTokenFinalizedEvent`, `EpochDustRolledOver`) are not mirrored.
+- Terminal trades expire from Mongo one year after resolution (TTL); the permanent `TerminalTradeStat` rows keep only status, token, amount and timing (no wallets), so long-horizon pair/cluster analysis needs its own store.
+- Payout fingerprint inputs are short-lived: `payout_snapshot.*.fingerprint_hash_at_lock` is wiped 30 days after the lock once the trade is terminal. Current fingerprints live in `User.payout_profile.fingerprint.hash` (HMAC `hmac-v1`; legacy records may still be unsalted `sha256`, and hashes of different schemes are not comparable). Because the HMAC input excludes the wallet, equal details give equal hashes across wallets, which is what makes reuse detection possible; the hash is key-dependent and never reveals the details.
+- `payout_snapshot` also carries `rail` and `country` until the same retention wipe.
+
+Authority is unchanged: none of this feeds the contracts, and the backend never writes weights, recipients or claimable amounts.

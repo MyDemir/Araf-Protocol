@@ -142,3 +142,22 @@ Bu plan şunları yapmaz:
 - reward recipient seçmek;
 - multiplier, weight, epoch pool veya claimable amount değiştirmek;
 - Proof of Peace'i cashback veya fixed rebate programına dönüştürmek.
+
+## 8) Uygulama durumu (kodla doğrulanmış)
+
+Bu doküman bir **plandır**. Bugün hiçbir backend işi, endpoint'i veya dashboard'u 3. bölümdeki metrikleri hesaplamaz; bunlar aşağıdaki okuma yüzeylerinin üstüne kurulmalıdır ve bazı girdiler mirror'da henüz yoktur.
+
+Var olanlar:
+
+- Public mirror route'ları `GET /api/rewards/*` (epoch satırları, global/product funding, cüzdan başına claim geçmişi) ve admin route'ları `GET /api/admin/revenue`, `GET /api/admin/rewards/health`; ayrıca `GET /api/admin/summary` içinde `resolutionAnalytics` ve `settlementAnalytics` (terminal outcome'a göre sayılar, `paymentWindowExpiredCount` dahil).
+- Mongo mirror modelleri (adlandırma önerilen dashboard alanlarından farklıdır): `RewardEpoch` (`epoch`, `token`, `epoch_pool`, `total_weight`, `status`), `RewardClaim` (`epoch`, `user`, `token`, `amount`, `user_weight`, `total_weight`), `RewardFunding` (`funder`, `token`, `amount`, `target_epoch`, `product_id`, `funding_ref`, `type` = `GLOBAL`/`PRODUCT`), `RewardEpochAllocationEvent`, `RevenueEvent` ve `Trade` içindeki child trade'ler.
+
+**Olmayanlar** (ileride yazılacak bir dashboard için boşluklar):
+
+- `TradeOutcomeRecorded` weight'leri saklanmaz: worker yalnız `Trade.timers.reward_recorded_at` alanını damgalar. Kullanıcı başına weight, weight payı ve `zero_weight_trade_count` Mongo'dan değil, on-chain event log'larından (ya da `ArafRewards.userWeight(epoch, user)` / `totalWeight(epoch)` okumalarından) türetilmelidir.
+- `RewardEpoch.total_weight` `null`, `RewardEpoch.status` `OPEN` kalır (worker bunları hiç güncellemez); finalize ve dust-rollover event'leri (`EpochTokenFinalizedEvent`, `EpochDustRolledOver`) mirror'lanmaz.
+- Terminal trade'ler çözülmeden 1 yıl sonra Mongo'dan silinir (TTL); kalıcı `TerminalTradeStat` satırları yalnız status, token, tutar ve zamanlamayı tutar (cüzdan yok); uzun vadeli çift/küme analizi bu yüzden kendi deposunu gerektirir.
+- Payout fingerprint girdileri kısa ömürlüdür: `payout_snapshot.*.fingerprint_hash_at_lock`, trade terminal olduktan sonra kilitten 30 gün sonra silinir. Güncel fingerprint'ler `User.payout_profile.fingerprint.hash` içinde yaşar (HMAC `hmac-v1`; eski kayıtlar hâlâ tuzsuz `sha256` olabilir ve farklı şemadaki hash'ler karşılaştırılamaz). HMAC girdisi wallet'ı içermediğinden aynı detaylar wallet'lar arasında aynı hash'i verir; yeniden kullanım tespitini mümkün kılan budur; hash anahtara bağlıdır ve detayları asla açığa çıkarmaz.
+- `payout_snapshot` aynı retention silmesine kadar `rail` ve `country` de taşır.
+
+Authority değişmez: bunların hiçbiri kontratlara girdi olmaz ve backend weight, recipient veya claimable amount yazmaz.
