@@ -38,7 +38,6 @@ Her satır: belge, tek cümle amaç, EN | TR bağlantısı ("—" = o dilde yok)
 | REWARDS_ROLLOUT | Proof of Peace rewards rollout plan. / Proof of Peace ödül yayılım planı. | [EN](EN/REWARDS_ROLLOUT.md) | [TR](TR/REWARDS_ROLLOUT.md) |
 | REWARDS_ABUSE_OBSERVABILITY | Monitoring rewards abuse. / Ödül suistimali gözlemlenebilirliği. | [EN](EN/REWARDS_ABUSE_OBSERVABILITY.md) | [TR](TR/REWARDS_ABUSE_OBSERVABILITY.md) |
 | Release notes | Per-version release notes. / Sürüm notları. | [releases/README](releases/README.md) | [releases/README](releases/README.md) |
-| colosseum/ | Hackathon submission material (mostly Turkish). / Hackathon başvuru malzemesi. | [colosseum](colosseum/) | [colosseum](colosseum/) |
 
 ## Plans / Plan
 

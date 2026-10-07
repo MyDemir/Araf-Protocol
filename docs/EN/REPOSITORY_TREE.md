@@ -57,7 +57,6 @@ Araf-Protocol/
 │   ├── EN/                               # English docs (API, ARCHITECTURE, DEPLOYMENT_GUIDE, ENV, DEPLOY_BASE_SEPOLIA, BACKLOG, ...)
 │   ├── TR/                               # Turkish docs (same set + MAINNET_READINESS_CHECKLIST)
 │   ├── Plan/                             # planned work (Spot tier, UI scenario lab)
-│   ├── colosseum/                        # hackathon submission material
 │   └── GAS_BASELINE.md
 ├── CLAUDE.md
 ├── package.json
