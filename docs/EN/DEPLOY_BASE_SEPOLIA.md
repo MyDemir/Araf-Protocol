@@ -105,6 +105,12 @@ gh run watch
 
 Input overrides: `araf_escrow_address`, `usdt_address`, `usdc_address`, `deployment_block`.
 
+## Farcaster / Base mini app
+
+- The workflow passes `VITE_PUBLIC_URL=https://$FRONTEND_DOMAIN` to the Vercel build; the build generates the `fc:miniapp` meta tags and `/.well-known/farcaster.json` from it.
+- The `accountAssociation` signature is bound to the domain, so it must be regenerated for every new `FRONTEND_DOMAIN`: deploy once, open the Farcaster developer tools (Manifest tool) or the Base Build manifest tool, enter the domain, sign with the Farcaster account, and copy the three values.
+- Store them as GitHub variables `FARCASTER_ACCOUNT_ASSOCIATION_HEADER`, `FARCASTER_ACCOUNT_ASSOCIATION_PAYLOAD`, `FARCASTER_ACCOUNT_ASSOCIATION_SIGNATURE` (all three or none), optionally `VITE_BASE_APP_ID`, then re-run the frontend deploy. Without them farcaster.json is emitted without `accountAssociation` (the app still works; mini app verification will not pass).
+
 ## Notes
 
 - Testnet KMS exception: with `NODE_ENV=production` + `EXPECTED_CHAIN_ID=84532` + `ALLOW_ENV_KMS_ON_TESTNET=yes`, `KMS_PROVIDER=env` is accepted (the backend exception exists on the main branch: `backend/scripts/services/encryption.js`; the RPC is also verified to be 84532). Mainnet requires AWS/Vault KMS.

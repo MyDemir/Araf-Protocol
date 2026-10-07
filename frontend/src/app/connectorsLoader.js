@@ -2,13 +2,23 @@
 //      1) tüm bağlayıcılar, 2) yalnız injected() (yeniden deneme), 3) bağlayıcısız (EIP-6963 keşfi yine çalışır).
 // [EN] If the connectors chunk fails to load (network error, stale deploy), degrade in steps instead of a blank
 //      screen: 1) all connectors, 2) injected() only (retry), 3) none (EIP-6963 discovery still works).
-export const loadConnectorsSafely = async (importer = () => import('wagmi/connectors'), logger = console) => {
+// [TR] miniAppConnectorImporter yalnız mini app içinde verilir; hata olursa normal bağlayıcılar etkilenmez.
+export const loadConnectorsSafely = async (importer = () => import('wagmi/connectors'), logger = console, miniAppConnectorImporter = null) => {
   try {
     const { coinbaseWallet, injected } = await importer();
-    return [
+    const list = [
       injected(), // OKX Wallet ve diğer injected cüzdanlar
       coinbaseWallet({ appName: 'Araf Protocol' }),
     ];
+    if (miniAppConnectorImporter) {
+      try {
+        const { farcasterMiniApp } = await miniAppConnectorImporter();
+        list.unshift(farcasterMiniApp());
+      } catch (err) {
+        logger.error('[bootstrap] mini app connector unavailable; continuing without it', err);
+      }
+    }
+    return list;
   } catch (err) {
     logger.error('[bootstrap] connectors chunk failed to load; retrying with injected() only', err);
   }
