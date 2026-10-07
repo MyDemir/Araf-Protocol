@@ -37,6 +37,7 @@ Her satır: belge, tek cümle amaç, EN | TR bağlantısı ("—" = o dilde yok)
 | GAME_THEORY | Game-theoretic model behind the protocol. / Protokolün oyun teorisi modeli. | [EN](EN/GAME_THEORY.md) | [TR](TR/GAME_THEORY.md) |
 | REWARDS_ROLLOUT | Proof of Peace rewards rollout plan. / Proof of Peace ödül yayılım planı. | [EN](EN/REWARDS_ROLLOUT.md) | [TR](TR/REWARDS_ROLLOUT.md) |
 | REWARDS_ABUSE_OBSERVABILITY | Monitoring rewards abuse. / Ödül suistimali gözlemlenebilirliği. | [EN](EN/REWARDS_ABUSE_OBSERVABILITY.md) | [TR](TR/REWARDS_ABUSE_OBSERVABILITY.md) |
+| Release notes | Per-version release notes. / Sürüm notları. | [releases/](releases/) | [releases/](releases/) |
 | colosseum/ | Hackathon submission material (mostly Turkish). / Hackathon başvuru malzemesi. | [colosseum](colosseum/) | [colosseum](colosseum/) |
 
 ## Plans / Plan
