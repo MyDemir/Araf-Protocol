@@ -419,6 +419,7 @@ yalnız son 96 saatte erir; bu yüzden yakılma anına kadar yaklaşık %34,7'si
 ### 7.5 Cancel semantiği
 - `proposeOrApproveCancel` onayı msg.sender ile kanıtlanır; onaylar yalnız verildikleri state için geçerlidir (`reportPayment` / `challengeTrade` sıfırlar).
 - Her iki taraf onayı tamamlanmadan cancel finalize edilmez; tamamlanmadan önce verilen onay `revokeCancel` ile geri alınabilir.
+- **Tasarım notu (EIP-712 iptal imzası):** Önceki sürümde `proposeOrApproveCancel(tradeId, deadline, sig)` bir EIP-712 imzası (`CANCEL_TYPEHASH`, `sigNonces`, `deadline`) istiyordu; 2026-09-29'da `f4a3298` commit'iyle (PR #112) kaldırıldı. Kontrat `recovered == msg.sender` şartı aradığı için imzayı işlemi gönderen cüzdanın kendisi atıyordu: relay mümkün değildi ve imza `msg.sender` yetkisine ek koruma sağlamıyordu. `deadline` yalnız gönderim anında kontrol ediliyor, verilen onaya süre koymuyordu; nonce pratikte işlevsizdi. Yerine gelen korumalar: `reportPayment` ve `challengeTrade`'de onayların sıfırlanması (ödeme öncesi verilen onay ödeme sonrası kullanılamaz) ve `revokeCancel`. Kullanılmayan `MAX_CANCEL_DEADLINE` sabiti bu akıştan kalmadır.
 - `LOCKED` iptalinde fee yoktur, iki taraf tam iade alır. `PAID`/`CHALLENGED` iptalinde her tarafın fee'si (snapshot oranı × güncel kripto) kendi güncel bond'uyla sınırlanarak kesilir; `CHALLENGED`'da erimiş kısım da hazineye gider.
 
 ### 7.6 Settlement semantiği
@@ -861,7 +862,7 @@ erDiagram
 - `evidence.receipt_encrypted`
 - `evidence.receipt_timestamp`
 - `evidence.receipt_delete_at`
-- `evidence.receipt_delete_at` dekont yüklemesinden 30 gün sonrasına ayarlanır.
+- `evidence.receipt_delete_at` yüklemede `+30 gün` olarak yazılır; trade terminale geçince worker yeniden yazar: `RESOLVED` (release, auto-release, settlement) ve `CANCELED` (karşılıklı iptal, ödeme penceresi aşımı) için terminal an `+24 saat`, `BURNED` için `+30 gün`. Yükleme anındaki 30 gün yalnız terminale hiç ulaşmayan trade için geçerli kalır.
 - `payout_snapshot.{maker,taker,...}` altında lock-time `profile_version_at_lock`, `bank_change_count_*_at_lock`, `fingerprint_hash_at_lock` gibi risk bağlamı alanları tutulur.
 - `payout_snapshot.{captured_at, snapshot_delete_at, is_complete, incomplete_reason}`: `captured_at` doluysa snapshot bir daha yazılmaz (tek seferlik); eksik profil `is_complete=false` + gerekçe olarak kalır.
 

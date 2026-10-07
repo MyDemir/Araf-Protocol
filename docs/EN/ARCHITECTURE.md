@@ -422,6 +422,7 @@ only decays for the final 96 hours, so ≈ 34.7% of it is still there to settle 
 ### 7.5 Cancel semantics
 - `proposeOrApproveCancel` consent is proven by msg.sender; consents are valid only for the state they were given in (`reportPayment` / `challengeTrade` reset them).
 - Cancel finalization requires both party approvals; a consent can be withdrawn with `revokeCancel` before that.
+- **Design note (EIP-712 cancel signature):** The previous version required an EIP-712 signature in `proposeOrApproveCancel(tradeId, deadline, sig)` (`CANCEL_TYPEHASH`, `sigNonces`, `deadline`); it was removed on 2026-09-29 by commit `f4a3298` (PR #112). Because the contract required `recovered == msg.sender`, the signature was produced by the very wallet sending the tx: relaying was impossible and the signature added no protection beyond `msg.sender` authority. The `deadline` was only checked at submission and put no time limit on the given consent; the nonce was practically inert. The protections that replaced it: consent reset in `reportPayment` and `challengeTrade` (a consent given before payment cannot be used after it) and `revokeCancel`. The unused `MAX_CANCEL_DEADLINE` constant is a leftover of that flow.
 - A `LOCKED` cancel carries no fee and fully refunds both sides. On a `PAID`/`CHALLENGED` cancel each side's fee (snapshot rate × current crypto) is capped by that side's current bond; in `CHALLENGED` the decayed part also goes to treasury.
 
 ### 7.6 Settlement semantics
@@ -864,7 +865,7 @@ erDiagram
 - `evidence.receipt_encrypted`
 - `evidence.receipt_timestamp`
 - `evidence.receipt_delete_at`
-- `evidence.receipt_delete_at` is set to 30 days after the receipt upload.
+- `evidence.receipt_delete_at` is written as `+30 days` at upload; when the trade turns terminal the worker rewrites it: terminal time `+24h` for `RESOLVED` (release, auto-release, settlement) and `CANCELED` (mutual cancel, payment-window expiry), `+30 days` for `BURNED`. The upload-time 30 days only remains for a trade that never reaches a terminal state.
 - `payout_snapshot.{maker,taker,...}` carries lock-time risk context like `profile_version_at_lock`, `bank_change_count_*_at_lock`, `fingerprint_hash_at_lock`.
 - `payout_snapshot.{captured_at, snapshot_delete_at, is_complete, incomplete_reason}`: once `captured_at` is set the snapshot is never rewritten (one-shot); a missing profile stays as `is_complete=false` + reason.
 
