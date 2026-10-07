@@ -48,7 +48,12 @@ function initEnv({ root = path.resolve(__dirname, ".."), fixSecrets = false, log
 
     if (!fs.existsSync(target)) {
       let content = fs.readFileSync(example, "utf8");
-      if (pkg === "backend") content = fillSecrets(content, findPlaceholders(content));
+      if (pkg === "backend") {
+        content = fillSecrets(content, findPlaceholders(content));
+        // [TR] RELAYER_PRIVATE_KEY gerçek cüzdan anahtarıdır, üretilmez; placeholder ise boş bırakılır (relayer işleri pasif).
+        // [EN] A real wallet key, never generated; a placeholder is blanked (relayer jobs stay passive).
+        content = content.replace(/^RELAYER_PRIVATE_KEY=.*BURAYA.*$/m, "RELAYER_PRIVATE_KEY=");
+      }
       fs.writeFileSync(target, content, { mode: 0o600, flag: "wx" });
       result.created.push(rel);
       log(`[init-env] ${rel} oluşturuldu.`);

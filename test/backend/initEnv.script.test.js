@@ -29,6 +29,7 @@ describe("scripts/init-env.js", () => {
     const master = env.match(/^MASTER_ENCRYPTION_KEY=(.*)$/m)[1];
     expect(jwt).toMatch(/^[0-9a-f]{128}$/);
     expect(master).toMatch(/^[0-9a-f]{64}$/);
+    expect(env).toMatch(/^RELAYER_PRIVATE_KEY=$/m);
     expect(logs.join("\n")).not.toContain(jwt);
     expect(logs.join("\n")).not.toContain(master);
     fs.rmSync(root, { recursive: true, force: true });
