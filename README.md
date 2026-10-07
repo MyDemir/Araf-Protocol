@@ -107,38 +107,49 @@ Rollout docs:
 
 ---
 
-## 🛠 Quick start / Hızlı başlangıç
+## 🛠 Kurulum / Setup
 
-Requirements / Gereksinimler: Node.js + npm; backend için MongoDB ve Redis. Örnek env dosyaları: `backend/.env.example`, `frontend/.env.example`, `contracts/.env.example`.
+**Gereksinimler / Requirements:** Node.js 22 (`.nvmrc`), npm; backend için MongoDB ve Redis (yerelde Docker yeterli: bkz. [docs/EN/DEPLOYMENT_GUIDE.md](./docs/EN/DEPLOYMENT_GUIDE.md) §1).
 
 ```bash
-# Install / Kurulum
-npm --prefix contracts ci
-npm --prefix backend ci
-npm --prefix frontend ci
+# 1. Node 22 / Use Node 22
+nvm use                            # reads .nvmrc
 
-# Tests / Testler (tests live under test/<package>/)
-npm --prefix contracts test        # Hardhat
-npm run test:abi-drift             # escrow ABI vs. ABI strings in useArafContract.js / eventListener.js
+# 2. Install all packages / Tüm paketleri kur (contracts + backend + frontend, npm ci)
+npm run setup
+
+# 3. Env files / Ortam dosyaları (`npm run setup` bunu zaten çalıştırır; tek başına da çalışır)
+#    Eksik .env'leri .env.example'dan oluşturur, backend/.env için JWT_SECRET ve MASTER_ENCRYPTION_KEY'i
+#    rastgele üretir (ekrana basmaz). Var olan .env'ye dokunmaz; placeholder varsa uyarır,
+#    `node scripts/init-env.js --fix-secrets` ile yeniden üretir.
+#    Creates missing .env files, generates backend secrets, never overwrites existing files.
+npm run init:env
+#    Yerel hardhat düğümü kullanıyorsanız backend/.env içinde BASE_RPC_URL=http://127.0.0.1:8545 ve
+#    EXPECTED_CHAIN_ID=31337 yapın (örnek 8453 prod içindir). Using local hardhat: set EXPECTED_CHAIN_ID=31337.
+
+# 4. Test / Lint (tests live under test/<package>/)
+npm run test:all                   # contracts + backend + frontend + ABI drift
 npm --prefix backend test          # Jest
 npm --prefix frontend test         # Vitest
-npm run test:all                   # all of the above
+npm --prefix contracts test        # Hardhat
+npm run test:abi-drift             # escrow ABI vs. ABI strings in useArafContract.js / eventListener.js
+npm run lint                       # backend + frontend
 
-# Lint
-npm --prefix backend run lint
-npm --prefix frontend run lint
+# 5. Dev / Yerel çalıştırma
+npm run dev:backend
+npm run dev:frontend
+
+# 6. Build
+npm run build:frontend
+npm run build:frontend:testnet     # Base Sepolia build (POSIX shell: sets VITE_TARGET_CHAIN=base-sepolia)
 
 # Gas baseline
 npm --prefix contracts run gas:baseline
-
-# Local run / Yerel çalıştırma
-(cd contracts && npx hardhat node)                                   # terminal 1
-(cd contracts && TREASURY_ADDRESS=0x... npx hardhat run scripts/deploy.js --network localhost)  # libs + escrow + mock USDT/USDC
-npm --prefix backend run dev
-npm --prefix frontend run dev
 ```
 
-See [docs/EN/DEPLOYMENT_GUIDE.md](./docs/EN/DEPLOYMENT_GUIDE.md) / [docs/TR/DEPLOYMENT_GUIDE.md](./docs/TR/DEPLOYMENT_GUIDE.md) for full deployment steps.
+Yerel kontrat deploy'u (hardhat node + `deploy.js`) için [docs/EN/DEPLOYMENT_GUIDE.md](./docs/EN/DEPLOYMENT_GUIDE.md) / [docs/TR/DEPLOYMENT_GUIDE.md](./docs/TR/DEPLOYMENT_GUIDE.md) §1. Base Sepolia deploy / testnet yayını: [docs/DEPLOY_BASE_SEPOLIA.md](./docs/DEPLOY_BASE_SEPOLIA.md).
+
+> **Rewards scripts note / Not:** `verify:rewards`, `configure:rewards` and `switch:rewards:treasury` all run the same `scripts/rewardsOps.js`; the operation is chosen by the npm script name (so call them via `npm run`, not `npx hardhat run` directly), or by `REWARDS_OP`. / Üçü de aynı `rewardsOps.js`'i çalıştırır; işlem npm script adından seçilir (`npm run` ile çağırın).
 
 ## 🗂 Repository layout / Depo yapısı
 

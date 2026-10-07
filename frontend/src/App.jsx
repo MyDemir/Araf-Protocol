@@ -18,6 +18,7 @@ import { getInitialLang, APP_LANG_STORAGE_KEY } from './app/bootstrapState';
 import { markTermsAcceptedLocally } from './app/legal/terms';
 import { buildApiUrl, resolveApiPolicyDiagnostics } from './app/apiConfig';
 import { checkDeploymentAlignment, getSupportedChainsMap, isMintTokenEnabled, isSupportedChainId } from './app/chainPolicy';
+import { resolveRevenueVaultAddress } from './app/envConfig';
 import { useMakerOrderForm } from './app/contexts/marketplace/useMakerOrderForm';
 import { useMarketFilters } from './app/contexts/marketplace/marketFilters';
 import { buildMintAction, buildOrderActions, buildProfileActions, buildStartTradeAction, buildTradeRoomActions } from './app/actions/contractLifecycleActions';
@@ -399,7 +400,7 @@ function App() {
     import('./app/contexts/admin/adminChainConfig').then(({ readProtocolConfig }) => readProtocolConfig({
       publicClient,
       escrowAddress: import.meta.env.VITE_ESCROW_ADDRESS,
-      vaultAddress: import.meta.env.VITE_REVENUE_VAULT_ADDRESS || import.meta.env.VITE_REWARDS_VAULT_ADDRESS,
+      vaultAddress: resolveRevenueVaultAddress(),
       rewardsAddress: import.meta.env.VITE_REWARDS_ADDRESS,
       tokens: SUPPORTED_TOKEN_ADDRESSES,
     }))

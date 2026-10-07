@@ -1,0 +1,1342 @@
+# Crypto World's Fair: the complete Superteam Türkiye guide
+
+Everything on https://tr.superteam.fun/colosseum and the guides beneath it, as one document.
+
+Generated from the site's own content on 2026-10-03. If a figure here disagrees with https://tr.superteam.fun/colosseum, the site is right and this file is stale.
+
+Written for people and for assistants. Paste the whole thing in and ask your question.
+
+---
+
+## The facts, stated once
+
+- Competition: Crypto World's Fair, organised by Colosseum. Colosseum Org LLC administers it. Colosseum is an independent company, not a division or investment arm of the Solana Foundation.
+- Format: online, global, and for the first time open to builders on every blockchain ecosystem.
+- Building opened: 14 September 2026 at 06:00 Pacific, which is 16:00 in Türkiye. Section 5 of the official rules.
+- Submission deadline: 12 October, 23:59 California time. That's 09:59 on 13 October in Türkiye.
+- Every team member must register individually before 23:59 Pacific on 12 October or be disqualified. Section 6.
+- Winners announced on or about 5 December 2026. Section 13.
+- Prize pool: $840,000. This is not the same number as the venture fund.
+- Venture fund: $2.5M, behind the accelerator. Accepted teams get $250,000 pre-seed and twelve weeks in San Francisco.
+- Superteam Türkiye's own pool: 10,000 USDG, open only to teams based in Türkiye.
+- All submission content must be in English. Section 12.
+- Official rules: https://colosseum.com/legal/Crypto%20World's%20Fair%20Hackathon%20Rules.pdf
+- Register (Superteam Türkiye referral): https://colosseum.com?ref=superteamtr-2026
+- Our Earn listing: https://superteam.fun/earn/listing/submit-crypto-worlds-fair-project-for-turkish-builders/
+- Our Telegram group: https://t.me/+3sWAzL4fgPViMjU8
+- Our intake form: https://forms.gle/EELv1S3eD1nEytrq7
+- Our calendar: https://luma.com/superteamtr
+
+The two figures most often conflated are $840,000 and $2.5M. The first is prize money paid to placing teams. The second is venture capital deployed through the accelerator to a much smaller number of them.
+
+The mistake that cannot be undone is the timezone. Colosseum runs on California time and Türkiye is ten hours ahead. A team that waits for midnight in Türkiye submits ten hours late.
+
+---
+
+## Count yourself in.
+
+These three take under a minute and they're the difference between competing alone and competing with Superteam Türkiye behind you.
+
+**01. Enter via the referral link**
+Register on Arena through our referral link.
+Register: https://colosseum.com?ref=superteamtr-2026
+
+**02. Set your location to Türkiye**
+Select Türkiye as your team's primary base.
+
+
+**03. Submit to the Türkiye listing**
+Submit the same project again, on Earn, for 10,000 USDG that only Türkiye teams compete for.
+Open the listing: https://superteam.fun/earn/listing/submit-crypto-worlds-fair-project-for-turkish-builders/
+
+Registered? Tell us, so we can put you on the list for kickoff, office hours and idea validation. https://forms.gle/EELv1S3eD1nEytrq7
+
+---
+
+## Not a coding contest. A pre-seed funnel.
+
+Colosseum runs the largest hackathons in tech and then invests in the winning teams. Billed as a hackathon, judged as a seed round.
+
+- **9,000+** Products submitted. Across Colosseum's competitions in two and a half years.
+- **$60M** Fund I. Colosseum's own venture fund, backing the winners.
+- **74** Portfolio startups. Funded out of the arena so far.
+- **85%** Of VC-backed Solana startups. Colosseum's own number, published with this announcement.
+
+### 01. The largest startup competition in tech
+More products have been submitted here than to any other competition in crypto, and the company that runs it writes the cheques afterwards. It is one organisation doing both jobs, which is why placing well converts into capital rather than a certificate.
+
+### 02. 85% of venture-backed Solana startups started here
+If you want to raise in this ecosystem, this is the front door, not one of several. Teams that skip it end up pitching the same investors cold, a year later, without the proof.
+
+### 03. Open to every chain, for the first time
+All eight tracks are funded and published. Solana, Tempo, Hyperliquid and Zcash carry $100,000 each; Ethereum L1, Base, Arbitrum and Robinhood Chain carry $25,000. You pick up to three at registration, and every submission competes for the general awards as well, so a track is upside rather than a trade-off.
+
+### 04. But the accelerator money is still Solana
+Colosseum was explicit: the accelerator and venture fund keep investing in Solana founders. Build on Solana and you compete in your ecosystem track, in the cross-chain pool, and for the $250,000. Build elsewhere and the third one is not on the table.
+
+### 05. Judges score you like investors, not graders
+Founder-market fit, unique insight, execution quality, market size, communication, business model, and traction. Clean code is table stakes, not a score.
+
+### 06. The field got harder on purpose
+Colosseum's reasoning for opening it up: competition compounds. You are no longer measured against other Solana teams. You are measured against the best founders in crypto. Plan for that bar, not the old one.
+
+---
+
+## What's actually on the table.
+
+$840,000 in prizes, and $2.5M of Colosseum's fund behind the teams that win. Every figure below is from the official rules, not the announcement.
+
+- **$840,000** In prizes. Across the general awards and eight ecosystem tracks.
+- **$2.5M** In seed funding. From Colosseum's venture fund, through the accelerator.
+- **$250,000** Per accelerator team. Pre-seed, plus twelve weeks in San Francisco.
+- **5 Dec** Winners announced. On or about 5 December, per the rules.
+
+### Open to everyone
+
+- **Grand Champion: $30,000.** One team. Paid in Phantom CASH.
+- **The next 20 teams: $15,000 each.** $300,000 in total, and the band that feeds the accelerator.
+- **Public Goods Award: $5,000.** One team.
+- **University Award: $5,000.** One team.
+
+### Pick up to three at registration
+
+- **Solana: $100,000.** 10 products at $10,000
+- **Tempo: $100,000.** 10 products at $10,000
+- **Hyperliquid: $100,000.** 10 products, Hypercore or HyperEVM
+- **Zcash: $100,000.** 10 products, chain or asset
+- **Ethereum L1: $25,000.** 5 products at $5,000
+- **Base: $25,000.** 5 products at $5,000
+- **Arbitrum: $25,000.** 5 products at $5,000
+- **Robinhood Chain: $25,000.** 5 products at $5,000
+
+> **Read the two columns together**
+> Track prizes are additive: every submission competes for the general awards too, whichever chain you chose. But the $2.5M behind this competition is the accelerator's, and Colosseum has been explicit that it still backs Solana founders. A Base team can win $5,000. A Solana team can win $5,000, the general pool, and a $250,000 cheque.
+
+---
+
+## A prize pool only Türkiye teams can win.
+
+Colosseum organises its tracks per blockchain ecosystem, not per country, so there is no Türkiye track inside the competition itself. This runs alongside it on Superteam Earn, and it is additive: the project you enter for Colosseum's $840,000 competes here too.
+
+- **10,000** USDG prize pool. On top of everything Colosseum pays.
+- **Türkiye only** Who can enter. A regional listing. Your Colosseum profile has to say Turkey.
+- **12 Oct** Same deadline. One project, two submissions, one clock.
+- **28 Oct** Results. More than a month before Colosseum announces its own.
+
+- 1st: 5,000 USDG
+- 2nd: 3,000 USDG
+- 3rd: 2,000 USDG
+
+### Five things, and all five are checked
+
+- Set Turkey as your primary base country on your Colosseum profile.
+- Fill in the Superteam Türkiye intake form so we can track you and get you mentorship.
+- Join the Colosseum hackathon group on Telegram.
+- Submit the final project to both places: the Colosseum portal and this Earn listing. One is not the other.
+- Include a pitch video (max 3 minutes), a demo video (max 3 minutes), and a public repository, or judges granted access if it stays private. Everything in English.
+
+### What the local judges score
+
+- Ecosystem impact. Does this add real infrastructure, tooling or value to Solana?
+- Product-market fit on Solana. Is there genuine demand, and is there early traction to point at?
+- User growth potential. Does it bring new people into the ecosystem, or deepen engagement for the ones already here?
+- Presentation and adherence to the rules. Clarity of the videos, and strict compliance with the steps below.
+
+> **This track is Solana, even though the competition isn't**
+> Three of the four criteria name Solana explicitly. Crypto World's Fair is open to every ecosystem and this pool is not, so a team building elsewhere can still win Colosseum's general awards and its own ecosystem track, but not this one. It is the same split the accelerator makes, one scale down.
+
+Hackathon tracks on Earn don't consume submission credits. Superteam Türkiye reserves the right to announce results later than 28 October if the volume of submissions needs more review time.
+Listing: https://superteam.fun/earn/listing/submit-crypto-worlds-fair-project-for-turkish-builders/
+
+---
+
+## Week by week, start to submission.
+
+Four weeks is enough for exactly one strong use case. This is where each week should end.
+
+> **Before you follow the official guide**
+> Colosseum's own How to Win guide was written for a five-week hackathon and tells you to spend four weeks engineering. This edition is four weeks. Give three to building, and give the whole last week to testing, the two videos and the submission.
+
+### Every week until the deadline
+Four fixed slots a week, all of them free and none of them compulsory. Subscribe once and the whole programme lands in your calendar.
+
+- **Wednesdays · 19:00, Colosseum Community Call** (X Spaces). The week gets set here. One theme per call, and the room is where teams find each other.
+- **Fridays · 10:00, Coworking Fridays** (Kolektif House Levent, İstanbul). In person, all day. Bring the thing you are stuck on.
+- **Fridays · 19:00, Colosseum Office Hours** (Google Meet). One to one. Idea validation, architecture, deck and video review: whatever is blocking you that week.
+- **Saturdays · 14:00, Shipyard** (Nişantaşı, and livestreamed). The vertical deep-dive. One place Solana actually wins, worked through properly.
+
+**Community Calls** (Wednesdays, X Spaces)
+
+- 16 Sep: Find Your Edge
+- 23 Sep: Find Your Users
+- 30 Sep: Reality Check
+- 7 Oct: Fix What's Weak
+
+**Shipyard** (Saturdays, İstanbul and livestream)
+
+- 19 Sep: AI, Speed & Compute
+- 26 Sep: RWA, Payments & Corridors
+- 3 Oct: Gaming, Consumer & GTM
+
+Calendar: https://luma.com/superteamtr
+
+### Before Sep 14: Enter the arena and pick a fight
+Goal: Register, build a team, and gap-check your idea.
+
+- Create a Colosseum Arena account through Superteam Türkiye's referral link.
+- Click Register in the upper-right corner and set your team location to Türkiye.
+- Register even if you have no idea and no team yet. The project and team fields open on 14 September. Delaying costs you nothing but the invites and the office hours you'd have had in the meantime.
+- Find teammates. Judges prefer teams of 3+. Solo entries are allowed, but harder.
+- Run your idea through Colosseum Copilot against 5,400+ past projects. Full or partial gap: keep going. False gap: pivot now, not in week three.
+- Fill in our orientation form so we know you're competing. It's what puts you on the list for kickoff sessions and office hours.
+- Write a one-liner you can say out loud without apologizing for it.
+
+### Week 1: Narrowest possible MVP
+Goal: One user, one job, one screen that works on devnet.
+
+- Cut scope until one use case works end to end. Overscoping is the single most common way Türkiye teams lose.
+- Wire the chain integration early: wallet connect and a real transaction. If it can exist without a chain at all, judges notice.
+- Use the existing stack instead of rebuilding it: Helius or Triton for RPC, Privy for auth, Jupiter for swaps, Squads for multisig, Pyth for prices.
+- Post your first build-in-public update. Day one of a track record is better than day twenty.
+
+### Week 2: Put it in front of humans
+Goal: Real people used it and you have something to quote.
+
+- Ship a public URL. A GitHub link isn't a demo.
+- Get it in front of ten people who match your ideal customer and watch them use it, silently.
+- Write down what broke. Fix what stops adoption; ignore what only annoys you.
+- Start the pitch materials. Deck outline plus the story you'll tell on camera. Rough is fine. The structure isn't optional: Problem → Solution → Demo → Team.
+
+### Week 3: Traction and narrative
+Goal: Numbers on a slide and a story that explains them.
+
+- Instrument the product. Users, retained users, transactions, volume. Pick the two you would defend to an investor.
+- Build the narrative around the numbers, not around the vision.
+- Record a rough pitch and watch it back at 1x. If the hook isn't in the first ten seconds, rewrite it.
+- Ask Superteam Türkiye to amplify a real milestone. Not a launch announcement. A result.
+
+### Week 4 · to Oct 12: Submission week
+Goal: Everything uploaded two days early.
+
+- The submit button unlocks 6 October, 4:00am PT. You can draft, save and edit your project on Colosseum before then, so there's no reason to wait for it to start writing.
+- Pitch video, up to 2 minutes: problem, solution, team, traction. Founder voice, not a voiceover artist.
+- Demo video, up to 3 minutes: the product doing the thing.
+- Publish the repo. If it stays private, grant judges access. This is the most common disqualifying mistake.
+- Submit the identical project to the Superteam Türkiye local listing.
+- Know the deadline in your own timezone: 12 October, 23:59 California time. That's 09:59 on 13 October in Türkiye. Teams that assume midnight in Türkiye submit ten hours late.
+- Submit two days early anyway. The platform is slow on the last night, every single time.
+
+### After Oct 12: Don't stop
+Goal: Momentum is a judging signal and a fundraising one.
+
+- Keep shipping and keep posting. Judges fund teams that didn't treat the deadline as the finish line.
+- Apply to the grant and accelerator ladder below.
+
+---
+
+## Nine things between you and a valid submission.
+
+Every one of these has cost a team its submission before. Tick them off as you go. Your progress is saved in this browser.
+
+- [ ] **One-liner and blurb written and reviewed.** One sentence a stranger understands without a follow-up question. (Send this to us before it goes live.)
+- [ ] **MVP live on a public domain.** Publicly accessible. A localhost screenshot isn't a product.
+- [ ] **Business and revenue model written down.** How this makes money, in three sentences. Judges score it explicitly. (Send this to us before it goes live.)
+- [ ] **Your chain integration actually working.** Wallet connect and a real transaction, at minimum. Any ecosystem qualifies this time, but read the note on where the accelerator money sits before you choose.
+- [ ] **Code published, or judges granted access.** Private repos and locked Google Docs are the most common own goal.
+- [ ] **Verified X account, posting daily, following the judges.** The full panel is public now: five from Colosseum, plus fifteen track judges from Phantom, Base, Anza, Arcium, Drift, Ellipsis and MetaDAO. Follow them, and build in public. Silent teams read as abandoned.
+- [ ] **Pitch materials drafted and reviewed.** Deck, pitch video and demo: one story told three ways, structured Problem → Solution → Demo → Team. Bring them to us rough; polishing before feedback wastes the week. (Send this to us before it goes live.)
+- [ ] **Project and every team member registered on Colosseum.** Members missing from the project is a silent disqualifier.
+- [ ] **Same project submitted to the Superteam Türkiye listing.** Identical project, submitted twice. The Colosseum portal and the Earn listing are separate places, and doing one is not doing the other.
+
+---
+
+## The playbook, in full
+
+The 9 guides at https://tr.superteam.fun/colosseum/[slug], reproduced completely. These are the long-form answers; everything above is the summary. The last two are the same plan for people starting late, in English and in Turkish.
+
+---
+
+### 01. What judges actually score
+
+*The seven official criteria, the AI that reads you before a human does, and what they explicitly don't grade.* (9 min, https://tr.superteam.fun/colosseum/what-judges-score)
+
+#### The seven criteria
+
+Colosseum publishes what it evaluates. Almost nobody reads it, and it explains most losses.
+
+- Founder-market fit and motivation: why you, specifically, for this problem.
+- Unique insight and technology: what you know that the room doesn't.
+- Product execution quality: does it work, and does it feel built.
+- Market size: is the ceiling worth an investor's time.
+- Founder communication: can you explain it in two minutes.
+- Business viability: how it makes money.
+- Traction and demand: proof someone wants it.
+
+> **Read that list again**
+> Five of the seven are business criteria. This is a startup competition wearing a hackathon's clothes.
+
+- [The official rules, in full](https://colosseum.com/legal/Crypto%20World's%20Fair%20Hackathon%20Rules.pdf)
+
+#### Something reads you before a human does
+
+Colosseum runs an internal AI evaluation engine that filters submissions and raises flags before their team works through them. It scores founder-market fit, product velocity, user demand, market timing, and what they call evidence of grit in your past.
+
+Humans still review afterwards. But something is reading your history before they reach you, and your history is not something you can build in four weeks, which is an argument for entering with the track record you already have, written down and linkable, rather than a clean slate.
+
+After panel judging, a smaller group gets a fifteen-minute call. That call is about velocity and commitment, not a second demo. Expect to be asked what you shipped last week and whether you are doing this full time.
+
+#### Two published criteria lists, and they disagree
+
+The seven above are what Colosseum publishes in its own guidance. Section 8 of the official rules lists six different ones: functionality, potential impact, novelty, UX, open-source and composability, and business plan. Both are real, and where they conflict the rules are the document that settles an argument.
+
+The sharpest conflict is about code. Colosseum's FAQ says they are not looking for a particular language or framework, or for design patterns, best practices, or code-quality checks, which is often quoted as "they don't grade your code". The rules say the opposite in the first criterion: "How well does this Project Submission work? What is the quality of the code?"
+
+> **How to hold both**
+> Nobody is marking your style. Something does have to work, and a judge who opens the repo has to be able to see that you built it and prioritised sensibly. Ship something functional, then stop. An extra week of refactoring buys you nothing that either list scores.
+
+The rules also reward open-sourcing and composing with existing protocols directly, which the seven criteria never mention. If your repo is public and your product builds on other people's primitives, say so explicitly in the submission. It is a scored criterion, not a footnote.
+
+#### Are you even eligible
+
+Narrower than most people assume. This is for new startups that have not raised significant outside capital, and you are judged on work done inside the window. If you have already raised a round, read the rules before you spend four weeks on it.
+
+#### Pitch and deck tactics
+
+- The first ten seconds decide the rest. Judges review hundreds of submissions, so open with the problem and your solution, not with your team's origin story.
+- People remember people, not PDFs. Record yourself. Let them feel the team.
+- Slides support you, they don't speak for you. Less text, more clarity.
+- Structure: Problem → Solution → Demo → Team. Deviating from this costs you clarity and buys you nothing.
+- Scored does not mean it belongs in the video. Write the business model down where the form asks for it, and keep the three minutes for the problem, the product and the team. Revenue models and roadmaps read as padding at this length.
+
+#### Show why your team matters
+
+- Don't list names and titles. Say why each person is the right one to execute this specific thing.
+- Link proof of execution: shipped products, repos, portfolios. Builders, not thinkers.
+
+#### Product and audience
+
+- If it's for everyone, it's for no one. A specific problem for a narrow audience beats a general product every time.
+- Ship early, polish later. You don't have to be perfect to win, but you do have to be functional.
+
+#### Further reading
+
+- [How to Win a Colosseum Hackathon](https://blog.colosseum.com/how-to-win-a-colosseum-hackathon)
+- [Perfecting Your Hackathon Submission](https://blog.colosseum.com/perfecting-your-hackathon-submission)
+- [Hall of Fame: past winners](https://colosseum.com/arena/hackathon/hall-of-fame)
+
+---
+
+### 02. Validate before you build
+
+*Run a gap analysis against 5,400+ past hackathon projects before you write a line of code. Takes an hour, saves three weeks.* (4 min, https://tr.superteam.fun/colosseum/validate-your-idea)
+
+#### The question that matters on day one
+
+Has this been built before? If the answer is yes and you find out in week three, you have lost the hackathon. Colosseum ships a tool that answers it in an hour.
+
+#### Setting up Colosseum Copilot
+
+1. Generate a Personal Access Token in Arena.
+2. Set COLOSSEUM_COPILOT_API_BASE and COLOSSEUM_COPILOT_PAT in your environment.
+3. Install the skill into Claude Code or Codex: npx skills add ColosseumOrg/colosseum-copilot
+
+> **The prompt**
+> Validate this idea for the hackathon: [your idea]. Has anyone built this before, what is the competitive landscape, and what is genuinely unsolved?
+
+#### Reading the answer
+
+- False gap: already solved, and solved well. Pivot today.
+- Partial gap: solved for a different audience or on a different chain. This is usually the best position to be in.
+- Full gap: nobody has tried. Ask why before celebrating; sometimes there's a reason.
+
+#### No idea yet?
+
+Start from a problem list rather than a blank page. Our Türkiye request-for-proposals opens with registration; until then these are the best sources.
+
+- [Superteam Idea Bank](https://superteam.fun/build/ideas)
+- [Cofounder matching](https://colosseum.com/cofounder-matching)
+
+---
+
+### 03. Building AI-native on Solana
+
+*Which chain to build on now that every ecosystem qualifies, and how to reach a working product on infrastructure that already exists.* (9 min, https://tr.superteam.fun/colosseum/ai-native-solana-stack)
+
+#### The rule
+
+Every hour spent rebuilding something Helius or Privy already ships is an hour not spent on what judges actually score. Four weeks is enough for exactly one strong use case, and only if the plumbing is bought rather than built.
+
+> **The test that decides your stack**
+> If a hosted service exists and its free tier covers a hackathon's traffic, use it. Come back to the build-versus-buy question after you have users.
+
+#### Which chain?
+
+Crypto World's Fair is the first Colosseum competition open to every blockchain ecosystem, so this is a real decision now rather than a given. Prize tracks are organised per ecosystem (Solana, Tempo, Hyperliquid, Zcash, Ethereum L1, Base, Arbitrum and Robinhood Chain), and every submission also competes in a general pool across all of them.
+
+> **The part that decides it for most teams**
+> Colosseum's accelerator and venture fund keep investing in Solana founders. The hackathon opened up; the $250,000 did not. On Solana you're playing for your ecosystem track, the cross-chain pool and the accelerator. Anywhere else, the third one is off the table.
+
+So the honest version: pick the chain your product actually needs. If the answer is genuinely another ecosystem (you need its liquidity, its users, its execution model), build there and compete for the prizes. If the answer is a coin flip, Solana is the one with money behind it after the competition ends, and it's the one we can help you with. Everything below is Solana-specific for that reason.
+
+- Many strong entries will use more than one chain under the hood. Colosseum said as much in the announcement. Abstracting that away from users is a feature, not a hedge.
+- Whatever you pick, judges ask why this chain. Have a real answer that names a property of the infrastructure, not a preference.
+
+#### Start here, not from an empty repo
+
+- solana.new: scaffolds plus the AI skills and MCP servers that let an agent write Solana code that compiles.
+- Solana developer templates: working starting points for token, program, client and mobile projects.
+- Solana Playground: browser-based build, test and deploy when you don't want to lose a morning to local toolchain setup.
+
+- [solana.new: AI skills and scaffolds](https://www.solana.new/)
+- [Solana developer templates](https://solana.com/developers/templates)
+- [Superteam developer tools](https://superteam.fun/build/developer-tools)
+- [Superteam Build: resources](https://superteam.fun/build/resources)
+
+#### The Solana SaaS stack
+
+The pieces below are what production Solana teams actually run. Picking from this list isn't cutting corners; it's the same decision the companies you're competing against already made.
+
+- RPC and transaction landing: Helius, Triton, Jito bundles. Don't ship on a public endpoint; dropped transactions during a demo are unrecoverable.
+- Wallet authentication: Privy. Email and social login onto a real wallet, which is usually the difference between a demo people finish and one they abandon.
+- Swaps and routing: Jupiter Ultra.
+- Multisig and smart accounts: Squads Protocol and their APIs.
+- Rollups and compression: Magicblock, Light Protocol.
+- Prices and oracles: Pyth, Switchboard.
+
+- [Solana transaction guide: why yours isn't landing](https://www.solanatransaction.com/)
+- [Solana developer documentation](https://solana.com/developers)
+- [Solana Stack Exchange: when the agent and the docs both fail you](https://solana.stackexchange.com/)
+
+#### Learning it fast enough to matter
+
+If you're arriving from another ecosystem, don't read the whole documentation set. Take one guided path end to end, then build.
+
+- [Blueshift: the best structured Solana course](https://blueshift.gg/)
+- [Superteam hackathon headquarters](https://superteam.fun/hackathon)
+
+#### AI-native means the product, not the pitch
+
+Saying your product uses AI isn't a differentiator in 2026; every submission says it. AI-native means the core loop is impossible without a model: the agent is the product, not a feature bolted onto a dashboard.
+
+1. Remove the model. Does the product still exist? If yes, you have an AI feature, not an AI-native product.
+2. Remove Solana. Does it still work on a normal database? If yes, judges will say so before you do.
+3. If both removals break it, you have found the thing worth building for four weeks.
+
+The places the two genuinely need each other are agentic payments, autonomous onchain execution, and verifiable memory or provenance. Everything else tends to be a web app with a chat box.
+
+#### Using AI to build, not just to demo
+
+- Install the Solana skills for your coding agent from solana.new before you write anything. An agent without them will confidently produce Solana code that doesn't compile.
+- Run Colosseum Copilot alongside them for competitive context, not just code.
+- Review what the agent writes against the transaction guide. Programs that work on devnet and fail under real load are a common and very visible way to lose a demo.
+
+---
+
+### 04. Narrative, and building in public
+
+*Used strategically, X measurably improves your odds. How to run it as a feedback loop rather than a megaphone, including what the algorithm rewards and what it flags.* (7 min, https://tr.superteam.fun/colosseum/narrative-and-building-in-public)
+
+#### Why narrative is a judging criterion in disguise
+
+Founder communication is scored explicitly, and traction is scored right after it. Both are downstream of whether you can explain what you're doing in a way people repeat. If you use X strategically over these four weeks, your chances of winning go up measurably, not because judges count followers, but because everything they do score gets easier when people already know what you're building.
+
+> **It isn't marketing**
+> Building in public is the cheapest way to find out you're building the wrong thing while there's still time to change it. The feedback is the product of the exercise; the audience is a side effect.
+
+#### Two accounts, two jobs
+
+Run the project and yourself as separate voices. They reinforce each other and the split stops either from becoming noise.
+
+- Project account: releases, new features, progress, and replies. What shipped, what broke, what's next.
+- Personal account: opinions, insight, and replies. The thinking behind the product, not its changelog.
+- Both reply and like daily. Visibility here is mostly a function of being present in other people's threads.
+
+#### What the algorithm rewards
+
+- Subscribe to X Premium. It changes reach materially.
+- Attach an image or video. Posts without media are throttled against posts with them.
+- Put links in a reply to your first post, never in the post itself.
+
+That last one is the rule people break most, and it's the most expensive. A link in the first post caps its distribution before anyone sees it. Post the thought, then reply to yourself with the link.
+
+#### What gets you flagged
+
+- Don't buy followers. It's a red flag, and it's visible to anyone who looks at your ratios.
+- Don't pay influencers. Judges and investors read it exactly as what it is.
+- Don't use hashtags.
+- Don't fill a post with blue text: stacked mentions and links suppress reach.
+- Don't put a link in the first post.
+
+#### One sentence, repeated
+
+Pick the sentence in week one and don't change it. It goes in your bio, your first slide, your pitch video's opening line, and every post. Repetition is what turns a project into a thing people can refer to when you aren't in the room.
+
+- Name the problem, not the technology.
+- Say who it's for inside the sentence.
+- If it needs a second sentence to make sense, it isn't the sentence yet.
+
+#### Cadence
+
+- Start on day one. Twenty small posts across four weeks is a track record; twenty in the final week is noise.
+- Post results, not intentions. "Shipped X, here's what broke" outperforms "excited to announce" every time.
+- Follow the judges. Cheap, and it works.
+
+#### Where we amplify
+
+Superteam Türkiye will amplify shipped milestones: a working demo, a real user number, a launch. We won't amplify an announcement that you have started. Bring us the result and we'll put it in front of the ecosystem.
+
+- [Build in public, worked through in a thread](https://x.com/mxmnci/status/1940478798178439654)
+
+---
+
+### 05. The submission itself
+
+*What to upload, in what format, why the video matters more than the deck, and the two rules that get teams disqualified.* (8 min, https://tr.superteam.fun/colosseum/submission)
+
+#### The package
+
+- Project description and team details.
+- Pitch video, up to 2 minutes, public on your project page. This one explains the why: who you are, what it does, why you started, the market, how you get customers, and a working demo.
+- Demo video, up to 3 minutes, a separate upload. This one explains the how. Keep it technical. It is not a second pitch, and turning it into one wastes the only slot where a judge watches the thing actually run.
+- GitHub repository with the hackathon code.
+- Go-to-market notes, logo, and team location. Set the location to Türkiye.
+
+There is also a weekly one-minute update video Colosseum asks for. It is optional on paper and most teams skip it, which is exactly why it works: it is the cheapest evidence of momentum you can produce, and they watch them.
+
+#### Build the video first, not the deck
+
+Superteam Balkan went through all 139 winning submissions from the past three hackathons and counted what each team actually uploaded. Around 88% were a recorded video rather than a static deck: 63 Loom, 49 YouTube, 8 Vimeo, against roughly 16 PDFs. The Grand Champion submitted a YouTube video.
+
+Colosseum's own line is that the pitch video is usually the first item judges review and can decide whether a project is shortlisted at all. Standard startup advice says the opposite and warns founders off video, but that advice is written for a live demo day with five hundred people in the room. This is one reviewer working alone through a hundred submissions. In that setting the video does the job the deck would.
+
+> **Whose numbers these are**
+> The 139-submission count is Superteam Balkan's own research, not a Colosseum statistic. We are using it because nobody else has done the work.
+
+- [Superteam Balkan's write-up of the count](https://x.com/solanamarko/status/2098084013332210127)
+- [Their full hackathon guide](https://stblkn.notion.site/colosseum-hackathon)
+
+#### The one-liner might be the whole thing
+
+A good one-liner gets you shortlisted on its own. It is what a judge remembers an hour later, and what an investor repeats to their partners when you are not in the room. "Stablecoin neobank for SMBs" survives being repeated by someone who does not care about your product. Most one-liners do not.
+
+#### Five rules for every slide
+
+1. Write the takeaway in the title. Never put "Problem" at the top of a slide. Put "Users lose $4M a year to wallet drains."
+2. One point per slide.
+3. Under 40 words. Past that, reviewers skim.
+4. Cut the superlatives. Every founder writes revolutionary and fastest. Replace them with proof: start to finish in 15 seconds, $400 saved per user per month.
+5. Every slide readable in 15 seconds. Assume 90 seconds for the whole deck.
+
+#### Four ways to lose after doing the work
+
+- Overselling the future. A grand vision with no track record reads as a pitch, not a product. Show the MVP.
+- Forced crypto integration. If the product could exist without a chain, your use of one has to be justified deeply, or not claimed at all.
+- A weak demo. A repository link isn't a demo. There must be something a judge can watch working.
+- Missing permissions. Private repos and locked Google Docs that judges can't open. This is the single most common fatal mistake. If your repo stays private, grant access to hackathon@colosseum.com, then have someone outside your team confirm they can actually open every link you submitted.
+
+#### Two rules that get teams disqualified
+
+These are not style points. Both have removed teams from competitions that had already done the work.
+
+1. One product per team, and one per person. You cannot submit two projects, and you cannot appear on two submissions.
+2. You may start before the window opens and reuse your own code, but only work done inside the window is judged, and you have to disclose all prior development on the submission form.
+
+> **What happens if you don't disclose**
+> Colosseum's own words: they disqualify the team, ban the builders from future hackathons, and revoke prizes. Disclosing prior work costs you nothing. Teams with a running start have placed well. Hiding it costs you everything.
+
+Building on other people's open source is fine and actively encouraged. The pre-existing code rule is about your own earlier work, not about the libraries and protocols you compose with.
+
+#### Timing
+
+Submit two days early. Every hackathon has a slow final night, and there's no appeal for a deadline missed by ten minutes.
+
+---
+
+### 06. After the deadline
+
+*Grants, accelerators, and Eternal: with real terms. The funding ladder for teams that shipped something real, whether or not they placed.* (5 min, https://tr.superteam.fun/colosseum/after-the-hackathon)
+
+#### Momentum is a signal
+
+The hackathon doesn't end on submission day. Judges and investors both look at what a team did in the two weeks after the deadline, because that's when the ones who were only there for the prize stop.
+
+#### Almost nobody wins their first one
+
+Unruggable entered four Colosseum hackathons: an honourable mention at Renaissance, another at Radar, a first-place track win at Breakout, then the Grand Championship at Cypherpunk. Colosseum built a section of their own site around this, under the line that the best builders don't just compete once.
+
+The threshold is also higher up the table than most people assume. Placing in the top group is what feeds the accelerator, so aim there rather than at the single top spot, and if you place nowhere, the useful question is what you enter next, not whether you were right to enter at all.
+
+#### Accelerators
+
+- [Colosseum Accelerator: $250K on founder-friendly terms, and the hackathon is the only way in](https://colosseum.com/accelerator)
+- [Colosseum Eternal: self-paced 4-week sprint, $25K USDC. Paused; expected back around November](https://colosseum.com/eternal)
+- [Alliance DAO: $500K for around 7%](https://alliance.xyz)
+- [Orange DAO Fellowship: $100K MFN SAFE](https://www.orangedao.xyz)
+- [Monke Foundry](https://www.monkedao.io)
+
+#### Grants
+
+- [Solana Foundation grants](https://solana.org/grants-funding)
+- [Solana Mobile builder grants](https://solanamobile.com)
+- [Circle developer grants](https://www.circle.com/blog/circle-developer-grants)
+- [Superteam Earn: grants and bounties](https://superteam.fun/earn)
+
+If you shipped something real during the hackathon, you're also a credible Superteam Türkiye membership applicant. That's the door to local grants and perks.
+
+---
+
+### 07. What Colosseum's form actually asks
+
+*Every field, character limit and public/private tag, straight off the live submission form. Draft your answers before you open it, not while it's open.* (7 min, https://tr.superteam.fun/colosseum/the-form-itself)
+
+#### Why draft this first
+
+The form doesn't save you from a blank page. Half its required fields have a hard character limit, and writing a business model to a 500-character ceiling for the first time, live, costs more time than drafting it in a doc beforehand and pasting it in once it fits.
+
+> **The submit button isn't live yet**
+> Final submission opens 6 October, 4:00am PT. You can create your project, save it and edit it on Colosseum any time before then, so there's no reason to wait for that date to start filling it in.
+
+#### Tier 1: the public page
+
+Anyone with your project link sees these, including anyone you send it to before judging starts. Write them for a stranger, not for a judge.
+
+- Project name.
+- Brief description, up to 500 characters. The one-liner from your playbook belongs here, unchanged.
+- Project website, optional.
+- Product category. It's fine if the project spans several; pick the one closest to what it actually does.
+- Where your team is primarily based.
+- Project logo or graphic. JPEG, PNG, WEBP or GIF, up to 20MB before compression, stored at 0.5MB.
+- GitHub link, a direct link to the repository, not an org or profile page. It can stay private if you share access with hackathon@colosseum.com.
+- Pitch video, up to 2 minutes. Introduce the team, what you're building, and why you're the people to build it. Colosseum's own note: nothing fancy required, they're interested in how you think and communicate.
+- X profile.
+
+#### Tier 2: shared with your team, judges and Colosseum
+
+Not on the public page, but not private either. Every judge reads these before they watch anything.
+
+- What are you building, and who is it for? Up to 1,000 characters.
+- Why did you decide to build this, and why build it now? Up to 1,000 characters.
+- What technologies are you using or integrating with? Colosseum asks for notable developer tools and AI tools too, not just the chain stack.
+- Which chains does your product use? Select every chain actually integrated, not just the one you'd claim in a pitch.
+- How does your product use these chains? Up to 500 characters, and the question a forced integration fails first.
+- Is your project a mobile-focused dApp?
+- A team Telegram contact. This is how Colosseum reaches you for prize distribution or an accelerator interview, so it needs to be someone who actually checks it.
+- Did anyone not listed on the team do meaningful work on this project? Up to 600 characters. Answer honestly; it's a compliance question, not a trap.
+- Anything else judges should know that isn't captured above? Up to 500 characters, optional but rarely wasted.
+- Demo video, up to 3 minutes, a separate upload from the pitch video. Should show the live product, not a slide deck and not a code walkthrough. You choose whether it also shows on the public page.
+- Live product link and access instructions, if judges need credentials to get in.
+
+#### Tier 3: the accelerator screen
+
+Colosseum's own label for this tab is accurate: these answers stay private to organizers and the Colosseum team. They're also required, whether or not you want the accelerator, because this tab is literally how Colosseum decides who gets a look for it.
+
+- How do you know people actually need, or will need, this product? Up to 1,000 characters.
+- How far along are you? Do you have users? Be as specific as possible, up to 1,000 characters.
+- Who else is building in this space, and what do you think they're getting wrong? Up to 1,000 characters.
+- How do you make money, or how do you plan to? Up to 500 characters.
+- How long have you each been working on this? Have you been working on it full time? Up to 500 characters.
+- Where is each team member currently based, and do you work in person together? Note whether that would change after funding.
+
+Then four yes-or-no questions: whether you've formed a legal entity, taken any investment, are currently fundraising, and have a live token.
+
+> **There's no right answer to the yes/no questions**
+> A pre-idea team answers no to all four, honestly, and that's fine. What reads badly is the open questions above them left thin. "How do you make money" and "how far along are you" are exactly what an accelerator screens for, and a vague answer there is a worse signal than an early-stage one.
+
+#### Before you open the form
+
+1. Draft every answer above in a doc first, to the character limits given. Writing to a hard ceiling is a different task from writing freely, and it's faster to do once, offline.
+2. Have someone outside the team open the GitHub link, the demo video and the pitch video before you submit. The same rule as the repo: a link that only works for you doesn't work.
+3. Decide your chain list before you fill in "how does your product use these chains". That answer is where a forced integration gets caught first.
+4. If you're not chasing the accelerator this cycle, still answer Tier 3 properly. It's required to submit, and a thin answer costs nothing to avoid.
+
+---
+
+### 08. Starting late, or with no idea yet: the step-by-step guide
+
+*Seven steps from registering to hitting submit: finding an idea, validating it, the narrowest MVP, the submission materials, drafting the form and sending. For students and teams starting late, on the current rules.* (14 min, https://tr.superteam.fun/colosseum/latecomer-guideline-en)
+
+#### Know this first: you're not too late
+
+The competition started on 14 September and ends on 12 October. This guide takes a student with no idea, or a late start, from registering to the submit button, one step at a time. Whenever you start, the order is the same. Don't skip around.
+
+- Registration is still open. Under section 6(a) of the official rules, every member can register until 23:59 PT on 12 October. Joining late isn't a loophole, it's the rule.
+- Four weeks was only ever enough for one strong use case. A team that started on day one is building what you'd build: one user, one job, one screen. The difference is they could spread it over four weeks.
+- Speed is scored. Colosseum's evaluation looks at product velocity, and the final call asks what you shipped last week. Getting something working in a short time is good evidence for that criterion, not bad evidence.
+- It isn't only a coding contest. Colosseum runs it as a pre-seed funnel and the judges score you like investors. Five of the seven official criteria are business criteria. Clean code alone doesn't earn points.
+
+The most expensive mistake is starting on something too big. Every step below also tells you what not to do.
+
+> **Don't follow the official guide's schedule**
+> Colosseum's own How to Win guide was written for a five-week competition and tells you to spend the first four weeks engineering. This edition is four weeks, and most teams have far less than that left. Working product first, then the videos and the submission.
+
+#### Step 1: Register and form a team
+
+Do this first. You can register without an idea; you fill in the project and team fields later.
+
+1. Create the account. Enter through Superteam Türkiye's referral link (below). You can sign up to Arena with email, Google, GitHub or X. The link matters: without it your registration still counts for you, but the attribution to us quietly goes missing.
+2. An account isn't a registration. Creating an Arena account and registering for the competition are two separate things. Press Register at the top right and finish the flow.
+3. Set your team's location to Türkiye. Choose Türkiye as the team location during registration. It's one of the conditions for the Superteam Türkiye pool.
+4. Every team member registers with their own account. A member missing from the project page is a silent disqualifier. A person can be on only one team, and a team can submit only one project (rules, section 7).
+5. Find a team. You can compete alone, but the judges prefer teams of three or more. If you don't have teammates, use Cofounder Matching or ask in the Telegram group.
+6. Fill in the Superteam Türkiye form. The orientation form puts you on the list for office hours and mentoring. Registering with Colosseum tells Colosseum you exist; this form tells us.
+7. Join the Telegram group. The other Türkiye teams, the mentors and the weekly calendar are there. If you ask a question, the answer helps everyone.
+
+- [Register on Colosseum through the Superteam Türkiye link](https://colosseum.com?ref=superteamtr-2026)
+- [Cofounder Matching](https://colosseum.com/cofounder-matching)
+- [Superteam Türkiye orientation form](https://forms.gle/EELv1S3eD1nEytrq7)
+- [Telegram group](https://t.me/+3sWAzL4fgPViMjU8)
+
+> **Am I even eligible?**
+> The competition is for new startups that haven't raised significant outside capital, and only work done inside the window is judged. If you started earlier or you're reusing old code, disclose it on the submission form. The price of not disclosing is disqualification.
+
+#### Step 2: Find an idea and validate it
+
+The goal: by the end of this step you have a one-sentence idea and an answer to "has this been built before?" Don't let it drag on. If you already have an idea, skip to the validation part.
+
+Learn the method first: start from signals, not from a product. "AI is hot, so I'll build something with AI" is the fastest way to land on the same idea as everyone else. The order is: signals, patterns, an opportunity thesis, product ideas, a filter, what to build.
+
+- Ecosystem signals. The Solana Foundation, the Colosseum team, founders and protocol teams say what they want on X, again and again. One tweet isn't a thesis; look for what recurs. Example: in June the Foundation explicitly asked for fully on-chain perps and derivatives, and named adjacent areas like vaults, aggregators and social trading.
+- Research and capital signals. Read reports from Blockworks, Messari and similar the way a founder would: what's growing, what infrastructure is missing? Example: according to Blockworks, tokenized-asset trading volume on Solana reached about $5.8 billion in Q2 2026, and Solana handled roughly 97% of tokenized-equity volume.
+- Onchain data. Look at volume, users and revenue on DeFiLlama and Blockworks Analytics. Look two ways: where Solana is already strong (what can be built around it?) and where there's demand elsewhere but little on Solana (why?).
+- Look outside Solana. Don't clone a product that works elsewhere; borrow the proof of demand. Why does it work, which user problem does it solve, and why doesn't it exist on Solana?
+- Use AI to gather evidence. Ask Grok or Claude to "find what these accounts have asked for repeatedly over the last six months, and don't generate ideas yet." Don't ask it for the idea. Two people reading the same data still arrive at different ideas, and that difference is your edge.
+
+If you have no idea at all, start from ready-made material. The Requests for Products section on this site gives four ideas for Türkiye: provenance for exported goods, carbon MRV for industry and the EU's CBAM, used-car history and underwriting, and a portable credit history for professionals moving to Europe. Each one carries a "know this before you start" note: all four depend on data somebody else holds. If you're a student, work with synthetic but correctly shaped data and say so on the slide. You don't have to pick from the list, and nobody scores higher for it.
+
+- [Four product ideas for Türkiye (Requests for Products, on this page)](/colosseum#rfp)
+- [Colosseum's Request for Products: their own idea list](https://blog.colosseum.com/request-for-products/)
+- [Superteam Idea Bank: a ready-made list of problems](https://superteam.fun/build/ideas)
+- [Ten things worth building in Solana DeFi (Superteam India)](https://x.com/SuperteamIN/status/2100268342863180230)
+- [Hall of Fame: past winners](https://colosseum.com/arena/hackathon/hall-of-fame)
+
+A five-question filter. Run your candidate idea through these. If the answer to any is no, shrink it or change it:
+
+- Can I describe one type of user and their one job?
+- Will it work end to end on a single screen in the time I have left?
+- Could it exist without a chain? If it could, you'll have to defend your use of blockchain in depth; if you can't, don't use it.
+- Can I actually get the data or the permissions I need?
+- Can I explain it to a stranger in ten seconds?
+
+Validate it: a gap analysis with Colosseum Copilot, in an hour. Copilot searches more than 5,400 past hackathon projects. Finding out late that someone already built your idea loses you the competition, so don't skip this.
+
+1. Generate a Personal Access Token in Arena.
+2. Set the environment variables: COLOSSEUM_COPILOT_API_BASE and COLOSSEUM_COPILOT_PAT.
+3. Add the skill to Claude Code or Codex: npx skills add ColosseumOrg/colosseum-copilot
+4. Ask: "Validate this idea for the hackathon: [your idea]. Has anyone built this before, what is the competitive landscape, and what is genuinely unsolved?"
+
+> **How to read the answer**
+> False gap (already solved, and solved well): change the idea today. Partial gap (solved for a different audience or chain): usually the best position, keep going. Full gap (nobody has tried): before celebrating, ask why. Sometimes there's a reason.
+
+Finally, write one sentence. One a stranger understands with no follow-up question: who it's for and what it does. Something like "Stablecoin neobank for SMBs". Don't change it; it goes in your bio, on your first slide, in your pitch's opening line and in every post. If you're stuck, Friday 19:00 office hours (Google Meet) is exactly for this: idea validation and picking a problem.
+
+- [Colosseum Copilot](https://colosseum.com/copilot)
+
+#### Step 3: Build the narrowest MVP
+
+The goal: one user, one job, one screen. On a public domain, on devnet, with a real transaction. Overscoping is the most common way Türkiye teams lose, so the most important job in this step is cutting.
+
+- Cut the scope. Write the product as one sentence: "person X does job Y." Anything that isn't in that sentence (a second user role, a settings page, an admin panel, profile editing) goes on a "later" list, and stays closed for now.
+- Wire the chain first. Wallet connect, then a real transaction on devnet. If the product could exist without a chain, judges notice. Leaving the chain until the end is the most expensive surprise of the last night.
+- Use existing infrastructure; don't rebuild it. Helius or Triton for RPC, Privy for auth, Jupiter for swaps, Squads for multisig, Pyth for prices. Writing something Helius or Privy already ships is time stolen from what the judges actually score.
+- Work with an AI assistant. Pairing with something like Claude Code or Codex makes a real difference when time is short.
+- Get RPC support. Carbium is giving Colosseum teams 25 free RPC and Swap API grants (Developer RPC is 10M credits a month). The application and terms are on the Carbium card on this page; we check fit first. Don't demo on a public RPC: a transaction that drops mid-demo can't be undone.
+- Put it on a public domain. Vercel or Netlify will do. A localhost screenshot isn't a product, and a GitHub link isn't a demo. Judges want to click and see something work.
+- Post your first build-in-public update right away. What you're doing, why, and a screenshot. A post made early is worth more than one made late: it starts a record. If you don't have an X account, create one, verify it, and follow the judges.
+
+A toolkit for building faster. Before you write anything from scratch, look at these:
+
+- [solana.new: ready-made AI skills and MCP servers for Solana](https://www.solana.new/)
+- [Noah AI: a no-code tool that generates the Solana app you describe in chat](https://trynoah.ai/)
+- [Solana Developer MCP: so AI tools understand Solana](https://mcp.solana.com/)
+- [Helius MCP: gives your AI assistant RPC and transaction queries as tools](https://www.helius.dev/docs/agents/mcp)
+- [awesome-solana-ai: a list of tools for building on Solana with AI](https://github.com/solana-foundation/awesome-solana-ai)
+- [Superteam developer tools](https://superteam.fun/build/developer-tools)
+- [Solana templates](https://solana.com/developers/templates)
+- [Carbium RPC grant (the card on this page)](/colosseum#perks)
+
+> **One warning**
+> Test whatever these tools generate yourself on devnet, and check that the chain integration really works and that you can explain what it does. Judges look at whether the product actually works and why you use this chain; if you can't explain how a generated app works, they'll notice in the final call. The form also asks which AI tools you used. Don't hide it, write it down.
+
+Test after every work session. Before you stop, send the link to a friend and ask: "Could you connect your wallet and finish the transaction?" If the answer is no, the next job isn't a new feature, it's fixing that.
+
+#### Step 4: Show it to people and collect numbers
+
+The goal: real people used the product, and you have two numbers you can quote. A judge doesn't buy "a great idea", they buy "this many people used it".
+
+- Find ten people. Ten who look like your target user: classmates, club members, the other teams in the Telegram group. If the idea is for students, your easiest audience is already around you.
+- Watch in silence. Send them the product and watch what they do. Don't explain, don't say "press here". Where they get stuck is where the product is stuck. If you can, record the screen (with permission).
+- Write down what broke, and split it in two. List one: what stopped them using it. Fix those. List two: what only annoys you. Ignore those.
+- Pick two numbers. Users, returning users, transactions, volume. Choose the two you'd defend in front of an investor and start measuring now. For transactions, your program address on Solscan is enough. It's not too small to start: 10 people and 30 transactions beat zero.
+- Build the story around the numbers. Not "in the future this will happen" but "10 people tried it, 7 completed the transaction, here's where they got stuck, and we fixed it". Tell the result, not the vision.
+- Post a short update on X every day. A silent team looks abandoned. The panel is public now: five people from Colosseum and fifteen track judges from teams like Phantom, Base, Anza, Arcium, Drift, Ellipsis and MetaDAO. Follow all of them.
+- Tag us when you share a real result. Superteam Türkiye amplifies a real milestone ("10 users tried it"). We don't amplify launch announcements; we amplify results.
+
+If you're stuck: the most common blocker at this stage is finding users. Post in the Telegram group, "I need ten people to try this, anyone?" Teams can start as each other's users.
+
+#### Step 5: Prepare the submission materials
+
+The goal: two videos, a repo, a first slide, and a clear paragraph about your team. Record the video before the slides. Superteam Balkan counted all 139 winning submissions from the last three competitions, and about 88% of winners uploaded a recorded video rather than a static deck. Colosseum also says the pitch video is the first thing judges look at.
+
+- Pitch video, at most 2 minutes. In your own voice and on your own face, Loom or YouTube. The first ten seconds decide: say the problem and the solution straight away, not your own story. A suggested order: problem and solution, the product working, the team, your numbers and what's next. The structure is always the same: Problem, Solution, Demo, Team. The Superteam Türkiye Earn listing still accepts up to 3 minutes, but if you're uploading the same video to both places, keep it to 2 minutes and it fits both.
+- Demo video, at most 3 minutes. Show the live product. Not slides, and not a code walkthrough. Go technical here and don't make a second pitch: this is the only place the judge sees it working.
+- First slide: the product name and one sentence, nothing else. The name at medium size, the sentence large and five words at most. No image, logo, website, contact details or year. According to the hackathon mentor Josip Volarević, a judge or investor remembers at most 0 to 3 things the next day: a feeling, a key takeaway, and sometimes a second one. Make them remember your sentence, not your name.
+- Don't undersell your team. Don't list names and titles; say concretely why each person can do this. The weak line: "we're a passionate, hardworking team." A good line (an example): "Aylin wrote the backend of an app that reached 400 users at the last hackathon." No adjectives, no years of experience, write outcomes. Claim only results you were directly responsible for. If you don't have such a result yet, the user and transaction numbers you produce now are your first proof.
+- Publish the repo. Give the direct GitHub link to the repository, not an organisation or profile page. If it stays private, give access to hackathon@colosseum.com. Locked Google Docs and private repos are the most common, and most expensive, mistake.
+- Write the business model in three sentences. How does it make money? Don't put it in the video; write it in the matching field on the form. A business model and a roadmap read as padding in a two-minute video, but the form scores you on it.
+- Do it all in English. The videos, the form answers and the repo description. It's also a condition of the Türkiye pool.
+- Have someone watch the video before you upload it. Ask a friend, "did you understand what I'm doing?" Bring the rough cut to Friday 19:00 office hours; getting feedback before you polish saves a week.
+
+- [Josip Volarević: the first slide is a name and one sentence](https://x.com/JosipVolarevic2/status/2106374392166973692)
+- [Josip Volarević: don't undersell yourself](https://x.com/JosipVolarevic2/status/2106075158465089606)
+- [Perfecting Your Hackathon Submission (Colosseum)](https://blog.colosseum.com/perfecting-your-hackathon-submission)
+
+#### Step 6: Draft the form in a doc beforehand
+
+Colosseum's project form is full of required fields with character limits. Fitting your business model into 500 characters for the first time with the form open costs far more than writing it in a doc first. Fill this doc in while you do steps 3, 4 and 5.
+
+> **The submit button may not be live yet**
+> Final submission opens on 6 October at 04:00 PT, which is 14:00 in Türkiye (if that date has passed, it's already open). You can create the form, save it and edit it before then.
+
+Tier 1, the public page. Anyone with your project link sees these; write for a stranger.
+
+- Project name, brief description (up to 500 characters; put your one sentence here), website (optional), product category, the country your team is based in.
+- Logo or graphic (JPEG, PNG, WEBP or GIF, up to 20MB before compression).
+- GitHub repo link (the repository itself, not an organisation).
+- Pitch video (up to 2 minutes) and your X profile.
+
+Tier 2, seen by your team, the judges and Colosseum, but not public.
+
+- What are you building, and who is it for? (1,000 characters)
+- Why this, and why now? (1,000 characters)
+- Which technologies and AI tools are you using?
+- Which chains do you use, and how? (500 characters)
+- A team Telegram contact. Prize distribution and accelerator interviews go through it, so make it someone who checks it.
+- Did anyone not on the team do meaningful work on this? (600 characters; answer honestly)
+- Anything else the judges should know? (500 characters)
+- Demo video (up to 3 minutes), live product link, and access instructions if needed.
+
+Tier 3, the accelerator screen. Only the organisers and Colosseum see it, but it's required to submit even if you don't want the accelerator. It's really where Colosseum decides who to look at, so take it seriously.
+
+- How do you know people actually need this product? (1,000 characters)
+- How far along are you, and do you have users? Be specific. (1,000 characters)
+- Who else is building in this space, and what are they getting wrong? (1,000 characters)
+- How do you make money, or plan to? (500 characters)
+- How long has each of you been working on this, and is it full time? (500 characters)
+- Where is the team based, and do you work in person together? (500 characters)
+- Four yes/no questions: have you formed a company, taken investment, are you fundraising, do you have a live token. There's no right answer, and "no" is fine. Leaving the open questions thin reads worse.
+
+- [Every field and what it's looking for: What Colosseum's form actually asks](/colosseum/the-form-itself)
+
+#### Step 7: Submit
+
+The goal: everything uploaded at least two days before the deadline. The platform slows down on the last night every single time, and any mistake made then can't be undone.
+
+- Convert the deadline to your own time. The deadline is 23:59 California time on 12 October. In Türkiye that's the morning of Tuesday 13 October, 09:59. Teams that assume midnight in Türkiye submit ten hours late, and there's no appeal.
+- Submit on the Colosseum portal. Make sure the team leader has uploaded the project and every member is attached to it. A missing member can invalidate the submission.
+- Submit the identical project a second time to the Superteam Türkiye Earn listing. The Colosseum portal and the Earn listing are two separate places; doing one doesn't count as doing the other. The Türkiye pool is 10,000 USDG (5,000, 3,000 and 2,000 for 1st to 3rd), with results on 28 October. The conditions: Türkiye as the primary base country on your Colosseum profile, the Superteam Türkiye form, the Colosseum Telegram group, submission to both places, and videos and repo, all in English.
+- Don't run the link test yourself; have someone else do it. Ask somebody outside the team to open the GitHub link, the demo video and the pitch video. A link only you can open is a link that doesn't open.
+
+- [Superteam Türkiye Earn listing](https://superteam.fun/earn/listing/submit-crypto-worlds-fair-project-for-turkish-builders/)
+- [Official rules (PDF)](https://colosseum.com/legal/Crypto%20World's%20Fair%20Hackathon%20Rules.pdf)
+
+Right before you send, tick off these nine one by one:
+
+1. The one-liner and short description are written, and someone has read them.
+2. The MVP is live on a public domain.
+3. The business model is written in three sentences.
+4. The chain integration really works: wallet connect and a real transaction.
+5. The code is published, or the judges have been given access.
+6. A verified X account, posting every day, following the judges.
+7. Pitch materials (slide, pitch video, demo) are ready and someone has seen them.
+8. The project and every team member are registered on Colosseum.
+9. The same project has also been submitted to the Superteam Türkiye listing.
+
+#### Four mistakes that lose after the work is done
+
+1. Selling the future. A big vision with no record reads as a pitch, not a product. Instead of "in 2027 we'll do this", say "this week we did this, and this many people tried it".
+2. Forced crypto. If the product could exist without a chain, you have to defend your use of one in depth. If you can't, don't say "we use blockchain".
+3. A weak demo. A GitHub link isn't a demo. There has to be something a judge can watch working.
+4. Missing permissions. A private repo, a locked Google Doc, a Loom link that won't open: the most common fatal mistake. If it stays private, give access to hackathon@colosseum.com, then have someone outside the team open every link.
+
+Two rules that get teams disqualified:
+
+- A team may submit only one product, and a person may appear on only one submission.
+- You may start before the window and reuse your own old code, but only work done inside the window is judged. You have to disclose all prior development on the submission form.
+
+#### Prizes and the accelerator: the current numbers
+
+These figures come from Colosseum's official rules (section 14), not from the launch announcement. The numbers from earlier competitions no longer apply.
+
+- Total prizes: $840,000, across the general awards and eight ecosystem tracks.
+- Grand Champion: $30,000, one team. The next 20 teams: $15,000 each, $300,000 in total. That band is what feeds the accelerator.
+- Special awards: Public Goods and University, $5,000 each, one team apiece.
+- Tracks: Solana, Tempo, Hyperliquid and Zcash at $100,000; Ethereum L1, Base, Arbitrum and Robinhood Chain at $25,000. You pick up to three at registration, and every submission competes for the general awards too.
+- Accelerator: $250,000 per team, a twelve-week programme with the first two weeks in San Francisco and the remaining ten remote-friendly. There's a $2.5M fund behind it.
+- Türkiye pool: 10,000 USDG (5,000, 3,000 and 2,000), for teams based in Türkiye only. Results on 28 October.
+- Winners are announced on or about 5 December.
+
+A note for students: the University Award goes to one team and is $5,000. A Türkiye team, Lexicon, won the University Award at the Radar hackathon, so it can be done.
+
+> **The one thing to know**
+> The competition is open to every chain, but the accelerator and the fund still back Solana founders. Three of the four criteria for the Türkiye pool also name Solana explicitly. Build on another chain and you compete for the general awards and your own track, but not for the accelerator or the Türkiye pool. If you haven't decided: Solana.
+
+#### Where to get help
+
+Every weekly event is free and none is compulsory. The current times are on the Luma calendar.
+
+- Wednesday 19:00, Colosseum Community Call (X Spaces): the week gets set here, and the room is where teams find each other.
+- Friday 10:00, Coworking Fridays (Kolektif House Levent, İstanbul): all day, bring the thing you're stuck on.
+- Friday 19:00, Colosseum Office Hours (Google Meet): one to one. Idea validation, architecture, deck and video review.
+- Saturday 14:00, Shipyard (Nişantaşı, and livestreamed): the vertical deep-dive.
+
+For general questions, use the Telegram group: the answer helps everyone. Or write to Caner directly at @trench_survivor. If you get stuck on something, stop reading this guide and write.
+
+- [Luma calendar](https://luma.com/superteamtr)
+- [Telegram group](https://t.me/+3sWAzL4fgPViMjU8)
+- [Caner (@trench_survivor)](https://t.me/trench_survivor)
+- [This guide in Turkish: Türkçe sürüm](/colosseum/latecomer-guideline)
+- [Colosseum's own developer resources](https://colosseum.com/worldsfair/resources)
+- [How to Win a Colosseum Hackathon](https://blog.colosseum.com/how-to-win-a-colosseum-hackathon)
+- [Superteam Balkan's guide: the most complete one written for this competition](https://stblkn.notion.site/colosseum-hackathon)
+
+---
+
+### 09. Geç kalanlar ve fikri olmayanlar için adım adım rehber
+
+*Kayıttan "gönder" butonuna kadar yedi adım: fikir bulma, doğrulama, en dar MVP, teslim malzemeleri, form hazırlığı ve gönderim. Fikri olmayan ya da geç başlayan öğrenciler için, güncel kurallarla.* (15 dk, https://tr.superteam.fun/colosseum/latecomer-guideline, in Turkish)
+
+#### Önce şunu bil: geç kalmadın
+
+Yarışma 14 Eylül'de başladı ve 12 Ekim'de bitiyor. Bu rehber fikri olmayan ya da geç başlayan bir öğrenciyi kayıttan "gönder" butonuna kadar adım adım taşır. Ne zaman başlarsan başla sıra aynı: sırayı bozma.
+
+- Kayıt hâlâ açık. Resmi kuralların 6(a) maddesine göre her üye 12 Ekim 23:59 PT'ye (Kaliforniya saati) kadar kayıt olabilir. Geç girmek bir boşluk değil, kuralın kendisi.
+- Dört hafta zaten tek bir güçlü kullanım senaryosuna yetiyordu. Baştan başlayan takım da senin yapacağın şeyi yapıyor: tek kullanıcı, tek iş, tek ekran. Fark, onların bunu dört haftaya yayabilmesi.
+- Hız puanlanıyor. Colosseum'un değerlendirme sistemi ürün hızına (product velocity) bakıyor ve son elemedeki görüşme "geçen hafta ne ship ettin?" diye soruyor. Kısa sürede çalışan bir şey çıkarmak, bu kriter için kötü değil, iyi bir kanıt.
+- Yarışma sadece kod yarışması değil. Colosseum bunu bir pre-seed hunisi gibi kuruyor: jüri sizi yatırımcı gibi puanlıyor. Yedi resmi kriterin beşi iş kriteri. Temiz kod tek başına puan getirmiyor.
+
+Bu sürecin en pahalı hatası, fazla büyük bir şeye başlamak. Bu rehberin her adımı "neyi yapma" sorusuna da cevap veriyor.
+
+> **Resmi rehberin takvimini aynen izleme**
+> Colosseum'un kendi How to Win rehberi beş haftalık bir yarışma için yazıldı ve ilk dört haftayı mühendisliğe ayırmayı öneriyor. Bu edisyon dört hafta ve çoğu takımın elinde bundan çok daha az süre var. Önce çalışan bir ürün, sonra videolar ve gönderim.
+
+#### Adım 1: Kayıt ve takım
+
+Bu adımı ilk iş olarak bitir. Fikrin henüz olmasa bile kayıt olabilirsin; proje ve takım alanlarını sonra doldurursun.
+
+1. Hesabı aç. Superteam Türkiye'nin referral linkinden gir (aşağıda). Arena hesabını e-posta, Google, GitHub veya X ile açabilirsin. Link'ten girmek önemli: linksiz girersen kayıt senin adına yapılır ama bize atfı sessizce kaybolur.
+2. Hesap açmak kayıt olmak değildir. Arena hesabı ile yarışmaya kayıt iki ayrı şeydir. Sağ üstteki Register butonuna bas ve akışı sonuna kadar tamamla.
+3. Takımın konumunu Türkiye yap. Kayıt sırasında team location olarak Türkiye'yi seç. Bu, Superteam Türkiye havuzuna girmenin koşullarından biri.
+4. Her takım üyesi kendi hesabıyla kayıt olsun. Proje sayfasında eksik üye, sessiz bir diskalifiye sebebi. Bir kişi yalnızca bir takımda olabilir ve bir takım yalnızca tek bir proje gönderebilir (kurallar, madde 7).
+5. Takım kur. Tek başına yarışabilirsin ama jüri 3 ve üzeri kişiden oluşan takımları tercih ediyor. Arkadaşın yoksa Cofounder Matching sistemini kullan veya Telegram grubunda yaz.
+6. Superteam Türkiye formunu doldur. Orientation formu office hours ve mentorluk listesine girmenin yolu. Colosseum'a kayıt seni Colosseum'a tanıtır, bu form bize tanıtır.
+7. Telegram grubuna katıl. Diğer Türkiye takımları, mentorlar ve haftalık takvim burada. Soru sorarsan cevap herkese yarar.
+
+- [Colosseum'a Superteam Türkiye linkiyle kayıt ol](https://colosseum.com?ref=superteamtr-2026)
+- [Cofounder Matching](https://colosseum.com/cofounder-matching)
+- [Superteam Türkiye orientation formu](https://forms.gle/EELv1S3eD1nEytrq7)
+- [Telegram grubu](https://t.me/+3sWAzL4fgPViMjU8)
+
+> **Yarışmaya girebilir miyim?**
+> Yarışma yeni kurulan, henüz ciddi dış sermaye almamış startuplar için. Pencere içinde yapılan iş puanlanır. Daha önce başladıysan ya da eski kodunu kullanıyorsan bunu gönderim formunda beyan etmelisin. Beyan etmemenin bedeli diskalifiye.
+
+#### Adım 2: Fikir bul ve doğrula
+
+Hedef: bu adımın sonunda elinde tek cümleli bir fikir ve "daha önce yapılmış mı" cevabı olsun. Bu adımı uzatma. Fikri zaten olanlar doğrudan doğrulama kısmına geçsin.
+
+Önce yöntemi öğren: ürünle değil, sinyalle başla. "AI moda, AI ile bir şey yapayım" demek herkesle aynı fikre varmanın en kısa yolu. Sıra şöyle: sinyal, örüntü, fırsat tezi, ürün fikri, filtre, ne yapacağın.
+
+- Ekosistem sinyalleri. Solana Foundation, Colosseum ekibi, kurucular ve protokol ekipleri X'te ne istediklerini tekrar tekrar yazıyor. Tek tweet tez değildir; tekrar edenleri ara. Örnek: Foundation haziranda tamamen on-chain perp ve türev ürünlerini açıkça istedi ve vault, aggregator, social trading gibi çevre alanları saydı.
+- Araştırma ve sermaye sinyalleri. Blockworks, Messari gibi kurumların raporlarını bir kurucu gibi oku: ne büyüyor, hangi altyapı eksik? Örnek: Blockworks'e göre 2026'nın ikinci çeyreğinde Solana'daki tokenize varlık işlem hacmi yaklaşık 5,8 milyar dolar ve tokenize hisse hacminin yaklaşık yüzde 97'si Solana'da.
+- On-chain veri. DeFiLlama ve Blockworks Analytics'te hacim, kullanıcı ve gelire bak. İki yöne bak: Solana'nın zaten güçlü olduğu yerler (etrafına ne kurulabilir?) ve başka yerde talep olup Solana'da kullanım az olan alanlar (neden?).
+- Solana dışına bak. Başka yerde işleyen bir ürünü kopyalama, kanıtlanmış talebi ödünç al. Neden işliyor, hangi kullanıcı sorununu çözüyor, Solana'da neden yok?
+- AI'yı kanıt toplamak için kullan. Grok veya Claude'a "son 6 ayda şu hesapların tekrar eden isteklerini bul, henüz fikir üretme" de. Fikri ondan isteme; aynı veriyi okuyan iki kişi bile farklı fikirlere varır ve bu fark senin avantajın.
+
+Hiç fikrin yoksa hazır malzemeye bak. Sitedeki Requests for Products bölümü Türkiye için dört ürün fikri veriyor: ihracat ürünleri için menşe izlenebilirliği, sanayi için karbon MRV ve AB CBAM, ikinci el araç geçmişi ve kredilendirme, Avrupa'ya giden profesyoneller için taşınabilir kredi geçmişi. Her birinin yanında "bunu başlamadan bil" notu var: dördünün de verisi başkasında. Öğrenciysen sentetik ama doğru biçimli veriyle çalış ve sunumda bunu açıkça söyle. Listeden seçmek zorunda değilsin, seçene ekstra puan da yok.
+
+- [Türkiye için dört ürün fikri (bu sayfadaki Requests for Products)](/colosseum#rfp)
+- [Colosseum Request for Products: Colosseum'un kendi fikir listesi](https://blog.colosseum.com/request-for-products/)
+- [Superteam Idea Bank: hazır problem listesi](https://superteam.fun/build/ideas)
+- [Solana DeFi'de yapılmaya değer on şey (Superteam India)](https://x.com/SuperteamIN/status/2100268342863180230)
+- [Hall of Fame: geçmiş kazananlar](https://colosseum.com/arena/hackathon/hall-of-fame)
+
+Beş soruluk filtre. Aday fikrini şu sorulardan geçir. Birine "hayır" diyorsan küçült veya değiştir:
+
+- Tek bir kullanıcı tipini ve onun tek bir işini tarif edebiliyor muyum?
+- Kalan sürede tek ekranda uçtan uca çalışır mı?
+- Zincir olmadan da var olabilir mi? Olabiliyorsa blockchain kullanımını derinlemesine savunman gerekir; savunamıyorsan kullanma.
+- İhtiyacım olan veriye ya da izne gerçekten ulaşabiliyor muyum?
+- Tanımayan birine 10 saniyede anlatabiliyor muyum?
+
+Doğrula: Colosseum Copilot ile bir saatte gap analizi. Copilot, 5.400'den fazla geçmiş hackathon projesi üzerinde arama yapıyor. Aynı şeyin daha önce yapılıp yapılmadığını geç öğrenmek yarışmayı kaybettirir, bu yüzden bu adımı atlama.
+
+1. Arena'da bir Personal Access Token oluştur.
+2. Ortam değişkenlerini ayarla: COLOSSEUM_COPILOT_API_BASE ve COLOSSEUM_COPILOT_PAT.
+3. Beceriyi Claude Code veya Codex'e ekle: npx skills add ColosseumOrg/colosseum-copilot
+4. Şunu sor: "Validate this idea for the hackathon: [fikrin]. Has anyone built this before, what is the competitive landscape, and what is genuinely unsolved?"
+
+> **Sonucu nasıl okursun**
+> False gap (zaten çözülmüş, iyi çözülmüş): bugün fikir değiştir. Partial gap (başka kitle veya zincir için çözülmüş): genellikle en iyi durum, devam et. Full gap (kimse denememiş): sevinmeden önce "neden?" diye sor, bazen bir sebebi vardır.
+
+Son olarak tek cümle yaz. Bir yabancının ek soru sormadan anlayacağı tek cümle: kim için, ne yapıyor. "Stablecoin neobank for SMBs" gibi. Bu cümleyi değiştirme; bio'nda, ilk slaytında, pitch'in açılışında ve her postta aynı olsun. Takıldıysan Cuma 19:00 Office Hours (Google Meet) tam olarak bunun için: fikir doğrulama ve problem seçimi orada konuşuluyor.
+
+- [Colosseum Copilot](https://colosseum.com/copilot)
+
+#### Adım 3: En dar MVP'yi yap
+
+Hedef: tek kullanıcı, tek iş, tek ekran. Herkese açık bir alan adında, devnet üzerinde, gerçek bir işlemle çalışsın. Türkiye takımlarının en sık kaybetme sebebi fazla büyük bir şeye başlamak, bu yüzden bu adımın en önemli işi kesmek.
+
+- Kapsamı kes. Ürünü tek cümleyle yaz: "X kişisi Y işini yapıyor." Bu cümleye girmeyen her şeyi (ikinci kullanıcı rolü, ayarlar sayfası, admin paneli, profil düzenleme) bir "sonra" listesine at ve şimdilik açma.
+- Zinciri en başta bağla. Önce cüzdan bağlantısı, sonra devnet'te gerçek bir işlem. Ürün zincir olmadan da var olabiliyorsa jüri bunu fark eder. Zinciri sona bırakmak, son gece ortaya çıkan en pahalı sürprizdir.
+- Hazır altyapıyı kullan, yeniden yazma. RPC için Helius veya Triton, giriş için Privy, swap için Jupiter, multisig için Squads, fiyat için Pyth. Helius veya Privy'nin zaten sunduğu bir şeyi yazmak, jürinin puanladığı işten çalınan zamandır.
+- Bir AI asistanıyla çalış. Claude Code veya Codex gibi bir asistanla eşleşerek ilerlemek kısa sürede ciddi fark yaratır.
+- RPC desteği al. Carbium, Colosseum takımlarına 25 ücretsiz RPC ve Swap API hibesi veriyor (Developer RPC ayda 10M kredi). Başvuru ve şartlar sayfadaki Carbium kartında; önce biz bakıp uygunluğu onaylıyoruz. Public RPC ile demo yapma: demo sırasında düşen işlem geri alınamaz.
+- Herkese açık bir alan adına yayınla. Vercel veya Netlify gibi bir yerde. Localhost ekran görüntüsü ürün değildir, GitHub linki de demo değildir. Jüri tıklayıp çalışan bir şey görmek istiyor.
+- İlk build in public paylaşımını hemen at. Ne yaptığını, neden yaptığını ve bir ekran görüntüsünü paylaş. Erken atılan paylaşım, sonradan atılandan daha değerlidir: bir iz oluşturuyor. X hesabın yoksa aç, doğrulat ve jüriyi takip et.
+
+Daha hızlı inşa için araç seti. Sıfırdan kod yazmadan önce bunlara bak:
+
+- [solana.new: Solana için hazır AI becerileri ve MCP sunucuları](https://www.solana.new/)
+- [Noah AI: sohbetle tarif ettiğin Solana uygulamasını üreten kodsuz araç](https://trynoah.ai/)
+- [Solana Developer MCP: AI araçlarının Solana'yı tanıması için](https://mcp.solana.com/)
+- [Helius MCP: RPC ve işlem sorgularını AI asistanına tool olarak verir](https://www.helius.dev/docs/agents/mcp)
+- [awesome-solana-ai: Solana'da AI ile inşa etmek için araç listesi](https://github.com/solana-foundation/awesome-solana-ai)
+- [Superteam developer araçları](https://superteam.fun/build/developer-tools)
+- [Solana şablonları](https://solana.com/developers/templates)
+- [Carbium RPC hibesi (bu sayfadaki kart)](/colosseum#perks)
+
+> **Bir uyarı**
+> Bu araçlarla çıkan kodu devnet'te kendin test et, zincir entegrasyonunun gerçekten çalıştığını ve ne yaptığını anlatabildiğini kontrol et. Jüri "ürün gerçekten çalışıyor mu" ve "bu zinciri neden kullanıyorsun" sorularına bakıyor; hazır üretilmiş bir uygulamanın nasıl çalıştığını anlatamazsan, son elemedeki görüşmede bunu hemen fark ederler. Form da hangi AI araçlarını kullandığını soruyor; saklı tutma, yaz.
+
+Her çalışma oturumundan sonra test et. Bırakmadan önce linki bir arkadaşına gönder ve şunu sor: "Cüzdanını bağlayıp işlemi tamamlayabildin mi?" Cevap hayırsa sıradaki iş yeni özellik değil, bunu düzeltmek.
+
+#### Adım 4: İnsanlara göster, sayı topla
+
+Hedef: gerçek insanlar ürünü kullandı ve elinde alıntılanacak iki sayı var. Jüri "çok iyi bir fikir" satın almaz, "şu kadar kişi kullandı" satın alır.
+
+- On kişi bul. Hedef kullanıcıya benzeyen on kişi: sınıf arkadaşların, kulüp üyeleri, Telegram grubundaki diğer takımlar. Fikir öğrenciler içinse zaten en kolay kitlen çevrende.
+- Sessizce izle. Onlara ürünü gönder ve ne yaptıklarını izle. Açıklama yapma, "şuraya bas" deme. Takıldıkları yer, ürünün takıldığı yerdir. Mümkünse ekran kaydı al (izin ile).
+- Neyin bozulduğunu yaz, ikiye ayır. Birinci liste: kullanımı durduranlar. Bunları düzelt. İkinci liste: sadece seni rahatsız edenler. Bunları görmezden gel.
+- İki sayı seç. Kullanıcı sayısı, geri dönen kullanıcı, işlem sayısı, hacim gibi. Bir yatırımcı karşısında savunabileceğin iki tanesini seç ve şimdi ölçmeye başla. İşlem sayısı için program adresinin Solscan sayfası yeter. Başlamak için çok küçük değil: 10 kişi ve 30 işlem, 0 kişiden iyidir.
+- Anlatıyı sayıların etrafında kur. "Gelecekte şu olacak" yerine "10 kişi denedi, 7'si işlemi tamamladı, takıldıkları yer şuydu ve düzelttik". Vizyon değil, sonuç anlat.
+- X'te her gün kısa bir güncelleme at. Sessiz kalan takım terk edilmiş gibi görünür. Panel artık açık: beş kişi Colosseum'dan, on beş kişi Phantom, Base, Anza, Arcium, Drift, Ellipsis ve MetaDAO gibi ekiplerden track jürisi. Hepsini takip et.
+- Gerçek bir sonucu paylaşırken bizi etiketle. Superteam Türkiye gerçek bir kilometre taşını ("10 kullanıcı denedi" gibi) paylaşır. Lansman duyurusunu paylaşmaz, sonucu paylaşır.
+
+Takıldıysan: bu aşamada en sık takılma sebebi kullanıcı bulamamak. Telegram grubuna "ilk 10 kişi lazım, ürünü deneyecek biri var mı?" diye yaz; takımlar birbirinin kullanıcısı olarak başlayabilir.
+
+#### Adım 5: Teslim malzemelerini hazırla
+
+Hedef: iki video, bir repo, bir ilk slayt ve takımını anlatan net bir paragraf. Videoyu slayttan önce çek: Superteam Balkan son üç yarışmadaki 139 kazanan gönderimi tek tek saymış, kazananların yaklaşık yüzde 88'i statik bir sunum değil, kayıtlı video yüklemiş. Colosseum da pitch videosunun jürinin baktığı ilk şey olduğunu söylüyor.
+
+- Pitch videosu, en fazla 2 dakika. Kendi sesin ve yüzünle, Loom veya YouTube. İlk 10 saniye karar verdirir: problemi ve çözümü hemen söyle, kendi hikayeni değil. Önerilen sıra: problem ve çözüm, ürünün çalışırken görüntüsü, takım, sayıların ve sonraki adım. Yapı hep aynı: Problem, Çözüm, Demo, Takım. Superteam Türkiye Earn listesi hâlâ 3 dakikaya kadar kabul ediyor ama iki yere aynı videoyu yükleyeceksen 2 dakikada tut, ikisine de uyar.
+- Demo videosu, en fazla 3 dakika. Canlı ürünü göster. Slayt değil, kod gezintisi de değil. Burada teknik anlat, ikinci bir pitch yapma: jürinin ürünün çalıştığını gördüğü tek yer burası.
+- İlk slayt: ürün adı ve tek cümle, başka hiçbir şey. Ürün adı orta boy, cümle büyük ve en fazla beş kelime. Görsel, logo, web sitesi, iletişim bilgisi, yıl koyma. Hackathon mentoru Josip Volarević'in yazısına göre bir jüri veya yatırımcı ertesi gün en fazla 0-3 şey hatırlar: bir his, bir ana çıkarım ve bazen ikinci bir çıkarım. Adını değil, cümleni hatırlasınlar.
+- Takımını küçümseme. İsim ve unvan sıralama; her kişinin bu işi neden yapabileceğini somut söyle. Sorunlu cümle: "tutkulu ve çalışkan bir ekibiz." İyi cümle (örnek): "Ayşe, bir önceki hackathonda 400 kullanıcıya ulaşan bir uygulamanın arka ucunu yazdı." Sıfat kullanma, yıl sayısı verme, sonuç yaz. Sadece kendi doğrudan sorumlu olduğun sonuçları sahiplen. Henüz öyle bir sonucun yoksa, bu hafta ürettiğin kullanıcı ve işlem sayıları ilk kanıtın.
+- Repoyu yayınla. GitHub'daki doğrudan repo linkini ver, organizasyon veya profil sayfasını değil. Private kalacaksa hackathon@colosseum.com adresine erişim ver. Kilitli Google Docs belgeleri ve private repolar en sık yapılan ve en pahalıya patlayan hatadır.
+- İş modelini üç cümleyle yaz. Nasıl para kazanıyor? Bunu videoya koyma, formdaki ilgili alana yaz. İş modeli ve yol haritası 2 dakikalık videoda dolgu gibi okunur, ama form sizi bu alanda puanlıyor.
+- Hepsini İngilizce yap. Videolar, form cevapları ve repo açıklaması. Türkiye havuzu şartı da bu.
+- Videoyu yüklemeden önce başkasına izlet. Bir arkadaşına izlet ve "ne yaptığımı anladın mı?" diye sor. Cuma 19:00 Office Hours'ta ham halini getir; parlatmadan önce geri bildirim almak bir hafta kurtarır.
+
+- [Josip Volarević: ilk slayt sadece ad ve tek cümle olmalı](https://x.com/JosipVolarevic2/status/2106374392166973692)
+- [Josip Volarević: takımını küçümseme](https://x.com/JosipVolarevic2/status/2106075158465089606)
+- [Perfecting Your Hackathon Submission (Colosseum)](https://blog.colosseum.com/perfecting-your-hackathon-submission)
+
+#### Adım 6: Formu önceden bir belgede hazırla
+
+Colosseum'un proje formu karakter sınırlı ve zorunlu alanlarla dolu. İş modelini 500 karaktere ilk kez form açıkken sığdırmaya çalışmak, bir belgede önceden yazmaktan çok daha pahalı. Adım 3, 4 ve 5'i yaparken bu belgeyi de doldur.
+
+> **Gönder butonu henüz açık olmayabilir**
+> Final gönderim butonu 6 Ekim, 04:00 PT yani Türkiye saatiyle 14:00'te açılıyor (bu tarih geçtiyse zaten açık). Formu bu tarihten önce de oluşturup kaydedebilir ve düzenleyebilirsin.
+
+Katman 1, herkese açık sayfa. Proje linkine sahip herkes görür; bir yabancı için yaz.
+
+- Proje adı, kısa açıklama (en fazla 500 karakter, tek cümleni buraya koy), web sitesi (isteğe bağlı), ürün kategorisi, takımın bulunduğu ülke.
+- Logo veya görsel (JPEG, PNG, WEBP veya GIF, sıkıştırmadan önce en fazla 20MB).
+- GitHub repo linki (doğrudan repo, organizasyon değil).
+- Pitch videosu (en fazla 2 dakika) ve X profili.
+
+Katman 2, takımın, jürinin ve Colosseum'un gördüğü ama herkese açık olmayan kısım.
+
+- Ne inşa ediyorsun ve kimin için? (1.000 karakter)
+- Neden bunu, neden şimdi? (1.000 karakter)
+- Hangi teknolojileri ve hangi AI araçlarını kullanıyorsun?
+- Hangi zincirleri kullanıyorsun ve nasıl kullanıyorsun? (500 karakter)
+- Takım Telegram iletişim bilgisi. Ödül dağıtımı ve accelerator görüşmeleri buradan yapılır, kontrol eden biri olsun.
+- Takımda olmayan ama önemli iş yapan biri var mı? (600 karakter, dürüst cevapla)
+- Jürinin bilmesi gereken başka bir şey? (500 karakter)
+- Demo videosu (en fazla 3 dakika), canlı ürün linki, gerekirse erişim bilgileri.
+
+Katman 3, accelerator ekranı. Sadece organizatörler ve Colosseum görür ama göndermek için zorunlu, accelerator istemesen bile. Aslında Colosseum'un kime bakacağına karar verdiği yer burası, o yüzden ciddiye al.
+
+- İnsanların bu ürüne gerçekten ihtiyacı olduğunu nereden biliyorsun? (1.000 karakter)
+- Ne kadar ilerledin, kullanıcın var mı? Somut ol. (1.000 karakter)
+- Bu alanda başka kim var ve neyi yanlış yapıyorlar? (1.000 karakter)
+- Nasıl para kazanıyorsun veya kazanmayı planlıyorsun? (500 karakter)
+- Her biriniz ne zamandır bunun üzerinde çalışıyorsunuz, tam zamanlı mı? (500 karakter)
+- Takım üyeleri nerede, bir arada mı çalışıyorsunuz? (500 karakter)
+- Dört evet/hayır sorusu: şirket kurdun mu, yatırım aldın mı, şu an fundraising yapıyor musun, canlı bir token'ın var mı? Doğru cevap yok; "hayır" demek sorun değil. Açık uçlu soruları boş bırakmak aslında daha kötü okunur.
+
+- [Tam alan listesi ve her birinin ne aradığı: What Colosseum's form actually asks](/colosseum/the-form-itself)
+
+#### Adım 7: Gönder
+
+Hedef: her şey, son tarihten en az iki gün önce yüklenmiş olsun. Platform son gece her seferinde yavaşlıyor ve son gece çıkan her hata geri alınamaz.
+
+- Son tarihi kendi saatine çevir. Teslim 12 Ekim 23:59 Kaliforniya saati. Türkiye'de bu 13 Ekim Salı sabahı 09:59. Türkiye'de gece yarısı sanan takımlar 10 saat geç kalıyor, itiraz hakkı yok.
+- Colosseum portalında gönder. Takım liderinin projeyi yüklediğinden ve her üyenin projeye bağlı olduğundan emin ol. Üye eksikse gönderim geçersiz sayılabilir.
+- Aynı projeyi Superteam Türkiye Earn listesine ikinci kez gönder. Colosseum portalı ve Earn listesi iki ayrı yerdir; birini yapmak diğerini yapmış saymaz. Türkiye havuzu 10.000 USDG (1. 5.000, 2. 3.000, 3. 2.000), sonuçlar 28 Ekim'de. Şartları: Colosseum profilinde ana üs olarak Türkiye, Superteam Türkiye formu, Colosseum Telegram grubu, her iki yere gönderim, videolar ve repo, hepsi İngilizce.
+- Link testini sen yapma, başkasına yaptır. Takım dışından birine GitHub linkini, demo videosunu ve pitch videosunu açtır. Sadece senin açabildiğin link, açılmayan linktir.
+
+- [Superteam Türkiye Earn listesi](https://superteam.fun/earn/listing/submit-crypto-worlds-fair-project-for-turkish-builders/)
+- [Resmi kurallar (PDF)](https://colosseum.com/legal/Crypto%20World's%20Fair%20Hackathon%20Rules.pdf)
+
+Göndermeden hemen önce şu dokuz maddeyi tek tek işaretle:
+
+1. Tek cümle ve kısa açıklama yazıldı ve biri okudu.
+2. MVP herkese açık bir alan adında canlı.
+3. İş modeli üç cümleyle yazıldı.
+4. Zincir entegrasyonu gerçekten çalışıyor: cüzdan bağlantısı ve gerçek bir işlem.
+5. Kod yayınlandı ya da jüriye erişim verildi.
+6. Doğrulanmış X hesabı, her gün paylaşım, jüri takipte.
+7. Pitch malzemeleri (slayt, pitch videosu, demo) hazır ve biri gördü.
+8. Proje ve her takım üyesi Colosseum'da kayıtlı.
+9. Aynı proje Superteam Türkiye listesine de gönderildi.
+
+#### Emeğini verip yine de kaybettiren dört hata
+
+1. Geleceği satmak. İzi olmayan büyük bir vizyon, ürün değil, sunum gibi okunur. "2027'de şunu yapacağız" yerine "bu hafta şunu yaptık, şu kadar kişi denedi" de.
+2. Zorlama kripto. Ürünün zincir olmadan da var olabiliyorsa, zinciri neden kullandığını derinlemesine savunman gerekir. Savunamıyorsan "blockchain kullanıyoruz" deme.
+3. Zayıf demo. GitHub linki demo değildir. Bir jürinin izleyip çalıştığını görebileceği bir şey olmalı.
+4. Eksik izin. Private repo, kilitli Google Docs, açılmayan Loom linki: kuralda en sık ölüm sebebi. Private kalacaksa hackathon@colosseum.com adresine erişim ver, sonra takım dışından birine her linki açtır.
+
+İki kural da diskalifiye sebebi:
+
+- Bir takım yalnızca bir ürün gönderebilir ve bir kişi yalnızca bir gönderimde yer alabilir.
+- Yarışma penceresinden önce başlayabilir ve kendi eski kodunu kullanabilirsin ama yalnızca pencere içinde yapılan iş puanlanır. Tüm önceki geliştirmeyi gönderim formunda beyan etmelisin.
+
+#### Ödüller ve accelerator: güncel rakamlar
+
+Bu rakamlar Colosseum'un resmi kurallarından (madde 14), tanıtım duyurusundan değil. Önceki yarışmaların rakamları artık geçerli değil.
+
+- Toplam ödül: 840.000 dolar, genel ödüller ve sekiz ekosistem track'i.
+- Grand Champion: 30.000 dolar, bir takım. Sonraki 20 takım: her biri 15.000 dolar, toplam 300.000 dolar. Accelerator'ı besleyen grup bu.
+- Özel ödüller: Public Goods ve Üniversite Ödülü, her biri 5.000 dolar, birer takım.
+- Track'ler: Solana, Tempo, Hyperliquid, Zcash 100.000 dolar; Ethereum L1, Base, Arbitrum, Robinhood Chain 25.000 dolar. Kayıt sırasında en fazla üç track seçersin, her gönderim genel ödüllere de girer.
+- Accelerator: takım başı 250.000 dolar, on iki haftalık program, ilk iki haftası San Francisco'da, kalan on hafta uzaktan da olabilir. Arkasında 2,5 milyon dolarlık fon var.
+- Türkiye havuzu: 10.000 USDG (1. 5.000, 2. 3.000, 3. 2.000), sadece Türkiye merkezli takımlar için. Sonuçlar 28 Ekim.
+- Kazananlar 5 Aralık civarında açıklanır.
+
+Öğrencilere not: Üniversite Ödülü bir takıma gidiyor ve 5.000 dolar. Türkiye'den bir takım, Lexicon, daha önce Radar hackathon'unda Üniversite Ödülü'nü kazandı. Yani bu mümkün.
+
+> **Bilmen gereken tek şey**
+> Yarışma her zincire açık ama accelerator ve fon hâlâ Solana kurucularını destekliyor. Ayrıca Türkiye havuzunun dört kriterinden üçü açıkça Solana'yı anıyor. Başka bir zincirde inşa edersen genel ödüllere ve kendi track'ine girersin ama accelerator ve Türkiye havuzuna giremezsin. Hiç karar vermediysen: Solana.
+
+#### Yardım nerede
+
+Haftalık etkinliklerin hepsi ücretsiz, hiçbiri zorunlu değil. Güncel saatler Luma takviminde.
+
+- Çarşamba 19:00, Colosseum Community Call (X Spaces): hafta burada belirlenir, takımlar birbirini burada bulur.
+- Cuma 10:00, Coworking Cuma (Kolektif House Levent, İstanbul): tüm gün, takıldığın şeyi getir.
+- Cuma 19:00, Colosseum Office Hours (Google Meet): bire bir. Fikir doğrulama, mimari, sunum ve video geri bildirimi.
+- Cumartesi 14:00, Shipyard (Nişantaşı ve canlı yayın): dikey derinlemesine içerik.
+
+Genel sorular için Telegram grubu: cevap herkese yarar. Ya da doğrudan Caner'e yaz: @trench_survivor. Bir şeye takılırsan, bu rehberi okumayı bırak ve yaz.
+
+- [Luma takvimi](https://luma.com/superteamtr)
+- [Telegram grubu](https://t.me/+3sWAzL4fgPViMjU8)
+- [Caner (@trench_survivor)](https://t.me/trench_survivor)
+- [Bu rehberin İngilizce sürümü](/colosseum/latecomer-guideline-en)
+- [Superteam Türkiye Colosseum sayfası](/colosseum)
+- [Colosseum'un kendi geliştirici kaynakları](https://colosseum.com/worldsfair/resources)
+- [How to Win a Colosseum Hackathon](https://blog.colosseum.com/how-to-win-a-colosseum-hackathon)
+- [Superteam Balkan'ın rehberi: bu yarışma için yazılmış en eksiksiz rehber](https://stblkn.notion.site/colosseum-hackathon)
+
+---
+
+## Not another market. A verification layer.
+
+Most of crypto assumes everything has to become a market. The opening here is narrower and more durable: products that pull scattered records together, make them verifiable, and connect them to real capital and real export channels.
+
+> **Why this shape**
+> Crypto payments are prohibited here and the Capital Markets Board regulates the rest, so the consumer plays every other market reaches for are closed. That is not a reason to build somewhere else. It is what leaves verification open, and KVKK is what makes provable-without-revealing genuinely worth money. Every idea below uses a chain as an evidence layer, never to issue a token.
+
+### 01. Provenance for Turkish exports (Trade and export)
+
+Türkiye produces some of the world's most counterfeited premium goods: Antep pistachios, Malatya apricots, Isparta rose oil, hand-woven carpets. Most of it goes to the EU, where traceability is turning into a legal requirement rather than a marketing line.
+
+**Build:** A provenance stack from producer to EU importer. Origin attestations, certificates, shipping events, and a verification page a buyer can actually scan.
+
+**What counts in four weeks:** One product category, one real exporter or cooperative, one flow that runs end to end.
+
+**Know this before you start:** The chain is the easy half. An attestation is worth exactly what its source is worth, so the real problem is who signs the first record and why anyone should believe them.
+
+### 02. Carbon MRV for industry and EU CBAM (Industry and compliance)
+
+The EU's Carbon Border Adjustment Mechanism is in its definitive phase and already bites exporters of steel, aluminium, cement and fertiliser. Türkiye is standing up its own emissions regime alongside it, so the same plant ends up reporting verified emissions to two authorities that don't share a format.
+
+**Build:** Not a carbon marketplace. A measurement, reporting and verification layer with tamper-evident audit trails, verifier sign-off, and exports shaped for both regimes.
+
+**What counts in four weeks:** One sector, sample facility data, one report a compliance officer would actually file.
+
+**Know this before you start:** Real emissions data lives in ERP systems nobody opens for a hackathon. Work from a published methodology with synthetic but correctly shaped data, and say so on the slide. Overstating the data you hold is the one thing a verification product cannot survive.
+
+### 03. Vehicle history and underwriting (Insurance and lending)
+
+Türkiye runs one of the region's largest used-car markets, and the record of any given car is scattered across service networks, insurers, notaries and marketplaces. Odometer fraud and undisclosed damage price into every loan and every policy written.
+
+**Build:** An aggregation and verification layer that turns those fragments into a vehicle profile a lender, insurer or marketplace can rely on.
+
+**What counts in four weeks:** Mileage and service-history integrity across one fleet or one service network, plus an underwriting API something else can call.
+
+**Know this before you start:** The national registries are not open to you. Start where consent already works: one service network that holds its own records and will let you attest them, rather than the dataset you can't reach.
+
+### 04. Portable credit history (Credit and mobility)
+
+Skilled professionals leaving Türkiye for Europe arrive with no credit history at all, after years of borrowing responsibly at home. They pay for that gap in deposits, in rates, and in applications that just get refused.
+
+**Build:** Zero-knowledge proofs of creditworthiness derived from Turkish credit records, verifiable by a foreign lender or landlord without exposing anything underneath. Consent and KVKK belong in the design, not bolted on at the end.
+
+**What counts in four weeks:** A working proof flow, and a verifier demo on the receiving side.
+
+**Know this before you start:** The blocker is access, not cryptography. The bureau holds the records and will not hand API keys to a hackathon team. Build over the report a person can export for themselves, which is where consent belongs anyway.
+
+> **What this list isn't**
+> Deliberately narrow, and not a condition of anything. Nobody scores higher for picking from it, and we aren't only interested in these. It's where our partners and our own experience let us help most. If you're building elsewhere, the Shipyard sessions cover AI and compute, payments and corridors, and consumer go-to-market.
+
+**Who we want to hear from.** Teams with real operator experience in fintech, insurance, trade or industry, and teams who already have a domain partner. If that's you, tell us before you start building rather than after.
+https://forms.gle/EELv1S3eD1nEytrq7
+
+---
+
+## You're not competing alone.
+
+What we run, and what we expect back.
+
+- **Events and workshops.** Four sessions a week, in person in İstanbul and online. The full shape is in the route above. Free, and none of it compulsory.
+- **Mentorship and pitch review.** Product, technical and pitch questions, one to one. We read the deck and watch your videos before the judges do.
+- **Social amplification.** Shipped milestones, in front of the Solana ecosystem through our channels. Results only. We don't amplify announcements.
+- **Membership, grants and perks.** Membership is earned, not given. Ship something real these four weeks and you have the strongest application we accept.
+
+### Three ways in, one team behind them.
+Registering tells Colosseum you exist. These tell us, and each one unlocks a different kind of help.
+
+**Orientation** (3 – 21 September): Kickoff and workshop invites; Idea validation slot; Cofounder matching. Tell us you're competing: https://forms.gle/EELv1S3eD1nEytrq7
+
+**Acceleration** (22 September – 6 October): One-liner and blurb iterated with us; Camera and audio for your recordings; Introductions to judges. Ask for intensive support: https://t.me/trench_survivor
+
+**Post-hackathon** (From 6 October): Grant and accelerator support; Launch amplification; Membership review. Ask about what comes next: https://t.me/trench_survivor
+
+**Come with:**
+
+- Idea validation and gap analysis, before you start building.
+- Technical direction: architecture, stack choices, what to cut.
+- Pitch material review: deck, pitch video, demo, across as many rounds as you need.
+- Demo and pitch video feedback before you upload.
+
+Workshops, mentors and every other team competing from Türkiye, in one place. Ask here first. Most answers help more than one team. https://t.me/+3sWAzL4fgPViMjU8
+
+---
+
+## Questions worth answering.
+
+### Before you enter
+
+**Do I need to be a developer?**
+No. Winning teams combine technical and business people. Founders, designers, product people, and domain experts are all needed, but a team with nobody who can ship code will struggle in four weeks.
+
+**What does it cost?**
+Nothing. Registration is free, the competition is free, and everything Superteam Türkiye runs around it (workshops, office hours, pitch reviews) is free. The only thing it costs is four weeks.
+
+**Do I need to speak English?**
+For the submission, yes, and it's a rule, not a convention. Section 12 of the official rules: all content must be in English. You don't need to be fluent. Clear beats polished, and judges watch hundreds of these. We'll review your script and your video before you upload, in Turkish or English, whichever you think in.
+
+**Do I need to know blockchain, or Rust?**
+No Rust. Most winning products are applications, not protocols, and modern Solana work is largely TypeScript against hosted infrastructure. If you can ship a web product you can ship here; the chain-specific part is a wallet connection and a transaction. Start with the AI-native stack guide.
+
+**How big should my team be?**
+Two to five people with complementary skills. Solo is allowed and judges have funded solo founders, but you're competing against teams.
+
+**I don't have an idea yet.**
+Start with the Superteam Idea Bank, then run a gap analysis against past projects before you commit to anything. Cofounder matching on Arena is where you find people to build it with, and Colosseum publishes the ecosystem tracks on 14 September, which is the sharpest prompt list you'll get.
+
+**Am I eligible?**
+Eligibility is narrower than most people assume: this is for new startups that haven't raised significant outside capital. If you've already raised a round, read Colosseum's rules before you commit four weeks to it.
+
+**Can I enter more than one project?**
+No. One product per team, and one per person: you can't submit two projects, and you can't appear on two submissions. This is a disqualifying rule, not a guideline.
+
+**Does creating an Arena account register me?**
+No, and this catches people every year. Create the account, then separately click Register on the hackathon page. Both steps are required.
+
+**Does every team member have to register?**
+Yes, individually, and this one is a disqualifier. Section 6 of the official rules: every member must register on colosseum.com before 11:59pm PT on 12 October, the same moment as the submission deadline. After that the individual registration form is disabled, and any member who hasn't completed it is disqualified. It takes two minutes per person, so do it in week one rather than on deadline night.
+
+**Do I have to build on Solana?**
+No. Crypto World's Fair is the first Colosseum competition open to builders across blockchain ecosystems, with prize tracks per ecosystem and a general pool across all of them. One thing didn't change, though: Colosseum's accelerator and venture fund still invest in Solana founders. So Solana teams compete for their track, the cross-chain pool and the $250,000 accelerator place; teams on other chains compete for the first two. Build where your product genuinely belongs, and know what you're trading if that isn't Solana.
+
+### While you're building
+
+**Can I compete remotely?**
+Yes. The hackathon is global and online. Superteam Türkiye's sessions run online, with in-person events announced on the calendar.
+
+**Can I compete with a project I started before?**
+Yes, and a running start is an advantage: judges are evaluating a company's trajectory. Two conditions, though. Only work done inside the window is judged, so you still need dated proof of work: commits, shipped features, users acquired. And you have to disclose all prior development on the submission form. Colosseum's own words for teams that don't: they disqualify the team, ban the builders from future hackathons, and revoke prizes. Disclosing costs you nothing. Building on other people's open source is fine and encouraged; this rule is about your own earlier work.
+
+### Prizes and after
+
+**When do we find out?**
+Section 13 of the official rules puts it on or about 5 December 2026, roughly seven weeks after the deadline. Judging isn't instant, and the teams that keep shipping through those seven weeks are the ones the accelerator interviews.
+
+**Is this a hackathon or a startup competition?**
+Colosseum calls it a hackathon and runs it as a startup competition. Five of the seven judging criteria are business criteria, the prize money is smaller than the accelerator cheque behind it, and winners are interviewed as founders rather than graded as entrants. Build accordingly: a working product with real users beats a technically impressive weekend project every time.
+
+---
+
+## Everything else, in one place.
+
+### Colosseum
+
+- [Register for the competition](https://colosseum.com?ref=superteamtr-2026)
+- [Crypto World's Fair: official page](https://colosseum.com/worldsfair)
+- [Official rules (PDF)](https://colosseum.com/legal/Crypto%20World's%20Fair%20Hackathon%20Rules.pdf) — Dates, eligibility, the prize table and the six legal judging criteria. The only document that settles an argument.
+- [Colosseum's own dev resources](https://colosseum.com/worldsfair/resources) — Published the day the competition opened.
+- [Colosseum Discord: workshops stream live](https://colosseum.com/discord) — Kickoff, then a session per ecosystem. Watch live and ask questions.
+- [Official FAQs](https://colosseum.com/hackathon#faqs)
+- [Cofounder matching](https://colosseum.com/cofounder-matching)
+- [Hall of Fame: past winners](https://colosseum.com/arena/hackathon/hall-of-fame)
+- [Request for Products: their own idea list](https://blog.colosseum.com/request-for-products/) — Written for Cypherpunk in 2025, so a cycle old, but the prompts hold, and Crypto World's Fair publishes its own tracks on 14 September.
+
+### How to win
+
+- [How to win a Colosseum hackathon](https://blog.colosseum.com/how-to-win-a-colosseum-hackathon) — mattytay, Colosseum's own playbook
+- [Perfecting your submission](https://blog.colosseum.com/perfecting-your-hackathon-submission) — Colosseum, on what the form is actually asking for
+- [Judges look for reasons to say no](https://x.com/josipvolarevic/status/2038643299221729462) — Josip Volarević, 3 hackathons, 2 wins, ~10 winners mentored
+- [It's a company hackathon, not a dev hackathon](https://x.com/ansel_sol/status/1907826765608972780) — ANSEL, won Radar with Tokamai, Colosseum accelerator
+- [Make your submission easy to judge](https://x.com/beeman_nl/status/1842165504405917952) — beeman, 2 wins and a judge himself
+- [Pick the narrative before you pick the product](https://zkchakra.substack.com/p/how-to-win-hackathons) — Kuba, grand champion at Radar with Reflect
+- [Make the demo the hero, and cut everything around it](https://x.com/ivan_nomadz/status/2100588952277156347) — Ivan, Nomadz, who lost three Colosseum hackathons in a row before winning one
+- [The accelerator application is really one question: are you exceptional?](https://x.com/JosipVolarevic2/status/2106075158465089606) — Josip Volarević, on what Colosseum, Alliance and YC reviewers look for, and the six ways founders undersell themselves
+- [Your first slide is a name and a one-liner, nothing else](https://x.com/JosipVolarevic2/status/2106374392166973692) — Josip Volarević, on the three things a judge remembers the day after
+
+### Other chapters
+
+- [Seven things decide it, and only one is your product](https://x.com/solanamarko/status/2098084013332210127) — solanamarko, Superteam Balkan, who counted what 139 winners actually submitted
+- [Crypto World's Fair, worked through end to end](https://stblkn.notion.site/colosseum-hackathon) — Superteam Balkan, the most complete guide anyone has published
+- [Hackathon cheatsheet](https://stblkn.notion.site/hackathon-cheatsheet) — Superteam Balkan
+- [Ten things worth building in Solana DeFi](https://x.com/SuperteamIN/status/2100268342863180230) — Superteam India, sourced from founders at Solana Foundation, Jupiter, Colosseum, Jito and SendAI
+- [Hackathon playbook](https://superteam-japan.gitbook.io/hackathon-playbook) — Superteam Japan
+
+### Build and fund
+
+- [solana.new: AI skills and MCP servers](https://www.solana.new/)
+- [Colosseum Copilot: validate against 5,400+ past projects](https://colosseum.com/copilot)
+- [Superteam developer tools](https://superteam.fun/build/developer-tools)
+- [Superteam Idea Bank](https://superteam.fun/build/ideas)
+- [Superteam hackathon headquarters](https://superteam.fun/hackathon)
+- [Superteam Earn: grants and bounties](https://superteam.fun/earn)
+- [Colosseum Eternal](https://colosseum.com/eternal)
+
+---
+
+Source and current version: https://tr.superteam.fun/colosseum
+Short index for assistants: https://tr.superteam.fun/colosseum/llms.txt
+Questions: https://t.me/+3sWAzL4fgPViMjU8 or tr@superteam.fun

@@ -1,6 +1,7 @@
 import { LoaderCircle } from 'lucide-react';
 import { WALLET_AGE_MIN_DAYS } from '../walletAge';
 import { tx as t } from '../copy';
+import { isTestnetBuild } from '../chainPolicy';
 
 
 const supportedChainNames = (supportedChains) => Object.values(supportedChains || {})
@@ -138,6 +139,7 @@ export const SystemStatusBar = ({
   ordersFeedError = false,
   lang = 'EN',
   children = null,
+  isTestnet = isTestnetBuild(),
 }) => {
   const statuses = resolveSystemStatuses({
     envErrors,
@@ -157,11 +159,16 @@ export const SystemStatusBar = ({
     lang,
   });
 
-  if (statuses.length === 0 && !children) return null;
+  if (statuses.length === 0 && !children && !isTestnet) return null;
 
   return (
     <section aria-label={lang === 'TR' ? 'Sistem durumu' : 'System status'} className="shrink-0 border-b border-borderSubtle" data-testid="system-status-bar">
       <div className="flex flex-col">
+        {isTestnet && (
+          <div role="status" className={`pl-4 pr-16 md:pr-44 py-1 text-xs font-bold text-center border-b bg-info border-info text-black`} data-testid="testnet-banner">
+            {t(lang, 'Base Sepolia Testnet — test tokenları, gerçek para yok', 'Base Sepolia Testnet — test tokens, no real money')}
+          </div>
+        )}
         {statuses.map((status) => (
           <div key={status.key} className={`pl-4 pr-16 md:pr-44 py-1.5 md:py-2 text-xs md:text-sm border-b last:border-b-0 ${toneClass(status.tone)}`} data-status-key={status.key}>
             <div className="max-w-[1200px] mx-auto flex items-center justify-between gap-3">

@@ -75,8 +75,7 @@ async function runBackfillTerminalTradeStats({ apply = false, batchSize = DEFAUL
 async function main() {
   const mongoose = require("mongoose");
   const { apply } = parseArgs();
-  const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI;
-  if (!mongoUri) throw new Error("MONGODB_URI/MONGO_URI tanımlı değil.");
+  const mongoUri = require("./_mongoUri").resolveMongoUri();
   await mongoose.connect(mongoUri);
   try {
     const result = await runBackfillTerminalTradeStats({ apply });
