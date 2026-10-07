@@ -163,8 +163,7 @@ async function migrateFieldInBatches(Model, {
 }
 
 async function run({ dryRun = false } = {}) {
-  const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI;
-  if (!mongoUri) throw new Error("MONGODB_URI/MONGO_URI tanımlı değil.");
+  const mongoUri = require("./_mongoUri").resolveMongoUri();
 
   await mongoose.connect(mongoUri);
   const batchSize = resolveBatchSize(process.env.IDENTITY_MIGRATION_BATCH_SIZE);

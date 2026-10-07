@@ -72,6 +72,7 @@ function getSiweConfig() {
 }
 
 // JWT secret kalite kontrolü
+// SENKRON TUTUN: _shannonEntropy ve KNOWN_PLACEHOLDERS scripts/init-env.js içinde kopyalanmıştır (bu dosya yüklenirken throw eder, require edilemez).
 function _shannonEntropy(str) {
   const freq = {};
   for (const ch of str) freq[ch] = (freq[ch] || 0) + 1;

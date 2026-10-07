@@ -14,8 +14,7 @@ import {
   BASE_SEPOLIA_CHAIN_ID,
   HARDHAT_CHAIN_ID,
   getSupportedChainIds,
-  resolveTargetChain,
-  TARGET_CHAIN_BASE_SEPOLIA,
+  isTestnetBuild,
 } from './app/chainPolicy'
 
 import ErrorBoundary from './components/ErrorBoundary.jsx'
@@ -59,7 +58,7 @@ const loadConnectors = () => loadConnectorsSafely(() => import('wagmi/connectors
 
 // [TR] P4 — VITE_RPC_URL birincil RPC, herkese açık RPC yedek (fallback). Prod'da Base, dev'de Base Sepolia'ya uygulanır.
 const PRIMARY_RPC = import.meta.env.VITE_RPC_URL
-const IS_TESTNET_BUILD = Boolean(import.meta.env.PROD) && resolveTargetChain() === TARGET_CHAIN_BASE_SEPOLIA
+const IS_TESTNET_BUILD = isTestnetBuild()
 const buildConfig = (connectors) => createConfig({
   chains: wagmiChains,
   connectors,

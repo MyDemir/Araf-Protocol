@@ -48,6 +48,11 @@ export const getSupportedChainsMap = (isProd = import.meta.env.PROD, targetChain
 export const isSupportedChainId = (chainId, isProd = import.meta.env.PROD, targetChain = import.meta.env.VITE_TARGET_CHAIN) =>
   Boolean(getSupportedChainsMap(isProd, targetChain)[chainId]);
 
+// [TR] Testnet build tek authority: yalnız production + VITE_TARGET_CHAIN=base-sepolia. Dev ve mainnet'te false.
+// [EN] Single authority for testnet builds: production + VITE_TARGET_CHAIN=base-sepolia only. False for dev and mainnet.
+export const isTestnetBuild = (isProd = import.meta.env.PROD, targetChain = import.meta.env.VITE_TARGET_CHAIN) =>
+  Boolean(isProd) && resolveTargetChain(targetChain) === TARGET_CHAIN_BASE_SEPOLIA;
+
 export const isMintTokenEnabled = (isProd = import.meta.env.PROD) => !isProd;
 
 
