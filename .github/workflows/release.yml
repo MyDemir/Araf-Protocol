@@ -21,7 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.ref }}
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -44,6 +44,12 @@ jobs:
           fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --title "Araf Protocol $TAG" --notes-file "$NOTES" "$PRE"
-          else
+          elif git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --title "Araf Protocol $TAG" --notes-file "$NOTES" --verify-tag "$PRE"
+          elif [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            # Tag does not exist: gh creates it at the dispatched commit.
+            gh release create "$TAG" --title "Araf Protocol $TAG" --notes-file "$NOTES" --target "$GITHUB_SHA" "$PRE"
+          else
+            echo "::error::Tag $TAG not found on remote for event $GITHUB_EVENT_NAME"
+            exit 1
           fi

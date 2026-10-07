@@ -10,6 +10,8 @@
    release already exists, it updates the notes.
 5. Fallback: `gh workflow run release.yml -f tag=vX.Y.Z`.
 6. A tag containing `-` (for example `v3.1.0-rc1`) is published as a pre-release.
+7. If the tag cannot be pushed, run `gh workflow run release.yml -f tag=vX.Y.Z` on `main`: it creates the tag and the
+   release together at the dispatched commit.
 
 ## Sürüm nasıl çıkarılır (TR)
 
@@ -21,3 +23,5 @@
    notları günceller.
 5. Yedek yol: `gh workflow run release.yml -f tag=vX.Y.Z`.
 6. İçinde `-` olan etiketler (örn. `v3.1.0-rc1`) pre-release olur.
+7. Etiket push edilemiyorsa `main`'de `gh workflow run release.yml -f tag=vX.Y.Z` çalıştır: etiketi ve release'i
+   dispatch edilen commit'te birlikte oluşturur.
