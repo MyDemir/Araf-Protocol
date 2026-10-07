@@ -9,6 +9,8 @@ altında.
 - Backend: `npm --prefix backend test`, `npm --prefix backend run lint`
 - Frontend: `npm --prefix frontend test`, `npm --prefix frontend run lint`
 - Hepsi: `npm run test:all`
+- Kurulum: `npm run setup`
+- Lint (backend+frontend): `npm run lint`
 
 ## Orkestra kuralı
 - Sen şefsin: işi böl, brif yaz, ajan ve model

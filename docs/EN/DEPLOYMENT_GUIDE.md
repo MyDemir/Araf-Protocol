@@ -45,11 +45,11 @@ docker run -d --name araf-redis -p 6379:6379 redis:latest
 ### Step 2 — Install Dependencies
 
 ```bash
-# In the project root directory
-cd contracts && npm ci && cd ..
-cd backend  && npm ci && cd ..
-cd frontend && npm ci && cd ..
+nvm use          # Node 22 (.nvmrc)
+npm run setup    # npm ci: contracts + backend + frontend
 ```
+
+Same install path as the README "Setup" section; the root script runs `npm ci` in all three packages. For the Node 22 toolchain (`nvm use`), env file copies and the full command list, see [README → Setup](../../README.md#-kurulum--setup).
 
 ### Step 3 — Terminal 1: Hardhat Node
 
@@ -797,6 +797,8 @@ Production runs a KMS self-test at startup (`runProductionKmsStartupSelfTest`). 
 | `ALLOW_NON_4000_REWARD_BPS` | `rewardsOps.js` | `true` bypasses the "`rewardBps` must be 4000" go-live check in `switch-treasury`. |
 | `CONFIRM_PUBLIC_SMOKE` | `smokeRewards.js` | `yes` required on non-local networks. |
 | `GAS_BASELINE_OUT` | `gasBaseline.js` | Optional output path of the JSON table. |
+
+> `verify:rewards`, `configure:rewards` and `switch:rewards:treasury` all run the same `rewardsOps.js`; the operation is chosen by the npm script name, so call them via `npm run` (or set `REWARDS_OP`).
 
 `REWARD_BPS`, `CONFIRM_CONFIGURE_REWARDS`, `REWARDS_READ_ONLY` and `REWARDS_SOURCE` appear in the `.env.example` files but are not read by any code; they are documented constants.
 

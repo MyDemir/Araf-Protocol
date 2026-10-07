@@ -45,11 +45,11 @@ docker run -d --name araf-redis -p 6379:6379 redis:latest
 ### Adım 2 — Bağımlılıkları Kur
 
 ```bash
-# Proje kök dizininde
-cd contracts && npm ci && cd ..
-cd backend  && npm ci && cd ..
-cd frontend && npm ci && cd ..
+nvm use          # Node 22 (.nvmrc)
+npm run setup    # npm ci: contracts + backend + frontend
 ```
+
+README "Kurulum / Setup" bölümüyle aynı yol; kök script üç pakette `npm ci` çalıştırır. Node 22 (`nvm use`), env dosyası kopyaları ve komut listesi için bkz. [README → Kurulum](../../README.md#-kurulum--setup).
 
 ### Adım 3 — Terminal 1: Hardhat Node
 
@@ -801,6 +801,8 @@ Production açılışta KMS self-test çalıştırır (`runProductionKmsStartupS
 | `ALLOW_NON_4000_REWARD_BPS` | `rewardsOps.js` | `true`, `switch-treasury`'deki "`rewardBps` 4000 olmalı" go-live kontrolünü atlar. |
 | `CONFIRM_PUBLIC_SMOKE` | `smokeRewards.js` | Local olmayan ağlarda `yes` gerekir. |
 | `GAS_BASELINE_OUT` | `gasBaseline.js` | JSON tablosunun opsiyonel çıktı yolu. |
+
+> `verify:rewards`, `configure:rewards` ve `switch:rewards:treasury` aynı `rewardsOps.js`'i çalıştırır; işlem npm script adından seçilir, bu yüzden `npm run` ile çağırın (ya da `REWARDS_OP` verin).
 
 `REWARD_BPS`, `CONFIRM_CONFIGURE_REWARDS`, `REWARDS_READ_ONLY` ve `REWARDS_SOURCE` `.env.example` dosyalarında geçer ama hiçbir kod tarafından okunmaz; belge amaçlı sabitlerdir.
 
