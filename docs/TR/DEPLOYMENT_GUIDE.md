@@ -248,7 +248,7 @@ tail -f backend/logs/araf.log
 
 ## 3. Public Testnet — Base Sepolia
 
-> **Önerilen yol: GitHub Actions workflow'u** ([docs/DEPLOY_BASE_SEPOLIA.md](../DEPLOY_BASE_SEPOLIA.md)). Kontrat, Fly backend ve Vercel frontend deploy'u; Fly secrets ve Vercel build-env dahil, secrets/variables girilerek otomatik yapılır.
+> **Önerilen yol: GitHub Actions workflow'u** ([DEPLOY_BASE_SEPOLIA.md](./DEPLOY_BASE_SEPOLIA.md)). Kontrat, Fly backend ve Vercel frontend deploy'u; Fly secrets ve Vercel build-env dahil, secrets/variables girilerek otomatik yapılır.
 > Bu bölümdeki Adım 1–5 (elle `fly secrets set`, `.env.production` vb.) **alternatif/elle** akıştır; workflow kullanılmayacaksa izlenir.
 
 ### Ön Gereksinimler
@@ -261,7 +261,7 @@ tail -f backend/logs/araf.log
 - Fly.io hesabı (backend için)
 - Vercel hesabı (frontend için)
 - BaseScan API anahtarı (`basescan.org/myapikey`)
-- AWS KMS veya HashiCorp Vault (backend `fly.toml` gereği `NODE_ENV=production` ile çalışır ve production'da `KMS_PROVIDER=env` reddedilir; tek istisna Base Sepolia demosudur: `NODE_ENV=production` + `EXPECTED_CHAIN_ID=84532` + `ALLOW_ENV_KMS_ON_TESTNET=yes` (RPC'nin 84532 olduğu doğrulanır; mainnet'te asla). Workflow'lu akış için bkz. [DEPLOY_BASE_SEPOLIA.md](../DEPLOY_BASE_SEPOLIA.md))
+- AWS KMS veya HashiCorp Vault (backend `fly.toml` gereği `NODE_ENV=production` ile çalışır ve production'da `KMS_PROVIDER=env` reddedilir; tek istisna Base Sepolia demosudur: `NODE_ENV=production` + `EXPECTED_CHAIN_ID=84532` + `ALLOW_ENV_KMS_ON_TESTNET=yes` (RPC'nin 84532 olduğu doğrulanır; mainnet'te asla). Workflow'lu akış için bkz. [DEPLOY_BASE_SEPOLIA.md](./DEPLOY_BASE_SEPOLIA.md))
 
 ### Adım 1 — Kontratları Deploy Et (Base Sepolia)
 
@@ -335,7 +335,7 @@ fly apps create araf-protocol-backend
 
 # Secret'ları ayarla (hepsi birden). NODE_ENV ve PORT zaten fly.toml [env] içinden gelir.
 # Tüm değişkenler için 6. bölüme bakın; Mainnet yalnız zincir/token değerlerinde farklıdır.
-# Not: Base Sepolia demosunda KMS_PROVIDER=env + ALLOW_ENV_KMS_ON_TESTNET=yes istisnası da kullanılabilir (bkz. ../DEPLOY_BASE_SEPOLIA.md); mainnet'te aws/vault şarttır.
+# Not: Base Sepolia demosunda KMS_PROVIDER=env + ALLOW_ENV_KMS_ON_TESTNET=yes istisnası da kullanılabilir (bkz. ./DEPLOY_BASE_SEPOLIA.md); mainnet'te aws/vault şarttır.
 fly secrets set \
   MONGODB_URI="mongodb+srv://<user>:<pass>@cluster.mongodb.net/araf_testnet" \
   REDIS_URL="rediss://:<token>@<host>.upstash.io:6379" \
@@ -396,7 +396,7 @@ vercel --prod
 
 Vercel'de Environment Variables de ayarlanmalıdır (Dashboard → Settings → Environment Variables).
 
-> **Zincir politikası:** frontend production build'lerde (`import.meta.env.PROD`) varsayılan olarak yalnız Base Mainnet'i açar; `VITE_TARGET_CHAIN=base-sepolia` verilirse production build yalnız Base Sepolia'yı açar (`frontend/src/app/chainPolicy.js`). Hardhat zinciri yalnız production olmayan build'lere bağlanır. `main.jsx` üzerinde yapılacak bir düzenleme yoktur; barındırılan Sepolia frontend'i için aşağıdaki `VITE_TARGET_CHAIN` notuna ve [DEPLOY_BASE_SEPOLIA.md](../DEPLOY_BASE_SEPOLIA.md)'ye bakın.
+> **Zincir politikası:** frontend production build'lerde (`import.meta.env.PROD`) varsayılan olarak yalnız Base Mainnet'i açar; `VITE_TARGET_CHAIN=base-sepolia` verilirse production build yalnız Base Sepolia'yı açar (`frontend/src/app/chainPolicy.js`). Hardhat zinciri yalnız production olmayan build'lere bağlanır. `main.jsx` üzerinde yapılacak bir düzenleme yoktur; barındırılan Sepolia frontend'i için aşağıdaki `VITE_TARGET_CHAIN` notuna ve [DEPLOY_BASE_SEPOLIA.md](./DEPLOY_BASE_SEPOLIA.md)'ye bakın.
 
 ### Adım 5 — SIWE Domain'i ve Origin
 

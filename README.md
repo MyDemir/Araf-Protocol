@@ -59,7 +59,8 @@ interprets receipts or intent; it only enforces deadlines and payouts.
 
 States and transitions below are the `TradeState` enum and the functions in
 [`contracts/src/ArafEscrow.sol`](contracts/src/ArafEscrow.sol#L54-L62). A child trade starts in `LOCKED` when an
-order is filled (`fillSellOrder` / `fillBuyOrder`).
+order is filled (`fillSellOrder` / `fillBuyOrder`). `TradeState.OPEN` exists in the enum, but trades start
+directly in `LOCKED`; `OPEN` is used only on the order side (`OrderState`).
 
 ```mermaid
 stateDiagram-v2
@@ -113,7 +114,7 @@ Every value below is read from the contract source. "Constant" means it cannot b
 | Settlement proposal deadline | 10 minutes to 7 days | constant | [`ArafSettlementLib.sol#L35-L36`](contracts/src/ArafSettlementLib.sol#L35-L36) |
 | Minimum wallet age (taker) | 2 days after `registerWallet` | constant | [`#L280`](contracts/src/ArafEscrow.sol#L280) |
 | Minimum native balance (taker) | 0.001 ETH | constant | [`#L293`](contracts/src/ArafEscrow.sol#L293) |
-| Trade cooldown, Tier 0 and 1 | 4 hours (max 30 days) | default | [`#L281-L282`](contracts/src/ArafEscrow.sol#L281-L282), [`#L296`](contracts/src/ArafEscrow.sol#L296) |
+| Trade cooldown, Tier 0 and 1 | 4 hours (max 30 days); Tier 0 and 1 orders; not applied to Tier 2+ | default | [`#L281-L282`](contracts/src/ArafEscrow.sol#L281-L282), [`#L296`](contracts/src/ArafEscrow.sol#L296), [`#L597`](contracts/src/ArafEscrow.sol#L597) |
 
 **Tiers.** A wallet's tier comes from its on-chain reputation. Higher tiers post smaller bonds. A clean history
 lowers the bond by 1 percentage point; open risk points raise it by 3
@@ -256,7 +257,8 @@ Start at the documentation index: [docs/README.md](docs/README.md). The most imp
 | [API](docs/EN/API.md) ([TR](docs/TR/API.md)) | Backend REST endpoints |
 | [Environment variables](docs/EN/ENV.md) ([TR](docs/TR/ENV.md)) | Every `.env` setting for contracts, backend and frontend |
 | [Governance readiness](docs/EN/GOVERNANCE_READINESS.md) ([TR](docs/TR/GOVERNANCE_READINESS.md)) | Owner powers and the path to a multisig |
-| [Backlog](docs/EN/BACKLOG.md) ([TR](docs/TR/YAPILACAKLAR.md)) | Known limits and deferred design changes |
+| [Rewards rollout](docs/EN/REWARDS_ROLLOUT.md) ([TR](docs/TR/REWARDS_ROLLOUT.md)), [abuse observability](docs/EN/REWARDS_ABUSE_OBSERVABILITY.md) ([TR](docs/TR/REWARDS_ABUSE_OBSERVABILITY.md)) | Proof of Peace go-live order and abuse monitoring |
+| [Backlog](docs/EN/BACKLOG.md) ([TR](docs/TR/BACKLOG.md)) | Known limits and deferred design changes |
 | [Gas baseline](docs/GAS_BASELINE.md) | Measured gas cost per function |
 | [Colosseum submission](docs/colosseum/) | Hackathon submission material |
 
@@ -299,4 +301,4 @@ her şey hazineye gider. Yalan söylemek ya da oyalamak iki tarafa da pahalıya 
 yayını hazırlanıyor, harici denetim yok, gerçek fonla kullanmayın. Kurulum: Node 22, `npm run setup`, testler
 `npm run test:all`. Belgeler: [docs/README.md](docs/README.md), [Mimari](docs/TR/ARCHITECTURE.md),
 [Oyun teorisi](docs/TR/GAME_THEORY.md), [Base Sepolia deploy](docs/TR/DEPLOY_BASE_SEPOLIA.md),
-[Yapılacaklar](docs/TR/YAPILACAKLAR.md).
+[Backlog](docs/TR/BACKLOG.md).

@@ -264,10 +264,10 @@ Each completed trade pays a protocol fee, by default 0.15% from each side (owner
 ### How long have you each been working on this? Have you been working on it full time?
 
 ```text
-[[TODO: per person: since when, full-time or part-time]]. Facts from the repo: the earliest pitch document is dated March 2026, the first commit is 2 May 2026, and active development resumed on 28 Sep 2026 with 137 commits since.
+[[TODO: per person: since when, full-time or part-time]]. Facts from the repo: the first commit is 2 May 2026, and active development resumed on 28 Sep 2026 with 137 commits since.
 ```
 
-**Characters:** 229/500
+**Characters:** 180/500
 
 ### Where is each team member currently based, and do you work in person together?
 
@@ -283,5 +283,5 @@ Each completed trade pays a protocol fee, by default 0.15% from each side (owner
 |---|---|---|
 | Have you formed a legal entity? | `[[TODO: Yes/No]]` | not in repo |
 | Have you taken any investment? | `[[TODO: Yes/No]]` | not in repo (note: competition is for teams without significant outside capital) |
-| Are you currently fundraising? | `[[TODO: Yes/No]]` | `docs/FUNDRAISING_STRATEGY.md` lists targets, but says nothing about an active raise |
+| Are you currently fundraising? | `[[TODO: Yes/No]]` | not in repo (no information about an active raise) |
 | Do you have a live token? | No | no token contract in `contracts/src`; the protocol uses existing USDT/USDC. `[[TODO: confirm]]` |
