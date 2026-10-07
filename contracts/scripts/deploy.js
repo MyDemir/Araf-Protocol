@@ -112,6 +112,12 @@ function resolveProductionTokenConfig({ chainId, requireConfigured = false } = {
 
   const normalizedChainId = Number(chainId);
   if (normalizedChainId === 8453) {
+    if (
+      (!process.env.BASE_MAINNET_USDT_ADDRESS && process.env.MAINNET_USDT_ADDRESS) ||
+      (!process.env.BASE_MAINNET_USDC_ADDRESS && process.env.MAINNET_USDC_ADDRESS)
+    ) {
+      console.warn("⚠️ MAINNET_USDT_ADDRESS/MAINNET_USDC_ADDRESS eski takma adlardır; BASE_MAINNET_* kullanın.");
+    }
     const usdtRaw = process.env.BASE_MAINNET_USDT_ADDRESS || process.env.MAINNET_USDT_ADDRESS;
     const usdcRaw = process.env.BASE_MAINNET_USDC_ADDRESS || process.env.MAINNET_USDC_ADDRESS;
     return {

@@ -48,7 +48,13 @@
 5. **Alchemy**: Base Sepolia app; HTTP ve WSS URL.
 6. **Basescan**: API key (opsiyonel).
 7. **Test USDC**: https://faucet.circle.com/ (Base Sepolia, USDC). Adres yukarıdaki örnek, doğrula.
-8. **Test USDT**: Circle faucet USDT vermez. Seçenek: 6 decimals'lı bir ERC20 kullan veya `contracts/src/MockERC20.sol`'u (`MockERC20(name,symbol,6)`, herkese açık `mint()`) Base Sepolia'ya elle deploy edip adresini `BASE_SEPOLIA_USDT_ADDRESS` yap. deploy.js public ağda mock deploy ETMEZ.
+8. **Test USDT**: Circle faucet USDT vermez. `contracts/scripts/deployTestToken.js` 6 decimals'lı `MockERC20` deploy eder (yalnız chainId 84532 ve 31337; mainnet'te hata verir). deploy.js public ağda mock deploy ETMEZ; bu ayrı bir test aracıdır.
+   ```bash
+   cd contracts
+   CONFIRM_TEST_TOKEN_DEPLOY=yes TEST_TOKEN_SYMBOL=tUSDT TEST_TOKEN_NAME="Test Tether USD" \
+     npm run deploy:test-token:base-sepolia
+   ```
+   Gerekli env: `BASE_SEPOLIA_RPC_URL`, `DEPLOYER_PRIVATE_KEY`, `CONFIRM_TEST_TOKEN_DEPLOY=yes`; opsiyonel `TEST_TOKEN_SYMBOL` (varsayılan `tUSDT`), `TEST_TOKEN_NAME` (varsayılan `Test Tether USD`). Çıktı: token adresi ve sonraki adım; kayıt `contracts/deployments/base-sepolia-test-tokens.json`'a (`symbol, address, decimals, txHash, deployedAt`) eklenir. Sonra: `gh variable set BASE_SEPOLIA_USDT_ADDRESS --body <adres>`. Token basmak için `mint()` (saatte 1000) veya owner `mint(to, amount)`.
 9. Deployer cüzdanına Base Sepolia ETH yükle (Coinbase/Alchemy faucet).
 
 ## Komutlar
