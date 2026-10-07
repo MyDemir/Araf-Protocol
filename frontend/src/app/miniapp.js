@@ -3,7 +3,19 @@
 
 const defaultImporter = () => import('@farcaster/miniapp-sdk')
 
-export const isInMiniApp = async (importer = defaultImporter, logger = console) => {
+// [TR] Ucuz, senkron ön kontrol: iframe (cross-origin hatasında true) ya da React Native webview. Yoksa SDK hiç yüklenmez.
+export const mayBeMiniApp = (win = typeof window !== 'undefined' ? window : undefined) => {
+  if (!win) return false
+  if (win.ReactNativeWebView) return true
+  try {
+    return win.self !== win.top
+  } catch {
+    return true
+  }
+}
+
+export const isInMiniApp = async (importer = defaultImporter, logger = console, win) => {
+  if (!mayBeMiniApp(win)) return false
   try {
     const { sdk } = await importer()
     return (await sdk.isInMiniApp()) === true
@@ -14,7 +26,8 @@ export const isInMiniApp = async (importer = defaultImporter, logger = console) 
 }
 
 // [TR] Mini app içindeyse splash ekranını kapatır (ready). Dışındaysa hiçbir şey yapmaz.
-export const signalMiniAppReady = async (importer = defaultImporter, logger = console) => {
+export const signalMiniAppReady = async (importer = defaultImporter, logger = console, win) => {
+  if (!mayBeMiniApp(win)) return false
   try {
     const { sdk } = await importer()
     if ((await sdk.isInMiniApp()) !== true) return false

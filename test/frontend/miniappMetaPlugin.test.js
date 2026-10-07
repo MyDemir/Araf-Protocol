@@ -40,6 +40,7 @@ describe('miniappMeta plugin', () => {
     expect(find(tags, 'base:app_id').attrs.content).toBe('abc');
     const fc = JSON.parse(find(tags, 'fc:miniapp').attrs.content);
     expect(fc.button.action.splashImageUrl).toBe('https://example.vercel.app/splash.png');
+    expect(fc.button.action.type).toBe('launch_miniapp');
     expect(fc.button.action.splashBackgroundColor).toBe('#060608');
     expect(emitted).toHaveLength(1);
     expect(emitted[0].fileName).toBe('.well-known/farcaster.json');

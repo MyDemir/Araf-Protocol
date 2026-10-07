@@ -77,7 +77,7 @@ export const buildMetaTags = ({ publicUrl, baseAppId }) => {
       imageUrl: img,
       button: {
         title: BUTTON_TITLE,
-        action: { type: 'launch_frame', name: NAME, url: home, splashImageUrl: `${publicUrl}/splash.png`, splashBackgroundColor: SPLASH_BG },
+        action: { type: 'launch_miniapp', name: NAME, url: home, splashImageUrl: `${publicUrl}/splash.png`, splashBackgroundColor: SPLASH_BG },
       },
     }))
     meta('name', 'fc:frame', JSON.stringify({
