@@ -358,22 +358,6 @@ Sağlam one-liner shortlist'e kendi başına geçebilir.
 
 ---
 
-## Diskalifikasyon Kuralları (2 Tane)
-
-**Bu stil kuralı değil; iki takım zaten kapısı kapatılmış.** (llms-full.txt:540)
-
-1. **Bir ürün per takım, bir ürün per kişi** (llms-full.txt:540)
-   - İki proje gönderemezsin
-   - İki submission'a görünemezsin
-
-2. **Eski kod açıklamamak** (llms-full.txt:541-545)
-   - Window'dan önce başlayabilir, kendi kodunu yeniden kullanabilirsin
-   - **Ama eski geliştirmeyi bildirmelisin form'da**
-   - Gizleme cezası: diskalifikasyon + future hackathon ban + prize revoke
-   - Açıklama = sıfır maliyet; running start takımlar iyi yerleşmiş
-
----
-
 ## Önemli Tarihler
 
 | Tarih | Olay | Saat (PT) | Saat (TR) |

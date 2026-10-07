@@ -15,7 +15,9 @@ Araf-Protokol/
 │       └── yukleyici.md
 ├── .github/
 │   └── workflows/
-│       └── ci.yml
+│       ├── ci.yml
+│       ├── deploy-base-sepolia.yml   # kontrat + Fly + opsiyonel Vercel (workflow_dispatch)
+│       └── deploy-runtime-base-sepolia.yml   # kontratsız backend/frontend deploy
 ├── backend/
 │   ├── scripts/
 │   │   ├── config/
@@ -140,8 +142,7 @@ Araf-Protokol/
 │   │   ├── Araf_V3_Faz3_Proof_of_Peace_Global_Rewards_Plan.md
 │   │   ├── Araf_V3_Urun_Planı_Yeniden_Kurgulanmis.md
 │   │   ├── Kontrat_Denetimi_Piyasa_SWOT_2026-09.md
-│   │   ├── Optimasyon.pdf.pdf
-│   │   ├── REWARDS_ROLLOUT.md
+│   │   ├── Optimasyon.pdf
 │   │   ├── ui_scenario_lab.md
 │   │   └── Uyumluluk_ve_Mainnet_Hazirlik_Raporu_2026-09.md
 │   ├── TR/
@@ -158,6 +159,13 @@ Araf-Protokol/
 │   │   ├── REWARDS_ROLLOUT.md
 │   │   ├── V3_TERMINOLOGY_AUDIT.md
 │   │   └── YAPILACAKLAR.md
+│   ├── colosseum/
+│   │   ├── BASVURU-REHBERI.md
+│   │   ├── SUBMISSION-GUIDE.md
+│   │   ├── llms-full.txt
+│   │   └── submission/   # DEMO_SCRIPT, FIRST_SLIDE, FORM, PITCH_SCRIPT, TODO
+│   ├── DEPLOY_BASE_SEPOLIA.md   # GitHub Actions ile Base Sepolia deploy rehberi
+│   ├── ENV.md   # tüm ortam değişkenleri başvuru belgesi
 │   ├── FUNDRAISING_STRATEGY.md
 │   ├── GAS_BASELINE.md
 │   ├── OUTREACH_TEMPLATE.md
@@ -281,7 +289,9 @@ Araf-Protokol/
 │   ├── contracts/   # hardhat
 │   ├── frontend/   # vitest
 │   └── ui-lab/   # UI Lab: fixture, mock, controller; yalnız dev / VITE_ENABLE_UI_LAB ile tembel yüklenir
+├── .editorconfig
 ├── .gitignore
+├── .nvmrc   # Node sürümü (CI ve deploy workflow'ları okur)
 ├── CLAUDE.md
 ├── LICENSE
 ├── package.json

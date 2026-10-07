@@ -11,7 +11,8 @@
 | `DEPLOYER_PRIVATE_KEY` | Kontratı deploy eden cüzdan (Base Sepolia ETH gerekir) | Yeni cüzdan; faucet'ten ETH | `0x` + 64 hex |
 | `BASE_SEPOLIA_RPC_URL` | Alchemy HTTP RPC | Alchemy > Base Sepolia | `https://base-sepolia.g.alchemy.com/v2/KEY` |
 | `BASE_SEPOLIA_WS_RPC_URL` | Alchemy WebSocket RPC (event worker) | Aynı Alchemy app | `wss://base-sepolia.g.alchemy.com/v2/KEY` |
-| `BASESCAN_API_KEY` | Opsiyonel; hiçbir workflow okumaz/kullanmaz, yalnız elle `hardhat verify` için (GitHub secret olarak eklemek gerekmez) | basescan.org | rastgele string |
+| `BASESCAN_API_KEY` | Opsiyonel; yalnız tam deploy'da `verify_contracts=true` iken kullanılır (deneysel) | basescan.org | rastgele string |
+| `GH_VARIABLES_TOKEN` | Opsiyonel; tam deploy sonrası `ARAF_ESCROW_ADDRESS`/`ARAF_DEPLOYMENT_BLOCK` variable'larını otomatik yazar. Fine-grained PAT, yalnız bu repo, izin: Variables: read and write. Yoksa workflow uyarı verir, özetteki komutlar elle çalıştırılır | GitHub > Settings > Developer settings > Fine-grained tokens | `github_pat_...` |
 | `FLY_API_TOKEN` | Fly deploy token | `fly tokens create deploy -a <app>` | `FlyV1 ...` |
 | `MONGODB_URI` | MongoDB Atlas bağlantısı | Atlas > Connect (IP allowlist: Fly çıkışı veya 0.0.0.0/0) | `mongodb+srv://u:p@cluster.mongodb.net/araf_protocol` |
 | `REDIS_URL` | Redis, TLS ZORUNLU (`rediss://`) | Upstash > TLS endpoint | `rediss://default:PASS@host.upstash.io:6379` |
@@ -36,19 +37,27 @@
 | `FLY_APP_NAME` | Opsiyonel; varsayılan `araf-protocol-backend` | `araf-protocol-backend` |
 | `ADMIN_WALLETS` | Opsiyonel; admin paneli cüzdanları (virgüllü) | `0xabc...,0xdef...` |
 | `VITE_RPC_URL` | Opsiyonel; frontend birincil RPC (PUBLIC olur, kısıtlı/ayrı key kullanın) | `https://...` |
-| `ARAF_ESCROW_ADDRESS` | Deploy SONRASI yazılır (runtime workflow için) | `0x...` |
-| `ARAF_DEPLOYMENT_BLOCK` | Deploy SONRASI yazılır | `12345678` |
+| `ARAF_ESCROW_ADDRESS` | Deploy SONRASI yazılır (runtime workflow için); `GH_VARIABLES_TOKEN` varsa tam deploy kendisi yazar | `0x...` |
+| `ARAF_DEPLOYMENT_BLOCK` | Deploy SONRASI yazılır (aynı şekilde) | `12345678` |
+| `ARAF_REVENUE_VAULT_ADDRESS` | Opsiyonel; rewards ayrıca deploy edildiyse. Tanımlıysa iki workflow da Fly secret (`ARAF_REVENUE_VAULT_ADDRESS`) ve Vercel build-env (`VITE_REVENUE_VAULT_ADDRESS`) olarak geçirir; adres regex'iyle doğrulanır, tanımsızsa hiçbir şey yazılmaz | `0x...` |
+| `ARAF_REWARDS_ADDRESS` | Opsiyonel; yukarıdakiyle aynı (`ARAF_REWARDS_ADDRESS` / `VITE_REWARDS_ADDRESS`) | `0x...` |
 
 ## Tek seferlik hazırlık
 
 1. **Fly**: `fly apps create araf-protocol-backend` (ad farklıysa `FLY_APP_NAME` ayarla). `fly.toml` zaten `backend/` içinde. Volume/secret elle gerekmez; workflow secrets'ı yükler.
-2. **Vercel**: frontend için proje oluştur; Project Settings > Root Directory BOŞ bırak (CLI `frontend/` içinden çalışır). Proje env'lerinde `VITE_API_URL` TANIMLAMA (prod mutlak URL'i reddeder). `frontend/vercel.json` `/api` rewrite'ı `https://araf-protocol-backend.fly.dev` adresine gider; `FLY_APP_NAME` farklıysa `vercel.json` güncellenmeli (workflow uyuşmazlıkta durur).
+2. **Vercel**: frontend için proje oluştur; Project Settings > Root Directory BOŞ bırak (CLI `frontend/` içinden çalışır). Proje env'lerinde `VITE_API_URL` TANIMLAMA (prod mutlak URL'i reddeder). `frontend/vercel.json` `/api` rewrite'ı repo'da `https://araf-protocol-backend.fly.dev` adresine gider; workflow Vercel deploy'undan hemen önce runner üzerindeki kopyada hedefi `https://${FLY_APP_NAME}.fly.dev/api/$1` olarak yeniden yazar (`FLY_APP_NAME` `^[a-z0-9-]+$` doğrulanır; repo dosyası değişmez, sonuç log'a basılır). Vercel CLI sürümü workflow'da sabittir (`vercel@62.7.0`).
 3. **MongoDB Atlas**: ücretsiz cluster, DB kullanıcısı, network access.
 4. **Upstash Redis**: TLS endpoint'i (`rediss://`).
 5. **Alchemy**: Base Sepolia app; HTTP ve WSS URL.
-6. **Basescan**: API key (opsiyonel).
+6. **Basescan**: API key (opsiyonel; `verify_contracts` için).
 7. **Test USDC**: https://faucet.circle.com/ (Base Sepolia, USDC). Adres yukarıdaki örnek, doğrula.
-8. **Test USDT**: Circle faucet USDT vermez. Seçenek: 6 decimals'lı bir ERC20 kullan veya `contracts/src/MockERC20.sol`'u (`MockERC20(name,symbol,6)`, herkese açık `mint()`) Base Sepolia'ya elle deploy edip adresini `BASE_SEPOLIA_USDT_ADDRESS` yap. deploy.js public ağda mock deploy ETMEZ.
+8. **Test USDT**: Circle faucet USDT vermez. `contracts/scripts/deployTestToken.js` 6 decimals'lı `MockERC20` deploy eder (yalnız chainId 84532 ve 31337; mainnet'te hata verir). deploy.js public ağda mock deploy ETMEZ; bu ayrı bir test aracıdır.
+   ```bash
+   cd contracts
+   CONFIRM_TEST_TOKEN_DEPLOY=yes TEST_TOKEN_SYMBOL=tUSDT TEST_TOKEN_NAME="Test Tether USD" \
+     npm run deploy:test-token:base-sepolia
+   ```
+   Gerekli env: `BASE_SEPOLIA_RPC_URL`, `DEPLOYER_PRIVATE_KEY`, `CONFIRM_TEST_TOKEN_DEPLOY=yes`; opsiyonel `TEST_TOKEN_SYMBOL` (varsayılan `tUSDT`), `TEST_TOKEN_NAME` (varsayılan `Test Tether USD`). Çıktı: token adresi ve sonraki adım; kayıt `contracts/deployments/base-sepolia-test-tokens.json`'a (`symbol, address, decimals, txHash, deployedAt`) eklenir. Sonra: `gh variable set BASE_SEPOLIA_USDT_ADDRESS --body <adres>`. Token basmak için `mint()` (saatte 1000) veya owner `mint(to, amount)`.
 9. Deployer cüzdanına Base Sepolia ETH yükle (Coinbase/Alchemy faucet).
 
 ## Komutlar
@@ -75,12 +84,15 @@ Deploy:
 
 ```bash
 gh workflow run deploy-base-sepolia.yml -f deploy_frontend=true
+# opsiyonel (deneysel) Basescan doğrulama: -f verify_contracts=true  (BASESCAN_API_KEY secret gerekir)
 gh run watch
 ```
 
+`GH_VARIABLES_TOKEN` (opsiyonel): `gh secret set GH_VARIABLES_TOKEN` (fine-grained PAT, yalnız bu repo, Variables: read and write).
+
 ## Deploy sonrası
 
-Run summary'deki (veya log) adresleri variables'a yaz; sonraki backend/frontend güncellemeleri kontratı yeniden deploy etmez:
+`GH_VARIABLES_TOKEN` tanımlıysa tam deploy workflow'u aşağıdaki iki variable'ı kendisi yazar (token log'a basılmaz). Tanımlı değilse workflow "token tanımlı değil" uyarısı verir; run summary'deki adresleri elle yaz. Sonraki backend/frontend güncellemeleri kontratı yeniden deploy etmez:
 
 ```bash
 gh variable set ARAF_ESCROW_ADDRESS --body "0x..."
@@ -97,4 +109,5 @@ Girdi override'ları: `araf_escrow_address`, `usdt_address`, `usdc_address`, `de
 - Frontend `VITE_TARGET_CHAIN=base-sepolia` bayrağını gerektirir (ana dalda mevcut: `frontend/src/app/chainPolicy.js`; workflow bunu Vercel build-env olarak verir); onsuz prod build yalnız Base Mainnet'e bağlıdır.
 - Deployment bloğu `deploy.js` çıktısında yoktur; workflow `deployTxHash` receipt'inden okur.
 - Secret değerlerinde boşluk/tırnak/`#` olmasın (`flyctl secrets import` dotenv biçimi).
-- Contract verify (Basescan) workflow'da yok; ArafEscrow iki library'ye linkli olduğundan elle yapılır.
+- Contract verify (Basescan) **deneysel**: tam deploy'da `verify_contracts=true` (varsayılan false) + `BASESCAN_API_KEY` ile `hardhat verify` çalışır; constructor argümanı (`treasuryAddress`) ve linkli library'ler (`ArafReputationLib`, `ArafSettlementLib`) deploy manifestinden üretilir. Adım `continue-on-error: true`'dur, başarısız olursa deploy etkilenmez; o durumda elle doğrula. Library'lerin kendisi doğrulanmaz.
+- Rewards deploy'u workflow'a dahil değildir (ayrı operasyon); adresleri `ARAF_REVENUE_VAULT_ADDRESS`/`ARAF_REWARDS_ADDRESS` variable'ları olarak girersen workflow'lar backend ve frontend'e geçirir.

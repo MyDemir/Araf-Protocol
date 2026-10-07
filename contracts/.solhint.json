@@ -1,0 +1,20 @@
+{
+  "extends": "solhint:recommended",
+  "rules": {
+    "use-natspec": "off",
+    "gas-indexed-events": "off",
+    "gas-increment-by-one": "off",
+    "gas-strict-inequalities": "off",
+    "gas-small-strings": "off",
+    "gas-custom-errors": "off",
+    "no-global-import": "off",
+    "not-rely-on-time": "off",
+    "reason-string": "off",
+    "immutable-vars-naming": "off",
+    "const-name-snakecase": "off",
+    "function-max-lines": "off",
+    "max-states-count": "off",
+    "no-inline-assembly": "warn",
+    "func-visibility": ["warn", { "ignoreConstructors": true }]
+  }
+}
