@@ -5,10 +5,19 @@
 > voice and face (no voiceover artist), no teleprompter feel, business model stays in the form.
 > Upload to YouTube or Loom, set to public / unlisted-with-link, and test it from a logged-out browser.
 >
-> **Length:** the spoken text below (the `>` lines) is about 235 words without the
-> placeholders and about 270-285 once they are filled; at a calm 140-150 words per minute it lands at about 1:55. Read it
-> aloud once with a stopwatch after filling the `[[TODO]]`s; if you go over 2:00, cut from
-> Solution first, never from the hook.
+> **Length budget: at most 270 spoken words once the placeholders are filled** (~1:45-1:52 at
+> 140-150 words per minute). Measured with `wc -w`:
+> - fixed text, placeholders removed: **206 words**
+> - word budget given inside the placeholders: **55 words** (each `[[TODO]]` says its max)
+> - total if every budget is used: **261 words**
+>
+> Measure again after filling (run from `docs/colosseum/submission/`):
+> `sed -n '/^## 0:00/,$p' PITCH_SCRIPT.md | grep '^> ' | sed 's/^> //' | wc -w`
+> (before filling, add `| sed 's/\[\[TODO[^]]*\]\]//g'` before `wc -w` to get the fixed count).
+> If the filled text is over 270 words, cut from Solution first, never from the hook. Then read it
+> aloud once with a stopwatch.
+>
+> **Demo segment:** record it only after the Base Sepolia deploy is done (TODO.md section 1).
 >
 > **Honesty rule:** we say "testnet". No user, volume or revenue number is spoken unless it is
 > real and filled in from TODO.md.
@@ -25,13 +34,13 @@
 
 **On screen:** Simple slide, takeaway as title: "A contract can't see a bank account." Two icons: a wallet and a bank, a question mark between them. Then a second slide: "So every P2P platform needs a human judge."
 
-> In Türkiye and many other markets, people move between their bank and stablecoins through person-to-person trades. [[TODO: one real fact or a short quote from someone you talked to]]. A contract can lock the tokens, but it cannot see a bank account. So every platform needs a human dispute desk: slow, costly, and you must trust it.
+> Many people in Türkiye move between bank and stablecoins through person-to-person trades. [[TODO: one real fact or a quote from someone you talked to, max 15 words]]. A contract can lock tokens but cannot see a bank account, so every platform needs a human dispute desk.
 
 ## 0:30-1:00 · Solution
 
 **On screen:** Animated timeline, one line, left to right: "Lock → Paid → 48h grace → deposits shrink by the hour → tokens shrink → day 10: rest goes to treasury". Exits branch off the line: "Release", "Cancel together", "Agree a split".
 
-> Araf is an escrow on Base that does not try to find out who is right. It makes being wrong expensive. If the seller says the money never came, both sides get forty-eight hours. After that, both deposits shrink every hour, then the locked tokens too. At day ten, what is left goes to the treasury. Lying stops paying, so the cheap move is to release, cancel together, or agree a split on-chain.
+> Araf is an escrow on Base that doesn't decide who is right. It makes being wrong expensive. If the seller disputes, both sides get forty-eight hours. Then both deposits shrink every hour, later the tokens too, and at day ten the rest goes to the treasury. So the cheap move is to release, cancel, or agree a split.
 
 ## 1:00-1:30 · Demo
 
@@ -43,13 +52,13 @@
 
 **On screen:** Founder back on camera. Lower-third with name, role and one credential. If there are teammates, a 2-second photo grid with names.
 
-> I'm [[TODO: name]]. [[TODO: one sentence on why you, e.g. your own P2P trading or fintech experience]]. [[TODO: teammates in one sentence, or "I'm building this solo, and I'm looking for a co-founder on growth."]]
+> I'm [[TODO: name, max 3 words]]. [[TODO: why you, e.g. your own P2P trading or fintech experience, max 15 words]]. [[TODO: teammates, or "I'm building this solo and looking for a growth co-founder.", max 12 words]]
 
 ## 1:48-2:00 · Traction and next
 
 **On screen:** One slide, takeaway as title, max 40 words: real numbers only (from TODO.md) and the next step. Close on the logo + "Trust the time, not the oracle."
 
-> Today: [[TODO: honest numbers, e.g. "live on testnet, N test trades so far"]]. Next: real traders on testnet, then mainnet once our readiness checklist is done. Araf: trust the time, not the oracle.
+> Today: [[TODO: honest numbers, e.g. "live on testnet, N test trades so far", max 10 words]]. Next: real traders on testnet, then mainnet once our readiness checklist is done. Araf: trust the time, not the oracle.
 
 ---
 
