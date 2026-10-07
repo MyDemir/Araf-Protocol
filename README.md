@@ -260,7 +260,6 @@ Start at the documentation index: [docs/README.md](docs/README.md). The most imp
 | [Rewards rollout](docs/EN/REWARDS_ROLLOUT.md) ([TR](docs/TR/REWARDS_ROLLOUT.md)), [abuse observability](docs/EN/REWARDS_ABUSE_OBSERVABILITY.md) ([TR](docs/TR/REWARDS_ABUSE_OBSERVABILITY.md)) | Proof of Peace go-live order and abuse monitoring |
 | [Backlog](docs/EN/BACKLOG.md) ([TR](docs/TR/BACKLOG.md)) | Known limits and deferred design changes |
 | [Gas baseline](docs/GAS_BASELINE.md) | Measured gas cost per function |
-| [Colosseum submission](docs/colosseum/) | Hackathon submission material |
 
 ## Repository layout
 
@@ -270,7 +269,7 @@ Start at the documentation index: [docs/README.md](docs/README.md). The most imp
 ├── backend/     Express API, event worker, jobs, Mongo models (scripts/)
 ├── frontend/    React + Vite app (src/), static assets (public/)
 ├── test/        Tests per package: contracts/, backend/, frontend/, ui-lab/
-├── docs/        EN/ and TR/ documentation, colosseum/ submission material
+├── docs/        EN/ and TR/ documentation
 ├── scripts/     init-env.js (creates local .env files)
 └── package.json Root scripts: setup, test:all, lint, dev, build
 ```

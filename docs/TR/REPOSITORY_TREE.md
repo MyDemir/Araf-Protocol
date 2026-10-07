@@ -57,7 +57,6 @@ Araf-Protocol/
 │   ├── EN/                               # İngilizce belgeler (API, ARCHITECTURE, DEPLOYMENT_GUIDE, ENV, DEPLOY_BASE_SEPOLIA, BACKLOG, ...)
 │   ├── TR/                               # Türkçe belgeler (aynı set + MAINNET_READINESS_CHECKLIST)
 │   ├── Plan/                             # planlanan işler (Spot tier, UI scenario lab)
-│   ├── colosseum/                        # hackathon başvuru malzemesi
 │   └── GAS_BASELINE.md
 ├── CLAUDE.md
 ├── package.json
