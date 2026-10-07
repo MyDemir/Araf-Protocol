@@ -149,7 +149,7 @@ npm --prefix contracts run gas:baseline
 
 Yerel kontrat deploy'u (hardhat node + `deploy.js`) için [docs/EN/DEPLOYMENT_GUIDE.md](./docs/EN/DEPLOYMENT_GUIDE.md) / [docs/TR/DEPLOYMENT_GUIDE.md](./docs/TR/DEPLOYMENT_GUIDE.md) §1. Base Sepolia deploy / testnet yayını: [docs/EN/DEPLOY_BASE_SEPOLIA.md](./docs/EN/DEPLOY_BASE_SEPOLIA.md) · [docs/TR/DEPLOY_BASE_SEPOLIA.md](./docs/TR/DEPLOY_BASE_SEPOLIA.md).
 
-> **Rewards scripts note / Not:** `verify:rewards`, `configure:rewards` and `switch:rewards:treasury` all run the same `scripts/rewardsOps.js`; the operation is chosen by the npm script name (so call them via `npm run`, not `npx hardhat run` directly), or by `REWARDS_OP`. / Üçü de aynı `rewardsOps.js`'i çalıştırır; işlem npm script adından seçilir (`npm run` ile çağırın).
+> **Rewards scripts note / Not:** `verify:rewards`, `configure:rewards` and `switch:rewards:treasury` all run the same `contracts/scripts/rewardsOps.js`; the operation is chosen by the npm script name (so call them via `npm run`, not `npx hardhat run` directly), or by `REWARDS_OP`. / Üçü de aynı `rewardsOps.js`'i çalıştırır; işlem npm script adından seçilir (`npm run` ile çağırın).
 
 ## 🗂 Repository layout / Depo yapısı
 
