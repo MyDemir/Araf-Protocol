@@ -99,9 +99,12 @@ function _warnEnvKmsTestnetException() {
  */
 async function _getMasterKey() {
   // Cache varsa tekrar KMS'e gitme
-  if (_masterKeyCache) return _masterKeyCache;
-
   const provider = (process.env.KMS_PROVIDER || "env").toLowerCase();
+
+  // env provider: cache'ten dönmeden önce de SEC-01 kontrolü (env sonradan değişse bile fail-closed)
+  if (provider === "env") _assertEnvKmsAllowedOrThrow();
+
+  if (_masterKeyCache) return _masterKeyCache;
 
   // ENV Provider (Sadece Development)
   if (provider === "env") {
@@ -236,6 +239,34 @@ function _assertMasterKeyLengthOrThrow(masterKey, providerLabel) {
   }
 }
 
+/**
+ * [TR] İstisna aktifken RPC'nin gerçekten Base Sepolia (84532) olduğunu doğrular; aksi halde başlatma durur.
+ * Hata mesajlarında anahtar değeri yer almaz.
+ * [EN] Verifies the RPC really is chain 84532 when the exception is active; fail-closed on mismatch/unreachable.
+ */
+async function _assertTestnetRpcChainOrThrow() {
+  const rpcUrl = process.env.BASE_RPC_URL;
+  if (!rpcUrl) {
+    throw new Error("SEC-01 BLOCKER: Testnet env-KMS istisnası için BASE_RPC_URL zorunlu (chain 84532 doğrulanamadı).");
+  }
+  try {
+    const { ethers } = require("ethers");
+    const { assertProviderExpectedChainOrThrow } = require("./expectedChain");
+    const provider = new ethers.JsonRpcProvider(rpcUrl);
+    const { actualChainId } = await assertProviderExpectedChainOrThrow(provider, {
+      rpcUrl,
+      rpcEnvName: "BASE_RPC_URL",
+      surface: "EnvKmsTestnetException",
+    });
+    if (actualChainId !== 84532) throw new Error(`actual chain=${actualChainId}`);
+  } catch (err) {
+    throw new Error(
+      "SEC-01 BLOCKER: ALLOW_ENV_KMS_ON_TESTNET için RPC'nin Base Sepolia (84532) olduğu doğrulanamadı: " +
+      err.message
+    );
+  }
+}
+
 async function runProductionKmsStartupSelfTest() {
   const provider = (process.env.KMS_PROVIDER || "env").toLowerCase();
 
@@ -245,6 +276,7 @@ async function runProductionKmsStartupSelfTest() {
 
   if (provider === "env") {
     _assertEnvKmsAllowedOrThrow();
+    if (_isEnvKmsTestnetExceptionActive()) await _assertTestnetRpcChainOrThrow();
     const envKey = await _getMasterKey();
     _assertMasterKeyLengthOrThrow(envKey, "ENV");
     return { ok: true, provider };
