@@ -220,9 +220,9 @@ export const buildAppViews = (ctx) => {
   const renderSlimRail = () => (
     <div className="hidden md:flex w-16 bg-shell border-r border-borderSubtle flex-col items-center py-6 justify-between z-50 shrink-0 shadow-2xl">
       <div className="space-y-6 flex flex-col items-center w-full">
-        <div className="w-8 h-8 rounded bg-gradient-to-br from-white to-slate-400 flex items-center justify-center font-bold text-black mb-4 cursor-pointer" onClick={() => setCurrentView('home')}>
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="square" strokeLinejoin="miter" strokeWidth="3" d="M4 4h4v4H4zm12 0h4v4h-4zM4 16h4v4H4zm12 0h4v4h-4zM10 10h4v4h-4z" /></svg>
-        </div>
+        <button type="button" aria-label="Araf" onClick={() => setCurrentView('home')} className="w-8 h-8 mb-4 flex items-center justify-center cursor-pointer">
+          <img src="/logo-64.png" alt="" width="32" height="32" className="w-8 h-8" />
+        </button>
         <button onClick={toggleSidebar} title={lang === 'TR' ? 'Filtreler' : 'Filters'} className={`w-10 h-10 flex items-center justify-center rounded-xl transition ${sidebarOpen ? 'bg-elevated text-textPrimary border border-borderStrong' : 'text-textMuted hover:text-textPrimary hover:bg-elevated'}`}><Menu className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" /></button>
         {NAV_ORDER.rail.filter((key) => isViewInNav(key, { navUnlocked, canSeeAdminEntry })).map((key) => {
           const view = VIEW_REGISTRY[key];

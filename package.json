@@ -19,5 +19,13 @@
     "test:abi-drift": "npm --prefix contracts run test:abi-drift",
     "test:all": "npm run test:backend && npm run test:frontend && npm run test:contracts && npm run test:abi-drift"
   },
-  "version": "3.0.0"
+  "version": "3.0.0",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "test"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
 }
