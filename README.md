@@ -147,7 +147,7 @@ npm run build:frontend:testnet     # Base Sepolia build (POSIX shell: sets VITE_
 npm --prefix contracts run gas:baseline
 ```
 
-Yerel kontrat deploy'u (hardhat node + `deploy.js`) için [docs/EN/DEPLOYMENT_GUIDE.md](./docs/EN/DEPLOYMENT_GUIDE.md) / [docs/TR/DEPLOYMENT_GUIDE.md](./docs/TR/DEPLOYMENT_GUIDE.md) §1. Base Sepolia deploy / testnet yayını: [docs/DEPLOY_BASE_SEPOLIA.md](./docs/DEPLOY_BASE_SEPOLIA.md).
+Yerel kontrat deploy'u (hardhat node + `deploy.js`) için [docs/EN/DEPLOYMENT_GUIDE.md](./docs/EN/DEPLOYMENT_GUIDE.md) / [docs/TR/DEPLOYMENT_GUIDE.md](./docs/TR/DEPLOYMENT_GUIDE.md) §1. Base Sepolia deploy / testnet yayını: [docs/EN/DEPLOY_BASE_SEPOLIA.md](./docs/EN/DEPLOY_BASE_SEPOLIA.md) · [docs/TR/DEPLOY_BASE_SEPOLIA.md](./docs/TR/DEPLOY_BASE_SEPOLIA.md).
 
 > **Rewards scripts note / Not:** `verify:rewards`, `configure:rewards` and `switch:rewards:treasury` all run the same `scripts/rewardsOps.js`; the operation is chosen by the npm script name (so call them via `npm run`, not `npx hardhat run` directly), or by `REWARDS_OP`. / Üçü de aynı `rewardsOps.js`'i çalıştırır; işlem npm script adından seçilir (`npm run` ile çağırın).
 
@@ -160,31 +160,21 @@ Yerel kontrat deploy'u (hardhat node + `deploy.js`) için [docs/EN/DEPLOYMENT_GU
 | `backend/scripts/` | Express app (`app.js`), routes, event worker (`services/eventListener.js`), DLQ, jobs, Mongo models |
 | `frontend/src/` | React/Vite app (`app/`, `hooks/`, `components/`) |
 | `test/` | `contracts/`, `backend/`, `frontend/`, `ui-lab/` |
-| `docs/` | `EN/`, `TR/` canonical docs; `Plan/` and pitch documents are historical/marketing context |
+| `docs/` | `EN/`, `TR/` canonical docs; `Plan/` holds planned (not yet implemented) work; `colosseum/` holds hackathon submission material; index: [docs/README.md](./docs/README.md) |
 
 Full tree: [docs/EN/REPOSITORY_TREE.md](./docs/EN/REPOSITORY_TREE.md) · [docs/TR/REPOSITORY_TREE.md](./docs/TR/REPOSITORY_TREE.md)
 
 ---
 
-## 📖 Documentation
-- Canonical Architecture:
-  - [docs/EN/ARCHITECTURE.md](./docs/EN/ARCHITECTURE.md)
-  - [docs/TR/ARCHITECTURE.md](./docs/TR/ARCHITECTURE.md)
-  - [docs/EN/ARCHITECTURE_INCENTIVES.md](./docs/EN/ARCHITECTURE_INCENTIVES.md)
-  - [docs/TR/ARCHITECTURE_INCENTIVES.md](./docs/TR/ARCHITECTURE_INCENTIVES.md)
-- API Reference:
-  - [docs/EN/API.md](./docs/EN/API.md)
-  - [docs/TR/API.md](./docs/TR/API.md)
-- Game Theory:
-  - [docs/EN/GAME_THEORY.md](./docs/EN/GAME_THEORY.md)
-  - [docs/TR/GAME_THEORY.md](./docs/TR/GAME_THEORY.md)
-- Governance:
-  - [docs/EN/GOVERNANCE_READINESS.md](./docs/EN/GOVERNANCE_READINESS.md)
-  - [docs/TR/GOVERNANCE_READINESS.md](./docs/TR/GOVERNANCE_READINESS.md)
-- Gas baseline: [docs/GAS_BASELINE.md](./docs/GAS_BASELINE.md)
-- Terminology audit: [docs/EN/V3_TERMINOLOGY_AUDIT.md](./docs/EN/V3_TERMINOLOGY_AUDIT.md) · [docs/TR/V3_TERMINOLOGY_AUDIT.md](./docs/TR/V3_TERMINOLOGY_AUDIT.md)
-- PII encryption migration: [docs/EN/PII_ENCRYPTION_MIGRATION.md](./docs/EN/PII_ENCRYPTION_MIGRATION.md) · [docs/TR/PII_ENCRYPTION_MIGRATION.md](./docs/TR/PII_ENCRYPTION_MIGRATION.md)
-- Backlog: [docs/EN/BACKLOG.md](./docs/EN/BACKLOG.md) · [docs/TR/YAPILACAKLAR.md](./docs/TR/YAPILACAKLAR.md)
+## 📖 Documentation / Belgeler
+Full index / Tam indeks: [docs/README.md](./docs/README.md)
+
+- Environment variables / Ortam değişkenleri: [docs/EN/ENV.md](./docs/EN/ENV.md) · [docs/TR/ENV.md](./docs/TR/ENV.md)
+- Base Sepolia deploy: [docs/EN/DEPLOY_BASE_SEPOLIA.md](./docs/EN/DEPLOY_BASE_SEPOLIA.md) · [docs/TR/DEPLOY_BASE_SEPOLIA.md](./docs/TR/DEPLOY_BASE_SEPOLIA.md)
+- Architecture / Mimari: [docs/EN/ARCHITECTURE.md](./docs/EN/ARCHITECTURE.md) · [docs/TR/ARCHITECTURE.md](./docs/TR/ARCHITECTURE.md)
+- Backlog: [docs/EN/BACKLOG.md](./docs/EN/BACKLOG.md) · [docs/TR/BACKLOG.md](./docs/TR/BACKLOG.md)
+- Hackathon submission / Jüri: [docs/colosseum/](./docs/colosseum/)
+- Mainnet readiness checklist (Turkish only / yalnız TR): [docs/TR/MAINNET_READINESS_CHECKLIST.md](./docs/TR/MAINNET_READINESS_CHECKLIST.md)
 
 ---
 *Araf Protocol — “The system does not judge. It makes dishonesty expensive.”*

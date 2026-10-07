@@ -248,7 +248,7 @@ tail -f backend/logs/araf.log
 
 ## 3. Public Testnet — Base Sepolia
 
-> **Recommended path: the GitHub Actions workflow** ([docs/DEPLOY_BASE_SEPOLIA.md](../DEPLOY_BASE_SEPOLIA.md)). It deploys contracts, the Fly backend and the Vercel frontend (including Fly secrets and Vercel build-env) from GitHub secrets/variables.
+> **Recommended path: the GitHub Actions workflow** ([DEPLOY_BASE_SEPOLIA.md](./DEPLOY_BASE_SEPOLIA.md)). It deploys contracts, the Fly backend and the Vercel frontend (including Fly secrets and Vercel build-env) from GitHub secrets/variables.
 > Steps 1-5 in this section (manual `fly secrets set`, `.env.production`, etc.) are the **alternative/manual** flow, to be used only when not using the workflow.
 
 ### Prerequisites
@@ -261,7 +261,7 @@ tail -f backend/logs/araf.log
 - Fly.io account (for backend)
 - Vercel account (for frontend)
 - BaseScan API key (`basescan.org/myapikey`)
-- AWS KMS or HashiCorp Vault (the backend runs with `NODE_ENV=production` per `fly.toml`, and `KMS_PROVIDER=env` is rejected in production; the only exception is the Base Sepolia demo: `NODE_ENV=production` + `EXPECTED_CHAIN_ID=84532` + `ALLOW_ENV_KMS_ON_TESTNET=yes` (the RPC is verified to be chain 84532; never on mainnet). For the workflow-driven path see [DEPLOY_BASE_SEPOLIA.md](../DEPLOY_BASE_SEPOLIA.md))
+- AWS KMS or HashiCorp Vault (the backend runs with `NODE_ENV=production` per `fly.toml`, and `KMS_PROVIDER=env` is rejected in production; the only exception is the Base Sepolia demo: `NODE_ENV=production` + `EXPECTED_CHAIN_ID=84532` + `ALLOW_ENV_KMS_ON_TESTNET=yes` (the RPC is verified to be chain 84532; never on mainnet). For the workflow-driven path see [DEPLOY_BASE_SEPOLIA.md](./DEPLOY_BASE_SEPOLIA.md))
 
 ### Step 1 — Deploy Contracts (Base Sepolia)
 
@@ -335,7 +335,7 @@ fly apps create araf-protocol-backend
 
 # Set secrets (all at once). NODE_ENV and PORT already come from fly.toml [env].
 # See section 6 for every variable; Mainnet differs only in the chain/token values.
-# Note: for the Base Sepolia demo the KMS_PROVIDER=env + ALLOW_ENV_KMS_ON_TESTNET=yes exception may also be used (see ../DEPLOY_BASE_SEPOLIA.md); mainnet requires aws/vault.
+# Note: for the Base Sepolia demo the KMS_PROVIDER=env + ALLOW_ENV_KMS_ON_TESTNET=yes exception may also be used (see ./DEPLOY_BASE_SEPOLIA.md); mainnet requires aws/vault.
 fly secrets set \
   MONGODB_URI="mongodb+srv://<user>:<pass>@cluster.mongodb.net/araf_testnet" \
   REDIS_URL="rediss://:<token>@<host>.upstash.io:6379" \
@@ -396,7 +396,7 @@ vercel --prod
 
 Environment Variables must also be set in Vercel (Dashboard → Settings → Environment Variables).
 
-> **Chain policy:** production builds (`import.meta.env.PROD`) enable only Base Mainnet by default; with `VITE_TARGET_CHAIN=base-sepolia` a production build enables only Base Sepolia (`frontend/src/app/chainPolicy.js`). The Hardhat chain is wired only into non-production builds. There is no `main.jsx` edit to make; for a hosted Sepolia frontend see the `VITE_TARGET_CHAIN` note below and [DEPLOY_BASE_SEPOLIA.md](../DEPLOY_BASE_SEPOLIA.md).
+> **Chain policy:** production builds (`import.meta.env.PROD`) enable only Base Mainnet by default; with `VITE_TARGET_CHAIN=base-sepolia` a production build enables only Base Sepolia (`frontend/src/app/chainPolicy.js`). The Hardhat chain is wired only into non-production builds. There is no `main.jsx` edit to make; for a hosted Sepolia frontend see the `VITE_TARGET_CHAIN` note below and [DEPLOY_BASE_SEPOLIA.md](./DEPLOY_BASE_SEPOLIA.md).
 
 ### Step 5 — SIWE Domain and Origin
 
