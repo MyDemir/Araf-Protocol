@@ -5,7 +5,7 @@
 >
 > Bu listedeki her madde, diğer dosyalardaki bir `[[TODO: ...]]` yer tutucusuna ya da senin
 > vermen gereken bir karara karşılık gelir. Kodda/belgede olmayan hiçbir bilgi uydurulmadı.
-> Sıra önceliğe göre. Toplam: **44 madde**.
+> Sıra önceliğe göre. Toplam: **45 madde** (45. madde sonradan eklendi, 0. bölümde).
 
 ---
 
@@ -19,20 +19,31 @@ Git'ten çıkan gerçekler (`git log`):
 - İlk commit: **2 Mayıs 2026** (`d70c55f`). Bu tek commit 240 dosya / ~77 bin satır ekliyor, yani
   kontrat, backend ve frontend o gün zaten hazırdı; proje repodan da eski.
 - `docs/PITCH_EN.md` "March 2026, Version 2.0, Mainnet Ready" diyor: iş en az Mart 2026'ya gidiyor.
-- 14 Eylül 2026 öncesi **68 commit** (son: 10 Ağustos, `afb20f6`).
-- Pencere içi: **28 Eylül'den bu yana 132 merge olmayan commit** (escrow'un kütüphanelere bölünmesi,
-  ödeme penceresi, düşen challenge ping'i, iptal geri alma, ödeme profili kapısı, dokümantasyon hizalaması).
-- Commit yazarları yalnız "MyD" ve "Claude"; 28 Eylül sonrası commit'lerin çoğu Claude Code ajanına ait.
+- 14 Eylül 2026 öncesi **59 merge olmayan commit** (merge'ler dahil 68; son: 10 Ağustos, `afb20f6`).
+- Pencere içi: **28 Eylül'den bu yana 137 merge olmayan commit**: 132'si Claude Code, 5'i senin
+  (escrow'un kütüphanelere bölünmesi, ödeme penceresi, düşen challenge ping'i, iptal geri alma,
+  ödeme profili kapısı, dokümantasyon hizalaması). Ölçüm tarihi: 7 Ekim 2026.
+- Commit yazarları yalnız "MyD" ve "Claude".
 
 - [ ] **1.** FORM.md → "Anything else judges should know" alanındaki beyan taslağını oku, doğruysa
       onayla. `[[TODO: real start date]]` yerine projenin gerçek başlangıç tarihini yaz (repo öncesi
-      çalışma dahil). 500 karakter sınırı: şu an 443, ~55 karakter payın var.
+      çalışma dahil). 500 karakter sınırı: şu an 460, ~40 karakter payın var.
 - [ ] **2.** Önceki iş başka bir hackathon'a / programa / yarışmaya gönderildi mi? Gönderildiyse
       bunu da beyana ekle `[[TODO]]`.
 - [ ] **3.** AI aracı beyanı: FORM.md "technologies" ve "Did anyone not on the team..." alanlarında
       Claude Code kullanımını açıkça yazdım. Başka AI aracı kullandıysan ekle.
 - [ ] **4.** "Did anyone not on the team do meaningful work?" → başka bir insan katkısı olmadığını
       teyit et (git'te yalnız MyD + Claude görünüyor).
+- [ ] **45.** Göndermeden hemen önce commit sayılarını yeniden ölç (yeni commit'ler sayıları
+      değiştirir) ve FORM.md'deki "Anything else", "How long have you..." alanları ile buradaki
+      rakamları güncelle:
+      ```bash
+      git log --reverse --format='%ad %h' | head -1                       # ilk commit
+      git rev-list --count --no-merges --until=2026-09-14 HEAD            # pencere öncesi
+      git rev-list --count --no-merges --since=2026-09-28 HEAD            # pencere içi
+      git rev-list --count --no-merges --since=2026-09-28 --author=Claude HEAD
+      git rev-list --count --no-merges --since=2026-09-28 --author=MyD HEAD
+      ```
 
 ## 1. Base Sepolia deploy + canlı frontend URL (en kritik teknik iş)
 

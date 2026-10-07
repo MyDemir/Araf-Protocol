@@ -1,14 +1,16 @@
 # Colosseum Submission Form: Draft Answers (Araf Protocol)
 
-> Field names and limits come from `docs/colosseum/llms-full.txt` lines 599-640
+> Field names and limits come from `docs/colosseum/llms-full.txt` lines 588-650
 > (section "07. What Colosseum's form actually asks"). Paste each `text` block as is.
 >
 > **Character counts** were measured with `wc -m` on the block content (no trailing
 > newline). Counts **include** the `[[TODO: ...]]` placeholders. After you fill a
 > placeholder, measure again: `printf '%s' "<answer>" | wc -m`.
 >
-> Positioning rule used everywhere: the product is **live on Base Sepolia testnet**
-> (once the deploy in TODO.md is done). No mainnet claim. Mainnet is mentioned only as
+> Positioning rule: **nothing is deployed yet**. Every "live / deployed on Base Sepolia" phrase is a
+> conditional `[[TODO: ...]]`: replace it only after the deploy in TODO.md section 1 is done and
+> you can open the contract on sepolia.basescan.org. Until then the honest wording is
+> "built for Base". No mainnet claim. Mainnet is mentioned only as
 > "next", and only as far as `docs/TR/MAINNET_READINESS_CHECKLIST.md` goes.
 >
 > Everything not found in the code or docs is a `[[TODO: ...]]` and is listed in `TODO.md`.
@@ -38,10 +40,10 @@ Limit: 500. The guide says the one-liner belongs here unchanged. Three candidate
 Recommended field text (one-liner A plus one sentence of status):
 
 ```text
-Escrow for trading stablecoins against bank transfers, with no moderator: if a dispute drags on, both sides' deposits slowly burn. Live on Base Sepolia testnet.
+Escrow for trading stablecoins against bank transfers, with no moderator: if a dispute drags on, both sides' deposits slowly burn. [[TODO: after the Base Sepolia deploy, add: "Live on Base Sepolia testnet."]]
 ```
 
-**Characters:** 160/500
+**Characters:** 208/500
 
 ### Project website (optional)
 
@@ -130,7 +132,7 @@ Why now: stablecoins have become a normal way to hold and send dollars, and the 
 (No limit given in the guide. Includes AI tools, as Colosseum asks.)
 
 ```text
-Contracts: Solidity 0.8.24, OpenZeppelin (ReentrancyGuard, Ownable, Pausable, SafeERC20), Hardhat; escrow logic split into ArafEscrow plus two linked libraries (ArafReputationLib, ArafSettlementLib), and ArafRevenueVault + ArafRewards for revenue and rewards. Chain: Base (Base Sepolia testnet now).
+Contracts: Solidity 0.8.24, OpenZeppelin (ReentrancyGuard, Ownable, Pausable, SafeERC20), Hardhat; escrow logic split into ArafEscrow plus two linked libraries (ArafReputationLib, ArafSettlementLib), and ArafRevenueVault + ArafRewards for revenue and rewards. Chain: Base (built for Base; Base Sepolia deployment [[TODO: date]]).
 Frontend: React 18, Vite, wagmi + viem, TanStack Query, Tailwind CSS.
 Backend: Node.js, Express, MongoDB (Mongoose), Redis, Sign-In with Ethereum (SIWE) + JWT, ethers v6 event worker that mirrors on-chain events, AES-256-GCM envelope encryption (HKDF-derived keys, optional AWS KMS) for bank details and receipts.
 Testing: Hardhat/Mocha, Jest, Vitest.
@@ -138,23 +140,23 @@ Hosting: [[TODO: confirm, config exists for Fly.io (backend) and Vercel (fronten
 AI tools: Claude Code (AI coding agent) was used heavily for implementation, tests and docs since late September 2026, under the founder's direction and review. [[TODO: list any other AI tools]]
 ```
 
-**Characters:** 932/no limit
+**Characters:** 962/no limit
 
 ### Which chains does your product use?
 
 ```text
-Base (deployed on Base Sepolia testnet)
+Base [[TODO: after deploy, add "(deployed on Base Sepolia testnet)"]]
 ```
 
-**Characters:** 39/no limit
+**Characters:** 69/no limit
 
 ### How does your product use these chains?
 
 ```text
-The escrow contract on Base holds the seller's tokens and both parties' deposits, and it is the only place a trade's state can change: lock, payment reported, release, cancel, challenge, split, burn. Time rules (payment window, 48h grace, hourly decay, 10-day burn) and reputation tiers are enforced on-chain. No server or admin can move escrowed funds or pick a winner. Without a chain, someone would have to hold the money and judge disputes, and that is exactly what we remove.
+The escrow contract on Base holds the seller's tokens and both deposits, and is the only place a trade's state changes: lock, payment reported, release, cancel, challenge, split, burn. Time rules (payment window, 48h grace, hourly decay, 10-day burn) and reputation tiers are enforced on-chain. The owner can set fees, pause and the treasury address, but no server or admin can move escrowed funds or pick a winner. Without a chain, someone would have to hold the money and judge disputes.
 ```
 
-**Characters:** 480/500
+**Characters:** 489/500
 
 ### Is your project a mobile-focused dApp?
 
@@ -184,13 +186,13 @@ No
 
 ### Anything else judges should know that isn't captured above?
 
-This is where prior work is disclosed (mandatory; hiding it means disqualification, disclosing costs nothing). Git facts used: first commit 2 May 2026, adding 240 files and about 77k lines in one go; 68 commits before 14 Sep 2026 (last on 10 Aug); 132 non-merge commits from 28 Sep 2026 onward.
+This is where prior work is disclosed (mandatory; hiding it means disqualification, disclosing costs nothing). Git facts used: first commit 2 May 2026, adding 240 files and about 77k lines in one go; 59 non-merge commits before 14 Sep 2026 (last on 10 Aug); 137 non-merge commits from 28 Sep 2026 onward (132 by Claude Code, 5 by the founder). Commands: `git rev-list --count --no-merges --until=2026-09-14 HEAD`, `git rev-list --count --no-merges --since=2026-09-28 HEAD`. Re-measure right before submitting.
 
 ```text
-Prior work disclosure: Araf existed before the hackathon. Our repo's first commit (2 May 2026) imported the full contracts, backend and frontend from earlier work [[TODO: real start date]]; 68 commits predate 14 Sep. In the window (132 commits from 28 Sep) we hardened the escrow (payment window, lapsing challenge ping, cancel revoke), split it into libraries, added a payout-profile gate and deployed to Base Sepolia. Not externally audited.
+Prior work disclosure: Araf existed before the hackathon. Our repo's first commit (2 May 2026) imported the full contracts, backend and frontend from earlier work [[TODO: real start date]]; 59 commits predate 14 Sep. In the window (137 commits from 28 Sep) we hardened the escrow (payment window, lapsing challenge ping, cancel revoke), split it into libraries and added a payout-profile gate. [[TODO: deployed to Base Sepolia on date]] Not externally audited.
 ```
 
-**Characters:** 443/500
+**Characters:** 460/500
 
 ### Demo video
 
@@ -204,10 +206,10 @@ Prior work disclosure: Araf existed before the hackathon. Our repo's first commi
 
 ```text
 [[TODO: live frontend URL]]
-Runs on Base Sepolia testnet (no real money). 1) Add Base Sepolia to your wallet and get test ETH from a faucet: [[TODO: faucet link you tested]]. 2) Connect your wallet and sign in (SIWE message, no gas). 3) Get test tokens: [[TODO: in-app faucet button or token address + how to get it]]. Note: to take an order as a buyer, a wallet must be registered on-chain at least 2 days earlier (anti-sybil rule); judges can use the seller side right away. [[TODO: optional pre-aged judge test wallet]]
+[[TODO: use this block only after the deploy is live]] Runs on Base Sepolia testnet (no real money). 1) Add Base Sepolia to your wallet and get test ETH from a faucet: [[TODO: faucet link you tested]]. 2) Connect your wallet and sign in (SIWE message, no gas). 3) Get test tokens: [[TODO: in-app faucet button or token address + how to get it]]. Note: to take an order as a buyer, a wallet must be registered on-chain at least 2 days earlier (anti-sybil rule); judges can use the seller side right away. [[TODO: optional pre-aged judge test wallet]]
 ```
 
-**Characters:** 522/no limit
+**Characters:** 577/no limit
 
 ---
 
@@ -228,14 +230,14 @@ What we know from the problem itself: a smart contract cannot check a bank trans
 ```text
 Built: the full escrow on Base: sell and buy orders, partial fills, a 48h payment window, release, mutual cancel, a ping-then-challenge dispute path, time-based decay, on-chain split settlement, a 10-day burn, and an on-chain reputation system with tiered limits. Around it: a web app (wallet sign-in, order book, trade room, encrypted bank details and receipts), a backend that mirrors chain events, and contract, backend and frontend test suites.
 
-Live: deployed on Base Sepolia testnet on [[TODO: date]], escrow at [[TODO: address]]; app at [[TODO: URL]].
+Deployment: [[TODO: after deploy: "Live on Base Sepolia testnet since <date>, escrow at <address>, app at <URL>." Until then: "Base Sepolia deployment in progress."]]
 
 Users: [[TODO: honest number, e.g. "no external users yet" or "N test trades by M wallets"]].
 
 Not yet: mainnet, external audit, revenue.
 ```
 
-**Characters:** 697/1000
+**Characters:** 755/1000
 
 ### Who else is building in this space, and what do you think they're getting wrong?
 
@@ -262,7 +264,7 @@ Each completed trade pays a protocol fee, by default 0.15% from each side (owner
 ### How long have you each been working on this? Have you been working on it full time?
 
 ```text
-[[TODO: per person: since when, full-time or part-time]]. Facts from the repo: the earliest pitch document is dated March 2026, the first commit is 2 May 2026, and active development resumed on 28 Sep 2026 with 132 commits since.
+[[TODO: per person: since when, full-time or part-time]]. Facts from the repo: the earliest pitch document is dated March 2026, the first commit is 2 May 2026, and active development resumed on 28 Sep 2026 with 137 commits since.
 ```
 
 **Characters:** 229/500

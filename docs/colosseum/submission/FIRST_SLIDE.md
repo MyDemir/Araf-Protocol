@@ -22,10 +22,10 @@ Word count rule used: hyphenated "Stablecoin-to-bank" counts as one word.
 │                                              │
 │     Stablecoin-to-bank escrow. No moderator. │
 │                                              │
-│  Live on Base Sepolia testnet · [[TODO: URL]]│
+│  [[TODO: only after deploy: "Live on Base Sepolia testnet · URL"]]  │
 └──────────────────────────────────────────────┘
 ```
 
-- Footer line is small text and optional. It must say "testnet"; do not put "mainnet" anywhere.
+- Footer line is small text and optional. **Nothing is deployed yet**: until the Base Sepolia deploy is done, leave the footer out or write "Built for Base". After the deploy it must say "testnet"; never put "mainnet" anywhere.
 - Logo: `[[TODO: logo file]]` (none in the repo).
 - Hold this card for no more than 2 seconds in the pitch video; the spoken hook (PITCH_SCRIPT.md) carries the first 10 seconds.

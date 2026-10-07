@@ -150,13 +150,13 @@ Pick **one** version, depending on what you prepared (see Part C).
 
 **Version 2 (no pre-staged trade):** BaseScan → escrow contract → "Read Contract": show `GRACE_PERIOD` (172800 s = 48h), `PAYMENT_WINDOW` (48h), `USDT_DECAY_START` (96h of bleeding), `MAX_BLEEDING` (864000 s = 10 days). These are constants; the owner cannot change them.
 
-> If the seller disputes, these rules take over, and they are constants in the contract: forty-eight hours of grace, then both deposits shrink every hour, the locked tokens follow after ninety-six more hours, and at day ten whatever is left goes to the treasury. No admin can change them or pick a winner.
+> If the seller disputes, these rules take over, and they are constants in the contract: forty-eight hours of grace, then both deposits shrink every hour, the locked tokens follow after ninety-six more hours, and at day ten whatever is left goes to the treasury. No admin can change them or pick a winner. The owner can set fees, pause new orders and choose the treasury address, but cannot move escrowed funds.
 
 ### 2:40-3:00 · How it fits together
 
 **Screen:** BaseScan escrow page, "Contract" tab with the green verified check, then back to the app.
 
-> All funds and every state change live in this one verified contract on Base. Our backend only mirrors events and keeps bank details and receipts encrypted; it cannot move escrowed funds. The code is open at [[TODO: repo URL or "on GitHub"]]. That's Araf: trust the time, not the oracle.
+> All funds and every state change live in this one verified contract on Base. Our backend only mirrors events and keeps bank details and receipts encrypted; it cannot move escrowed funds, and neither can the contract owner, who only sets fees, pause and the treasury address. The code is open at [[TODO: repo URL or "on GitHub"]]. That's Araf: trust the time, not the oracle.
 
 ---
 
