@@ -37,12 +37,13 @@ jobs:
             echo "::error::Release notes file not found: $NOTES"
             exit 1
           fi
-          PRE=()
           if [[ "$TAG" == *-* ]]; then
-            PRE=(--prerelease)
+            PRE=--prerelease
+          else
+            PRE=--prerelease=false
           fi
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --title "Araf Protocol $TAG" --notes-file "$NOTES" "${PRE[@]}"
+            gh release edit "$TAG" --title "Araf Protocol $TAG" --notes-file "$NOTES" "$PRE"
           else
-            gh release create "$TAG" --title "Araf Protocol $TAG" --notes-file "$NOTES" --verify-tag "${PRE[@]}"
+            gh release create "$TAG" --title "Araf Protocol $TAG" --notes-file "$NOTES" --verify-tag "$PRE"
           fi
