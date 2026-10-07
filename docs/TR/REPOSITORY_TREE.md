@@ -140,7 +140,7 @@ Araf-Protokol/
 │   │   ├── Araf_V3_Faz3_Proof_of_Peace_Global_Rewards_Plan.md
 │   │   ├── Araf_V3_Urun_Planı_Yeniden_Kurgulanmis.md
 │   │   ├── Kontrat_Denetimi_Piyasa_SWOT_2026-09.md
-│   │   ├── Optimasyon.pdf.pdf
+│   │   ├── Optimasyon.pdf
 │   │   ├── REWARDS_ROLLOUT.md
 │   │   ├── ui_scenario_lab.md
 │   │   └── Uyumluluk_ve_Mainnet_Hazirlik_Raporu_2026-09.md
