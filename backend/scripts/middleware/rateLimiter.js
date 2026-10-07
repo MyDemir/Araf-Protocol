@@ -24,15 +24,13 @@ The earlier fix for proxy/load-balancer environments still stands:
 That part is preserved and not changed here.
 
 ### New behavior
-This PR keeps fail-open behavior for general/public routes, but separates auth from that policy.
+Current behavior (supersedes the original fail-open split): every limiter falls back to a process-local
+in-memory counter when Redis is unavailable, so no route is left unbounded.
 
-New behavior:
-
-- public and lower-risk routes still use the general Redis-based skip strategy
-- auth routes now use a dedicated fallback path when Redis is unavailable
-- an in-memory limiter is introduced for auth traffic
-- if Redis is down, auth requests are no longer fully unbounded
-- if the in-memory auth limit is exceeded, the request is rejected with `429`
+- auth, nonce, PII, market/stats read, orders, room, receipt, coordination, admin, client-log and feedback
+  limiters all have an in-memory fallback
+- if Redis is down, requests are no longer unbounded
+- if the in-memory limit is exceeded, the request is rejected with `429`
 
 ### Effect
 This keeps the original availability goal for the wider platform while preventing the auth surface from becoming completely unprotected during Redis degradation.

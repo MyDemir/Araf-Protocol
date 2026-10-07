@@ -146,7 +146,8 @@ function getRedisClient() {
 /**
  * ALT-02 Fix: Redis'in kullanıma hazır olup olmadığını kontrol eder.
  * rateLimiter.js bu fonksiyonu kullanarak Redis erişilemezse
- * rate limiting'i atlayabilir (fail-open) — platform erişilemez olmasın.
+ * Redis erişilemezse limiter'lar proses-içi (in-memory) fallback sayaca düşer;
+ * rate limiting atlanmaz (fail-open değil).
  *
  * @returns {boolean} Redis bağlı ve hazırsa true
  */

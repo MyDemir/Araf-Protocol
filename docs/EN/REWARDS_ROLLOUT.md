@@ -95,7 +95,7 @@ Rollout phases are product and operations stages. On-chain, recording, finalizat
 | Claim amount | `epochRewardPool × userWeight / totalWeight` |
 | Dust | after the claim window (or once all weight has claimed) `sweepEpochDust` rolls the unclaimed remainder into the **current** epoch's pool; no recipient can be chosen |
 | Funding | sponsor funding targets the current or a future epoch; the epoch pool = sponsor funding for that epoch + owner-triggered `allocateEpochRewards` from the reward reserve |
-| Owner powers | `setRewardBps` (4000–7000), `allocateEpochRewards`, `setProductPool`, `withdrawTreasuryShare*` (treasury reserve only; the reward reserve is not withdrawable), `setSupportedToken`, `setFinalTreasury`; `setRewards` is single use |
+| Owner powers | `setRewardBps` (4000–7000), `allocateEpochRewards`, `setProductPool`, `withdrawTreasuryShare*` (treasury reserve only; the reward reserve is not withdrawable), `setSupportedToken`, `setFinalTreasury`, `pause()` / `unpause()`; `setRewards` is single use. `allocateEpochRewards` is `whenNotPaused` (`ArafRewards.sol:225`), so an owner pause of `ArafRewards` blocks allocation only; recording, finalize, claim and sweep stay open |
 
 Backend/frontend surfaces: public read-only mirror under `/api/rewards/*` and admin `/api/admin/revenue`, `/api/admin/rewards/health`; `claimable` is never estimated by the backend (use the on-chain getter). The rewards flags in the `.env.example` files (`REWARDS_READ_ONLY`, `REWARDS_SOURCE`) are documentation constants and are not read by code.
 

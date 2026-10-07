@@ -110,9 +110,9 @@ ARAF_ESCROW_ADDRESS=<deploy_çıktısındaki_adres>
 # Yerel zincir ne 8453 ne 84532 olduğundan izlenen token seti açıkça verilir
 ARAF_TRACKED_TOKENS=<deploy_çıktısındaki_usdt_adresi>,<deploy_çıktısındaki_usdc_adresi>
 
-# Relayer için Account #2 private key kullan (opsiyonel: yoksa itibar-temizleme ve
-# reward-outcome görevleri pasif kalır)
-RELAYER_PRIVATE_KEY=0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a
+# Relayer için Hardhat Account #2 private key'ini kullan (opsiyonel: yoksa itibar-temizleme ve
+# reward-outcome görevleri pasif kalır). Yalnız yerel: bu anahtarlar herkese açıktır; mainnet'te ASLA kullanma.
+RELAYER_PRIVATE_KEY=<hardhat_account_2_private_key>
 
 SIWE_DOMAIN=localhost
 ALLOWED_ORIGINS=http://localhost:5173
@@ -683,7 +683,7 @@ Production açılışta KMS self-test çalıştırır (`runProductionKmsStartupS
 |---|---|---|---|
 | `BASE_RPC_URL` | prod: **evet** | — | Public fallback yok. |
 | `BASE_WS_RPC_URL` | hayır (önerilir) | — | `wss://` ile başlamalı, aksi halde HTTP provider kullanılır. |
-| `EXPECTED_CHAIN_ID` | prod: **evet** (`BASE_RPC_URL` tanımlıyken de) | — | Production'da `8453` veya `84532`. Provider'lar worker, config, preview ve `/ready` yüzeylerinde buna karşı doğrulanır. |
+| `EXPECTED_CHAIN_ID` | prod: **evet** (`BASE_RPC_URL` tanımlıyken de) | — | Her pozitif tamsayı kabul edilir (`expectedChain.js`); production'daki `8453` / `84532` kısıtı token env çözümlemesinden (`tokenEnv.js`) gelir. Provider'lar worker, config, preview ve `/ready` yüzeylerinde buna karşı doğrulanır. |
 | `ALLOW_UNSAFE_CHAIN_ID_BYPASS` | hayır | `false` | Yalnız prod dışı: `EXPECTED_CHAIN_ID` boşken zincir kontrolünü atlar. |
 | `ARAF_ESCROW_ADDRESS` | prod: **evet** | — | Zero address tanımsız sayılır (production çıkar). |
 | `ARAF_REVENUE_VAULT_ADDRESS` | hayır | — | Reward mirror event'leri; bu (veya `ARAF_REWARDS_ADDRESS`) yoksa reward mirror izlenmez. |
@@ -882,7 +882,7 @@ HKDF değişikliği sonrası PII'ın yeniden şifrelenmesi için repoda bir ara�
 - `VITE_*` değişkenleri tarayıcıda build/runtime'da **public**'tir. API key, private key, JWT secret, DB URL veya herhangi bir secret'ı asla `VITE_*` değişkenlerine koymayın.
 
 ### Gerekli / yasak ortam matrisi (production)
-- Zorunlu: `NODE_ENV=production`, `MONGODB_URI`, `REDIS_URL` (TLS), `JWT_SECRET`, `SIWE_DOMAIN`, `SIWE_URI`, `ARAF_ESCROW_ADDRESS`, `BASE_RPC_URL`, `ALLOWED_ORIGINS`, `EXPECTED_CHAIN_ID` (`8453` veya `84532`), anahtar değişkenleriyle birlikte `KMS_PROVIDER` (`aws` veya `vault`) ve zincire uygun token adresleri (`BASE_MAINNET_*` / `BASE_SEPOLIA_*` ya da `ARAF_TRACKED_TOKENS`).
+- Zorunlu: `NODE_ENV=production`, `MONGODB_URI`, `REDIS_URL` (TLS), `JWT_SECRET`, `SIWE_DOMAIN`, `SIWE_URI`, `ARAF_ESCROW_ADDRESS`, `BASE_RPC_URL`, `ALLOWED_ORIGINS`, `EXPECTED_CHAIN_ID` (her pozitif tamsayı kabul edilir ama production'da token çözümlemesi yalnız `8453` / `84532` destekler), anahtar değişkenleriyle birlikte `KMS_PROVIDER` (`aws` veya `vault`) ve zincire uygun token adresleri (`BASE_MAINNET_*` / `BASE_SEPOLIA_*` ya da `ARAF_TRACKED_TOKENS`).
 - Worker bootstrap için zorunlu: `ARAF_DEPLOYMENT_BLOCK` veya `WORKER_START_BLOCK` (veya mevcut redis checkpoint).
 - Production'da yasak/güvensiz: `KMS_PROVIDER=env`, `REDIS_TLS_SKIP_VERIFY=true`, wildcard `ALLOWED_ORIGINS=*`, yalnız-localhost fallback origin'leri, `SIWE_DOMAIN=localhost` ve eksik `BASE_RPC_URL`.
 - Güvenli geliştirme varsayılanları (yalnız local): localhost `ALLOWED_ORIGINS`, opsiyonel TLS'siz Redis ve mock/token local adresleri.
