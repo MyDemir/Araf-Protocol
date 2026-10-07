@@ -117,7 +117,7 @@ Yapılacaklar:
 **⚠️ TAKVIM UYARISI:** Colosseum California saati kullanıyor, Türkiye 10 saat öncede. 12 Ekim 23:59 PT = **13 Ekim 09:59 Türkiye saati** (llms-full.txt:16, 226)
 
 Yapılacaklar:
-- [ ] Pitch video (max 2 min): Problem, solution, team, traction. Founder sesi (voiceover değil). Public project page'de. ⚠️ Kaynakta çelişki: llms-full.txt:136'da max 3 dk, llms-full.txt:222/499'da max 2 dk. Güvenli olmak için 2 dakika kalın.
+- [ ] Pitch video (max 2 min): Problem, solution, team, traction. Founder sesi (voiceover değil). Public project page'de. ⚠️ Colosseum pitch videoları max 2 dakika ile sınırlıdır; Superteam Türkiye Earn listesi 3 dakikaya kadar kabul eder (llms-full.txt:136, 780). Her iki yere de aynı videoyu yüklersen 2 dakika ile kalıyor.
 - [ ] Demo video (max 3 min): Ürün çalışırken. Technical. İkinci pitch değil. Ayrı upload.
 - [ ] Repo publish et: Private kalırsa `hackathon@colosseum.com`'e erişim ver
 - [ ] **Superteam Türkiye havuzuna da gönder** - Aynı proje, iki ayrı gönderim (Colosseum portal + Earn listing) (llms-full.txt:225, 249)
