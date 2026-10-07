@@ -1,6 +1,6 @@
 {
   "name": "araf-contracts",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "Araf Protocol Smart Contracts — Base L2",
   "private": true,
   "engines": {
