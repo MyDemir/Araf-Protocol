@@ -3,6 +3,9 @@
   "version": "2.0.0",
   "description": "Araf Protocol Smart Contracts \u2014 Base L2",
   "private": true,
+  "engines": {
+    "node": ">=22 <23"
+  },
   "scripts": {
     "compile": "hardhat compile",
     "test": "hardhat test",
