@@ -18,7 +18,6 @@ iadesi. Beyan etmenin cezası yok. Yalnız pencere içindeki iş değerlendirili
 Git'ten çıkan gerçekler (`git log`):
 - İlk commit: **2 Mayıs 2026** (`d70c55f`). Bu tek commit 240 dosya / ~77 bin satır ekliyor, yani
   kontrat, backend ve frontend o gün zaten hazırdı; proje repodan da eski.
-- `docs/PITCH_EN.md` "March 2026, Version 2.0, Mainnet Ready" diyor: iş en az Mart 2026'ya gidiyor.
 - 14 Eylül 2026 öncesi **59 merge olmayan commit** (merge'ler dahil 68; son: 10 Ağustos, `afb20f6`).
 - Pencere içi: **28 Eylül'den bu yana 137 merge olmayan commit**: 132'si Claude Code, 5'i senin
   (escrow'un kütüphanelere bölünmesi, ödeme penceresi, düşen challenge ping'i, iptal geri alma,
@@ -138,7 +137,7 @@ Deploy etmediğin zinciri seçmek "forced/claimed integration" riski.
 - [ ] **30.** X profili: doğrulanmış hesap, günlük paylaşım, jüri takibi `[[TODO: X URL]]`.
       Frontend'de `VITE_SOCIAL_TWITTER` boş.
 - [ ] **31.** Evet/Hayır soruları: şirket kuruldu mu, yatırım alındı mı, şu an fon arıyor musun
-      (`docs/FUNDRAISING_STRATEGY.md` hedef listesi var ama aktif tur bilgisi yok). Canlı token:
+      (repoda aktif tur bilgisi yok). Canlı token:
       kodda token yok, "No" yazdım, teyit et.
 - [ ] **32.** "Is it mobile-focused?" → "No" yazdım (duyarlı web uygulaması), teyit et.
 - [ ] **33.** Hosting satırı: Fly.io + Vercel gerçekten kullanılıyor mu, teyit et.
@@ -165,11 +164,11 @@ Deploy etmediğin zinciri seçmek "forced/claimed integration" riski.
 
 ## 8. Belgede yazıp kodda olmayan / kodla çelişen iddialar (doğrula, başvuruda kullanma)
 
-`docs/PITCH_EN.md` (Mart 2026) eski ve şu iddiaları kodla uyuşmuyor. Başvuru taslaklarında
-bunların hiçbirini kullanmadım:
+Eski pitch belgesi (silindi) şu iddiaları taşıyordu ve kodla uyuşmuyordu. Başvuru taslaklarında
+bunların hiçbirini kullanmadım; doğru değerler koddan:
 
-- [ ] **42.** Ücret: PITCH_EN "0.2% success fee" diyor. Kod: varsayılan **taraf başına 15 bps (%0,15)**,
-      owner değiştirebilir, taraf başına en fazla 2000 bps; Tier 0'da maker bond'u 0 olduğu için
+- [ ] **42.** Ücret: eski pitch "0.2% success fee" diyordu. Kod: varsayılan **taraf başına 15 bps (%0,15)**
+      (`contracts/src/ArafEscrow.sol:261-262`), owner değiştirebilir, taraf başına en fazla 2000 bps (`:307`); Tier 0'da maker bond'u 0 olduğu için
       maker ücreti fiilen 0 (`releaseFunds`, `actualMakerFee`).
 - [ ] **43.** "Mainnet Ready" ve "100% decentralized / zero operational cost / free from human
       intervention": deploy yok, harici denetim (audit) kaydı yok, owner yönetişim yetkileri var
@@ -178,8 +177,8 @@ bunların hiçbirini kullanmadım:
       (bu fonksiyonlar herkese açık; escrow fonunu taşıyamaz). Mainnet'i yalnız "next" olarak ve
       `docs/TR/MAINNET_READINESS_CHECKLIST.md` kapsamıyla an; checklist'te audit maddesi yok,
       audit planın varsa ekle `[[TODO: karar]]`.
-- [ ] **44.** Bleeding anlatımı: PITCH_EN "all locked funds ... begin to decay" diyor. Kod: 48 saat
-      grace sonrası önce iki tarafın **bond'u** erir (taker %0,42/saat, maker %0,26/saat), kilitli
+- [ ] **44.** Bleeding anlatımı: eski pitch "all locked funds ... begin to decay" diyordu. Kod
+      (`contracts/src/ArafEscrow.sol:266-271`, `:289-291`): 48 saat grace sonrası önce iki tarafın **bond'u** erir (taker %0,42/saat, maker %0,26/saat), kilitli
       kripto ancak 96 saat bleeding'den sonra erimeye başlar, 240. saatte (10 gün) `burnExpired`
       kalanı treasury'ye yollar. Tier 0'da bond yok. Yol haritası maddeleri (ZK IBAN doğrulama,
       The Graph) kodda yok; yalnız "gelecek" olarak anılabilir.
