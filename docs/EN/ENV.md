@@ -398,11 +398,13 @@ Full: `deploy-base-sepolia.yml:211-228` · runtime: `deploy-runtime-base-sepolia
 | Name | Type | What |
 |---|---|---|
 | `FLY_API_TOKEN` | secret | Fly deploy token (`deploy-base-sepolia.yml:145`, `:183`) |
+| `FLY_ORG` | variable (optional) | Fly org used when the workflow creates a missing app; default `personal`. Needs an org/personal `FLY_API_TOKEN` |
 | `FLY_APP_NAME` | variable | Fly app name; default `araf-protocol-backend`. During the Vercel deploy, the `vercel.json` rewrite target is rewritten on the runner according to this name (does not stop on a mismatch) |
 | `FRONTEND_DOMAIN` | variable | `SIWE_DOMAIN`, `SIWE_URI`, `ALLOWED_ORIGINS` are derived from it (`:30`, `:173-175`) |
 | `BASE_SEPOLIA_WS_RPC_URL` | secret | Becomes `BASE_WS_RPC_URL` on Fly |
 | `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` | secret | Vercel CLI identity (`:31-32`, `:197-202`) |
 | `GH_VARIABLES_TOKEN` | secret (optional) | Fine-grained PAT (this repo only, Variables: read and write) for `gh variable set ARAF_ESCROW_ADDRESS/ARAF_DEPLOYMENT_BLOCK` after a full deploy. Not printed in logs |
+| `deploy_test_usdt` | workflow input (full deploy) | If true and the `BASE_SEPOLIA_USDT_ADDRESS` variable is empty, deploys tUSDT first; ignored if the variable is set |
 | `BASESCAN_API_KEY` | secret (optional) | Only `verify_contracts=true` (experimental) |
 | `ARAF_REVENUE_VAULT_ADDRESS`, `ARAF_REWARDS_ADDRESS` | variable (optional) | If defined, passed as Fly secrets and Vercel `VITE_*` build-env |
 

@@ -396,11 +396,13 @@ Tam: `deploy-base-sepolia.yml:211-228` · runtime: `deploy-runtime-base-sepolia.
 | Ad | Tür | Ne |
 |---|---|---|
 | `FLY_API_TOKEN` | secret | Fly deploy token'ı (`deploy-base-sepolia.yml:145`, `:183`) |
+| `FLY_ORG` | variable (opsiyonel) | Workflow eksik app'i oluştururken kullanılan Fly org'u; varsayılan `personal`. Org/kişisel `FLY_API_TOKEN` gerekir |
 | `FLY_APP_NAME` | variable | Fly uygulama adı; varsayılan `araf-protocol-backend`. Vercel deploy'unda `vercel.json` rewrite hedefi runner üzerinde bu ada göre yeniden yazılır (uyuşmazlıkta durmaz) |
 | `FRONTEND_DOMAIN` | variable | `SIWE_DOMAIN`, `SIWE_URI`, `ALLOWED_ORIGINS` buradan türer (`:30`, `:173-175`) |
 | `BASE_SEPOLIA_WS_RPC_URL` | secret | Fly'da `BASE_WS_RPC_URL` olur |
 | `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` | secret | Vercel CLI kimliği (`:31-32`, `:197-202`) |
 | `GH_VARIABLES_TOKEN` | secret (opsiyonel) | Tam deploy sonrası `gh variable set ARAF_ESCROW_ADDRESS/ARAF_DEPLOYMENT_BLOCK` için fine-grained PAT (yalnız bu repo, Variables: read and write). Log'a basılmaz |
+| `deploy_test_usdt` | workflow girdisi (tam deploy) | true ve `BASE_SEPOLIA_USDT_ADDRESS` variable'ı boşsa önce tUSDT deploy eder; variable doluysa yok sayılır |
 | `BASESCAN_API_KEY` | secret (opsiyonel) | Yalnız `verify_contracts=true` (deneysel) |
 | `ARAF_REVENUE_VAULT_ADDRESS`, `ARAF_REWARDS_ADDRESS` | variable (opsiyonel) | Tanımlıysa Fly secret ve Vercel `VITE_*` build-env olarak geçer |
 
