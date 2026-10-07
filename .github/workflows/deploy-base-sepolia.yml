@@ -144,6 +144,8 @@ jobs:
           else
             echo "::warning::GH_VARIABLES_TOKEN secret is not set; BASE_SEPOLIA_USDT_ADDRESS was NOT persisted (command is in the job summary)."
           fi
+          # Aynı DEPLOYER anahtarı deploy.js'te hemen kullanılacak; nonce/RPC yayılım çakışmasını önlemek için kısa bekleme.
+          sleep 15
 
       # Secret'lar yalnız bu adımın ortam değişkenlerinde; contracts/.env dosyası yazılmaz.
       - name: Deploy contracts to Base Sepolia
@@ -236,7 +238,13 @@ jobs:
             echo "Fly app $FLY_APP_NAME exists."
           else
             echo "Fly app $FLY_APP_NAME not found; creating in org ${FLY_ORG:-personal}."
-            flyctl apps create "$FLY_APP_NAME" --org "${FLY_ORG:-personal}" || { echo "::error::Fly app yok ve token app oluşturamıyor; Fly dashboard'dan org token üretin ya da app'i oluşturun (docs/TR/DEPLOY_BASE_SEPOLIA.md)."; exit 1; }
+            if ! flyctl apps create "$FLY_APP_NAME" --org "${FLY_ORG:-personal}"; then
+              # Create başarısızsa app gerçekten var mı (status okunamadı) yoksa token mı yetersiz ayır.
+              if flyctl apps list --json 2>/dev/null | FLY_APP_NAME="$FLY_APP_NAME" python3 -c 'import json,os,sys; n=os.environ["FLY_APP_NAME"]; d=json.load(sys.stdin); sys.exit(0 if any(isinstance(a,dict) and n in (a.get("Name"),a.get("name")) for a in d) else 1)'; then
+                echo "::error::Fly app var ama status okunamadı: token yetkisini kontrol edin."; exit 1
+              fi
+              echo "::error::Fly app yok ve token app oluşturamıyor; Fly dashboard'dan org token üretin ya da app'i oluşturun (docs/TR/DEPLOY_BASE_SEPOLIA.md)."; exit 1
+            fi
           fi
 
       # Secret'lar komut satırına değil stdin'e (NAME=VALUE) verilir; --stage ile deploy'a kadar uygulanmaz.
