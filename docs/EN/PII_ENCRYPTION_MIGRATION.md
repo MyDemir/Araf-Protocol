@@ -14,6 +14,32 @@
 
 The previous implementation used two chained HMAC operations instead of RFC 5869-compatible HKDF. AES-GCM payload framing stayed the same (`iv` + `authTag` + `ciphertext` as hex), so old and new payloads can look identical at the storage-format level.
 
+### 1.1) Master key sources (`KMS_PROVIDER`)
+
+The master key is resolved once per process (cached, zeroed on shutdown) and must be exactly 32 bytes:
+
+- `env` — `MASTER_ENCRYPTION_KEY` (64 hex chars). **Development only**; production refuses to start.
+- `aws` — `AWS_ENCRYPTED_DATA_KEY` (base64 `CiphertextBlob`) decrypted with AWS KMS (`AWS_REGION`, default `eu-west-1`). `AWS_KMS_KEY_ARN` is not read by the code.
+- `vault` — HashiCorp Vault Transit: the **fixed wrapped data key** `VAULT_ENCRYPTED_DATA_KEY` (`vault:v1:…`) is decrypted through `transit/decrypt/<VAULT_KEY_NAME>` (`VAULT_ADDR`, `VAULT_TOKEN`; key name default `araf-master-key`). The wrapped key must be created once and kept: generating a new data key per start would make all existing PII undecryptable, so a missing value fails closed.
+
+In production a startup self-test (`runProductionKmsStartupSelfTest`) checks the provider variables and resolves the key before the server listens.
+
+### 1.2) Purpose-separated HMAC (fingerprints and IP hashes)
+
+Besides the per-wallet DEK, the same master key derives purpose-separated HMAC keys with HKDF-SHA256: salt `sha256("araf-hmac-salt-v1")`, info `"araf-hmac:<purpose>"`, output 32 bytes. The digest is `HMAC-SHA256(key, value)` (hex). Purposes in use:
+
+- `payout-fingerprint` — payout-profile fingerprint (`User.payout_profile.fingerprint.hash`, scheme **`hmac-v1`**), computed over the key-sorted, trimmed JSON of the payout details. The input does not include the wallet, so identical details hash identically across wallets; without the master key the hash cannot be brute-forced from the low-entropy IBAN space.
+- `chargeback-ip` — caller IP of `POST /api/trades/:id/chargeback-ack` (`chargeback_ack.ip_hash`).
+
+Fingerprint schemes (`payout_profile.fingerprint.hash_scheme`):
+
+| Scheme | Meaning |
+|---|---|
+| `hmac-v1` | Current. Written for every new/updated profile. |
+| `sha256` (or missing/`null`) | Legacy unsalted SHA-256. Never written for new records; only kept as a comparison path (`payoutFingerprintMatches`). |
+
+`PUT /api/auth/profile` computes **both** sides (existing and incoming details) with the HMAC scheme before comparing, so a legacy `sha256` record is upgraded to `hmac-v1` on the first save without a false "bank profile changed" signal. The lock-time snapshot copies only the hash (`payout_snapshot.<role>.fingerprint_hash_at_lock`), not the scheme, so snapshots taken before and after the upgrade are not comparable to each other.
+
 ## 2) Stored fields that may be affected
 
 Any field encrypted with `encryptField(...)` before the HKDF change may require migration:
@@ -26,9 +52,11 @@ Any field encrypted with `encryptField(...)` before the HKDF change may require 
 | `trades` | `payout_snapshot.maker.contact_value_enc` | Optional encrypted maker contact snapshot. |
 | `trades` | `payout_snapshot.taker.payout_details_enc` | Encrypted payout snapshot copied at lock time. |
 | `trades` | `payout_snapshot.taker.contact_value_enc` | Optional encrypted taker contact snapshot. |
-| `trades` | `evidence.receipt_encrypted` | Encrypted receipt/base64 payload. Cleared by retention after completion. |
+| `trades` | `evidence.receipt_encrypted` | Encrypted receipt/base64 payload. Cleared by retention once the trade is terminal and `receipt_delete_at` (30 days after upload) has passed. |
 
-Non-encrypted metadata such as `rail`, `country`, fingerprint hashes, profile version, timestamps, and bank-change counters is not re-encrypted by this migration.
+Non-encrypted metadata such as `rail`, `country`, fingerprint hashes, profile version, timestamps, and bank-change counters is not re-encrypted by this migration. Payout snapshots (`payout_snapshot.*`, including `fingerprint_hash_at_lock`) are wiped by the retention job 30 days after the lock once the trade is terminal.
+
+Hash-type fields (`payout_profile.fingerprint.hash`, `payout_snapshot.*.fingerprint_hash_at_lock`, `chargeback_ack.ip_hash`) are not ciphertext, but they depend on the master key (section 1.2). They are unaffected by the HKDF DEK change (that change only touches the `*_enc` fields above), yet they do change if the master key is ever rotated.
 
 ## 3) Safe old-payload detection
 
@@ -90,7 +118,7 @@ Because there is no embedded `kdf_version`, the safest production marker should 
 - For production, prefer batch-sized writes with an external migration ledger containing record id, field path, old ciphertext hash, new ciphertext hash, timestamp, and operator/change id. Store hashes only, not ciphertext or plaintext.
 - If verification fails before traffic is resumed, restore the database snapshot or replay the ledger to replace new ciphertext with the previous ciphertext values from the secure backup process.
 - If only a small batch fails, stop the migration, quarantine the batch ids, restore those fields from backup, and keep the app on the pre-migration deployment until root cause is fixed.
-- Do not rotate the master key during this HKDF migration unless a separate key-rotation runbook and tests are ready.
+- Do not rotate the master key during this HKDF migration unless a separate key-rotation runbook and tests are ready. A rotation would also invalidate every DEK (all `*_enc` fields) and every `hmac-v1` fingerprint / `ip_hash`.
 
 ## 6) Production safety checks
 
@@ -101,7 +129,7 @@ Before production migration:
 - [ ] Read-only diagnostic completed with aggregate counts only.
 - [ ] Migration write mode has tests and an explicit production confirmation guard.
 - [ ] `KMS_PROVIDER=env` is not used in production.
-- [ ] App, worker, and migration process use the same KMS provider and expected chain/environment config.
+- [ ] App, worker, and migration process use the same KMS provider (for `vault`: the same fixed `VAULT_ENCRYPTED_DATA_KEY`; for `aws`: the same `AWS_ENCRYPTED_DATA_KEY`) and expected chain/environment config.
 - [ ] PII endpoints are monitored for decrypt/auth failures without logging plaintext.
 - [ ] All logs are checked for PII redaction before and after the migration.
 - [ ] Support/comms plan is ready for temporary PII reveal unavailability.

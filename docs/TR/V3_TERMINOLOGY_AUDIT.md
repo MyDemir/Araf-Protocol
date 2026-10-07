@@ -10,9 +10,10 @@ Bu denetim kalan `listing`, `createEscrow`, `lockEscrow` ve `legacy` referanslar
 
 ## Compatibility/deprecated davranış
 
-- `backend/scripts/routes/listings.js`, `Order` dokümanları üzerinde deprecated read-only compatibility alias’tır. Kanonik `app.js` mount yüzeyinde yoktur; write route’ları 410 döner.
-- `backend/scripts/jobs/cleanupPendingListings.js`, scheduler/app wiring stabilitesi için tutulan deprecated no-op compatibility job’dır.
-- `Trade.trade_origin = DIRECT_ESCROW` ve direct escrow event handler’ları tarihsel/deployment compatibility mirror değerleridir; kanonik V3 authority değildir.
+- Eski `backend/scripts/routes/listings.js` (`/api/listings` alias'ı) ve `backend/scripts/jobs/cleanupPendingListings.js` (no-op job) depodan **kaldırılmıştır**; `app.js` yalnız `/api/orders` ve diğer kanonik yüzeyleri bağlar.
+- Direct escrow event handler'ları (`EscrowCreated` / `EscrowLocked`) kaldırılmıştır (B36): kontrat bu event'leri yayınlamaz, child trade'ler `OrderFilled` + `getTrade()` ile aynalanır.
+- `Trade.trade_origin` enum'unda `DIRECT_ESCROW` değeri yalnız tarihsel/compat mirror değeri olarak durur (varsayılan `ORDER_CHILD`; `parentOrderId == 0` gelirse yazılır). Kontrat V3'te her trade'i bir order fill'inden üretir; `ArafRewards` da `isOrderChild == false` kaydı `DirectEscrowNotRewardable` ile reddeder.
+- `canonical_refs.listing_ref` (Mongo) ve `childListingRef` (ABI) adları geriye dönük uyumluluk için korunur; anlamı child-trade trace referansıdır.
 - Legacy environment alias’ları ve legacy profil alanları V3 market primitive’iyle ilgili olmayan compatibility konularıdır.
 
 ## Bu değişiklikte düzeltilen stale/incorrect terminoloji

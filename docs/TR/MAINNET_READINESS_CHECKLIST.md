@@ -24,7 +24,12 @@ Kritik not:
 ### Worker / replay güvenliği
 - `WORKER_START_BLOCK` **veya** `ARAF_DEPLOYMENT_BLOCK` (checkpoint yoksa production'da zorunlu)
 - `BASE_WS_RPC_URL` (önerilir; yoksa HTTP fallback gözlenmeli)
-- `WORKER_FINALITY_DEPTH` (önerilen production değeri: `6` veya üzeri)
+- `WORKER_FINALITY_DEPTH` (production varsayılanı `6`; daha düşük verilmemeli)
+
+### Opsiyonel backend env
+- `RELAYER_PRIVATE_KEY` — yalnız permissionless bakım çağrıları için (`decayReputation`, `ArafRewards.recordTradeOutcomes`); tanımsızsa reputation decay ve reward outcome recorder job'ları çalışmaz. Fon taşıyan bir anahtar olmamalıdır.
+- `READY_INTERNAL_TOKEN` — `/ready` ayrıntılı görünümü için; yoksa kimliksiz çağrı redakte görünüm alır.
+- `ADMIN_WALLETS` — salt-okunur `/api/admin` paneline erişebilecek cüzdanlar.
 
 ### Rewards rollout env (backend/frontend + contracts uyumu)
 - `ARAF_REVENUE_VAULT_ADDRESS`
@@ -56,11 +61,12 @@ Kritik not:
 Aşağıdaki sıra **bozulmamalıdır**:
 
 1. **Contracts deployed**
-   - ArafEscrow (var olan deployment veya ayrı migration)
+   - `ArafReputationLib` → `ArafSettlementLib` → linkli `ArafEscrow` (`contracts/scripts/deploy.js`; var olan deployment veya ayrı migration). Library adresleri manifest'te doğrulanmalı.
    - ArafRevenueVault
    - ArafRewards
+   - Hedef ağ EIP-1153 transient storage'ı desteklemeli (vault `tstore`/`tload` kullanır; derleme hedefi `cancun`).
 2. **Vault/Rewards configured**
-   - `vault.rewards == ArafRewards`
+   - `vault.rewards == ArafRewards` (`setRewards` yalnız bir kez çağrılabilir; yanlış adres sonradan düzeltilemez)
    - USDT/USDC `supportedToken=true`
    - `rewardBps == 4000` başlangıç doğrulaması
 3. **Backend/frontend env updated**
@@ -85,7 +91,7 @@ Aşağıdaki sıra **bozulmamalıdır**:
 - Admin recipient seçemez.
 - Sponsor/funder recipient seçemez.
 - `paymentRiskLevel` reward multiplier değildir.
-- MVP'de auto-release / burn / mutual cancel / disputed release zero-weight'tir.
+- MVP'de auto-release / burn / mutual cancel / disputed release / ödeme penceresi aşımı zero-weight'tir.
 - MVP'de Tier 0 reward eligibility dışıdır.
 - `rewardBps` yalnız 4000–7000 aralığındadır (başlangıç 4000).
 
@@ -98,6 +104,7 @@ Aşağıdaki sıra **bozulmamalıdır**:
 - Mutual cancel zero-weight kalmalıdır; cancel-loop farming yüzeyi açılmamalıdır.
 - Disputed release zero-weight kalmalıdır; challenge-sonra-release farming teşvik edilmemelidir.
 - Burn zero-weight kalmalıdır; deadlock hiçbir koşulda rewardable olmamalıdır.
+- Ödeme penceresi aşımı (`PAYMENT_WINDOW_EXPIRED`) zero-weight kalmalıdır.
 - Beklenen reward, sentetik hacim / wash trading maliyetinden düşük kalacak şekilde rollout bütçesi izlenmelidir.
 - Reward dili kullanıcıya cashback, getiri garantisi veya işlem başına sabit rebate olarak sunulmamalıdır.
 
@@ -117,6 +124,8 @@ Aşağıdaki sıra **bozulmamalıdır**:
 
 ## 5) Smoke Test Komutları (local/staging)
 
+- `npm run test:all` (kökten: backend + frontend + contracts + ABI drift)
+- `npm run test:abi-drift`
 - `cd backend && npm test -- --runInBand`
 - `cd contracts && npm test -- --grep "deploy script|rewards"`
 - `cd contracts && npm test -- --grep "ArafRewards|Proof of Peace|partial settlement"`

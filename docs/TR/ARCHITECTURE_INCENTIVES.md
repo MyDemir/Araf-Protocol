@@ -28,6 +28,9 @@ Dispute sistemi `child trade` seviyesinde çalışır. Parent order market gör�
 ```mermaid
 flowchart TD
     LOCKED --> PAID
+    LOCKED --> EXPIRED[CANCELED odeme penceresi asimi]
+    LOCKED --> CANCEL
+    PAID --> CANCEL
     PAID --> CLEAN[RESOLVED clean release]
     PAID --> AUTO[RESOLVED auto-release]
     PAID --> CHALLENGED
@@ -40,7 +43,8 @@ flowchart TD
 Dispute mimarisinin temel mesajı:
 
 - Taker ödeme bildirdiğinde maker sessiz kalamaz.
-- Maker ödeme almadığını iddia ederse trade challenge alanına girer.
+- Taker 48 saat içinde ödeme bildirmezse kilit `expirePaymentWindow` ile zamanla çözülür (maker tam iade, taker bond'undan %2 ceza).
+- Maker ödeme almadığını iddia ederse önce `pingTakerForChallenge` atar; `challengeTrade` yalnız maker'a ve yalnız `[ping+24sa, ping+48sa)` penceresinde açıktır. Pencere kaçarsa ping düşer ve taker'ın liveness yolu (`pingMaker` → `autoRelease`) açılır.
 - Challenge, haklılık kararı değildir; ekonomik baskı modudur.
 - Taraflar release, settlement veya mutual cancel ile çıkabilir.
 - Çıkmaz devam ederse bleeding/burn hattı değeri korumaz; çözümsüzlüğü maliyetlendirir.
@@ -75,6 +79,7 @@ Mimari kural:
 | Auto-release | Zero weight | Maker inaktivitesi ödüllendirilmez |
 | Mutual cancel | Zero weight | Cancel-loop farming engellenir |
 | Disputed release | Zero weight | Challenge-sonra-release farming engellenir |
+| Ödeme penceresi aşımı | Zero weight | Bildirilmeyen ödeme başarılı trade sayılmaz |
 | Burn | Zero weight | Deadlock hiçbir koşulda rewardable değildir |
 
 ## 5. Mimari authority sınırları
@@ -82,7 +87,7 @@ Mimari kural:
 | Bileşen | Yetkisi | Yetkisiz olduğu alan |
 |---|---|---|
 | `ArafEscrow` | State transition, terminal outcome, payout math | Off-chain fiat truth’u ispatlamak |
-| `ArafRevenueVault` | Revenue reserve accounting, reward/treasury split | Reward recipient seçmek |
+| `ArafRevenueVault` | Revenue reserve accounting, reward/treasury split (`rewardBps` 4000–7000, başlangıç 4000) | Reward recipient seçmek |
 | `ArafRewards` | Outcome-derived weight, epoch pool, claim math | Off-chain dispute yargısı üretmek |
 | Backend | Mirror, read model, coordination, PII boundary | Economic outcome, reward eligibility, recipient, multiplier |
 | Frontend | UX guardrail, timing guidance, contract access | Contract outcome override |

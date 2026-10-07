@@ -540,7 +540,6 @@ router.get("/:id", requireAuth, requireSessionWalletMatch, roomReadLimiter, asyn
   }
 });
 
-// ─── POST /api/trades/propose-cancel ─────────────────────────────────────────
 // ─── POST /api/trades/:id/chargeback-ack ─────────────────────────────────────
 // [TR] Bu endpoint yalnızca audit/log içindir. On-chain release akışına veto uygulamaz.
 //      Başarısızlığı kontrat çağrısını engelleyecek bir protocol gate olarak kullanılmamalıdır.
