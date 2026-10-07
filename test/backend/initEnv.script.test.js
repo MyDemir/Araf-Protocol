@@ -65,4 +65,14 @@ describe("scripts/init-env.js", () => {
     expect(env).toContain("OTHER=keep");
     fs.rmSync(root, { recursive: true, force: true });
   });
+
+  it("flags JWT_SECRET like siwe.js does: known placeholder, low entropy, short; accepts a strong one", () => {
+    const { findPlaceholders } = require("../../scripts/init-env");
+    const master = "MASTER_ENCRYPTION_KEY=" + "ab12".repeat(16);
+    const jwt = (v) => `JWT_SECRET=${v}\n${master}\n`;
+    expect(findPlaceholders(jwt("changeme" + "x".repeat(60)))).toEqual(["JWT_SECRET"]);
+    expect(findPlaceholders(jwt("a".repeat(80)))).toEqual(["JWT_SECRET"]);
+    expect(findPlaceholders(jwt("abcd1234".repeat(4)))).toEqual(["JWT_SECRET"]);
+    expect(findPlaceholders(jwt(require("crypto").randomBytes(64).toString("hex")))).toEqual([]);
+  });
 });

@@ -13,8 +13,36 @@ const path = require("path");
 const crypto = require("crypto");
 
 const PACKAGES = ["contracts", "backend", "frontend"];
+// SENKRON TUTUN / KEEP IN SYNC: shannonEntropy ve KNOWN_PLACEHOLDERS backend/scripts/services/siwe.js'ten kopyadır
+// (siwe.js yüklenirken JWT_SECRET doğrulayıp throw ettiği için require edilemez). Kurallar: <64 karakter, bilinen
+// placeholder içermek ya da entropi < 3.5 => geçersiz. "BURAYA_" yalnız .env.example şablonunu yakalamak içindir.
+const KNOWN_PLACEHOLDERS = [
+  "CHANGE_THIS_TO_A_LONG_RANDOM_SECRET_MIN_64_CHARS",
+  "your-secret-here",
+  "supersecretkey",
+  "changeme",
+];
+
+function shannonEntropy(str) {
+  const freq = {};
+  for (const ch of str) freq[ch] = (freq[ch] || 0) + 1;
+  const len = str.length;
+  let entropy = 0;
+  for (const count of Object.values(freq)) {
+    const p = count / len;
+    entropy -= p * Math.log2(p);
+  }
+  return entropy;
+}
+
 const SECRETS = {
-  JWT_SECRET: { bytes: 64, isPlaceholder: (v) => v.length < 64 || /BURAYA|YOUR_|PLACEHOLDER|CHANGE/i.test(v) },
+  JWT_SECRET: {
+    bytes: 64,
+    isPlaceholder: (v) => v.length < 64
+      || KNOWN_PLACEHOLDERS.some((p) => v.includes(p))
+      || v.includes("BURAYA_")
+      || shannonEntropy(v) < 3.5,
+  },
   MASTER_ENCRYPTION_KEY: { bytes: 32, isPlaceholder: (v) => !/^[0-9a-fA-F]{64}/.test(v) },
 };
 

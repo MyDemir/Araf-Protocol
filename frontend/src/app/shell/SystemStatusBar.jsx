@@ -165,7 +165,7 @@ export const SystemStatusBar = ({
     <section aria-label={lang === 'TR' ? 'Sistem durumu' : 'System status'} className="shrink-0 border-b border-borderSubtle" data-testid="system-status-bar">
       <div className="flex flex-col">
         {isTestnet && (
-          <div role="status" className={`pl-4 pr-16 md:pr-44 py-1 text-xs font-bold text-center border-b ${toneClass('warning')}`} data-testid="testnet-banner">
+          <div role="status" className={`pl-4 pr-16 md:pr-44 py-1 text-xs font-bold text-center border-b bg-info border-info text-black`} data-testid="testnet-banner">
             {t(lang, 'Base Sepolia Testnet — test tokenları, gerçek para yok', 'Base Sepolia Testnet — test tokens, no real money')}
           </div>
         )}
