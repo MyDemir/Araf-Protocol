@@ -13,7 +13,7 @@
 | `BASE_SEPOLIA_WS_RPC_URL` | Alchemy WebSocket RPC (event worker) | Aynı Alchemy app | `wss://base-sepolia.g.alchemy.com/v2/KEY` |
 | `BASESCAN_API_KEY` | Opsiyonel; yalnız tam deploy'da `verify_contracts=true` iken kullanılır (deneysel) | basescan.org | rastgele string |
 | `GH_VARIABLES_TOKEN` | Opsiyonel; tam deploy sonrası `ARAF_ESCROW_ADDRESS`/`ARAF_DEPLOYMENT_BLOCK` variable'larını otomatik yazar. Fine-grained PAT, yalnız bu repo, izin: Variables: read and write. Yoksa workflow uyarı verir, özetteki komutlar elle çalıştırılır | GitHub > Settings > Developer settings > Fine-grained tokens | `github_pat_...` |
-| `FLY_API_TOKEN` | Fly deploy token | `fly tokens create deploy -a <app>` | `FlyV1 ...` |
+| `FLY_API_TOKEN` | Fly token. Org/kişisel token (dashboard > Tokens) eksik app'i workflow'un oluşturmasını sağlar; app-scoped deploy token yalnız app zaten varsa çalışır | `fly tokens create org` / `fly tokens create deploy -a <app>` | `FlyV1 ...` |
 | `MONGODB_URI` | MongoDB Atlas bağlantısı | Atlas > Connect (IP allowlist: Fly çıkışı veya 0.0.0.0/0) | `mongodb+srv://u:p@cluster.mongodb.net/araf_protocol` |
 | `REDIS_URL` | Redis, TLS ZORUNLU (`rediss://`) | Upstash > TLS endpoint | `rediss://default:PASS@host.upstash.io:6379` |
 | `JWT_SECRET` | >= 64 karakter | `node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"` | 128 hex |
@@ -32,15 +32,27 @@
 | `FRONTEND_DOMAIN` | Vercel production host'u (https:// ve path YOK); SIWE_DOMAIN/ALLOWED_ORIGINS buradan türer | `araf-demo.vercel.app` |
 | `TREASURY_ADDRESS` | Fee treasury adresi | `0x...` |
 | `FINAL_OWNER_ADDRESS` | Deploy sonrası ownership devri; TREASURY'den FARKLI olmalı (deploy.js reddeder) | `0x...` |
-| `BASE_SEPOLIA_USDT_ADDRESS` | Test USDT (6 decimals) | `0x...` |
+| `BASE_SEPOLIA_USDT_ADDRESS` | Test USDT (6 decimals); yalnız `deploy_test_usdt=true` ile tam deploy'da BOŞ olabilir | `0x...` |
 | `BASE_SEPOLIA_USDC_ADDRESS` | Test USDC (Circle) | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` |
 | `FLY_APP_NAME` | Opsiyonel; varsayılan `araf-protocol-backend` | `araf-protocol-backend` |
+| `FLY_ORG` | Opsiyonel; workflow app'i oluşturmak zorunda kalırsa kullanılan Fly org'u; varsayılan `personal` | `personal` |
 | `ADMIN_WALLETS` | Opsiyonel; admin paneli cüzdanları (virgüllü) | `0xabc...,0xdef...` |
 | `VITE_RPC_URL` | Opsiyonel; frontend birincil RPC (PUBLIC olur, kısıtlı/ayrı key kullanın) | `https://...` |
 | `ARAF_ESCROW_ADDRESS` | Deploy SONRASI yazılır (runtime workflow için); `GH_VARIABLES_TOKEN` varsa tam deploy kendisi yazar | `0x...` |
 | `ARAF_DEPLOYMENT_BLOCK` | Deploy SONRASI yazılır (aynı şekilde) | `12345678` |
 | `ARAF_REVENUE_VAULT_ADDRESS` | Opsiyonel; rewards ayrıca deploy edildiyse. Tanımlıysa iki workflow da Fly secret (`ARAF_REVENUE_VAULT_ADDRESS`) ve Vercel build-env (`VITE_REVENUE_VAULT_ADDRESS`) olarak geçirir; adres regex'iyle doğrulanır, tanımsızsa hiçbir şey yazılmaz | `0x...` |
 | `ARAF_REWARDS_ADDRESS` | Opsiyonel; yukarıdakiyle aynı (`ARAF_REWARDS_ADDRESS` / `VITE_REWARDS_ADDRESS`) | `0x...` |
+
+## Yalnız web arayüzüyle (mobil) deploy
+
+Bilgisayar ya da yerel CLI gerekmez; her şey tarayıcıdan yapılır.
+
+1. **GitHub secret/variable**: repo > Settings > Secrets and variables > Actions. Secret'lar için "Secrets" sekmesi > New repository secret; variable'lar için "Variables" sekmesi > New repository variable (yukarıdaki tablolar). Workflow'un test USDT'yi deploy etmesini istiyorsan `BASE_SEPOLIA_USDT_ADDRESS`'i BOŞ bırak (tanımlama).
+2. **Fly.io**: Fly dashboard'da Tokens sayfasını aç (dashboard > Tokens) ve bir **org token** üret (app-scoped deploy token app oluşturamaz). `FLY_API_TOKEN`'a yaz. App yoksa workflow kendisi oluşturur (`FLY_APP_NAME`; org opsiyonel `FLY_ORG` variable'ından, varsayılan `personal`). Deploy token kullanırsan app'i dashboard'dan (Launch an app / Create app) `FLY_APP_NAME` ile birebir aynı adla kendin oluştur.
+3. **Vercel**: dashboard > projeyi oluştur (Root Directory boş). `VERCEL_PROJECT_ID`: Project > Settings > General > Project ID. `VERCEL_ORG_ID`: Team Settings > General > Team ID (kişisel hesapta: Account Settings > General > Your ID). Token: Account Settings > Tokens.
+4. **Alchemy** (dashboard.alchemy.com): Base Sepolia app oluştur; HTTPS ve WSS URL'lerini kopyala. **Upstash** (console.upstash.com): TLS'li Redis DB oluştur, `rediss://` URL'sini kopyala. **MongoDB Atlas** (cloud.mongodb.com): ücretsiz cluster, veritabanı kullanıcısı, Network Access > `0.0.0.0/0` izni, Connect > Drivers'tan `mongodb+srv://` URL'si.
+5. **Çalıştır**: GitHub > Actions > "Deploy Base Sepolia" > Run workflow. `deploy_frontend=true` ve `deploy_test_usdt=true` seç, Run.
+6. **Test USDT davranışı**: `deploy_test_usdt=true` ve `BASE_SEPOLIA_USDT_ADDRESS` variable'ı boşsa workflow kontratlardan önce `tUSDT` (MockERC20) deploy eder, adresi doğrular ve kullanır. Variable zaten doluysa girdi yok sayılır (log'a not düşer). Opsiyonel `GH_VARIABLES_TOKEN` secret'ı varsa adres variable'a yazılır; yoksa job özetinde `gh variable set` komutu çıkar (ya da web arayüzünden variable'ı elle ekle).
 
 ## Tek seferlik hazırlık
 
@@ -61,6 +73,8 @@
 9. Deployer cüzdanına Base Sepolia ETH yükle (Coinbase/Alchemy faucet).
 
 ## Komutlar
+
+Tam deploy girdileri: `deploy_frontend` (Vercel), `deploy_test_usdt` (variable boşsa otomatik test USDT; varsayılan false), `verify_contracts` (deneysel).
 
 ```bash
 gh secret set DEPLOYER_PRIVATE_KEY < key.txt        # veya --body "..."

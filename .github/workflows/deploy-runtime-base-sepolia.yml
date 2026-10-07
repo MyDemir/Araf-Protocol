@@ -134,6 +134,22 @@ jobs:
         if: ${{ inputs.deploy_backend }}
         uses: superfly/flyctl-actions/setup-flyctl@1.5
 
+      # App yoksa oluşturur (FLY_API_TOKEN org/kişisel token olmalı); var olan app'e dokunmaz.
+      - name: Ensure Fly app exists
+        if: ${{ inputs.deploy_backend }}
+        shell: bash
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_ORG: ${{ vars.FLY_ORG }}
+        run: |
+          set -euo pipefail
+          if flyctl status -a "$FLY_APP_NAME" >/dev/null 2>&1; then
+            echo "Fly app $FLY_APP_NAME exists."
+          else
+            echo "Fly app $FLY_APP_NAME not found; creating in org ${FLY_ORG:-personal}."
+            flyctl apps create "$FLY_APP_NAME" --org "${FLY_ORG:-personal}" || { echo "::error::Fly app yok ve token app oluşturamıyor; Fly dashboard'dan org token üretin ya da app'i oluşturun (docs/TR/DEPLOY_BASE_SEPOLIA.md)."; exit 1; }
+          fi
+
       - name: Stage backend secrets on Fly
         if: ${{ inputs.deploy_backend }}
         working-directory: backend

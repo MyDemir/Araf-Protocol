@@ -11,6 +11,11 @@ on:
         required: false
         default: false
         type: boolean
+      deploy_test_usdt:
+        description: "Deploy a test USDT (tUSDT, MockERC20) first if the BASE_SEPOLIA_USDT_ADDRESS variable is empty"
+        required: false
+        default: false
+        type: boolean
       verify_contracts:
         description: "Experimental: verify ArafEscrow on Basescan (needs BASESCAN_API_KEY secret)"
         required: false
@@ -60,6 +65,7 @@ jobs:
           FINAL_OWNER_ADDRESS: ${{ vars.FINAL_OWNER_ADDRESS }}
           BASE_SEPOLIA_USDT_ADDRESS: ${{ vars.BASE_SEPOLIA_USDT_ADDRESS }}
           BASE_SEPOLIA_USDC_ADDRESS: ${{ vars.BASE_SEPOLIA_USDC_ADDRESS }}
+          DEPLOY_TEST_USDT: ${{ inputs.deploy_test_usdt }}
         run: |
           set -euo pipefail
           ADDRESS_RE='^0x[a-fA-F0-9]{40}$'
@@ -68,7 +74,13 @@ jobs:
 
           need FRONTEND_DOMAIN
           for n in DEPLOYER_PRIVATE_KEY BASE_SEPOLIA_RPC_URL BASE_SEPOLIA_WS_RPC_URL FLY_API_TOKEN MONGODB_URI REDIS_URL JWT_SECRET MASTER_ENCRYPTION_KEY; do need "$n"; done
-          for n in TREASURY_ADDRESS FINAL_OWNER_ADDRESS BASE_SEPOLIA_USDT_ADDRESS BASE_SEPOLIA_USDC_ADDRESS; do need "$n"; addr "$n"; done
+          for n in TREASURY_ADDRESS FINAL_OWNER_ADDRESS BASE_SEPOLIA_USDC_ADDRESS; do need "$n"; addr "$n"; done
+          # USDT: variable dolu olmalı; yalnız deploy_test_usdt=true iken boş olabilir (test token otomatik deploy edilir).
+          if [ -n "$BASE_SEPOLIA_USDT_ADDRESS" ]; then
+            addr BASE_SEPOLIA_USDT_ADDRESS
+          elif [ "$DEPLOY_TEST_USDT" != "true" ]; then
+            echo "::error::BASE_SEPOLIA_USDT_ADDRESS is required unless deploy_test_usdt=true (see docs/EN/DEPLOY_BASE_SEPOLIA.md)."; exit 1
+          fi
 
           [[ "${TREASURY_ADDRESS,,}" != "${FINAL_OWNER_ADDRESS,,}" ]] || { echo "::error::FINAL_OWNER_ADDRESS must differ from TREASURY_ADDRESS (deploy.js rejects equal values on public chains)."; exit 1; }
           [[ "$FRONTEND_DOMAIN" != http* && "$FRONTEND_DOMAIN" != */* ]] || { echo "::error::FRONTEND_DOMAIN must be a bare host (no https://, no path)."; exit 1; }
@@ -97,6 +109,42 @@ jobs:
         working-directory: contracts
         run: npx hardhat compile
 
+      # deploy_test_usdt=true ve BASE_SEPOLIA_USDT_ADDRESS boşsa tUSDT (MockERC20) deploy edilir; adres TEST_USDT_ADDRESS olarak sonraki adımlara geçer.
+      - name: Deploy test USDT (optional)
+        if: ${{ inputs.deploy_test_usdt }}
+        working-directory: contracts
+        shell: bash
+        env:
+          CONFIRM_TEST_TOKEN_DEPLOY: "yes"
+          TEST_TOKEN_SYMBOL: tUSDT
+          DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+          BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+          BASE_SEPOLIA_USDT_ADDRESS: ${{ vars.BASE_SEPOLIA_USDT_ADDRESS }}
+          GH_TOKEN: ${{ secrets.GH_VARIABLES_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -n "$BASE_SEPOLIA_USDT_ADDRESS" ]; then
+            echo "::notice::BASE_SEPOLIA_USDT_ADDRESS variable is already set; deploy_test_usdt input ignored."
+            exit 0
+          fi
+          npx hardhat run scripts/deployTestToken.js --network base-sepolia 2>&1 | tee "$RUNNER_TEMP/test-token.log"
+          addr=$(node -e '
+            const fs = require("fs");
+            const list = JSON.parse(fs.readFileSync("deployments/base-sepolia-test-tokens.json", "utf8"));
+            const arr = Array.isArray(list) ? list : [list];
+            const last = arr[arr.length - 1] || {};
+            process.stdout.write(String(last.address || ""));
+          ')
+          [[ "$addr" =~ ^0x[a-fA-F0-9]{40}$ ]] || { echo "::error::test token manifest address invalid."; exit 1; }
+          echo "TEST_USDT_ADDRESS=$addr" >> "$GITHUB_ENV"
+          echo "Test USDT deployed: $addr"
+          if [ -n "$GH_TOKEN" ]; then
+            gh variable set BASE_SEPOLIA_USDT_ADDRESS --body "$addr" --repo "$GITHUB_REPOSITORY"
+            echo "Repository variable BASE_SEPOLIA_USDT_ADDRESS updated."
+          else
+            echo "::warning::GH_VARIABLES_TOKEN secret is not set; BASE_SEPOLIA_USDT_ADDRESS was NOT persisted (command is in the job summary)."
+          fi
+
       # Secret'lar yalnız bu adımın ortam değişkenlerinde; contracts/.env dosyası yazılmaz.
       - name: Deploy contracts to Base Sepolia
         working-directory: contracts
@@ -107,7 +155,7 @@ jobs:
           BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
           TREASURY_ADDRESS: ${{ vars.TREASURY_ADDRESS }}
           FINAL_OWNER_ADDRESS: ${{ vars.FINAL_OWNER_ADDRESS }}
-          BASE_SEPOLIA_USDT_ADDRESS: ${{ vars.BASE_SEPOLIA_USDT_ADDRESS }}
+          BASE_SEPOLIA_USDT_ADDRESS: ${{ env.TEST_USDT_ADDRESS || vars.BASE_SEPOLIA_USDT_ADDRESS }}
           BASE_SEPOLIA_USDC_ADDRESS: ${{ vars.BASE_SEPOLIA_USDC_ADDRESS }}
         run: |
           set -euo pipefail
@@ -175,6 +223,21 @@ jobs:
 
       - name: Setup Fly CLI
         uses: superfly/flyctl-actions/setup-flyctl@1.5
+
+      # App yoksa oluşturur (FLY_API_TOKEN org/kişisel token olmalı); var olan app'e dokunmaz.
+      - name: Ensure Fly app exists
+        shell: bash
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_ORG: ${{ vars.FLY_ORG }}
+        run: |
+          set -euo pipefail
+          if flyctl status -a "$FLY_APP_NAME" >/dev/null 2>&1; then
+            echo "Fly app $FLY_APP_NAME exists."
+          else
+            echo "Fly app $FLY_APP_NAME not found; creating in org ${FLY_ORG:-personal}."
+            flyctl apps create "$FLY_APP_NAME" --org "${FLY_ORG:-personal}" || { echo "::error::Fly app yok ve token app oluşturamıyor; Fly dashboard'dan org token üretin ya da app'i oluşturun (docs/TR/DEPLOY_BASE_SEPOLIA.md)."; exit 1; }
+          fi
 
       # Secret'lar komut satırına değil stdin'e (NAME=VALUE) verilir; --stage ile deploy'a kadar uygulanmaz.
       - name: Stage backend secrets on Fly
@@ -343,6 +406,7 @@ jobs:
             echo '```'
             echo "gh variable set ARAF_ESCROW_ADDRESS --body ${ESCROW:-<address>}"
             echo "gh variable set ARAF_DEPLOYMENT_BLOCK --body ${DEPLOY_BLOCK:-<block>}"
+            if [ -n "${TEST_USDT_ADDRESS:-}" ]; then echo "gh variable set BASE_SEPOLIA_USDT_ADDRESS --body $TEST_USDT_ADDRESS"; fi
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 

@@ -15,7 +15,7 @@ Two workflows: `deploy-base-sepolia.yml` (contract + Fly backend + optional Verc
 | `BASE_SEPOLIA_WS_RPC_URL` | Alchemy WebSocket RPC (event worker) | Same Alchemy app | `wss://base-sepolia.g.alchemy.com/v2/KEY` |
 | `BASESCAN_API_KEY` | Optional; used only in a full deploy with `verify_contracts=true` (experimental) | basescan.org | random string |
 | `GH_VARIABLES_TOKEN` | Optional; after a full deploy, automatically writes the `ARAF_ESCROW_ADDRESS`/`ARAF_DEPLOYMENT_BLOCK` variables. Fine-grained PAT, this repo only, permission: Variables: read and write. If missing, the workflow warns and the commands in the summary are run manually | GitHub > Settings > Developer settings > Fine-grained tokens | `github_pat_...` |
-| `FLY_API_TOKEN` | Fly deploy token | `fly tokens create deploy -a <app>` | `FlyV1 ...` |
+| `FLY_API_TOKEN` | Fly token. Org/personal token (dashboard > Tokens) lets the workflow create a missing app; an app-scoped deploy token only works if the app already exists | `fly tokens create org` / `fly tokens create deploy -a <app>` | `FlyV1 ...` |
 | `MONGODB_URI` | MongoDB Atlas connection | Atlas > Connect (IP allowlist: Fly egress or 0.0.0.0/0) | `mongodb+srv://u:p@cluster.mongodb.net/araf_protocol` |
 | `REDIS_URL` | Redis, TLS REQUIRED (`rediss://`) | Upstash > TLS endpoint | `rediss://default:PASS@host.upstash.io:6379` |
 | `JWT_SECRET` | >= 64 characters | `node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"` | 128 hex |
@@ -34,15 +34,27 @@ Important: `MASTER_ENCRYPTION_KEY` must be generated once and NEVER CHANGED (exi
 | `FRONTEND_DOMAIN` | Vercel production host (NO https:// and no path); SIWE_DOMAIN/ALLOWED_ORIGINS are derived from it | `araf-demo.vercel.app` |
 | `TREASURY_ADDRESS` | Fee treasury address | `0x...` |
 | `FINAL_OWNER_ADDRESS` | Ownership transfer after deploy; must be DIFFERENT from TREASURY (deploy.js rejects it) | `0x...` |
-| `BASE_SEPOLIA_USDT_ADDRESS` | Test USDT (6 decimals) | `0x...` |
+| `BASE_SEPOLIA_USDT_ADDRESS` | Test USDT (6 decimals); may be EMPTY only when running the full deploy with `deploy_test_usdt=true` | `0x...` |
 | `BASE_SEPOLIA_USDC_ADDRESS` | Test USDC (Circle) | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` |
 | `FLY_APP_NAME` | Optional; default `araf-protocol-backend` | `araf-protocol-backend` |
+| `FLY_ORG` | Optional; Fly org used when the workflow has to create the app; default `personal` | `personal` |
 | `ADMIN_WALLETS` | Optional; admin panel wallets (comma-separated) | `0xabc...,0xdef...` |
 | `VITE_RPC_URL` | Optional; frontend primary RPC (becomes PUBLIC, use a restricted/separate key) | `https://...` |
 | `ARAF_ESCROW_ADDRESS` | Written AFTER deploy (for the runtime workflow); if `GH_VARIABLES_TOKEN` exists, the full deploy writes it itself | `0x...` |
 | `ARAF_DEPLOYMENT_BLOCK` | Written AFTER deploy (same way) | `12345678` |
 | `ARAF_REVENUE_VAULT_ADDRESS` | Optional; if rewards was deployed separately. If defined, both workflows pass it as a Fly secret (`ARAF_REVENUE_VAULT_ADDRESS`) and a Vercel build-env (`VITE_REVENUE_VAULT_ADDRESS`); validated with an address regex, and if undefined nothing is written | `0x...` |
 | `ARAF_REWARDS_ADDRESS` | Optional; same as above (`ARAF_REWARDS_ADDRESS` / `VITE_REWARDS_ADDRESS`) | `0x...` |
+
+## Web-only (mobile) deploy
+
+No computer or local CLI needed; everything is done from the browser.
+
+1. **GitHub secrets/variables**: repo > Settings > Secrets and variables > Actions. "Secrets" tab > New repository secret for secrets; "Variables" tab > New repository variable for variables (tables above). Leave `BASE_SEPOLIA_USDT_ADDRESS` EMPTY (or undefined) if you want the workflow to deploy the test USDT.
+2. **Fly.io**: in the Fly dashboard open Tokens (dashboard > Tokens) and create an **org token** (an app-scoped deploy token cannot create the app). Put it in `FLY_API_TOKEN`. The workflow creates the app itself if it does not exist (`FLY_APP_NAME`, org from the optional `FLY_ORG` variable, default `personal`). If you use a deploy token instead, create the app yourself in the dashboard (Launch an app / Create app) with the exact `FLY_APP_NAME`.
+3. **Vercel**: dashboard > create the project (Root Directory empty). `VERCEL_PROJECT_ID`: Project > Settings > General > Project ID. `VERCEL_ORG_ID`: Team Settings > General > Team ID (for a personal account: Account Settings > General > Your ID). Token: Account Settings > Tokens.
+4. **Alchemy** (dashboard.alchemy.com): create a Base Sepolia app; copy the HTTPS URL and the WSS URL. **Upstash** (console.upstash.com): create a Redis DB with TLS, copy the `rediss://` URL. **MongoDB Atlas** (cloud.mongodb.com): free cluster, database user, Network Access > allow `0.0.0.0/0`, Connect > Drivers for the `mongodb+srv://` URL.
+5. **Run**: GitHub > Actions > "Deploy Base Sepolia" > Run workflow. Set `deploy_frontend=true` and `deploy_test_usdt=true`, then Run.
+6. **Test USDT behavior**: with `deploy_test_usdt=true` and an empty `BASE_SEPOLIA_USDT_ADDRESS` variable, the workflow deploys `tUSDT` (MockERC20) before the contracts, validates the address, and uses it. If the variable is already set the input is ignored (a log note is written). With the optional `GH_VARIABLES_TOKEN` secret the address is saved to the variable; otherwise the job summary shows the `gh variable set` command (or add the variable by hand in the web UI).
 
 ## One-time setup
 
@@ -63,6 +75,8 @@ Important: `MASTER_ENCRYPTION_KEY` must be generated once and NEVER CHANGED (exi
 9. Fund the deployer wallet with Base Sepolia ETH (Coinbase/Alchemy faucet).
 
 ## Commands
+
+Full-deploy inputs: `deploy_frontend` (Vercel), `deploy_test_usdt` (auto test USDT when the variable is empty; default false), `verify_contracts` (experimental).
 
 ```bash
 gh secret set DEPLOYER_PRIVATE_KEY < key.txt        # or --body "..."
