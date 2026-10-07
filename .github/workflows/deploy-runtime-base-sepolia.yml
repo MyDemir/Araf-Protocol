@@ -244,6 +244,10 @@ jobs:
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VITE_RPC_URL: ${{ vars.VITE_RPC_URL }}
+          VITE_BASE_APP_ID: ${{ vars.VITE_BASE_APP_ID }}
+          FARCASTER_ACCOUNT_ASSOCIATION_HEADER: ${{ vars.FARCASTER_ACCOUNT_ASSOCIATION_HEADER }}
+          FARCASTER_ACCOUNT_ASSOCIATION_PAYLOAD: ${{ vars.FARCASTER_ACCOUNT_ASSOCIATION_PAYLOAD }}
+          FARCASTER_ACCOUNT_ASSOCIATION_SIGNATURE: ${{ vars.FARCASTER_ACCOUNT_ASSOCIATION_SIGNATURE }}
           REVENUE_VAULT_ADDRESS: ${{ vars.ARAF_REVENUE_VAULT_ADDRESS }}
           REWARDS_ADDRESS: ${{ vars.ARAF_REWARDS_ADDRESS }}
         run: |
@@ -254,8 +258,16 @@ jobs:
             --build-env VITE_ESCROW_ADDRESS="$ESCROW"
             --build-env VITE_USDT_ADDRESS="$USDT"
             --build-env VITE_USDC_ADDRESS="$USDC"
+            --build-env VITE_PUBLIC_URL="https://$FRONTEND_DOMAIN"
           )
           if [ -n "$VITE_RPC_URL" ]; then args+=(--build-env VITE_RPC_URL="$VITE_RPC_URL"); fi
+          # Farcaster / Base mini app (opsiyonel; imza FRONTEND_DOMAIN'e bağlıdır, docs/*/DEPLOY_BASE_SEPOLIA.md)
+          if [ -n "$VITE_BASE_APP_ID" ]; then args+=(--build-env VITE_BASE_APP_ID="$VITE_BASE_APP_ID"); fi
+          if [ -n "$FARCASTER_ACCOUNT_ASSOCIATION_HEADER" ] && [ -n "$FARCASTER_ACCOUNT_ASSOCIATION_PAYLOAD" ] && [ -n "$FARCASTER_ACCOUNT_ASSOCIATION_SIGNATURE" ]; then
+            args+=(--build-env FARCASTER_ACCOUNT_ASSOCIATION_HEADER="$FARCASTER_ACCOUNT_ASSOCIATION_HEADER")
+            args+=(--build-env FARCASTER_ACCOUNT_ASSOCIATION_PAYLOAD="$FARCASTER_ACCOUNT_ASSOCIATION_PAYLOAD")
+            args+=(--build-env FARCASTER_ACCOUNT_ASSOCIATION_SIGNATURE="$FARCASTER_ACCOUNT_ASSOCIATION_SIGNATURE")
+          fi
           ADDRESS_RE='^0x[a-fA-F0-9]{40}$'
           for n in REVENUE_VAULT_ADDRESS REWARDS_ADDRESS; do
             if [ -n "${!n}" ] && ! [[ "${!n}" =~ $ADDRESS_RE ]]; then echo "::error::$n variable must be a 0x + 40 hex address."; exit 1; fi

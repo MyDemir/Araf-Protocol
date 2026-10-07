@@ -288,6 +288,9 @@ Değerler **build sırasında** sabitlenir; Vercel'de değişiklik için yeniden
 | `VITE_SOCIAL_GITHUB` | Sosyal bağlantı: GitHub | Opsiyonel (proje repo URL'si) | boş | boş | boş | F/.env, Vercel | `app/AppViews.jsx:79` |
 | `VITE_SOCIAL_TWITTER` | Sosyal bağlantı: X/Twitter | Opsiyonel (boşsa gizli) | boş | boş | boş | F/.env, Vercel | `AppViews.jsx:80` |
 | `VITE_SOCIAL_FARCASTER` | Sosyal bağlantı: Farcaster | Opsiyonel (boşsa gizli) | boş | boş | boş | F/.env, Vercel | `AppViews.jsx:81` |
+| `VITE_PUBLIC_URL` | Genel https origin (sonda `/` yok); tüm mutlak meta URL'lerinin ve `dist/.well-known/farcaster.json` kaynağı | Opsiyonel (boşsa fc:*/farcaster.json üretilmez + build uyarısı) | boş | boş | `https://$FRONTEND_DOMAIN` (workflow) | F/.env, Vercel build | `frontend/build/miniappMeta.js` |
+| `VITE_BASE_APP_ID` | `base:app_id` meta etiketi değeri | Opsiyonel | proje kimliği | proje kimliği | opsiyonel (variable) | F/.env, Vercel build | `frontend/build/miniappMeta.js` |
+| `FARCASTER_ACCOUNT_ASSOCIATION_HEADER` / `_PAYLOAD` / `_SIGNATURE` | farcaster.json için imzalı alan adı ilişkisi (gizli değil ama alan adına bağlı); üçü birlikte ya hiçbiri | Opsiyonel | boş | boş | opsiyonel (variable) | F/.env, Vercel build | `frontend/build/miniappMeta.js` |
 
 Yerelde Sepolia build'i için `npm run build:frontend:testnet` (`package.json:12`) `VITE_TARGET_CHAIN=base-sepolia` verir. `contracts/scripts/deploy.js` yalnız local ağda `VITE_ESCROW_ADDRESS`, `VITE_USDT_ADDRESS`, `VITE_USDC_ADDRESS` değerlerini `frontend/.env`'e kendisi yazar (`deploy.js:274-299`, `:440-441`). Public ağda yazmaz.
 

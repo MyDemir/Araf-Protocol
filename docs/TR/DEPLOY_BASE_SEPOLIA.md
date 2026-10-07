@@ -103,6 +103,12 @@ gh run watch
 
 Girdi override'ları: `araf_escrow_address`, `usdt_address`, `usdc_address`, `deployment_block`.
 
+## Farcaster / Base mini app
+
+- Workflow, Vercel build'ine `VITE_PUBLIC_URL=https://$FRONTEND_DOMAIN` geçirir; build bundan `fc:miniapp` meta etiketlerini ve `/.well-known/farcaster.json` dosyasını üretir.
+- `accountAssociation` imzası alan adına bağlıdır; her yeni `FRONTEND_DOMAIN` için yeniden üretilmelidir: bir kez deploy edin, Farcaster developer tools (Manifest tool) ya da Base Build manifest aracını açın, alan adını girin, Farcaster hesabıyla imzalayın ve üç değeri kopyalayın.
+- Bunları GitHub variable olarak `FARCASTER_ACCOUNT_ASSOCIATION_HEADER`, `FARCASTER_ACCOUNT_ASSOCIATION_PAYLOAD`, `FARCASTER_ACCOUNT_ASSOCIATION_SIGNATURE` (üçü birlikte ya da hiçbiri) ve istenirse `VITE_BASE_APP_ID` olarak kaydedip frontend deploy'unu yeniden çalıştırın. Yoksa farcaster.json `accountAssociation`'sız üretilir (uygulama çalışır; mini app doğrulaması geçmez).
+
 ## Notlar
 
 - Testnet KMS istisnası: `NODE_ENV=production` + `EXPECTED_CHAIN_ID=84532` + `ALLOW_ENV_KMS_ON_TESTNET=yes` ile `KMS_PROVIDER=env` kabul edilir (backend istisnası ana dalda mevcut: `backend/scripts/services/encryption.js`; RPC'nin 84532 olduğu da doğrulanır). Mainnet için AWS/Vault KMS gerekir.

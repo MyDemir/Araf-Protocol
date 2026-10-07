@@ -2,12 +2,13 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import miniappMeta from './build/miniappMeta.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const fromFrontendNodeModules = (...segments) => path.resolve(__dirname, 'node_modules', ...segments)
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), miniappMeta()],
   resolve: {
     alias: [
       { find: '@testing-library/jest-dom/vitest', replacement: fromFrontendNodeModules('@testing-library/jest-dom/vitest.js') },
@@ -21,6 +22,8 @@ export default defineConfig({
       { find: 'viem', replacement: fromFrontendNodeModules('viem') },
       { find: 'wagmi', replacement: fromFrontendNodeModules('wagmi') },
       { find: '@tanstack/react-query', replacement: fromFrontendNodeModules('@tanstack/react-query') },
+      { find: '@farcaster/miniapp-sdk', replacement: fromFrontendNodeModules('@farcaster/miniapp-sdk') },
+      { find: '@farcaster/miniapp-wagmi-connector', replacement: fromFrontendNodeModules('@farcaster/miniapp-wagmi-connector') },
       { find: 'vitest', replacement: fromFrontendNodeModules('vitest') },
     ],
   },

@@ -290,6 +290,9 @@ Values are fixed **at build time**; on Vercel a change requires a rebuild.
 | `VITE_SOCIAL_GITHUB` | Social link: GitHub | Optional (project repo URL) | empty | empty | empty | F/.env, Vercel | `app/AppViews.jsx:79` |
 | `VITE_SOCIAL_TWITTER` | Social link: X/Twitter | Optional (hidden if empty) | empty | empty | empty | F/.env, Vercel | `AppViews.jsx:80` |
 | `VITE_SOCIAL_FARCASTER` | Social link: Farcaster | Optional (hidden if empty) | empty | empty | empty | F/.env, Vercel | `AppViews.jsx:81` |
+| `VITE_PUBLIC_URL` | Public https origin (no trailing `/`); source of all absolute meta URLs and `dist/.well-known/farcaster.json` | Optional (fc:*/farcaster.json skipped + build warning if empty) | empty | empty | `https://$FRONTEND_DOMAIN` (workflow) | F/.env, Vercel build | `frontend/build/miniappMeta.js` |
+| `VITE_BASE_APP_ID` | `base:app_id` meta tag value | Optional | project id | project id | optional (variable) | F/.env, Vercel build | `frontend/build/miniappMeta.js` |
+| `FARCASTER_ACCOUNT_ASSOCIATION_HEADER` / `_PAYLOAD` / `_SIGNATURE` | Signed domain association for farcaster.json (public but bound to the domain); all three or none | Optional | empty | empty | optional (variables) | F/.env, Vercel build | `frontend/build/miniappMeta.js` |
 
 For a local Sepolia build, `npm run build:frontend:testnet` (`package.json:12`) sets `VITE_TARGET_CHAIN=base-sepolia`. `contracts/scripts/deploy.js` writes `VITE_ESCROW_ADDRESS`, `VITE_USDT_ADDRESS`, `VITE_USDC_ADDRESS` to `frontend/.env` itself only on the local network (`deploy.js:274-299`, `:440-441`). It does not write them on a public network.
 
