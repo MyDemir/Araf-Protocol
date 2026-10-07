@@ -11,7 +11,7 @@
 | `DEPLOYER_PRIVATE_KEY` | Kontratı deploy eden cüzdan (Base Sepolia ETH gerekir) | Yeni cüzdan; faucet'ten ETH | `0x` + 64 hex |
 | `BASE_SEPOLIA_RPC_URL` | Alchemy HTTP RPC | Alchemy > Base Sepolia | `https://base-sepolia.g.alchemy.com/v2/KEY` |
 | `BASE_SEPOLIA_WS_RPC_URL` | Alchemy WebSocket RPC (event worker) | Aynı Alchemy app | `wss://base-sepolia.g.alchemy.com/v2/KEY` |
-| `BASESCAN_API_KEY` | Opsiyonel; hardhat verify için (workflow şu an verify yapmaz) | basescan.org | rastgele string |
+| `BASESCAN_API_KEY` | Opsiyonel; hiçbir workflow okumaz/kullanmaz, yalnız elle `hardhat verify` için (GitHub secret olarak eklemek gerekmez) | basescan.org | rastgele string |
 | `FLY_API_TOKEN` | Fly deploy token | `fly tokens create deploy -a <app>` | `FlyV1 ...` |
 | `MONGODB_URI` | MongoDB Atlas bağlantısı | Atlas > Connect (IP allowlist: Fly çıkışı veya 0.0.0.0/0) | `mongodb+srv://u:p@cluster.mongodb.net/araf_protocol` |
 | `REDIS_URL` | Redis, TLS ZORUNLU (`rediss://`) | Upstash > TLS endpoint | `rediss://default:PASS@host.upstash.io:6379` |
@@ -93,8 +93,8 @@ Girdi override'ları: `araf_escrow_address`, `usdt_address`, `usdc_address`, `de
 
 ## Notlar
 
-- Testnet KMS istisnası: `NODE_ENV=production` + `EXPECTED_CHAIN_ID=84532` + `ALLOW_ENV_KMS_ON_TESTNET=yes` ile `KMS_PROVIDER=env` kabul edilir (backend istisnası ayrı iş; bu değişiklik backend'de yoksa backend production'da başlamaz). Mainnet için AWS/Vault KMS gerekir.
-- Frontend `VITE_TARGET_CHAIN=base-sepolia` bayrağını gerektirir (ayrı iş); onsuz prod build yalnız Base Mainnet'e bağlıdır.
+- Testnet KMS istisnası: `NODE_ENV=production` + `EXPECTED_CHAIN_ID=84532` + `ALLOW_ENV_KMS_ON_TESTNET=yes` ile `KMS_PROVIDER=env` kabul edilir (backend istisnası ana dalda mevcut: `backend/scripts/services/encryption.js`; RPC'nin 84532 olduğu da doğrulanır). Mainnet için AWS/Vault KMS gerekir.
+- Frontend `VITE_TARGET_CHAIN=base-sepolia` bayrağını gerektirir (ana dalda mevcut: `frontend/src/app/chainPolicy.js`; workflow bunu Vercel build-env olarak verir); onsuz prod build yalnız Base Mainnet'e bağlıdır.
 - Deployment bloğu `deploy.js` çıktısında yoktur; workflow `deployTxHash` receipt'inden okur.
 - Secret değerlerinde boşluk/tırnak/`#` olmasın (`flyctl secrets import` dotenv biçimi).
 - Contract verify (Basescan) workflow'da yok; ArafEscrow iki library'ye linkli olduğundan elle yapılır.

@@ -116,9 +116,18 @@ jobs:
           [[ "$FRONTEND_DOMAIN" != http* && "$FRONTEND_DOMAIN" != */* ]] || { echo "::error::FRONTEND_DOMAIN must be a bare host (no https://, no path)."; exit 1; }
           [[ "$FRONTEND_DOMAIN" != "localhost" ]] || { echo "::error::FRONTEND_DOMAIN cannot be localhost."; exit 1; }
           [[ "$BASE_SEPOLIA_RPC_URL" == http* ]] || { echo "::error::BASE_SEPOLIA_RPC_URL must be http(s)."; exit 1; }
-          [[ "$BASE_SEPOLIA_WS_RPC_URL" == ws* ]] || { echo "::error::BASE_SEPOLIA_WS_RPC_URL must be ws(s)."; exit 1; }
+          [[ "$BASE_SEPOLIA_WS_RPC_URL" == wss://* ]] || { echo "::error::BASE_SEPOLIA_WS_RPC_URL must start with wss:// (backend eventListener only uses wss://; ws:// silently falls back to HTTP)."; exit 1; }
           [[ "$REDIS_URL" == rediss://* ]] || { echo "::error::REDIS_URL must be rediss:// (backend requires Redis TLS in production)."; exit 1; }
           [[ ${#JWT_SECRET} -ge 64 ]] || { echo "::error::JWT_SECRET must be at least 64 characters."; exit 1; }
+          # Mirrors backend siwe.js SEC-02 (known placeholders + Shannon entropy >= 3.5); never prints the secret.
+          python3 - <<'PY' || { echo "::error::JWT_SECRET is a known placeholder or has too low entropy (backend siwe.js would reject it)."; exit 1; }
+          import math, os, sys
+          s = os.environ["JWT_SECRET"]
+          if any(p in s for p in ["CHANGE_THIS_TO_A_LONG_RANDOM_SECRET_MIN_64_CHARS", "your-secret-here", "supersecretkey", "changeme"]):
+              sys.exit(1)
+          h = -sum((s.count(c) / len(s)) * math.log2(s.count(c) / len(s)) for c in set(s))
+          sys.exit(1 if h < 3.5 else 0)
+          PY
           [[ "$MASTER_ENCRYPTION_KEY" =~ ^[a-fA-F0-9]{64}$ ]] || { echo "::error::MASTER_ENCRYPTION_KEY must be exactly 64 hex characters."; exit 1; }
 
       - name: Setup Fly CLI

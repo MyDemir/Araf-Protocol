@@ -258,7 +258,7 @@ tail -f backend/logs/araf.log
 - Fly.io hesabı (backend için)
 - Vercel hesabı (frontend için)
 - BaseScan API anahtarı (`basescan.org/myapikey`)
-- AWS KMS veya HashiCorp Vault (backend `fly.toml` gereği `NODE_ENV=production` ile çalışır ve production'da, testnet dahil, `KMS_PROVIDER=env` reddedilir)
+- AWS KMS veya HashiCorp Vault (backend `fly.toml` gereği `NODE_ENV=production` ile çalışır ve production'da `KMS_PROVIDER=env` reddedilir; tek istisna Base Sepolia demosudur: `NODE_ENV=production` + `EXPECTED_CHAIN_ID=84532` + `ALLOW_ENV_KMS_ON_TESTNET=yes` (RPC'nin 84532 olduğu doğrulanır; mainnet'te asla). Workflow'lu akış için bkz. [DEPLOY_BASE_SEPOLIA.md](../DEPLOY_BASE_SEPOLIA.md))
 
 ### Adım 1 — Kontratları Deploy Et (Base Sepolia)
 
@@ -332,6 +332,7 @@ fly apps create araf-protocol-backend
 
 # Secret'ları ayarla (hepsi birden). NODE_ENV ve PORT zaten fly.toml [env] içinden gelir.
 # Tüm değişkenler için 6. bölüme bakın; Mainnet yalnız zincir/token değerlerinde farklıdır.
+# Not: Base Sepolia demosunda KMS_PROVIDER=env + ALLOW_ENV_KMS_ON_TESTNET=yes istisnası da kullanılabilir (bkz. ../DEPLOY_BASE_SEPOLIA.md); mainnet'te aws/vault şarttır.
 fly secrets set \
   MONGODB_URI="mongodb+srv://<user>:<pass>@cluster.mongodb.net/araf_testnet" \
   REDIS_URL="rediss://:<token>@<host>.upstash.io:6379" \
@@ -392,7 +393,7 @@ vercel --prod
 
 Vercel'de Environment Variables de ayarlanmalıdır (Dashboard → Settings → Environment Variables).
 
-> **Zincir politikası:** frontend production build'lerde (`import.meta.env.PROD`) yalnız Base Mainnet'i açar; Base Sepolia ve Hardhat zinciri yalnız production olmayan build'lere bağlanır (`frontend/src/app/chainPolicy.js`). `main.jsx` üzerinde yapılacak bir düzenleme yoktur; barındırılan bir Sepolia frontend'i production olmayan bir build gerektirir ve bu rehber onu tanımlamaz.
+> **Zincir politikası:** frontend production build'lerde (`import.meta.env.PROD`) varsayılan olarak yalnız Base Mainnet'i açar; `VITE_TARGET_CHAIN=base-sepolia` verilirse production build yalnız Base Sepolia'yı açar (`frontend/src/app/chainPolicy.js`). Hardhat zinciri yalnız production olmayan build'lere bağlanır. `main.jsx` üzerinde yapılacak bir düzenleme yoktur; barındırılan Sepolia frontend'i için aşağıdaki `VITE_TARGET_CHAIN` notuna ve [DEPLOY_BASE_SEPOLIA.md](../DEPLOY_BASE_SEPOLIA.md)'ye bakın.
 
 ### Adım 5 — SIWE Domain'i ve Origin
 
@@ -576,7 +577,7 @@ vercel --prod
 | Parametre | Local | Testnet | Mainnet |
 |-----------|-------|---------|---------|
 | `NODE_ENV` | `development` | `production` | `production` |
-| `KMS_PROVIDER` | `env` | `aws` / `vault` | `aws` / `vault` |
+| `KMS_PROVIDER` | `env` | `aws` / `vault` (veya `env` + `ALLOW_ENV_KMS_ON_TESTNET=yes` istisnası) | `aws` / `vault` |
 | `MockERC20` | ✅ Deploy edilir | ❌ Deploy edilmez (Sepolia token'ları) | ❌ Deploy edilmez |
 | `EXPECTED_CHAIN_ID` | `31337` | `84532` | `8453` |
 | `SIWE_DOMAIN` | `localhost` | frontend host'u (örn. `*.vercel.app`) | gerçek domain |
@@ -890,7 +891,7 @@ HKDF değişikliği sonrası PII'ın yeniden şifrelenmesi için repoda bir ara�
 ### Gerekli / yasak ortam matrisi (production)
 - Zorunlu: `NODE_ENV=production`, `MONGODB_URI`, `REDIS_URL` (TLS), `JWT_SECRET`, `SIWE_DOMAIN`, `SIWE_URI`, `ARAF_ESCROW_ADDRESS`, `BASE_RPC_URL`, `ALLOWED_ORIGINS`, `EXPECTED_CHAIN_ID` (her pozitif tamsayı kabul edilir ama production'da token çözümlemesi yalnız `8453` / `84532` destekler), anahtar değişkenleriyle birlikte `KMS_PROVIDER` (`aws` veya `vault`) ve zincire uygun token adresleri (`BASE_MAINNET_*` / `BASE_SEPOLIA_*` ya da `ARAF_TRACKED_TOKENS`).
 - Worker bootstrap için zorunlu: `ARAF_DEPLOYMENT_BLOCK` veya `WORKER_START_BLOCK` (veya mevcut redis checkpoint).
-- Production'da yasak/güvensiz: `KMS_PROVIDER=env`, `REDIS_TLS_SKIP_VERIFY=true`, wildcard `ALLOWED_ORIGINS=*`, yalnız-localhost fallback origin'leri, `SIWE_DOMAIN=localhost` ve eksik `BASE_RPC_URL`.
+- Production'da yasak/güvensiz: `KMS_PROVIDER=env` (tek istisna: `EXPECTED_CHAIN_ID=84532` + `ALLOW_ENV_KMS_ON_TESTNET=yes`), `REDIS_TLS_SKIP_VERIFY=true`, wildcard `ALLOWED_ORIGINS=*`, yalnız-localhost fallback origin'leri, `SIWE_DOMAIN=localhost` ve eksik `BASE_RPC_URL`.
 - Güvenli geliştirme varsayılanları (yalnız local): localhost `ALLOWED_ORIGINS`, opsiyonel TLS'siz Redis ve mock/token local adresleri.
 
 ### Frontend hosting güvenlik header'ları

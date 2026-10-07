@@ -258,7 +258,7 @@ tail -f backend/logs/araf.log
 - Fly.io account (for backend)
 - Vercel account (for frontend)
 - BaseScan API key (`basescan.org/myapikey`)
-- AWS KMS or HashiCorp Vault (the backend runs with `NODE_ENV=production` per `fly.toml`, and `KMS_PROVIDER=env` is rejected in production, testnet included)
+- AWS KMS or HashiCorp Vault (the backend runs with `NODE_ENV=production` per `fly.toml`, and `KMS_PROVIDER=env` is rejected in production; the only exception is the Base Sepolia demo: `NODE_ENV=production` + `EXPECTED_CHAIN_ID=84532` + `ALLOW_ENV_KMS_ON_TESTNET=yes` (the RPC is verified to be chain 84532; never on mainnet). For the workflow-driven path see [DEPLOY_BASE_SEPOLIA.md](../DEPLOY_BASE_SEPOLIA.md))
 
 ### Step 1 — Deploy Contracts (Base Sepolia)
 
@@ -332,6 +332,7 @@ fly apps create araf-protocol-backend
 
 # Set secrets (all at once). NODE_ENV and PORT already come from fly.toml [env].
 # See section 6 for every variable; Mainnet differs only in the chain/token values.
+# Note: for the Base Sepolia demo the KMS_PROVIDER=env + ALLOW_ENV_KMS_ON_TESTNET=yes exception may also be used (see ../DEPLOY_BASE_SEPOLIA.md); mainnet requires aws/vault.
 fly secrets set \
   MONGODB_URI="mongodb+srv://<user>:<pass>@cluster.mongodb.net/araf_testnet" \
   REDIS_URL="rediss://:<token>@<host>.upstash.io:6379" \
@@ -392,7 +393,7 @@ vercel --prod
 
 Environment Variables must also be set in Vercel (Dashboard → Settings → Environment Variables).
 
-> **Chain policy:** the frontend only enables Base Mainnet in production builds (`import.meta.env.PROD`); Base Sepolia and the Hardhat chain are wired only into non-production builds (`frontend/src/app/chainPolicy.js`). There is no `main.jsx` edit to make; a hosted Sepolia frontend needs a non-production build, which this guide does not define.
+> **Chain policy:** production builds (`import.meta.env.PROD`) enable only Base Mainnet by default; with `VITE_TARGET_CHAIN=base-sepolia` a production build enables only Base Sepolia (`frontend/src/app/chainPolicy.js`). The Hardhat chain is wired only into non-production builds. There is no `main.jsx` edit to make; for a hosted Sepolia frontend see the `VITE_TARGET_CHAIN` note below and [DEPLOY_BASE_SEPOLIA.md](../DEPLOY_BASE_SEPOLIA.md).
 
 ### Step 5 — SIWE Domain and Origin
 
@@ -572,7 +573,7 @@ vercel --prod
 | Parameter | Local | Testnet | Mainnet |
 |-----------|-------|---------|---------|
 | `NODE_ENV` | `development` | `production` | `production` |
-| `KMS_PROVIDER` | `env` | `aws` / `vault` | `aws` / `vault` |
+| `KMS_PROVIDER` | `env` | `aws` / `vault` (or `env` + `ALLOW_ENV_KMS_ON_TESTNET=yes` exception) | `aws` / `vault` |
 | `MockERC20` | ✅ Deployed | ❌ Not Deployed (use Sepolia tokens) | ❌ Not Deployed |
 | `EXPECTED_CHAIN_ID` | `31337` | `84532` | `8453` |
 | `SIWE_DOMAIN` | `localhost` | frontend host (e.g. `*.vercel.app`) | real domain |
@@ -886,7 +887,7 @@ PII re-encryption after the HKDF change has no tool in the repository; see `PII_
 ### Required / forbidden environment matrix (production)
 - Required: `NODE_ENV=production`, `MONGODB_URI`, `REDIS_URL` (TLS), `JWT_SECRET`, `SIWE_DOMAIN`, `SIWE_URI`, `ARAF_ESCROW_ADDRESS`, `BASE_RPC_URL`, `ALLOWED_ORIGINS`, `EXPECTED_CHAIN_ID` (any positive integer is accepted, but token resolution only supports `8453` / `84532` in production), `KMS_PROVIDER` (`aws` or `vault`) with its key variables, and the chain-matching token addresses (`BASE_MAINNET_*` / `BASE_SEPOLIA_*` or `ARAF_TRACKED_TOKENS`).
 - Required for worker bootstrap: `ARAF_DEPLOYMENT_BLOCK` or `WORKER_START_BLOCK` (or existing redis checkpoint).
-- Forbidden/insecure in production: `KMS_PROVIDER=env`, `REDIS_TLS_SKIP_VERIFY=true`, wildcard `ALLOWED_ORIGINS=*`, localhost-only fallback origins, `SIWE_DOMAIN=localhost`, and missing `BASE_RPC_URL`.
+- Forbidden/insecure in production: `KMS_PROVIDER=env` (sole exception: `EXPECTED_CHAIN_ID=84532` + `ALLOW_ENV_KMS_ON_TESTNET=yes`), `REDIS_TLS_SKIP_VERIFY=true`, wildcard `ALLOWED_ORIGINS=*`, localhost-only fallback origins, `SIWE_DOMAIN=localhost`, and missing `BASE_RPC_URL`.
 - Safe development defaults (local only): localhost `ALLOWED_ORIGINS`, optional non-TLS Redis, and mock/token local addresses.
 
 ### Frontend hosting security headers
