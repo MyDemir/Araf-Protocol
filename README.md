@@ -118,10 +118,14 @@ nvm use                            # reads .nvmrc
 # 2. Install all packages / Tüm paketleri kur (contracts + backend + frontend, npm ci)
 npm run setup
 
-# 3. Env files / Ortam dosyaları (şablonlar; gerçek secret commit etmeyin)
-cp backend/.env.example backend/.env
-cp frontend/.env.example frontend/.env
-cp contracts/.env.example contracts/.env
+# 3. Env files / Ortam dosyaları (`npm run setup` bunu zaten çalıştırır; tek başına da çalışır)
+#    Eksik .env'leri .env.example'dan oluşturur, backend/.env için JWT_SECRET ve MASTER_ENCRYPTION_KEY'i
+#    rastgele üretir (ekrana basmaz). Var olan .env'ye dokunmaz; placeholder varsa uyarır,
+#    `node scripts/init-env.js --fix-secrets` ile yeniden üretir.
+#    Creates missing .env files, generates backend secrets, never overwrites existing files.
+npm run init:env
+#    Yerel hardhat düğümü kullanıyorsanız backend/.env içinde BASE_RPC_URL=http://127.0.0.1:8545 ve
+#    EXPECTED_CHAIN_ID=31337 yapın (örnek 8453 prod içindir). Using local hardhat: set EXPECTED_CHAIN_ID=31337.
 
 # 4. Test / Lint (tests live under test/<package>/)
 npm run test:all                   # contracts + backend + frontend + ABI drift

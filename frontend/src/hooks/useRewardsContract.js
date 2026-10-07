@@ -2,11 +2,12 @@ import { useCallback, useMemo } from 'react';
 import { usePublicClient, useWalletClient, useAccount } from 'wagmi';
 import { parseAbi, getAddress } from 'viem';
 import { getSupportedChainsMap } from '../app/chainPolicy';
+import { resolveRevenueVaultAddress } from '../app/envConfig';
 import { decorateContractError } from '../app/contractErrors';
 import { resolveChainMismatch } from './useArafContract';
 
 const REWARDS_ADDRESS = import.meta.env.VITE_REWARDS_ADDRESS;
-const VAULT_ADDRESS = import.meta.env.VITE_REVENUE_VAULT_ADDRESS;
+const VAULT_ADDRESS = resolveRevenueVaultAddress();
 
 const REWARDS_ABI = parseAbi([
   'function epochDuration() view returns (uint256)',

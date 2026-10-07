@@ -6,7 +6,8 @@
     "node": ">=22 <23"
   },
   "scripts": {
-    "setup": "npm --prefix contracts ci && npm --prefix backend ci && npm --prefix frontend ci",
+    "setup": "npm --prefix contracts ci && npm --prefix backend ci && npm --prefix frontend ci && npm run init:env",
+    "init:env": "node scripts/init-env.js",
     "lint": "npm --prefix backend run lint && npm --prefix frontend run lint",
     "build:frontend": "npm --prefix frontend run build",
     "build:frontend:testnet": "VITE_TARGET_CHAIN=base-sepolia npm --prefix frontend run build",
