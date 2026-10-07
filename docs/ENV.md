@@ -44,10 +44,10 @@ Tablolardaki "Nereye girilir" sütunu Base Sepolia/Mainnet için **hedef yeri** 
 >
 > **Frontend de deploy edilecekse ek 3 secret:** `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`.
 >
-> **Opsiyonel:** secret `RELAYER_PRIVATE_KEY`; variable `FLY_APP_NAME` (varsayılan `araf-protocol-backend`), `ADMIN_WALLETS`, `VITE_RPC_URL`.
+> **Opsiyonel:** secret `RELAYER_PRIVATE_KEY`, `GH_VARIABLES_TOKEN` (fine-grained PAT, yalnız bu repo, "Variables: read and write"; tam deploy adresleri otomatik variable yapar), `BASESCAN_API_KEY` (yalnız `verify_contracts=true`); variable `FLY_APP_NAME` (varsayılan `araf-protocol-backend`), `ADMIN_WALLETS`, `VITE_RPC_URL`, `ARAF_REVENUE_VAULT_ADDRESS`, `ARAF_REWARDS_ADDRESS` (rewards ayrı deploy edildiyse; tanımlıysa Fly ve Vercel'e geçer).
 >
-> **Deploy SONRASI (2 variable, elle):** `ARAF_ESCROW_ADDRESS`, `ARAF_DEPLOYMENT_BLOCK`; yalnız sonraki `deploy-runtime-base-sepolia.yml` çalıştırmaları için gerekir
-> (tam deploy workflow'u bunları yalnız özet sayfasına yazar, variable olarak kaydetmez: `deploy-base-sepolia.yml:243`).
+> **Deploy SONRASI (2 variable):** `ARAF_ESCROW_ADDRESS`, `ARAF_DEPLOYMENT_BLOCK`; yalnız sonraki `deploy-runtime-base-sepolia.yml` çalıştırmaları için gerekir.
+> `GH_VARIABLES_TOKEN` secret'ı tanımlıysa tam deploy workflow'u bunları kendisi yazar; tanımlı değilse uyarı verir ve özet sayfasına elle çalıştırılacak `gh variable set` satırlarını basar.
 >
 > Toplam: **13 zorunlu giriş** (8 secret + 5 variable), frontend ile **16**. `contracts/.env`, `fly secrets set` ve Vercel paneli için elle giriş **yok**.
 > Fly uygulaması (`fly apps create`) ve Vercel projesi bir kez elle oluşturulmalı (`DEPLOY_BASE_SEPOLIA.md:44-45`).
@@ -338,7 +338,7 @@ Adresler (`ARAF_ESCROW_ADDRESS`, token adresleri) sır değildir.
 ## 7. Workflow'un otomatik ayarladıkları
 
 İki workflow var: `deploy-base-sepolia.yml` (kontrat + Fly + opsiyonel Vercel) ve `deploy-runtime-base-sepolia.yml` (kontratı yeniden deploy etmeden Fly ve/veya Vercel).
-`deployRewards.js` workflow'lara dahil değildir. Kullanıcı aşağıdaki değerleri **elle girmez**.
+`deployRewards.js` workflow'lara dahil değildir (bilinçli). Kullanıcı aşağıdaki değerleri **elle girmez**. Satır numaraları bu bölümde yaklaşıktır; workflow dosyaları güncellendi, güncel satır için dosyaya bakın.
 
 ### 7.1 Fly secrets: workflow'un yazdıkları (`flyctl secrets import --stage`, sonra `flyctl deploy`)
 
@@ -361,7 +361,9 @@ Tam deploy: `deploy-base-sepolia.yml:141-178` · runtime: `deploy-runtime-base-s
 | `MONGODB_URI`, `REDIS_URL`, `JWT_SECRET`, `MASTER_ENCRYPTION_KEY` | aynı adlı GitHub secret | 158-160, 165 / 146-148, 153 |
 | `RELAYER_PRIVATE_KEY`, `ADMIN_WALLETS` | GitHub secret / variable; **boşsa yazılmaz** | 176-177 / 164-165 |
 
-Workflow'un yazmadığı backend değişkenleri (hepsi opsiyonel/varsayılanlı): `ARAF_REVENUE_VAULT_ADDRESS`, `ARAF_REWARDS_ADDRESS` (rewards workflow dışı, bu yüzden reward mirror ve recorder pasif kalır),
+Koşullu (iki workflow'da da): repo variable `ARAF_REVENUE_VAULT_ADDRESS` / `ARAF_REWARDS_ADDRESS` tanımlıysa (adres regex'iyle doğrulanır) aynı adlarla Fly secret'a yazılır; tanımlı değilse hiçbir şey yazılmaz ve reward mirror/recorder pasif kalır.
+
+Workflow'un yazmadığı backend değişkenleri (hepsi opsiyonel/varsayılanlı):
 `ARAF_TRACKED_TOKENS`, `WORKER_*`, `JOB_*`, `READY_INTERNAL_TOKEN`, `AWS_*`, `VAULT_*` ve diğer ayar değişkenleri.
 
 ### 7.2 Vercel build-env: workflow'un verdikleri (`vercel deploy --prod --build-env ...`)
@@ -375,22 +377,27 @@ Tam: `deploy-base-sepolia.yml:211-228` · runtime: `deploy-runtime-base-sepolia.
 | `VITE_USDT_ADDRESS`, `VITE_USDC_ADDRESS` | aynı kaynak | 224-225 / 220-221 |
 | `VITE_RPC_URL` | GitHub variable `VITE_RPC_URL`; boşsa verilmez | 227 / 223 |
 
-`VITE_API_URL` bilerek verilmez (production'da mutlak URL reddedilir; `/api` `vercel.json` rewrite'ından gider). `VITE_REVENUE_VAULT_ADDRESS`/`VITE_REWARDS_ADDRESS` de verilmez.
+`VITE_REVENUE_VAULT_ADDRESS` / `VITE_REWARDS_ADDRESS`: yalnız repo variable `ARAF_REVENUE_VAULT_ADDRESS` / `ARAF_REWARDS_ADDRESS` tanımlıysa (adres regex'i) verilir.
+
+`VITE_API_URL` bilerek verilmez (production'da mutlak URL reddedilir; `/api` `vercel.json` rewrite'ından gider). Vercel deploy'undan hemen önce workflow, runner üzerindeki `frontend/vercel.json` kopyasında `/api/(.*)` rewrite hedefini `https://${FLY_APP_NAME}.fly.dev/api/$1` olarak yeniden yazar (`FLY_APP_NAME` `^[a-z0-9-]+$` doğrulanır; repo dosyası değişmez). Vercel CLI sürümü sabit (`vercel@62.7.0`).
 
 ### 7.3 Contracts: deploy adımına env olarak verilenler (`contracts/.env` yazılmaz)
 
 `deploy-base-sepolia.yml:87-100`: `CONFIRM_PUBLIC_DEPLOY=yes` (sabit), `DEPLOYER_PRIVATE_KEY`, `BASE_SEPOLIA_RPC_URL` (secret), `TREASURY_ADDRESS`, `FINAL_OWNER_ADDRESS`,
-`BASE_SEPOLIA_USDT_ADDRESS`, `BASE_SEPOLIA_USDC_ADDRESS` (variable). Verilmeyen: `BASESCAN_API_KEY` (workflow verify yapmaz).
+`BASE_SEPOLIA_USDT_ADDRESS`, `BASE_SEPOLIA_USDC_ADDRESS` (variable). `BASESCAN_API_KEY` yalnız `verify_contracts=true` iken (deneysel, `continue-on-error`) ayrı adımda verilir; `deploy.js` adımına verilmez.
 
 ### 7.4 Yalnız GitHub'da anlamı olan adlar (kodda okunmaz)
 
 | Ad | Tür | Ne |
 |---|---|---|
 | `FLY_API_TOKEN` | secret | Fly deploy token'ı (`deploy-base-sepolia.yml:145`, `:183`) |
-| `FLY_APP_NAME` | variable | Fly uygulama adı; varsayılan `araf-protocol-backend` (`:29`). `frontend/vercel.json:5` ile uyuşmazsa workflow durur (`:204`) |
+| `FLY_APP_NAME` | variable | Fly uygulama adı; varsayılan `araf-protocol-backend`. Vercel deploy'unda `vercel.json` rewrite hedefi runner üzerinde bu ada göre yeniden yazılır (uyuşmazlıkta durmaz) |
 | `FRONTEND_DOMAIN` | variable | `SIWE_DOMAIN`, `SIWE_URI`, `ALLOWED_ORIGINS` buradan türer (`:30`, `:173-175`) |
 | `BASE_SEPOLIA_WS_RPC_URL` | secret | Fly'da `BASE_WS_RPC_URL` olur |
 | `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` | secret | Vercel CLI kimliği (`:31-32`, `:197-202`) |
+| `GH_VARIABLES_TOKEN` | secret (opsiyonel) | Tam deploy sonrası `gh variable set ARAF_ESCROW_ADDRESS/ARAF_DEPLOYMENT_BLOCK` için fine-grained PAT (yalnız bu repo, Variables: read and write). Log'a basılmaz |
+| `BASESCAN_API_KEY` | secret (opsiyonel) | Yalnız `verify_contracts=true` (deneysel) |
+| `ARAF_REVENUE_VAULT_ADDRESS`, `ARAF_REWARDS_ADDRESS` | variable (opsiyonel) | Tanımlıysa Fly secret ve Vercel `VITE_*` build-env olarak geçer |
 
 ---
 
@@ -400,14 +407,14 @@ Düzeltilenler "düzeltildi" ile işaretlidir; diğerleri açıktır. (Önceki t
 
 1. **[düzeltildi: bkz. bu dalın commit'i]** **Belgeler yeni testnet KMS istisnasını bilmiyor.** `backend/.env.example:55` ve `:10-11` prod'da `KMS_PROVIDER=env`'in "testnet dahil" reddedildiğini söyler; `docs/TR/DEPLOYMENT_GUIDE.md:261`, `:339` (aws örneği) ve ortam tablosu (`KMS_PROVIDER` testnet = `aws`/`vault`) ile `docs/EN/DEPLOYMENT_GUIDE.md:339` istisnayı anmaz. Oysa kod (`encryption.js:57-63`) ve workflow'lar (`deploy-base-sepolia.yml:163-164`) Sepolia'da `env` + `ALLOW_ENV_KMS_ON_TESTNET=yes` kullanır. `ALLOW_ENV_KMS_ON_TESTNET` yalnız `backend/.env.example:77` (yorum satırı) ve `DEPLOY_BASE_SEPOLIA.md:96`'da geçer.
 2. **[düzeltildi: iki workflow'un Validate adımı]** **Workflow doğrulaması koddan gevşek.** `deploy-base-sepolia.yml:75` `JWT_SECRET` için yalnız uzunluk (≥64) bakar; backend ayrıca entropi ≥3.5 ve placeholder reddi uygular (`siwe.js:94-103`), yani workflow geçip backend açılışta çökebilir. `BASE_SEPOLIA_WS_RPC_URL` workflow'da zorunlu ve `ws*` kabul (`:65`, `:72`); backend'de `BASE_WS_RPC_URL` opsiyonel ve yalnız `wss://` kullanır, `ws://` sessizce HTTP'ye düşer (`eventListener.js:619-621`).
-3. **[kısmen düzeltildi: özet artık kopyalanabilir `gh variable set` satırları yazar; otomatik yazım yok, çünkü GITHUB_TOKEN repo variable yazamaz]** **Tam deploy workflow'u adresleri kalıcı yapmıyor.** `ARAF_ESCROW_ADDRESS` ve `ARAF_DEPLOYMENT_BLOCK` yalnız özet sayfasına yazılır (`deploy-base-sepolia.yml:238-243`); runtime workflow bunları variable olarak ister ve yoksa durur (`deploy-runtime-base-sepolia.yml:85-89`). Aradaki elle adım unutulabilir.
+3. **[düzeltildi: opsiyonel `GH_VARIABLES_TOKEN` secret'ı varsa tam deploy workflow'u `ARAF_ESCROW_ADDRESS`/`ARAF_DEPLOYMENT_BLOCK` variable'larını kendisi yazar; token yoksa uyarı verir ve özet sayfası kopyalanabilir `gh variable set` satırları basar]** **Tam deploy workflow'u adresleri kalıcı yapmıyordu.** `GITHUB_TOKEN` repo variable yazamadığı için ayrı bir fine-grained PAT gerekir (yalnız bu repo, "Variables: read and write"). Token tanımlı değilse elle adım kalır.
 4. **`MONGO_URI` yalnız migration'larda geçerli.** `config/db.js:34` yalnız `MONGODB_URI` okur; `MONGO_URI` yalnız `migrations/normalizeIdentityFields.js:166`, `dedupeRevenueEvents.js:98`, `backfillTerminalTradeStats.js:78`'de yedek.
 5. **Frontend takma adı yarım.** `VITE_REWARDS_VAULT_ADDRESS` yalnız `App.jsx:402`'de okunur; `hooks/useRewardsContract.js:9` yalnız `VITE_REVENUE_VAULT_ADDRESS`'e bakar.
-6. **[düzeltildi: örnekte yalnız-yerel uyarısı eklendi; vercel.json'un elle güncellenmesi açık]** **`frontend/.env.example:11` `VITE_API_URL=http://localhost:4000` içerir; production'da mutlak URL hatadır** (`app/apiConfig.js:27-32`, `App.jsx:29`). Örnek olduğu gibi Vercel'e taşınmamalı (workflow zaten vermez). Backend adresi hâlâ `frontend/vercel.json:5`'e sabit; workflow bunu `FLY_APP_NAME` ile karşılaştırıp uyuşmazlıkta durur (`deploy-base-sepolia.yml:204`), ama dosya elle güncellenmeli.
+6. **[düzeltildi: örnekte yalnız-yerel uyarısı eklendi; Vercel deploy adımı runner üzerindeki `vercel.json` kopyasında `/api` rewrite hedefini `FLY_APP_NAME`'e göre yeniden yazar, repo dosyası değişmez ve uyuşmazlıkta durulmaz]** **`frontend/.env.example:11` `VITE_API_URL=http://localhost:4000` içerir; production'da mutlak URL hatadır** (`app/apiConfig.js:27-32`, `App.jsx:29`). Örnek olduğu gibi Vercel'e taşınmamalı (workflow zaten vermez). Backend adresi repo'daki `frontend/vercel.json:5`'te `araf-protocol-backend` olarak sabit kalır; workflow deploy sırasında runner kopyasını `FLY_APP_NAME`'e çevirir. Workflow dışı (elle) Vercel deploy'unda dosya hâlâ elle güncellenmelidir.
 7. **[düzeltildi]** **`docs/DEPLOY_BASE_SEPOLIA.md:96-97` eskimiş.** Backend istisnasının ve `VITE_TARGET_CHAIN`'in "ayrı iş" olduğunu, yoksa backend'in başlamayacağını söyler; ikisi de artık kodda var (`encryption.js:57-63`, `app/chainPolicy.js:21`). Aynı belge `:14` `BASESCAN_API_KEY`'i GitHub secret olarak listeler ama hiçbir workflow okumaz.
-8. **[kısmen düzeltildi: zincir politikası notu güncellendi; rehberin workflow'dan söz etmemesi açık]** **`docs/TR/DEPLOYMENT_GUIDE.md:395` hâlâ eskimiş.** "Production build yalnız Base Mainnet'i açar, hosted Sepolia frontend'i production olmayan build ister" der; oysa `app/chainPolicy.js:34-39` ve `main.jsx:62` `VITE_TARGET_CHAIN=base-sepolia` ile production build'de yalnız Sepolia'yı açar (`:417` doğru anlatır, `:395` çelişir). Rehber ayrıca elle `fly secrets set`/`.env.production` akışını anlatır, workflow'dan söz etmez.
+8. **[düzeltildi: zincir politikası notu güncellendi; TR/EN DEPLOYMENT_GUIDE Base Sepolia bölümü başına "Önerilen yol: GitHub Actions workflow'u" notu eklendi, elle `fly secrets`/`.env.production` akışı "alternatif/elle" işaretlendi]** **`docs/TR/DEPLOYMENT_GUIDE.md:395` hâlâ eskimiş.** "Production build yalnız Base Mainnet'i açar, hosted Sepolia frontend'i production olmayan build ister" der; oysa `app/chainPolicy.js:34-39` ve `main.jsx:62` `VITE_TARGET_CHAIN=base-sepolia` ile production build'de yalnız Sepolia'yı açar (`:417` doğru anlatır, `:395` çelişir). Rehber ayrıca elle `fly secrets set`/`.env.production` akışını anlatır, workflow'dan söz etmez.
 9. **Örnekte olup kodda okunmayanlar:** `REWARD_BPS`, `CONFIRM_CONFIGURE_REWARDS` (`contracts/.env.example:71-72`), `REWARDS_READ_ONLY`, `REWARDS_SOURCE` (`backend/.env.example:157-158`) etkisiz, yalnız testler için duruyor. `docs/TR/MAINNET_READINESS_CHECKLIST.md:54` `AWS_KMS_KEY_ARN`'ı gerekli env gibi listeler; `backend/.env.example:66` okunmadığını söyler.
 10. **Kodda okunup örnekte olmayan:** `CONFIRM_SWITCH_TREASURY_TO_VAULT` (`rewardsOps.js:38`, yalnız reddetmek için), `NODE_ENV` ve `CODESPACE_NAME` contracts tarafında (`deploy.js:108`, `:301`). `contracts/.env.example:56` `CONFIRM_FRESH_ESCROW_DEPLOY`'u bir onay gibi sunar; kod public'te asla yeni escrow deploy etmez, yalnız hata metnini değiştirir (`deployRewards.js:73-77`).
 11. **`backend/.env.example` kopyalanınca olduğu gibi çalışmaz (bilinçli):** `JWT_SECRET` örneği 60 karakter (`:30`), kod en az 64 ister (`siwe.js:95`); `MASTER_ENCRYPTION_KEY` örneği (`:75`) 64 hex değil (`encryption.js:114`); `EXPECTED_CHAIN_ID=8453` örneği (`:83`) yerelde RPC farklıysa uyuşmazlık hatası verir (`expectedChain.js:55-58`).
 12. **Prod'da fail-fast olup örnekte az vurgulananlar:** `JWT_SECRET` prod'a özel değil, **her ortamda** zorunlu (`siwe.js:94`, modül yüklenirken; `/ready` de `health.js:96-99` ile ister). Yalnız-localhost `ALLOWED_ORIGINS` açılışta süreci durdurur (`app.js:161-163`). `ARAF_DEPLOYMENT_BLOCK`/`WORKER_START_BLOCK` ve Redis checkpoint yoksa prod'da worker `throw` eder (`eventListener.js:1098-1100`).
-13. **Rewards workflow dışı.** Workflow'lar `ARAF_REVENUE_VAULT_ADDRESS`/`ARAF_REWARDS_ADDRESS` (Fly) ve `VITE_REVENUE_VAULT_ADDRESS`/`VITE_REWARDS_ADDRESS` (Vercel) yazmaz; rewards ayrı operasyon (`DEPLOY_BASE_SEPOLIA.md:5`). Sepolia demosunda reward mirror ve recorder, bu değişkenler elle eklenene kadar pasif kalır.
+13. **[düzeltildi: rewards deploy'u bilinçli olarak workflow dışı kalır; ancak repo variable `ARAF_REVENUE_VAULT_ADDRESS`/`ARAF_REWARDS_ADDRESS` tanımlıysa (adres regex'iyle doğrulanır) her iki workflow bunları Fly secret (aynı adlar) ve Vercel build-env (`VITE_REVENUE_VAULT_ADDRESS`, `VITE_REWARDS_ADDRESS`) olarak geçirir; tanımlı değilse hiçbir şey yazılmaz]** **Rewards workflow dışı.** Rewards ayrı operasyondur (`DEPLOY_BASE_SEPOLIA.md`); adresler variable olarak girilene kadar Sepolia demosunda reward mirror ve recorder pasif kalır.
