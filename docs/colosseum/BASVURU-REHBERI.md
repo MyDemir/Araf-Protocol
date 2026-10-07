@@ -5,17 +5,41 @@
 
 ---
 
+## Ekosistem Track'leri (8 Adet)
+
+Kayıt sırasında en fazla **3 track** seçebilirsiniz. Her gönderim **genel ödüllere de** girer. Track ödülleri genel ödüllere ektir. (llms-full.txt:71-110)
+
+### Yüksek Ödüllü Track'ler ($100K each)
+
+- **Solana:** 10 ürün × $10K = $100K
+- **Tempo:** 10 ürün × $10K = $100K
+- **Hyperliquid:** 10 ürün × $10K (Hypercore veya HyperEVM)
+- **Zcash:** 10 ürün × $10K (chain veya asset)
+
+### Düşük Ödüllü Track'ler ($25K each)
+
+- **Ethereum L1:** 5 ürün × $5K = $25K
+- **Base:** 5 ürün × $5K = $25K
+- **Arbitrum:** 5 ürün × $5K = $25K
+- **Robinhood Chain:** 5 ürün × $5K = $25K
+
+**Önemli:** Colosseum'un accelerator ve venture fonu **hala Solana kurucularını** destekliyor. Başka chain'de inşa ederseniz genel ödüllere ve kendi track'inize girersiniz ama accelerator'e giremezsiniz. (llms-full.txt:73-75)
+
+---
+
 ## Colosseum Nedir?
 
-Colosseum, Solana ekosisteminin en büyük startup yarışması ve ön-tohumlama fon hava girişidir. İlk kez tüm blockchain'lere açıldı, ancak başarılı vergi (accelerator) parası Solana kurucularının arkasında kalıyor.
+Colosseum, Solana ekosisteminin en büyük startup yarışması ve ön-tohumlama fonu işletmesidir. İlk kez tüm blockchain'lere açıldı, ancak başarılı accelerator (hızlandırma programı) parası Solana kurucularının arkasında kalıyor. Colosseum Org LLC şirketi tarafından bağımsız olarak yönetiliyor. (llms-full.txt:12)
 
 **Temel rakamlar:**
-- **Ödül havuzu:** $840,000 (genel ödüller + ekosistem trackları)
-- **Accelerator fonu:** $2,5M, başarılı takımlar $250K ön-tohumlama + 12 hafta San Francisco'da
-- **Türkiye havuzu:** 10,000 USDG (Superteam Earn üzerinden, Colosseum'un üstüne)
+- **Ödül havuzu:** $840,000 (genel ödüller + 8 ekosistem track'i)
+- **Venture fonu:** $2,5M, Colosseum'un kendi yatırım fonu
+- **Accelerator:** Başarılı takımlar $250K ön-tohumlama + 12 hafta San Francisco'da (ilk 2 hafta şehirde, kalan 10 hafta uzaktan olabilir) (llms-full.txt:90)
+- **Türkiye havuzu:** 10,000 USDG (Superteam Earn üzerinden, Colosseum ödüllerine ek)
 - **Geçmiş katılım:** 9,000+ ürün (tüm Colosseum tarihinde)
+- **Geçmiş yatırımlar:** 74 portfolio startup, $60M Fund I (llms-full.txt:59-62)
 
-**Amaç:** Bu bir hackathon değil, ön-tohumlama hunisi. Jüriler startup yatırımcıları gibi puan veriyor; 7 kriterden 5'i iş kriterleri. (llms-full.txt:65-85, 87)
+**Amaç:** Bu bir hackathon değil, ön-tohumlama hunisi. Jüriler startup yatırımcıları gibi puan veriyor; 7 kriterden 5'i iş kriterleri. (llms-full.txt:55-87)
 
 ---
 
@@ -93,7 +117,7 @@ Yapılacaklar:
 **⚠️ TAKVIM UYARISI:** Colosseum California saati kullanıyor, Türkiye 10 saat öncede. 12 Ekim 23:59 PT = **13 Ekim 09:59 Türkiye saati** (llms-full.txt:16, 226)
 
 Yapılacaklar:
-- [ ] Pitch video (max 2 min): Problem, solution, team, traction. Founder sesi (voiceover değil). Public project page'de.
+- [ ] Pitch video (max 2 min): Problem, solution, team, traction. Founder sesi (voiceover değil). Public project page'de. ⚠️ Kaynakta çelişki: llms-full.txt:136'da max 3 dk, llms-full.txt:222/499'da max 2 dk. Güvenli olmak için 2 dakika kalın.
 - [ ] Demo video (max 3 min): Ürün çalışırken. Technical. İkinci pitch değil. Ayrı upload.
 - [ ] Repo publish et: Private kalırsa `hackathon@colosseum.com`'e erişim ver
 - [ ] **Superteam Türkiye havuzuna da gönder** - Aynı proje, iki ayrı gönderim (Colosseum portal + Earn listing) (llms-full.txt:225, 249)
@@ -169,50 +193,81 @@ Aşağıda dokuz madde; her biri daha önce bir takımın başvurusunu düşürm
 
 ## Teslim Formu Alanları (Forma Hazırlık)
 
-**⚠️ Not:** Tüm cevapları önceden bir dokümanda yazı, karakter limitlerine uydu, sonra yapıştır. Forma birinci kez cevap yazma hızını düşürüyor. (llms-full.txt:621-622)
+**⚠️ Not:** Tüm cevapları önceden bir dokümanda yaz, karakter limitlerine uydu, sonra yapıştır. Forma ilk kez cevap yazma hızını düşürüyor; önceden hazırlamak çok daha hızlıdır. (llms-full.txt:592-598)
 
 **Submit butonu:** 6 Ekim 4:00 PT'de açılıyor. Taslak kaydedilebilir ama beklemene gerek yok - hemen başla. (llms-full.txt:221)
 
-### Tier 1: Public Sayfada Görülür (llms-full.txt:600-616)
+### Tier 1: Public Sayfada Görülür (llms-full.txt:599-611)
 
-- Project name
-- Brief description (max 500 char) - one-liner değişmeden
-- Project website (optional)
-- Category
-- Team primary location - **Türkiye seç**
-- Logo/graphic (JPEG/PNG/WEBP/GIF, max 20MB)
-- GitHub link - **Org/profile değil, direct repo**
-- **Pitch video** (max 2 min)
-- X profile
+Her yer linki olan kişi görür. Yabancı için yaz, jüri için değil.
 
-### Tier 2: Jürilerle Paylaşılır, Public Değil (llms-full.txt:618-642)
+- **Project name** - Ürün adı
+- **Brief description** (max 500 char) - Kendi one-liner'ın, değiştirilmeden
+- **Project website** (optional)
+- **Product category** - Birden fazla fit ederse en yakını seç
+- **Team primary location** - **TÜRKIYE seç** (Türkiye havuzuna girmenin koşulu)
+- **Logo/graphic** (JPEG/PNG/WEBP/GIF, max 20MB) - Sıkıştırmadan önce
+- **GitHub link** - Doğrudan repo linki (org/profile sayfası değil). Private kalabilir ama `hackathon@colosseum.com`'e erişim ver.
+- **Pitch video** (max 2 min) - Kendi sesin ve yüzün; Loom veya YouTube
+- **X profile** - Doğrulanmış hesap
 
-- Neyi inşa ediyorsun, kimin için? (max 1000 char)
-- Neden bunu karar verdin, neden şimdi? (max 1000 char)
-- Hangi teknolojiler? (developer tools, AI tools dahil)
-- Hangi chain'ler? (Claim değil, gerçekten entegre olanlar)
-- **Bu chain'leri nasıl kullanıyorsun?** (max 500 char) - ZORLU entegrasyonlar burada yakalanır
-- Mobile-focused dApp mı?
-- Team Telegram contact (prize/accelerator için)
-- Ekipte olmayan ama katkı yapan? (max 600 char)
-- Başka? (max 500 char, optional ama yararlı)
-- **Demo video** (max 3 min, ayrı upload)
-- Live product link + erişim talimatları
+### Tier 2: Jürilerle Paylaşılır, Public Değil (llms-full.txt:613-627)
 
-### Tier 3: Accelerator Screening (Private, llms-full.txt:643-663)
+Takımı, jüriyi ve Colosseum'u görür. Jüri her şeyi izlemeden önce bunu oku.
 
-Accelerator'u istemiyor da olsan cevapla (required ve dönem değil).
+- **Ne inşa ediyorsun ve kimin için?** (max 1000 char)
+- **Neden bunu karar verdin ve neden şimdi?** (max 1000 char)
+- **Hangi teknolojileri ve AI araçlarını kullanıyorsun?** - Developer tools de saydığın gibi AI tools'ı da saydığınızı belirt
+- **Hangi chain'leri kullanıyorsun?** - Claim değil, gerçekten entegre olanlar
+- **Bu chain'leri nasıl kullanıyorsun?** (max 500 char) - **ZORLAMA entegrasyonlar burada yakalanır. Ürün zincir olmadan var olabiliyorsa bunu derinlemesine savunmanız gerekir.**
+- **Mobile-focused dApp mı?** (Evet/Hayır)
+- **Takım Telegram iletişim bilgisi** - Prize dağıtımı ve accelerator görüşmeleri buradan yapılır; kontrol eden biri olsun
+- **Ekipte olmayan ama önemli iş yapan var mı?** (max 600 char, dürüst cevapla)
+- **Jürinin bilmesi gereken başka şey?** (max 500 char, optional ama yardımcı olabilir)
+- **Demo video** (max 3 min, Pitch'ten ayrı upload) - Canlı ürün; slide deck değil, code walkthrough değil
+- **Live product link** + erişim talimatları (gerekli ise)
 
-- İnsanlar bunu gerçekten istediğini nasıl biliyorsun? (max 1000 char)
-- Ne kadar ilerledin? Kullanıcı var mı? (max 1000 char)
-- Bu alanda başka kimler inşa ediyor, onlar neyi yanlış yapıyor? (max 1000 char)
-- Para modeli nedir? (max 500 char)
-- Her üye ne kadar süredir bunun üzerinde, full-time mi? (max 500 char)
-- Her üyenin konumu, yüz yüze çalışıyor mu? (Post-funding değişir mi?)
-- Yes/no: Legal entity kurmuş mu?
-- Yes/no: Yatırım almış mı?
-- Yes/no: Şu anda fundraising yapıyor mu?
-- Yes/no: Live token var mı?
+### Tier 3: Accelerator Screening (Private, llms-full.txt:629-640)
+
+Sadece Colosseum ve organizatörler görür. Accelerator'ü istemiyor da olsan zorunlu; bu tabda Colosseum kime bakacağına karar veriyor.
+
+- **İnsanlar bunu gerçekten ihtiyaç duydukları için mi, yoksa gelecekte mi isteyecekler?** (max 1000 char)
+- **Ne kadar ilerledin? Kullanıcın var mı?** Mümkün kadar spesifik ol. (max 1000 char)
+- **Bu alanda başka kim inşa ediyor ve onlar neyi yanlış yapıyorlar?** (max 1000 char)
+- **Nasıl para kazanıyorsun veya kazanmayı planlıyorsun?** (max 500 char)
+- **Her biriniz bunun üzerinde ne kadar zamandır çalışıyorsunuz? Full-time mi?** (max 500 char)
+- **Takım üyeleri nerede yaşıyor ve yüz yüze çalışıyor musunuz?** Funding sonrası değişir mi? (max 500 char)
+- **Evet/Hayır:** Legal entity (şirket) kurdunuz mu?
+- **Evet/Hayır:** Yatırım aldınız mı?
+- **Evet/Hayır:** Şu an fundraising yapıyor musunuz?
+- **Evet/Hayır:** Canlı bir token'ınız var mı?
+
+**Not:** "Hayır" demek sorun değil. Açık uçlu soruları boş bırakmak daha kötü okunur. Accelerator screening'e basit cevaplar en iyi göstergedir.
+
+---
+
+## Diskalifikasyon Kuralları (2 Tane)
+
+**Bu stil kuralı değil. İki takım zaten kapısı kapatılmış.** (llms-full.txt:537-548)
+
+### 1. Bir Ürün Per Takım, Bir Ürün Per Kişi
+
+- **Bir takım yalnızca bir ürün gönderebilir**
+- **Bir kişi yalnızca bir gönderimde yer alabilir**
+- İki proje gönderemezsin
+- İki submission'a görünemezsin
+
+### 2. Eski Kod Açıklamak (Zorunlu)
+
+- Yarışma penceresinden **önce** başlayabilir ve kendi kodunuzu yeniden kullanabilirsiniz
+- **FAKAT** sadece pencere **içinde** yapılan iş puanlanır
+- **Tüm önceki geliştirmeyi gönderim formunda beyan ETMELISINIZ**
+
+**Gizleme cezası:** Diskalifikasyon + gelecek hackathon'lardan ban + ödül revoke
+
+**Açıklama cezası:** Sıfır. Başlayan takımlar iyi performans gösterebilir. Açıklamak risk değil.
+
+**Not:** Başka insanların açık kaynağını kullanmak izin veriliyor ve teşvik ediliyor. Bu kural sadece kendi önceki kodunuz hakkında. (llms-full.txt:547)
 
 ---
 
@@ -353,28 +408,94 @@ Max 3 dakika. Teknik *nasıl*. Slide deck değil, code walkthrough değil. Canl�
 
 ---
 
-## Sonrası: Hedefiniz Başarıdan Sonra
+## Sonrası: Jüri Süreci ve Kazandıktan Sonra
 
-### Kazanmazsan da (llms-full.txt:556-592)
+### Jüri Süreci (llms-full.txt:555-567)
 
-- **Momentum:** Deadline sonrası 2 hafta jüriler ve investor'ler bakar. Prize hunters durur, builders devam eder.
-- **İlk defada kazanış nadir** - Unruggable 4 Colosseum hackathon'a katıldı (honor mention → track win → Grand Championship)
-- **Top group placement = accelerator decision** - Tek top spot değil
+- **Deadline:** 12 Ekim 23:59 PT
+- **Sonuçlar:** 5 Aralık civarında (7 hafta)
+- **Momentum dönemi:** Deadline sonrası 2 hafta, jüriler ve yatırımcılar takip ediyor. Prize hunters durur, builders devam eder.
+- **Panel çağrısı:** Shortlist'e girenler 15 dakikalık görüşmeye çağrılır. Yeni demo değil; "Geçen hafta ne ship ettiniz?" "Full-time misiniz?" sorularıyla velocity ve commitment kontrol edilir. (llms-full.txt:285-286)
 
-### Accelerator ve Hibeler (llms-full.txt:573-592)
+### İlk Defada Kazanış Nadirdir (llms-full.txt:563-567)
 
-**Accelerators:**
-- Colosseum Accelerator: $250K founder-friendly (sadece hackathon yolu)
-- Alliance DAO: $500K ~7%
-- Orange DAO: $100K MFN SAFE
+- Unruggable 4 Colosseum hackathon'a katıldı: honor mention → track win → Grand Championship
+- **Top group placement = accelerator seçimi** - Sadece Grand Champion değil, top 20 de accelerator alimenter'dir
+- Colosseum bu başlı web sitesinin "Hall of Fame" bölümünde bulabilirsiniz
 
-**Grants:**
-- Solana Foundation
+### Accelerator Kanalları (llms-full.txt:569-575)
+
+**Colosseum Accelerator (Tek yol: hackathon yoluyla)**
+- $250K ön-tohumlama (founder-friendly şartlar)
+- 12 hafta program (ilk 2 hafta San Francisco, kalan 10 hafta uzaktan)
+
+**Diğer Accelerator'ler**
+- Alliance DAO: $500K (~7% equity)
+- Orange DAO: $100K (MFN SAFE)
+- Monke Foundry
+- Colosseum Eternal: $25K USDC (self-paced 4 hafta sprint, şu anda paused, Kasım civarı açılması bekleniyor)
+
+### Grant Kanalları (llms-full.txt:577-584)
+
+- Solana Foundation grants
 - Solana Mobile builder grants
 - Circle developer grants
 - Superteam Earn
 
-**Membership:** Hackathon'da gerçek şey gönderdiysen, Superteam Türkiye membership açısından kredibil - yerel hibeler + perks kapısı.
+### Superteam Türkiye Membership (llms-full.txt:584)
+
+Hackathon'da gerçek bir şey gönderdiğin takdirde, **Superteam Türkiye membership** için kredibil sayılırsın:
+- Yerel hibeler
+- Perks ve networking
+- Post-hackathon desteği
+
+---
+
+## Superteam Türkiye Desteği
+
+Yarışmada yalnız değilsin. (llms-full.txt:1210-1236)
+
+### Haftalık Etkinlikler (Tüm ücretsiz, hiçbiri zorunlu değil)
+
+- **Çarşamba 19:00** - Colosseum Community Call (X Spaces): Haftanın teması burada belirlenir, takımlar birbirini bulur
+- **Cuma 10:00** - Coworking Fridays (Kolektif House Levent, İstanbul): Tüm gün, takıldığınız şeyi getirin
+- **Cuma 19:00** - Colosseum Office Hours (Google Meet): Bire bir - Fikir doğrulama, mimari, sunum ve video geri bildirimi
+- **Cumartesi 14:00** - Shipyard (Nişantaşı + livestream): Dikey derinlemesine (AI/compute, payments/corridors, consumer GTM)
+
+[Takvim: https://luma.com/superteamtr](https://luma.com/superteamtr)
+
+### Üç Destek Seviyesi
+
+**Orientation (3-21 Eylül):** Orientation formu doldur
+- Kickoff ve workshop davetleri
+- Fikir doğrulama slotu
+- Cofounder matching
+- Form: https://forms.gle/EELv1S3eD1nEytrq7
+
+**Acceleration (22 Eylül - 6 Ekim):** Yoğun destek iste
+- One-liner ve blurb iterasyonu
+- Kamera ve ses kayıt desteği
+- Jüriye tanıtım
+- Telegram: @trench_survivor
+
+**Post-hackathon (6 Ekim sonrası):** Sonrası destek iste
+- Grant ve accelerator desteği
+- Launch amplifikasyon
+- Membership gözden geçirmesi
+- Telegram: @trench_survivor
+
+### Neler Beklemeli
+
+- Fikir doğrulama ve gap analizi
+- Teknik yönlendirme (mimari, stack seçimi, ne kesecek)
+- Pitch malzeme geri bildirimi (deck, video, demo - birden fazla tur)
+- Upload öncesi demo ve pitch video feedback
+
+### Soru Sor (Herkes Yarar)
+
+Telegram grubunda soru sor. Bir takımın cevapı tüm takımlara yardımcı olur.
+
+[Telegram: https://t.me/+3sWAzL4fgPViMjU8](https://t.me/+3sWAzL4fgPViMjU8)
 
 ---
 
@@ -403,10 +524,11 @@ Teslim öncesi, başvurunuzu gözden geçirin:
 - [ ] 1-2 milestone Superteam Türkiye'den amplifikasyon istendi
 
 ### Videolar ve Malzeme
-- [ ] Pitch video (max 2 min): Problem → Solution → Demo → Team, founder sesi, ilk 10s hook'ü açık
-- [ ] Demo video (max 3 min): Technical, ürün canlı, not slide, not code walkthrough
-- [ ] Logo/graphic (JPEG/PNG/WEBP/GIF, 20MB)
-- [ ] Videoları takım dışından birinin izleyebileceğini test ettiniz
+- [ ] Pitch video (max 2 min): Problem → Solution → Demo → Team yapısı, founder sesi (voiceover değil), ilk 10 saniyede hook açık
+- [ ] Demo video (max 3 min): Technical, ürün canlı çalışırken, değil slide, değil code walkthrough
+- [ ] Logo/graphic (JPEG/PNG/WEBP/GIF, max 20MB)
+- [ ] Tüm videoları takım dışından birinin izleyebileceğini test ettiniz
+- [ ] Pitch video linkini doğru yerde (public project page'de) upload ettiniz
 
 ### Form Hazırlığı
 - [ ] Tüm Tier 1 cevapları doc'da yazılı ve karakter limiti kontrol edilmiş
@@ -414,11 +536,12 @@ Teslim öncesi, başvurunuzu gözden geçirin:
 - [ ] Tier 3 (accelerator) cevapları yazılı ve gözden geçirilmiş
 - [ ] Chain integration kuralını oku: "Bu chain'leri nasıl kullanıyorsun?"
 
-### Ekip
-- [ ] Her üye Colosseum Arena'da kendi hesabıyla kaydolmuş
-- [ ] Project page'de tüm üyeler görülüyor
-- [ ] Hiçbir üye başka takımda değil
-- [ ] Telegram kontağı vermiş (prize/accelerator iletişim)
+### Ekip ve Kurallar
+- [ ] Her üye Colosseum Arena'da kendi hesabıyla kaydolmuş (eksik üye = diskalifikasyon)
+- [ ] Project page'de tüm üyeler görülüyor (kontrol et: hiç biri eksik mı?)
+- [ ] Hiçbir üye başka takımda yer almıyor (bir kişi = bir takım kuralı)
+- [ ] Telegram kontağı vermiş (prize/accelerator iletişim için kontrol eden biri olsun)
+- [ ] Daha önceki kod varsa gönderim formunda açıklanmış (gizleme = diskalifikasyon)
 
 ### Superteam Türkiye Havuzu
 - [ ] Superteam Türkiye orientation formu doldurulmuş
@@ -435,15 +558,32 @@ Teslim öncesi, başvurunuzu gözden geçirin:
 
 ## Kaynaklar ve Linkler
 
-- **Kayıt (Superteam Türkiye referral):** https://colosseum.com?ref=superteamtr-2026
-- **Orientation form:** https://forms.gle/EELv1S3eD1nEytrq7
-- **Superteam Türkiye Earn listing:** https://superteam.fun/earn/listing/submit-crypto-worlds-fair-project-for-turkish-builders/
+### Resmi Colosseum Kaynakları
+- **Resmi web sitesi:** https://colosseum.com/worldsfair
+- **Resmi kurallar (PDF):** https://colosseum.com/legal/Crypto%20World's%20Fair%20Hackathon%20Rules.pdf
+- **Developer kaynakları:** https://colosseum.com/worldsfair/resources
+- **Colosseum FAQ:** https://colosseum.com/hackathon#faqs
 - **Cofounder Matching:** https://colosseum.com/cofounder-matching
+- **Hall of Fame (geçmiş kazananlar):** https://colosseum.com/arena/hackathon/hall-of-fame
+- **Colosseum Discord (workshop canlı yayın):** https://colosseum.com/discord
+- **Colosseum Copilot (5,400+ projeye karşı gap analizi):** https://colosseum.com/copilot
+
+### Superteam Türkiye Kaynakları
+- **Kayıt (Superteam referral linki):** https://colosseum.com?ref=superteamtr-2026
+- **Orientation form:** https://forms.gle/EELv1S3eD1nEytrq7
+- **Türkiye Earn listing:** https://superteam.fun/earn/listing/submit-crypto-worlds-fair-project-for-turkish-builders/
 - **Telegram grup:** https://t.me/+3sWAzL4fgPViMjU8
-- **Colosseum hakikat kontrol:** https://blog.colosseum.com/how-to-win-a-colosseum-hackathon
-- **Resmi kurallar:** https://colosseum.com/legal/ (PDF)
-- **Luma Calendar (Office Hours, Community Calls):** https://luma.com/superteamtr
-- **Superteam Türkiye Colosseum hub:** https://tr.superteam.fun/colosseum/
+- **Luma Calendar (Office Hours + Community Calls):** https://luma.com/superteamtr
+- **Superteam Türkiye hub:** https://tr.superteam.fun/colosseum/
+
+### Eğitim Kaynakları
+- **How to Win a Colosseum Hackathon** (Colosseum resmi): https://blog.colosseum.com/how-to-win-a-colosseum-hackathon
+- **Perfecting Your Submission** (Colosseum): https://blog.colosseum.com/perfecting-your-hackathon-submission
+- **Superteam Balkan en kapsamlı rehberi:** https://stblkn.notion.site/colosseum-hackathon
+- **Superteam Idea Bank:** https://superteam.fun/build/ideas
+- **Superteam developer araçları:** https://superteam.fun/build/developer-tools
+- **solana.new (AI skills ve MCP):** https://www.solana.new/
+- **Superteam hackathon headquarters:** https://superteam.fun/hackathon
 
 ---
 
