@@ -248,6 +248,9 @@ tail -f backend/logs/araf.log
 
 ## 3. Public Testnet — Base Sepolia
 
+> **Önerilen yol: GitHub Actions workflow'u** ([docs/DEPLOY_BASE_SEPOLIA.md](../DEPLOY_BASE_SEPOLIA.md)). Kontrat, Fly backend ve Vercel frontend deploy'u; Fly secrets ve Vercel build-env dahil, secrets/variables girilerek otomatik yapılır.
+> Bu bölümdeki Adım 1–5 (elle `fly secrets set`, `.env.production` vb.) **alternatif/elle** akıştır; workflow kullanılmayacaksa izlenir.
+
 ### Ön Gereksinimler
 - MetaMask'ta Base Sepolia ağı yapılandırılmış
 - Base Sepolia ETH (Faucet: `faucet.quicknode.com` veya `sepoliafaucet.com`)

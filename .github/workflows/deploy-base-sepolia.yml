@@ -11,6 +11,11 @@ on:
         required: false
         default: false
         type: boolean
+      verify_contracts:
+        description: "Experimental: verify ArafEscrow on Basescan (needs BASESCAN_API_KEY secret)"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -38,7 +43,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .nvmrc
 
       - name: Validate required config
         shell: bash
@@ -143,6 +148,31 @@ jobs:
             })().catch((e) => { console.error("::error::" + e.message); process.exit(1); });
           '
 
+      # Deneysel: hardhat-verify; constructor argümanı (treasury) ve linkli library'ler manifest'ten üretilir.
+      # Başarısızlık deploy'u durdurmaz.
+      - name: Verify escrow on Basescan (experimental)
+        if: ${{ inputs.verify_contracts }}
+        continue-on-error: true
+        working-directory: contracts
+        shell: bash
+        env:
+          BASESCAN_API_KEY: ${{ secrets.BASESCAN_API_KEY }}
+          BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+        run: |
+          set -euo pipefail
+          test -n "$BASESCAN_API_KEY" || { echo "::error::BASESCAN_API_KEY secret is required when verify_contracts is true."; exit 1; }
+          node -e '
+            const fs = require("fs");
+            const m = JSON.parse(fs.readFileSync("deployments/base-sepolia.json", "utf8"));
+            const d = process.env.RUNNER_TEMP;
+            fs.writeFileSync(d + "/verify-args.js", "module.exports = " + JSON.stringify([m.treasuryAddress]) + ";\n");
+            fs.writeFileSync(d + "/verify-libs.js", "module.exports = " + JSON.stringify(m.libraries) + ";\n");
+          '
+          npx hardhat verify --network base-sepolia \
+            --constructor-args "$RUNNER_TEMP/verify-args.js" \
+            --libraries "$RUNNER_TEMP/verify-libs.js" \
+            "$ESCROW"
+
       - name: Setup Fly CLI
         uses: superfly/flyctl-actions/setup-flyctl@1.5
 
@@ -160,8 +190,14 @@ jobs:
           BASE_SEPOLIA_WS_RPC_URL: ${{ secrets.BASE_SEPOLIA_WS_RPC_URL }}
           RELAYER_PRIVATE_KEY: ${{ secrets.RELAYER_PRIVATE_KEY }}
           ADMIN_WALLETS: ${{ vars.ADMIN_WALLETS }}
+          REVENUE_VAULT_ADDRESS: ${{ vars.ARAF_REVENUE_VAULT_ADDRESS }}
+          REWARDS_ADDRESS: ${{ vars.ARAF_REWARDS_ADDRESS }}
         run: |
           set -euo pipefail
+          ADDRESS_RE='^0x[a-fA-F0-9]{40}$'
+          for n in REVENUE_VAULT_ADDRESS REWARDS_ADDRESS; do
+            if [ -n "${!n}" ] && ! [[ "${!n}" =~ $ADDRESS_RE ]]; then echo "::error::$n variable must be a 0x + 40 hex address."; exit 1; fi
+          done
           {
             printf '%s=%s\n' NODE_ENV production
             printf '%s=%s\n' MONGODB_URI "$MONGODB_URI"
@@ -184,6 +220,8 @@ jobs:
             printf '%s=%s\n' ALLOWED_ORIGINS "https://$FRONTEND_DOMAIN"
             if [ -n "$RELAYER_PRIVATE_KEY" ]; then printf '%s=%s\n' RELAYER_PRIVATE_KEY "$RELAYER_PRIVATE_KEY"; fi
             if [ -n "$ADMIN_WALLETS" ]; then printf '%s=%s\n' ADMIN_WALLETS "$ADMIN_WALLETS"; fi
+            if [ -n "$REVENUE_VAULT_ADDRESS" ]; then printf '%s=%s\n' ARAF_REVENUE_VAULT_ADDRESS "$REVENUE_VAULT_ADDRESS"; fi
+            if [ -n "$REWARDS_ADDRESS" ]; then printf '%s=%s\n' ARAF_REWARDS_ADDRESS "$REWARDS_ADDRESS"; fi
           } | flyctl secrets import --stage -a "$FLY_APP_NAME"
 
       - name: Deploy backend to Fly
@@ -209,12 +247,28 @@ jobs:
           test -n "$VERCEL_TOKEN" || { echo "::error::VERCEL_TOKEN secret is required when deploy_frontend is true."; exit 1; }
           test -n "$VERCEL_ORG_ID" || { echo "::error::VERCEL_ORG_ID secret is required when deploy_frontend is true."; exit 1; }
           test -n "$VERCEL_PROJECT_ID" || { echo "::error::VERCEL_PROJECT_ID secret is required when deploy_frontend is true."; exit 1; }
-          # Production frontend /api'yi vercel.json rewrite'ı ile çağırır (mutlak VITE_API_URL prod'da reddedilir).
-          grep -q "https://$FLY_APP_NAME.fly.dev/api/" frontend/vercel.json || { echo "::error::frontend/vercel.json /api rewrite destination does not match https://$FLY_APP_NAME.fly.dev. Update vercel.json or FLY_APP_NAME."; exit 1; }
+
+      # Repo dosyası değişmez; yalnız runner üzerindeki kopyada /api rewrite hedefi FLY_APP_NAME'e çevrilir.
+      - name: Point vercel.json /api rewrite at Fly app
+        if: ${{ inputs.deploy_frontend }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$FLY_APP_NAME" =~ ^[a-z0-9-]+$ ]] || { echo "::error::FLY_APP_NAME must match ^[a-z0-9-]+$."; exit 1; }
+          node -e '
+            const fs = require("fs");
+            const p = "frontend/vercel.json";
+            const cfg = JSON.parse(fs.readFileSync(p, "utf8"));
+            const r = (cfg.rewrites || []).find((x) => x.source === "/api/(.*)");
+            if (!r) throw new Error("vercel.json has no /api/(.*) rewrite");
+            r.destination = "https://" + process.env.FLY_APP_NAME + ".fly.dev/api/$1";
+            fs.writeFileSync(p, JSON.stringify(cfg, null, 2) + "\n");
+            console.log("vercel.json /api rewrite destination: " + r.destination);
+          '
 
       - name: Install Vercel CLI
         if: ${{ inputs.deploy_frontend }}
-        run: npm install -g vercel@latest
+        run: npm install -g vercel@62.7.0
 
       # VITE_API_URL bilerek verilmez: frontend/src/app/apiConfig.js prod'da mutlak URL'i reddeder, /api rewrite kullanılır.
       - name: Deploy frontend to Vercel
@@ -224,6 +278,8 @@ jobs:
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VITE_RPC_URL: ${{ vars.VITE_RPC_URL }}
+          REVENUE_VAULT_ADDRESS: ${{ vars.ARAF_REVENUE_VAULT_ADDRESS }}
+          REWARDS_ADDRESS: ${{ vars.ARAF_REWARDS_ADDRESS }}
         run: |
           set -euo pipefail
           vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
@@ -234,7 +290,29 @@ jobs:
             --build-env VITE_USDC_ADDRESS="$USDC"
           )
           if [ -n "$VITE_RPC_URL" ]; then args+=(--build-env VITE_RPC_URL="$VITE_RPC_URL"); fi
+          ADDRESS_RE='^0x[a-fA-F0-9]{40}$'
+          for n in REVENUE_VAULT_ADDRESS REWARDS_ADDRESS; do
+            if [ -n "${!n}" ] && ! [[ "${!n}" =~ $ADDRESS_RE ]]; then echo "::error::$n variable must be a 0x + 40 hex address."; exit 1; fi
+          done
+          if [ -n "$REVENUE_VAULT_ADDRESS" ]; then args+=(--build-env VITE_REVENUE_VAULT_ADDRESS="$REVENUE_VAULT_ADDRESS"); fi
+          if [ -n "$REWARDS_ADDRESS" ]; then args+=(--build-env VITE_REWARDS_ADDRESS="$REWARDS_ADDRESS"); fi
           vercel deploy --prod --yes --token="$VERCEL_TOKEN" "${args[@]}"
+
+      # GITHUB_TOKEN repo variable yazamaz; opsiyonel GH_VARIABLES_TOKEN (fine-grained PAT, Variables: read and write) varsa kalıcılaştırılır.
+      - name: Persist deployment variables
+        if: ${{ always() && env.ESCROW != '' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GH_VARIABLES_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -n "$GH_TOKEN" ]; then
+            gh variable set ARAF_ESCROW_ADDRESS --body "$ESCROW" --repo "$GITHUB_REPOSITORY"
+            gh variable set ARAF_DEPLOYMENT_BLOCK --body "$DEPLOY_BLOCK" --repo "$GITHUB_REPOSITORY"
+            echo "Repository variables ARAF_ESCROW_ADDRESS / ARAF_DEPLOYMENT_BLOCK updated."
+          else
+            echo "::warning::GH_VARIABLES_TOKEN secret is not set; repo variables were NOT updated. Run the gh variable set commands from the job summary manually."
+          fi
 
       - name: Print deployment summary
         if: ${{ always() }}
