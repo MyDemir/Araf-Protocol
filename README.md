@@ -12,7 +12,7 @@
 <p align="center"><em>Trust the Time, Not the Oracle.</em></p>
 
 <p align="center">
-  <a href="https://github.com/MyDemir/Araf-Protokol/actions/workflows/ci.yml"><img src="https://github.com/MyDemir/Araf-Protokol/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/MyDemir/Araf-Protocol/actions/workflows/ci.yml"><img src="https://github.com/MyDemir/Araf-Protocol/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
   <img src="https://img.shields.io/badge/network-Base%20Sepolia%20testnet-0052FF.svg" alt="Network: Base Sepolia testnet">
   <img src="https://img.shields.io/badge/Solidity-0.8.24-363636.svg" alt="Solidity 0.8.24">
@@ -282,8 +282,8 @@ Full tree: [docs/EN/REPOSITORY_TREE.md](docs/EN/REPOSITORY_TREE.md).
 This code has **not been audited** and is intended for **testnet use only**. Do not deposit real funds.
 
 If you find a vulnerability, please do not open a public issue. Report it privately through
-[GitHub Security Advisories](https://github.com/MyDemir/Araf-Protokol/security/advisories/new) for this
-repository. For non-sensitive bugs, use [GitHub Issues](https://github.com/MyDemir/Araf-Protokol/issues).
+[GitHub Security Advisories](https://github.com/MyDemir/Araf-Protocol/security/advisories/new) for this
+repository. For non-sensitive bugs, use [GitHub Issues](https://github.com/MyDemir/Araf-Protocol/issues).
 
 ## License
 

@@ -146,7 +146,7 @@ Deploy etmediğin zinciri seçmek "forced/claimed integration" riski.
 
 ## 6. Repo erişimi
 
-- [ ] **35.** Repo `https://github.com/MyDemir/Araf-Protokol` herkese açık mı? Değilse
+- [ ] **35.** Repo `https://github.com/MyDemir/Araf-Protocol` herkese açık mı? Değilse
       `hackathon@colosseum.com`'a erişim ver ve ekip dışından biri açabildiğini doğrulasın.
 - [ ] **36.** README'nin ilk ekranı: canlı URL, Base Sepolia adresleri ve demo videosu linkini ekle
       (jüri repoyu açınca ilk bunu görmeli). Bu da `submission/` dışında bir değişiklik.

@@ -78,7 +78,7 @@ JPEG, PNG, WEBP or GIF, max 20 MB. `[[TODO: logo file]]` (no logo file found in 
 ### GitHub link
 
 ```text
-https://github.com/MyDemir/Araf-Protokol
+https://github.com/MyDemir/Araf-Protocol
 ```
 
 **Characters:** 40/no limit
