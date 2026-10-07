@@ -21,6 +21,9 @@ describe('miniappMeta plugin', () => {
   it('normalizes the public url', () => {
     expect(normalizePublicUrl('https://a.vercel.app/')).toBe('https://a.vercel.app');
     expect(normalizePublicUrl('ftp://x')).toBe('');
+    expect(normalizePublicUrl('http://example.com')).toBe('');
+    expect(normalizePublicUrl('http://localhost:5173/')).toBe('http://localhost:5173');
+    expect(normalizePublicUrl('http://127.0.0.1:4173')).toBe('http://127.0.0.1:4173');
     expect(normalizePublicUrl('')).toBe('');
   });
 
@@ -50,6 +53,15 @@ describe('miniappMeta plugin', () => {
     expect(json.miniapp.heroImageUrl).toBeUndefined();
     expect(json.frame.iconUrl).toBe('https://example.vercel.app/icon.png');
     expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('plain http url: warns, no absolute meta, no farcaster.json', () => {
+    const { warn, tags, emitted } = run({ VITE_PUBLIC_URL: 'http://example.com' });
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toMatch(/https/);
+    expect(find(tags, 'fc:miniapp')).toBeUndefined();
+    expect(find(tags, 'og:image').attrs.content).toBe('/og-image.png');
+    expect(emitted).toHaveLength(0);
   });
 
   it('includes accountAssociation only when all three FARCASTER_* are set', () => {

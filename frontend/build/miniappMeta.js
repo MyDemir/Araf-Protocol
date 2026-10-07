@@ -14,7 +14,8 @@ export const normalizePublicUrl = (raw) => {
   if (!v) return ''
   try {
     const u = new URL(v)
-    if (u.protocol !== 'https:' && u.protocol !== 'http:') return ''
+    const localHttp = u.protocol === 'http:' && (u.hostname === 'localhost' || u.hostname === '127.0.0.1')
+    if (u.protocol !== 'https:' && !localHttp) return ''
     return `${u.origin}${u.pathname === '/' ? '' : u.pathname}`
   } catch {
     return ''
@@ -109,7 +110,9 @@ export default function miniappMeta({ env = process.env, warn = (m) => console.w
     name: 'araf-miniapp-meta',
     configResolved(config) {
       if (config.command !== 'build') return
-      if (!publicUrl) {
+      if (!publicUrl && String(env.VITE_PUBLIC_URL || '').trim()) {
+        warn('[miniapp-meta] VITE_PUBLIC_URL must be https (http only for localhost/127.0.0.1): fc:* tags, absolute meta and farcaster.json skipped.')
+      } else if (!publicUrl) {
         warn('[miniapp-meta] VITE_PUBLIC_URL not set: fc:miniapp/fc:frame tags and .well-known/farcaster.json skipped; og/twitter images use relative paths.')
       } else if (!accountAssociation) {
         warn('[miniapp-meta] FARCASTER_ACCOUNT_ASSOCIATION_* not set: farcaster.json emitted without accountAssociation (generate the signature for the new domain).')
