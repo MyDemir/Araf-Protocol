@@ -414,6 +414,10 @@ fly secrets set SIWE_DOMAIN="araf-protocol.vercel.app" SIWE_URI="https://araf-pr
 - [ ] Dispute → bleeding → cancel
 - [ ] Event listener logları temiz (`fly logs`)
 
+### Testnet build (Vercel)
+
+Herkese açık testnet sitesi için frontend production build'i `VITE_TARGET_CHAIN=base-sepolia` ile alınır (Vercel → Environment Variables). Bu durumda yalnız Base Sepolia (84532) desteklenir; mainnet karışmaz. Varsayılan `base` (8453) davranışı değişmez; bilinmeyen değer konsola uyarı yazar ve `base`'e düşer. Production build'lerde mint/faucet testnet'te de kapalıdır. `VITE_ESCROW_ADDRESS`/`VITE_USDT_ADDRESS`/`VITE_USDC_ADDRESS` Sepolia deploy değerleri olmalı.
+
 ---
 
 ## 4. Mainnet — Base

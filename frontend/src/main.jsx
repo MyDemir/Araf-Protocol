@@ -14,6 +14,8 @@ import {
   BASE_SEPOLIA_CHAIN_ID,
   HARDHAT_CHAIN_ID,
   getSupportedChainIds,
+  resolveTargetChain,
+  TARGET_CHAIN_BASE_SEPOLIA,
 } from './app/chainPolicy'
 
 import ErrorBoundary from './components/ErrorBoundary.jsx'
@@ -57,17 +59,24 @@ const loadConnectors = () => loadConnectorsSafely(() => import('wagmi/connectors
 
 // [TR] P4 — VITE_RPC_URL birincil RPC, herkese açık RPC yedek (fallback). Prod'da Base, dev'de Base Sepolia'ya uygulanır.
 const PRIMARY_RPC = import.meta.env.VITE_RPC_URL
+const IS_TESTNET_BUILD = Boolean(import.meta.env.PROD) && resolveTargetChain() === TARGET_CHAIN_BASE_SEPOLIA
 const buildConfig = (connectors) => createConfig({
   chains: wagmiChains,
   connectors,
-  transports: {
-    [base.id]:        buildRpcTransport(import.meta.env.PROD ? PRIMARY_RPC : undefined),
-    ...(import.meta.env.PROD ? {} : {
+  transports: IS_TESTNET_BUILD
+    ? {
+      // [TR] Prod + base-sepolia: yalnızca Base Sepolia (mainnet karışmaz).
+      // [EN] Prod + base-sepolia: Base Sepolia only (no mainnet mixing).
       [baseSepolia.id]: buildRpcTransport(PRIMARY_RPC),
-      // [TR] Hardhat yerel ağı — FRONT-05: sadece development'ta aktif
-      [hardhat.id]:     http(getCodespacesRPC(8545)),
-    }),
-  },
+    }
+    : {
+      [base.id]:        buildRpcTransport(import.meta.env.PROD ? PRIMARY_RPC : undefined),
+      ...(import.meta.env.PROD ? {} : {
+        [baseSepolia.id]: buildRpcTransport(PRIMARY_RPC),
+        // [TR] Hardhat yerel ağı — FRONT-05: sadece development'ta aktif
+        [hardhat.id]:     http(getCodespacesRPC(8545)),
+      }),
+    },
 })
 
 const queryClient = new QueryClient()
