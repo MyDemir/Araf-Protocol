@@ -1,9 +1,9 @@
 # Araf Protokol: Ortam Değişkenleri (env) Başvuru Belgesi
 
-> Bu belge koddan çıkarılmıştır (commit `7407cb4` tabanı). Her değişkenin en az bir kullanım yeri açılıp okunmuştur.
+> Bu belge koddan çıkarılmıştır (güncel ana dal `ccr-ddc7ecdc-5j36yk` üzerinde yeniden doğrulandı). Her değişkenin en az bir kullanım yeri açılıp okunmuştur.
 > Gerçek değer/sır yazılmaz; yalnız biçim örnekleri verilir. Emin olunamayan yerler "doğrulanmadı" diye işaretlidir.
 > Kaynaklar: `contracts/hardhat.config.js`, `contracts/scripts/*`, `backend/scripts/**`, `frontend/src/**`,
-> `.github/workflows/ci.yml`, `backend/fly.toml`, `backend/Dockerfile`, `frontend/vercel.json`, `*/.env.example`,
+> `.github/workflows/{ci,deploy-base-sepolia,deploy-runtime-base-sepolia}.yml`, `docs/DEPLOY_BASE_SEPOLIA.md`, `backend/fly.toml`, `backend/Dockerfile`, `frontend/vercel.json`, `*/.env.example`,
 > `docs/TR/DEPLOYMENT_GUIDE.md`, `docs/TR/MAINNET_READINESS_CHECKLIST.md`.
 
 ## İçindekiler
@@ -20,44 +20,44 @@
 
 ## 1. Önce bunu oku
 
-Değişkenler 4 yere girilir. Hangi paketin değişkeni olduğuna göre yer değişir:
+Değişkenler 4 yere girilir:
 
 | Nereye | Ne için | Nasıl |
 |---|---|---|
 | **Yerel geliştirme** | `contracts/.env`, `backend/.env`, `frontend/.env` | Her biri kendi `.env.example` dosyasından kopyalanır (`cp .env.example .env`). |
-| **GitHub** (Secrets / Variables) | Deploy workflow'u için | **Repoda deploy workflow'u YOK** (bkz. 7 ve 8.1). Elle girilmesi gerekenler aşağıdaki kutuda. |
-| **Fly.io** (backend production) | Backend'in tüm değişkenleri | Bugün elle: `fly secrets set KEY=VALUE`. `PORT` ve `NODE_ENV` zaten `backend/fly.toml [env]` içinden gelir. |
-| **Vercel** (frontend build) | Yalnız `VITE_*` | Bugün elle: Vercel Dashboard > Settings > Environment Variables. Build sırasında tarayıcı paketine gömülür. |
+| **GitHub** Secrets ve Variables | Base Sepolia deploy workflow'ları için tek giriş noktası | `gh secret set` / `gh variable set` (`docs/DEPLOY_BASE_SEPOLIA.md`). Sen yalnız buraya girersin. |
+| **Fly.io** (backend production) | Backend'in tüm production değişkenleri | **Workflow yazar** (`flyctl secrets import --stage`, sonra `flyctl deploy`). Elle `fly secrets set` gerekmez. `PORT`/`NODE_ENV` zaten `backend/fly.toml [env]`'de. |
+| **Vercel** (frontend build) | `VITE_*` | **Workflow verir** (`vercel deploy --build-env ...`; yalnız `deploy_frontend=true` iken). Elle girilmez. |
 
-Kısaltmalar (tablolardaki "Nereye girilir" sütunu):
-`C/.env` = `contracts/.env` · `B/.env` = `backend/.env` · `F/.env` = `frontend/.env` · `Fly` = `fly secrets set` ·
-`Vercel` = Vercel env · `terminal` = komut satırında geçici (`CONFIRM_...=yes npx hardhat ...`).
+Kısaltmalar: `C/.env` = `contracts/.env` · `B/.env` = `backend/.env` · `F/.env` = `frontend/.env` · `GH` = GitHub secret/variable ·
+`Fly` = Fly secret (workflow yazar) · `Vercel` = Vercel build-env (workflow verir) · `terminal` = komut satırında geçici.
+Tablolardaki "Nereye girilir" sütunu Base Sepolia/Mainnet için **hedef yeri** gösterir; Sepolia'da `Fly`/`Vercel` değerlerini workflow yazar (bkz. 7).
 
-> **Base Sepolia demosu için senin elle girmen gereken liste** (deploy workflow'u olmadığı için hepsi elle; kaynak: kod + `docs/TR/DEPLOYMENT_GUIDE.md` Adım 1-4)
+> **Base Sepolia demosu için senin elle girmen gereken liste**
+> (kaynak: `deploy-base-sepolia.yml:43-76` doğrulama adımı ve `docs/DEPLOY_BASE_SEPOLIA.md:7-40`; deploy: `gh workflow run deploy-base-sepolia.yml -f deploy_frontend=true`)
 >
-> **A) Kontrat deploy'u: `contracts/.env` (7 zorunlu)**
-> `DEPLOYER_PRIVATE_KEY`, `BASE_SEPOLIA_RPC_URL`, `TREASURY_ADDRESS`, `FINAL_OWNER_ADDRESS` (treasury'den farklı),
-> `BASE_SEPOLIA_USDT_ADDRESS`, `BASE_SEPOLIA_USDC_ADDRESS`, `CONFIRM_PUBLIC_DEPLOY=yes`. (Opsiyonel: `BASESCAN_API_KEY`.)
+> **GitHub Secrets, zorunlu (8):** `DEPLOYER_PRIVATE_KEY`, `BASE_SEPOLIA_RPC_URL`, `BASE_SEPOLIA_WS_RPC_URL`, `FLY_API_TOKEN`,
+> `MONGODB_URI`, `REDIS_URL` (`rediss://` olmalı), `JWT_SECRET` (≥64 karakter), `MASTER_ENCRYPTION_KEY` (tam 64 hex).
 >
-> **B) Backend: Fly secrets (15 zorunlu)**
-> `MONGODB_URI`, `REDIS_URL` (`rediss://`), `JWT_SECRET`, `KMS_PROVIDER=aws`, `AWS_ENCRYPTED_DATA_KEY`, `BASE_RPC_URL`,
-> `EXPECTED_CHAIN_ID=84532`, `ARAF_ESCROW_ADDRESS`, `BASE_SEPOLIA_USDT_ADDRESS`, `BASE_SEPOLIA_USDC_ADDRESS`,
-> `SIWE_DOMAIN`, `SIWE_URI`, `ALLOWED_ORIGINS`, `ARAF_DEPLOYMENT_BLOCK` (Redis'te checkpoint yoksa).
-> Önerilen: `BASE_WS_RPC_URL`, `RELAYER_PRIVATE_KEY`, `ADMIN_WALLETS`, `ARAF_REVENUE_VAULT_ADDRESS`, `ARAF_REWARDS_ADDRESS`, `AWS_REGION` (varsayılan `eu-west-1`).
-> Not: AWS KMS'i çözmek için AWS kimlik bilgileri de gerekir; kodda geçmez, SDK'nın varsayılan zincirinden okunur (**doğrulanmadı**, bkz. 8.2).
+> **GitHub Variables, zorunlu (5):** `FRONTEND_DOMAIN` (yalnız host, `https://` yok), `TREASURY_ADDRESS`, `FINAL_OWNER_ADDRESS` (treasury'den farklı),
+> `BASE_SEPOLIA_USDT_ADDRESS`, `BASE_SEPOLIA_USDC_ADDRESS`.
 >
-> **C) Frontend: Vercel (4 zorunlu)**
-> `VITE_TARGET_CHAIN=base-sepolia`, `VITE_ESCROW_ADDRESS`, `VITE_USDT_ADDRESS`, `VITE_USDC_ADDRESS`.
-> `VITE_API_URL` **boş bırakılmalı** (production'da mutlak URL build'i bozar). Opsiyonel: `VITE_RPC_URL`, `VITE_REVENUE_VAULT_ADDRESS`, `VITE_REWARDS_ADDRESS`.
+> **Frontend de deploy edilecekse ek 3 secret:** `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`.
 >
-> Toplam: 7 + 15 + 4 = **26 zorunlu giriş**.
+> **Opsiyonel:** secret `RELAYER_PRIVATE_KEY`; variable `FLY_APP_NAME` (varsayılan `araf-protocol-backend`), `ADMIN_WALLETS`, `VITE_RPC_URL`.
+>
+> **Deploy SONRASI (2 variable, elle):** `ARAF_ESCROW_ADDRESS`, `ARAF_DEPLOYMENT_BLOCK`; yalnız sonraki `deploy-runtime-base-sepolia.yml` çalıştırmaları için gerekir
+> (tam deploy workflow'u bunları yalnız özet sayfasına yazar, variable olarak kaydetmez: `deploy-base-sepolia.yml:243`).
+>
+> Toplam: **13 zorunlu giriş** (8 secret + 5 variable), frontend ile **16**. `contracts/.env`, `fly secrets set` ve Vercel paneli için elle giriş **yok**.
+> Fly uygulaması (`fly apps create`) ve Vercel projesi bir kez elle oluşturulmalı (`DEPLOY_BASE_SEPOLIA.md:44-45`).
 
 ---
 
 ## 2. Contracts (`contracts/.env`)
 
 Hardhat `contracts/.env` dosyasını yükler. Ağ, env ile değil `--network <hardhat|localhost|base-sepolia|base>` ile seçilir.
-Bu paketteki hiçbir değişken Fly/Vercel'e girmez. **37 değişken okunuyor** (+ 2 yalnız örnekte/belgede: bkz. 6).
+Bu paketteki değişkenler Fly/Vercel'e girmez; workflow bunları `contracts/.env` yazmadan, yalnız deploy adımının ortamına verir (`deploy-base-sepolia.yml:87-100`, bkz. 7.3). **37 değişken okunuyor** (+ yalnız örnekte/belgede olanlar: bkz. 6).
 
 Sütunlar: Y = Yerel, S = Base Sepolia, M = Mainnet. "Zorunlu": her zaman / ilgili işte / opsiyonel (varsayılan).
 
@@ -112,7 +112,7 @@ Sütunlar: Y = Yerel, S = Base Sepolia, M = Mainnet. "Zorunlu": her zaman / ilgi
 ## 3. Backend (`backend/.env` / Fly secrets)
 
 `app.js:3` ve migration script'leri `dotenv` ile `backend/.env`'i yükler. Production'da (`NODE_ENV=production`, `fly.toml:11-12`)
-değerler Fly secrets'tan gelir. **88 değişken okunuyor.** Hiçbir backend değişkeni `VITE_*` olarak frontend'e konmaz.
+değerler Fly secrets'tan gelir; Sepolia'da bunları workflow yazar (bkz. 7.1). **89 değişken okunuyor.** Hiçbir backend değişkeni `VITE_*` olarak frontend'e konmaz.
 
 Ortak okuma: Y = Yerel, S = Base Sepolia (Fly'da yine `NODE_ENV=production` çalışır), M = Mainnet.
 "Prod'da" = `NODE_ENV=production` iken zorunlu (yoksa süreç çıkar ya da `/ready` 503 olur).
@@ -177,18 +177,19 @@ Seçim `EXPECTED_CHAIN_ID`'ye bağlıdır (`services/tokenEnv.js:61-109`): 8453 
 
 ### 3.6 Şifreleme / KMS
 
-Prod'da `KMS_PROVIDER=env` **reddedilir, testnet dahil** (`encryption.js:70`, `:205-207`). Açılışta KMS self-test çalışır (`app.js:360`).
+Prod'da `KMS_PROVIDER=env` **reddedilir**; tek istisna dar testnet kuralıdır: `NODE_ENV=production` + `EXPECTED_CHAIN_ID=84532` + `ALLOW_ENV_KMS_ON_TESTNET=yes` (`encryption.js:57-79`, bkz. 3.12). Mainnet için `aws`/`vault` şart. Açılışta KMS self-test çalışır (`app.js:360`, `encryption.js:270-282`).
 
 | Değişken | Ne işe yarar | Zorunlu mu? | Y | S | M | Nereye | Kullanıldığı yer |
 |---|---|---|---|---|---|---|---|
-| `KMS_PROVIDER` | `env` (yalnız dev) / `aws` / `vault` | Prod'da `aws` ya da `vault`; varsayılan `env` | `env` | `aws` | `aws` | B/.env, Fly | `encryption.js:65`, `:203` |
-| 🔒 `MASTER_ENCRYPTION_KEY` | Ana şifreleme anahtarı (64 hex; ilk 64 karakter) | `KMS_PROVIDER=env` iken (yalnız dev) | `randomBytes(32)` hex | **konma** | **konma** | B/.env | `encryption.js:77` |
-| 🔒 `AWS_ENCRYPTED_DATA_KEY` | AWS KMS ile şifreli data key (base64 CiphertextBlob) | `KMS_PROVIDER=aws` iken | gerekmez | base64 | base64 | Fly | `encryption.js:104`, `:213` |
-| `AWS_REGION` | AWS bölgesi | Opsiyonel (`eu-west-1`) | boş | `eu-west-1` | `eu-west-1` | Fly | `encryption.js:103` |
-| `VAULT_ADDR` | Vault adresi | `KMS_PROVIDER=vault` iken | gerekmez | `https://vault…:8200` | aynı | Fly | `encryption.js:145`, `:218` |
-| 🔒 `VAULT_TOKEN` | Vault erişim token'ı | `KMS_PROVIDER=vault` iken | gerekmez | token | token | Fly | `encryption.js:146`, `:218` |
-| `VAULT_KEY_NAME` | Transit anahtar adı | Opsiyonel (`araf-master-key`) | gerekmez | boş | boş | Fly | `encryption.js:147` |
-| 🔒 `VAULT_ENCRYPTED_DATA_KEY` | Sabit wrapped data key (`vault:v1:…`) | `KMS_PROVIDER=vault` iken (yoksa fail-closed) | gerekmez | `vault:v1:…` | aynı | Fly | `encryption.js:148`, `:221` |
+| `KMS_PROVIDER` | `env` / `aws` / `vault` | Prod'da `aws`/`vault`; testnet istisnasında `env`; varsayılan `env` | `env` | `env` (workflow yazar) | `aws` | B/.env; Sepolia: Fly (workflow) | `encryption.js:102`, `:271` |
+| 🔒 `MASTER_ENCRYPTION_KEY` | Ana şifreleme anahtarı (64 hex; ilk 64 karakter) | `KMS_PROVIDER=env` iken: dev ve testnet istisnası | `randomBytes(32)` hex | GH secret → Fly (workflow) | **konma** | B/.env; GH secret | `encryption.js:113` |
+| 🔒 `AWS_ENCRYPTED_DATA_KEY` | AWS KMS ile şifreli data key (base64 CiphertextBlob) | `KMS_PROVIDER=aws` iken | gerekmez | gerekmez | base64 | Fly | `encryption.js:144`, `:285` |
+| `ALLOW_ENV_KMS_ON_TESTNET` | Yalnız Base Sepolia'da prod'da `KMS_PROVIDER=env`'e izin veren bayrak (`yes`); mainnet'te etkisiz ve hata verir | Opsiyonel; yalnız `NODE_ENV=production` + `EXPECTED_CHAIN_ID=84532` ile | gerekmez | `yes` (workflow yazar) | **asla** | Fly (workflow `:164`) | `encryption.js:58-63`, `:279` |
+| `AWS_REGION` | AWS bölgesi | Opsiyonel (`eu-west-1`) | boş | workflow yazmaz | `eu-west-1` | Fly | `encryption.js:143` |
+| `VAULT_ADDR` | Vault adresi | `KMS_PROVIDER=vault` iken | gerekmez | gerekmez | `https://vault…:8200` | Fly | `encryption.js:185`, `:290` |
+| 🔒 `VAULT_TOKEN` | Vault erişim token'ı | `KMS_PROVIDER=vault` iken | gerekmez | gerekmez | token | Fly | `encryption.js:186`, `:290` |
+| `VAULT_KEY_NAME` | Transit anahtar adı | Opsiyonel (`araf-master-key`) | gerekmez | gerekmez | boş | Fly | `encryption.js:187` |
+| 🔒 `VAULT_ENCRYPTED_DATA_KEY` | Sabit wrapped data key (`vault:v1:…`) | `KMS_PROVIDER=vault` iken (yoksa fail-closed) | gerekmez | gerekmez | `vault:v1:…` | Fly | `encryption.js:188`, `:293` |
 
 ### 3.7 Worker / event listener / health
 
@@ -258,9 +259,10 @@ Hepsi opsiyoneldir; `B/.env` ya da Fly'a girilir; kullanıldığı yer `app.js:8
 
 ### 3.12 Testnet istisnaları
 
-Kodda testnet'e özel bir env istisnası **yoktur**. Backend `fly.toml` yüzünden Sepolia'da da `NODE_ENV=production` çalışır;
-dolayısıyla Sepolia için de: gerçek KMS (`aws`/`vault`), `rediss://`, gerçek `SIWE_DOMAIN` ve `ARAF_DEPLOYMENT_BLOCK` gerekir.
-Sepolia'ya özgü olan yalnız değerlerdir: `EXPECTED_CHAIN_ID=84532` ve `BASE_SEPOLIA_*` token adresleri. Bkz. 8.2.
+Tek istisna `ALLOW_ENV_KMS_ON_TESTNET` (`encryption.js:57-63`). Üç koşul **birlikte** doğru olmalı: `NODE_ENV=production` + `EXPECTED_CHAIN_ID=84532` +
+`ALLOW_ENV_KMS_ON_TESTNET=yes`; o zaman prod'da `KMS_PROVIDER=env` + `MASTER_ENCRYPTION_KEY` kabul edilir. Açılışta RPC'nin gerçekten 84532 olduğu doğrulanır
+(`encryption.js:247-268`, `:279`) ve her başlatmada büyük uyarı loglanır. Mainnet'te (8453) `yes` olsa bile başlatma hata verir. Gerçek PII girilmemeli.
+Workflow bu üçlüyü kendisi yazar (bkz. 7.1). Sepolia için bunun dışındaki prod kuralları aynen geçerlidir: `rediss://`, gerçek `SIWE_DOMAIN`, `ARAF_DEPLOYMENT_BLOCK`.
 
 ---
 
@@ -285,7 +287,7 @@ Değerler **build sırasında** sabitlenir; Vercel'de değişiklik için yeniden
 | `VITE_SOCIAL_TWITTER` | Sosyal bağlantı: X/Twitter | Opsiyonel (boşsa gizli) | boş | boş | boş | F/.env, Vercel | `AppViews.jsx:80` |
 | `VITE_SOCIAL_FARCASTER` | Sosyal bağlantı: Farcaster | Opsiyonel (boşsa gizli) | boş | boş | boş | F/.env, Vercel | `AppViews.jsx:81` |
 
-Yerelde `contracts/scripts/deploy.js` yalnız local ağda `VITE_ESCROW_ADDRESS`, `VITE_USDT_ADDRESS`, `VITE_USDC_ADDRESS` değerlerini `frontend/.env`'e kendisi yazar (`deploy.js:274-299`, `:440-441`). Public ağda yazmaz.
+Yerelde Sepolia build'i için `npm run build:frontend:testnet` (`package.json:12`) `VITE_TARGET_CHAIN=base-sepolia` verir. `contracts/scripts/deploy.js` yalnız local ağda `VITE_ESCROW_ADDRESS`, `VITE_USDT_ADDRESS`, `VITE_USDC_ADDRESS` değerlerini `frontend/.env`'e kendisi yazar (`deploy.js:274-299`, `:440-441`). Public ağda yazmaz.
 
 ---
 
@@ -293,8 +295,8 @@ Yerelde `contracts/scripts/deploy.js` yalnız local ağda `VITE_ESCROW_ADDRESS`,
 
 | Grup | Değişkenler | Kural |
 |---|---|---|
-| Özel anahtar | `DEPLOYER_PRIVATE_KEY`, `RELAYER_PRIVATE_KEY` | Asla repoya, log'a ya da frontend'e. Deployer ve relayer farklı, düşük bakiyeli cüzdan olsun. |
-| Sır / token | `JWT_SECRET`, `MASTER_ENCRYPTION_KEY`, `AWS_ENCRYPTED_DATA_KEY`, `VAULT_TOKEN`, `VAULT_ENCRYPTED_DATA_KEY`, `READY_INTERNAL_TOKEN` | Fly secrets / `.env`; repoya girmez. |
+| Özel anahtar / token | `DEPLOYER_PRIVATE_KEY`, `RELAYER_PRIVATE_KEY`, `FLY_API_TOKEN`, `VERCEL_TOKEN` | Asla repoya, log'a ya da frontend'e. Deployer ve relayer farklı, düşük bakiyeli cüzdan olsun. |
+| Sır / token | `JWT_SECRET`, `MASTER_ENCRYPTION_KEY` (Sepolia'da düz Fly secret olarak durur; yalnız testnet, gerçek PII yok), `AWS_ENCRYPTED_DATA_KEY`, `VAULT_TOKEN`, `VAULT_ENCRYPTED_DATA_KEY`, `READY_INTERNAL_TOKEN` | Fly secrets / `.env`; repoya girmez. |
 | URL içinde anahtar/şifre | `MONGODB_URI`, `REDIS_URL`, `BASE_RPC_URL`, `BASE_WS_RPC_URL`, `BASE_SEPOLIA_RPC_URL` | Alchemy anahtarı ve DB/Redis şifresi URL'de durur; sır gibi davranın. |
 | API anahtarı | `BASESCAN_API_KEY`, `CMC_API_KEY` | Düşük risk ama paylaşmayın. |
 
@@ -317,6 +319,7 @@ Adresler (`ARAF_ESCROW_ADDRESS`, token adresleri) sır değildir.
 | `AWS_KMS_KEY_ARN` (`KMS_KEY_ARN`) | `docs/TR/MAINNET_READINESS_CHECKLIST.md:54`; `backend/.env.example:66` (okunmaz der) | Okunmaz; anahtar kimliği `CiphertextBlob` içindedir. Girmeyin. |
 | `MIN_REWARD_BPS`, `MAX_REWARD_BPS` | `docs/TR/REWARDS_ROLLOUT.md` | Kodda env olarak okunmaz (kontrat sabiti; **doğrulanmadı**, env olarak okunmadığı grep ile görüldü). |
 | `VITE_ADMIN_WALLETS` | Eski belgeler | Kaldırıldı (`AppViews.jsx:206`). |
+| `BASESCAN_API_KEY` (GitHub secret olarak) | `docs/DEPLOY_BASE_SEPOLIA.md:14` | Hiçbir workflow okumaz; yalnız elle `hardhat verify` için `contracts/.env`'de anlamlı. |
 | `NODE_PATH` | `contracts/hardhat.config.js:9-10` | Okunmaz, script kendisi ayarlar; sizin girmeniz gerekmez. |
 
 ### 6.2 Takma adlar (hangisi tercih edilir)
@@ -334,34 +337,77 @@ Adresler (`ARAF_ESCROW_ADDRESS`, token adresleri) sır değildir.
 
 ## 7. Workflow'un otomatik ayarladıkları
 
-**Doğrulanan gerçek: repoda deploy workflow'u yoktur.** `.github/workflows/` altında yalnız `ci.yml` var; o da sadece test çalıştırır
-(backend/frontend/contracts `npm test`, ABI drift), `secrets.*`, `vars.*`, Fly ya da Vercel adımı **içermez**. `docs/DEPLOY_BASE_SEPOLIA.md` dosyası da mevcut değildir.
-Bu yüzden aşağıdaki "workflow otomatik hesaplar" listesi bugün **boştur**; her şey elle girilir:
+İki workflow var: `deploy-base-sepolia.yml` (kontrat + Fly + opsiyonel Vercel) ve `deploy-runtime-base-sepolia.yml` (kontratı yeniden deploy etmeden Fly ve/veya Vercel).
+`deployRewards.js` workflow'lara dahil değildir. Kullanıcı aşağıdaki değerleri **elle girmez**.
 
-| Değişken | Beklenen otomatik kaynak | Bugünkü gerçek durum |
+### 7.1 Fly secrets: workflow'un yazdıkları (`flyctl secrets import --stage`, sonra `flyctl deploy`)
+
+Tam deploy: `deploy-base-sepolia.yml:141-178` · runtime: `deploy-runtime-base-sepolia.yml:128-166`. İkisinde aynı 19 sabit satır + 2 koşullu satır.
+
+| Fly değişkeni | Değer nereden | Satır (tam / runtime) |
 |---|---|---|
-| `ARAF_ESCROW_ADDRESS` | `contracts/deployments/base-sepolia.json` -> `escrowAddress` | Elle: deploy çıktısından Fly'a (guide Adım 3) |
-| `ARAF_DEPLOYMENT_BLOCK` | Deploy blok numarası | Elle (guide Adım 3: `<DEPLOY_BLOK_NUMARASI>`) |
-| `EXPECTED_CHAIN_ID` | `84532` / `8453` | Elle |
-| `VITE_TARGET_CHAIN` | `base-sepolia` | Elle (Vercel env; `docs/TR/DEPLOYMENT_GUIDE.md:417`) |
-| `ALLOW_ENV_KMS_ON_TESTNET` | Testnet'te `KMS_PROVIDER=env`'e izin | **Kodda yok**; hiçbir yerde okunmaz (bkz. 8.2) |
+| `NODE_ENV` | sabit `production` | 157 / 145 |
+| `JWT_EXPIRES_IN`, `PII_TOKEN_EXPIRES_IN` | sabit `15m` | 161-162 / 149-150 |
+| `KMS_PROVIDER` | sabit `env` | 163 / 151 |
+| `ALLOW_ENV_KMS_ON_TESTNET` | sabit `yes` | 164 / 152 |
+| `EXPECTED_CHAIN_ID` | sabit `84532` | 166 / 154 |
+| `ARAF_ESCROW_ADDRESS` | tam: deploy manifestinden (`escrowAddress`); runtime: variable/girdi | 169 / 157 |
+| `BASE_SEPOLIA_USDT_ADDRESS`, `BASE_SEPOLIA_USDC_ADDRESS` | tam: manifest `tokens[]`; runtime: variable/girdi | 170-171 / 158-159 |
+| `ARAF_DEPLOYMENT_BLOCK` | tam: `deployTxHash` receipt bloğu; runtime: variable/girdi (0 olamaz) | 172 / 160 |
+| `SIWE_DOMAIN` | `FRONTEND_DOMAIN` variable | 173 / 161 |
+| `SIWE_URI`, `ALLOWED_ORIGINS` | `https://$FRONTEND_DOMAIN` | 174-175 / 162-163 |
+| `BASE_RPC_URL` | GitHub secret `BASE_SEPOLIA_RPC_URL` (ad değişir) | 167 / 155 |
+| `BASE_WS_RPC_URL` | GitHub secret `BASE_SEPOLIA_WS_RPC_URL` (ad değişir) | 168 / 156 |
+| `MONGODB_URI`, `REDIS_URL`, `JWT_SECRET`, `MASTER_ENCRYPTION_KEY` | aynı adlı GitHub secret | 158-160, 165 / 146-148, 153 |
+| `RELAYER_PRIVATE_KEY`, `ADMIN_WALLETS` | GitHub secret / variable; **boşsa yazılmaz** | 176-177 / 164-165 |
 
-Otomatik olan tek şey `backend/fly.toml [env]` içindeki `PORT=4000` ve `NODE_ENV=production` ile yerelde `deploy.js`'in `frontend/.env`'e yazdığı 3 `VITE_*` adrestir.
-`backend/Dockerfile` hiçbir env tanımlamaz. `frontend/vercel.json` env içermez (yalnız rewrite ve güvenlik başlıkları).
+Workflow'un yazmadığı backend değişkenleri (hepsi opsiyonel/varsayılanlı): `ARAF_REVENUE_VAULT_ADDRESS`, `ARAF_REWARDS_ADDRESS` (rewards workflow dışı, bu yüzden reward mirror ve recorder pasif kalır),
+`ARAF_TRACKED_TOKENS`, `WORKER_*`, `JOB_*`, `READY_INTERNAL_TOKEN`, `AWS_*`, `VAULT_*` ve diğer ayar değişkenleri.
+
+### 7.2 Vercel build-env: workflow'un verdikleri (`vercel deploy --prod --build-env ...`)
+
+Tam: `deploy-base-sepolia.yml:211-228` · runtime: `deploy-runtime-base-sepolia.yml:207-224` (yalnız `deploy_frontend=true`).
+
+| Vercel değişkeni | Değer | Satır (tam / runtime) |
+|---|---|---|
+| `VITE_TARGET_CHAIN` | sabit `base-sepolia` | 222 / 218 |
+| `VITE_ESCROW_ADDRESS` | deploy manifesti ya da variable/girdi | 223 / 219 |
+| `VITE_USDT_ADDRESS`, `VITE_USDC_ADDRESS` | aynı kaynak | 224-225 / 220-221 |
+| `VITE_RPC_URL` | GitHub variable `VITE_RPC_URL`; boşsa verilmez | 227 / 223 |
+
+`VITE_API_URL` bilerek verilmez (production'da mutlak URL reddedilir; `/api` `vercel.json` rewrite'ından gider). `VITE_REVENUE_VAULT_ADDRESS`/`VITE_REWARDS_ADDRESS` de verilmez.
+
+### 7.3 Contracts: deploy adımına env olarak verilenler (`contracts/.env` yazılmaz)
+
+`deploy-base-sepolia.yml:87-100`: `CONFIRM_PUBLIC_DEPLOY=yes` (sabit), `DEPLOYER_PRIVATE_KEY`, `BASE_SEPOLIA_RPC_URL` (secret), `TREASURY_ADDRESS`, `FINAL_OWNER_ADDRESS`,
+`BASE_SEPOLIA_USDT_ADDRESS`, `BASE_SEPOLIA_USDC_ADDRESS` (variable). Verilmeyen: `BASESCAN_API_KEY` (workflow verify yapmaz).
+
+### 7.4 Yalnız GitHub'da anlamı olan adlar (kodda okunmaz)
+
+| Ad | Tür | Ne |
+|---|---|---|
+| `FLY_API_TOKEN` | secret | Fly deploy token'ı (`deploy-base-sepolia.yml:145`, `:183`) |
+| `FLY_APP_NAME` | variable | Fly uygulama adı; varsayılan `araf-protocol-backend` (`:29`). `frontend/vercel.json:5` ile uyuşmazsa workflow durur (`:204`) |
+| `FRONTEND_DOMAIN` | variable | `SIWE_DOMAIN`, `SIWE_URI`, `ALLOWED_ORIGINS` buradan türer (`:30`, `:173-175`) |
+| `BASE_SEPOLIA_WS_RPC_URL` | secret | Fly'da `BASE_WS_RPC_URL` olur |
+| `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` | secret | Vercel CLI kimliği (`:31-32`, `:197-202`) |
 
 ---
 
 ## 8. Tutarsızlıklar
 
-Yalnız listelenmiştir; düzeltilmemiştir.
+Yalnız listelenmiştir; düzeltilmemiştir. (Önceki taslaktaki "deploy workflow'u yok" ve "`ALLOW_ENV_KMS_ON_TESTNET` kodda yok" maddeleri güncel ana dalda geçersizdir ve kaldırıldı.)
 
-1. **Deploy workflow'u yok.** `.github/workflows/ci.yml` (tüm dosya) yalnız test çalıştırır. Bu belgenin görev tanımındaki "GitHub Secrets/Variables -> Fly/Vercel otomatik" modeli repoda uygulanmış değildir; ilgili deploy akışı `docs/TR/DEPLOYMENT_GUIDE.md:335-393` ile elle yapılıyor.
-2. **`ALLOW_ENV_KMS_ON_TESTNET` kodda yok; Sepolia için `KMS_PROVIDER=env` çalışmaz.** `backend/fly.toml:12` `NODE_ENV=production` sabitler; `services/encryption.js:70` ve `:205-207` prod'da `env` sağlayıcıyı reddeder, `app.js:360` açılışta self-test çalıştırır. Yani Sepolia demosu da AWS KMS ya da Vault ister (`DEPLOYMENT_GUIDE.md:261`, `:575`). Ayrıca AWS KMS çözümlemesi için AWS erişim kimlik bilgileri (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` ya da rol) gerekir; ne `.env.example`'da, ne `fly secrets set` örneğinde (`DEPLOYMENT_GUIDE.md:335-357`), ne kodda geçer (SDK varsayılan zinciri; **doğrulanmadı**).
-3. **`MONGO_URI` yalnız migration'larda geçerli.** `config/db.js:34` yalnız `MONGODB_URI` okur; `MONGO_URI` yalnız `migrations/*.js:166/98/78` içinde yedek. Sadece `MONGO_URI` tanımlarsanız uygulama açılmaz, migration çalışır.
-4. **Frontend takma adı yarım.** `VITE_REWARDS_VAULT_ADDRESS` yalnız `App.jsx:402`'de okunur; `hooks/useRewardsContract.js:9` yalnız `VITE_REVENUE_VAULT_ADDRESS`'e bakar. Yalnız takma ad girilirse arayüzün iki parçası farklı davranır.
-5. **`frontend/.env.example:11` `VITE_API_URL=http://localhost:4000` içerir; production'da mutlak URL build/çalışma hatasıdır** (`app/apiConfig.js:27-32`, `App.jsx:29`). Örneği olduğu gibi Vercel'e taşımak siteyi bozar; Vercel'de boş bırakılmalı (`DEPLOYMENT_GUIDE.md:380`). Ayrıca backend adresi env değil, `frontend/vercel.json:5` içine sabit yazılıdır (`araf-protocol-backend.fly.dev`); Fly uygulaması yeniden adlandırılırsa dosya elle değişmelidir.
-6. **`docs/TR/DEPLOYMENT_GUIDE.md:395` eskimiş.** "Production build yalnız Base Mainnet'i açar, hosted Sepolia frontend'i production olmayan build ister" der; ama `app/chainPolicy.js:34-39` ve `main.jsx:62` `VITE_TARGET_CHAIN=base-sepolia` ile production build'de yalnız Sepolia'yı açar (aynı belgenin `:417` satırı bunu doğru anlatır; `:395` ile çelişir).
-7. **Örnekte olup kodda okunmayanlar:** `REWARD_BPS`, `CONFIRM_CONFIGURE_REWARDS` (`contracts/.env.example:71-72`), `REWARDS_READ_ONLY`, `REWARDS_SOURCE` (`backend/.env.example:157-158`) hiçbir kod yolunda etkili değil; yalnız test için duruyorlar. `docs/TR/MAINNET_READINESS_CHECKLIST.md:54` ise `AWS_KMS_KEY_ARN`'ı AWS için gerekli env gibi listeler; `backend/.env.example:66` ve `DEPLOYMENT_GUIDE.md:465` bunun okunmadığını söyler.
-8. **Kodda okunup örnekte olmayan:** `CONFIRM_SWITCH_TREASURY_TO_VAULT` (`contracts/scripts/rewardsOps.js:38`, yalnız reddetmek için); `CODESPACE_NAME` (`deploy.js:301`, `.env.example`'da yok ama ortam tarafından verilir); `NODE_ENV` contracts tarafında (`deploy.js:108`) `contracts/.env.example`'da yok. `contracts/.env.example:56` `CONFIRM_FRESH_ESCROW_DEPLOY`'u bir onay gibi sunar; kod ise public'te asla yeni escrow deploy etmez, yalnız hata metnini değiştirir (`deployRewards.js:73-77`).
-9. **`backend/.env.example` kopyalanınca olduğu gibi çalışmaz (bilinçli):** `JWT_SECRET` örneği 60 karakter (`:30`) ama kod en az 64 ister (`siwe.js:95`); `MASTER_ENCRYPTION_KEY` örneği (`:75`) 64 hex değil (`encryption.js:78`). Ayrıca `EXPECTED_CHAIN_ID=8453` örneği (`:83`) yerelde (31337 ya da Sepolia RPC) uyuşmazlık hatası verir (`expectedChain.js:55-58`); yerel için değeri RPC'nize göre değiştirin.
-10. **Prod'da fail-fast olup örnek/belgede zayıf anlatılanlar:** `JWT_SECRET` prod'a özel değil, **her ortamda** zorunlu (`siwe.js:94`, modül yüklenirken; `/ready` de `health.js:96-99` ile her zaman ister). `ALLOWED_ORIGINS` yalnız-localhost kontrolü `/ready`'de değil, açılışta da süreci durdurur (`app.js:161-163`). `ARAF_DEPLOYMENT_BLOCK`/`WORKER_START_BLOCK` yokken Redis'te checkpoint de yoksa prod'da worker `throw` eder (`eventListener.js:1098-1100`); ilk kurulumda bu ikiliden biri mutlaka verilmeli, ama `fly.toml` ya da örnekte "PROD ZORUNLU" etiketi yalnız `backend/.env.example:105`'te var.
+1. **Belgeler yeni testnet KMS istisnasını bilmiyor.** `backend/.env.example:55` ve `:10-11` prod'da `KMS_PROVIDER=env`'in "testnet dahil" reddedildiğini söyler; `docs/TR/DEPLOYMENT_GUIDE.md:261`, `:339` (aws örneği) ve ortam tablosu (`KMS_PROVIDER` testnet = `aws`/`vault`) ile `docs/EN/DEPLOYMENT_GUIDE.md:339` istisnayı anmaz. Oysa kod (`encryption.js:57-63`) ve workflow'lar (`deploy-base-sepolia.yml:163-164`) Sepolia'da `env` + `ALLOW_ENV_KMS_ON_TESTNET=yes` kullanır. `ALLOW_ENV_KMS_ON_TESTNET` yalnız `backend/.env.example:77` (yorum satırı) ve `DEPLOY_BASE_SEPOLIA.md:96`'da geçer.
+2. **Workflow doğrulaması koddan gevşek.** `deploy-base-sepolia.yml:75` `JWT_SECRET` için yalnız uzunluk (≥64) bakar; backend ayrıca entropi ≥3.5 ve placeholder reddi uygular (`siwe.js:94-103`), yani workflow geçip backend açılışta çökebilir. `BASE_SEPOLIA_WS_RPC_URL` workflow'da zorunlu ve `ws*` kabul (`:65`, `:72`); backend'de `BASE_WS_RPC_URL` opsiyonel ve yalnız `wss://` kullanır, `ws://` sessizce HTTP'ye düşer (`eventListener.js:619-621`).
+3. **Tam deploy workflow'u adresleri kalıcı yapmıyor.** `ARAF_ESCROW_ADDRESS` ve `ARAF_DEPLOYMENT_BLOCK` yalnız özet sayfasına yazılır (`deploy-base-sepolia.yml:238-243`); runtime workflow bunları variable olarak ister ve yoksa durur (`deploy-runtime-base-sepolia.yml:85-89`). Aradaki elle adım unutulabilir.
+4. **`MONGO_URI` yalnız migration'larda geçerli.** `config/db.js:34` yalnız `MONGODB_URI` okur; `MONGO_URI` yalnız `migrations/normalizeIdentityFields.js:166`, `dedupeRevenueEvents.js:98`, `backfillTerminalTradeStats.js:78`'de yedek.
+5. **Frontend takma adı yarım.** `VITE_REWARDS_VAULT_ADDRESS` yalnız `App.jsx:402`'de okunur; `hooks/useRewardsContract.js:9` yalnız `VITE_REVENUE_VAULT_ADDRESS`'e bakar.
+6. **`frontend/.env.example:11` `VITE_API_URL=http://localhost:4000` içerir; production'da mutlak URL hatadır** (`app/apiConfig.js:27-32`, `App.jsx:29`). Örnek olduğu gibi Vercel'e taşınmamalı (workflow zaten vermez). Backend adresi hâlâ `frontend/vercel.json:5`'e sabit; workflow bunu `FLY_APP_NAME` ile karşılaştırıp uyuşmazlıkta durur (`deploy-base-sepolia.yml:204`), ama dosya elle güncellenmeli.
+7. **`docs/DEPLOY_BASE_SEPOLIA.md:96-97` eskimiş.** Backend istisnasının ve `VITE_TARGET_CHAIN`'in "ayrı iş" olduğunu, yoksa backend'in başlamayacağını söyler; ikisi de artık kodda var (`encryption.js:57-63`, `app/chainPolicy.js:21`). Aynı belge `:14` `BASESCAN_API_KEY`'i GitHub secret olarak listeler ama hiçbir workflow okumaz.
+8. **`docs/TR/DEPLOYMENT_GUIDE.md:395` hâlâ eskimiş.** "Production build yalnız Base Mainnet'i açar, hosted Sepolia frontend'i production olmayan build ister" der; oysa `app/chainPolicy.js:34-39` ve `main.jsx:62` `VITE_TARGET_CHAIN=base-sepolia` ile production build'de yalnız Sepolia'yı açar (`:417` doğru anlatır, `:395` çelişir). Rehber ayrıca elle `fly secrets set`/`.env.production` akışını anlatır, workflow'dan söz etmez.
+9. **Örnekte olup kodda okunmayanlar:** `REWARD_BPS`, `CONFIRM_CONFIGURE_REWARDS` (`contracts/.env.example:71-72`), `REWARDS_READ_ONLY`, `REWARDS_SOURCE` (`backend/.env.example:157-158`) etkisiz, yalnız testler için duruyor. `docs/TR/MAINNET_READINESS_CHECKLIST.md:54` `AWS_KMS_KEY_ARN`'ı gerekli env gibi listeler; `backend/.env.example:66` okunmadığını söyler.
+10. **Kodda okunup örnekte olmayan:** `CONFIRM_SWITCH_TREASURY_TO_VAULT` (`rewardsOps.js:38`, yalnız reddetmek için), `NODE_ENV` ve `CODESPACE_NAME` contracts tarafında (`deploy.js:108`, `:301`). `contracts/.env.example:56` `CONFIRM_FRESH_ESCROW_DEPLOY`'u bir onay gibi sunar; kod public'te asla yeni escrow deploy etmez, yalnız hata metnini değiştirir (`deployRewards.js:73-77`).
+11. **`backend/.env.example` kopyalanınca olduğu gibi çalışmaz (bilinçli):** `JWT_SECRET` örneği 60 karakter (`:30`), kod en az 64 ister (`siwe.js:95`); `MASTER_ENCRYPTION_KEY` örneği (`:75`) 64 hex değil (`encryption.js:114`); `EXPECTED_CHAIN_ID=8453` örneği (`:83`) yerelde RPC farklıysa uyuşmazlık hatası verir (`expectedChain.js:55-58`).
+12. **Prod'da fail-fast olup örnekte az vurgulananlar:** `JWT_SECRET` prod'a özel değil, **her ortamda** zorunlu (`siwe.js:94`, modül yüklenirken; `/ready` de `health.js:96-99` ile ister). Yalnız-localhost `ALLOWED_ORIGINS` açılışta süreci durdurur (`app.js:161-163`). `ARAF_DEPLOYMENT_BLOCK`/`WORKER_START_BLOCK` ve Redis checkpoint yoksa prod'da worker `throw` eder (`eventListener.js:1098-1100`).
+13. **Rewards workflow dışı.** Workflow'lar `ARAF_REVENUE_VAULT_ADDRESS`/`ARAF_REWARDS_ADDRESS` (Fly) ve `VITE_REVENUE_VAULT_ADDRESS`/`VITE_REWARDS_ADDRESS` (Vercel) yazmaz; rewards ayrı operasyon (`DEPLOY_BASE_SEPOLIA.md:5`). Sepolia demosunda reward mirror ve recorder, bu değişkenler elle eklenene kadar pasif kalır.
