@@ -1,5 +1,5 @@
 {
-  "name": "araf-protokol",
+  "name": "araf-protocol",
   "private": true,
   "description": "Araf Protocol monorepo: setup, lint, build and test runner for contracts, backend and frontend (Node 22)",
   "engines": {

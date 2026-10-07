@@ -5,7 +5,7 @@
 > Only top-level folders and each package's key files are listed. Generated/large folders (`node_modules`, `artifacts`, `cache`, `deployments`, `abi`, coverage, logs, `.env`) are omitted.
 
 ```text
-Araf-Protokol/
+Araf-Protocol/
 ├── .github/workflows/
 │   ├── ci.yml
 │   ├── deploy-base-sepolia.yml           # contracts + Fly + optional Vercel (workflow_dispatch)

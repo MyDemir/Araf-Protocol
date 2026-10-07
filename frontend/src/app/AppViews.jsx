@@ -76,7 +76,7 @@ const Segmented = ({ items, value, onChange, label }) => (
 // [TR] Ayarlanmamış sosyal linkler gösterilmez (önceden github.com / x.com ana sayfasına gidiyordu).
 // [EN] Unconfigured social links are hidden (they used to point at bare github.com / x.com).
 const SOCIAL_LINKS = {
-  github: import.meta.env.VITE_SOCIAL_GITHUB || 'https://github.com/MyDemir/Araf-Protokol',
+  github: import.meta.env.VITE_SOCIAL_GITHUB || 'https://github.com/MyDemir/Araf-Protocol',
   twitter: import.meta.env.VITE_SOCIAL_TWITTER || '',
   farcaster: import.meta.env.VITE_SOCIAL_FARCASTER || '',
 };

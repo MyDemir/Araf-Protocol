@@ -5,7 +5,7 @@
 > Yalnız üst düzey klasörler ve her paketin kritik dosyaları listelenir. Generated/büyük klasörler (`node_modules`, `artifacts`, `cache`, `deployments`, `abi`, coverage, log, `.env`) dışarıda bırakılmıştır.
 
 ```text
-Araf-Protokol/
+Araf-Protocol/
 ├── .github/workflows/
 │   ├── ci.yml
 │   ├── deploy-base-sepolia.yml           # kontrat + Fly + opsiyonel Vercel (workflow_dispatch)
