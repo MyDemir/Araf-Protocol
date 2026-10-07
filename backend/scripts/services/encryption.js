@@ -48,6 +48,45 @@ function _normalizeWalletAddress(walletAddress) {
 }
 
 /**
+ * [TR] SEC-01 için dar testnet istisnası: production'da KMS_PROVIDER=env YALNIZCA
+ * NODE_ENV=production + EXPECTED_CHAIN_ID="84532" (Base Sepolia) + ALLOW_ENV_KMS_ON_TESTNET="yes"
+ * üçü birlikte doğruysa izinli. Mainnet (8453) için istisna YOKTUR.
+ * [EN] Narrow testnet-only SEC-01 exception; all three conditions must hold exactly.
+ *
+ * @returns {boolean} true → istisna aktif; false → SEC-01 hatası fırlatılmalı
+ */
+function _isEnvKmsTestnetExceptionActive() {
+  return (
+    process.env.NODE_ENV === "production" &&
+    process.env.EXPECTED_CHAIN_ID === "84532" &&
+    process.env.ALLOW_ENV_KMS_ON_TESTNET === "yes"
+  );
+}
+
+function _assertEnvKmsAllowedOrThrow() {
+  if (process.env.NODE_ENV !== "production") return;
+  if (_isEnvKmsTestnetExceptionActive()) return;
+  const mainnetNote =
+    process.env.ALLOW_ENV_KMS_ON_TESTNET === "yes" && process.env.EXPECTED_CHAIN_ID !== "84532"
+      ? " ALLOW_ENV_KMS_ON_TESTNET yalnızca EXPECTED_CHAIN_ID=84532 (Base Sepolia) için geçerlidir; " +
+        "mainnet (8453) veya tanımsız zincirde istisna YOKTUR (ALLOW_ENV_KMS_ON_TESTNET is testnet-only)."
+      : "";
+  throw new Error(
+    "SEC-01 BLOCKER: Production'da KMS_PROVIDER='env' kullanılamaz! " +
+    "AWS KMS veya HashiCorp Vault kullanın. " +
+    "Detay: .env'deki MASTER_ENCRYPTION_KEY sunucu ele geçirildiğinde tüm PII'ları açığa çıkarır." +
+    mainnetNote
+  );
+}
+
+function _warnEnvKmsTestnetException() {
+  logger.warn(
+    "[Encryption] ⚠⚠⚠ TESTNET ONLY: KMS bypass aktif (KMS_PROVIDER=env, Base Sepolia 84532). " +
+    "Gerçek PII girmeyin! / KMS bypass is ACTIVE — do NOT enter real PII. ⚠⚠⚠"
+  );
+}
+
+/**
  *
  * Production'da master key'in .env'de plaintext durmaması için
  * KMS_PROVIDER ortam değişkeni kontrol edilir:
@@ -66,20 +105,18 @@ async function _getMasterKey() {
 
   // ENV Provider (Sadece Development)
   if (provider === "env") {
-    // Production'da .env'den master key okunmasını engelle
-    if (process.env.NODE_ENV === "production") {
-      throw new Error(
-        "SEC-01 BLOCKER: Production'da KMS_PROVIDER='env' kullanılamaz! " +
-        "AWS KMS veya HashiCorp Vault kullanın. " +
-        "Detay: .env'deki MASTER_ENCRYPTION_KEY sunucu ele geçirildiğinde tüm PII'ları açığa çıkarır."
-      );
-    }
+    // Production'da .env'den master key okunmasını engelle (dar testnet istisnası hariç)
+    _assertEnvKmsAllowedOrThrow();
     const hex = process.env.MASTER_ENCRYPTION_KEY;
     if (!hex || hex.length < 64) {
       throw new Error("MASTER_ENCRYPTION_KEY is missing or too short (need 32 bytes / 64 hex chars)");
     }
     _masterKeyCache = Buffer.from(hex.slice(0, 64), "hex");
-    logger.warn("[Encryption] ⚠ Master key .env'den okunuyor — sadece development için!");
+    if (_isEnvKmsTestnetExceptionActive()) {
+      _warnEnvKmsTestnetException();
+    } else {
+      logger.warn("[Encryption] ⚠ Master key .env'den okunuyor — sadece development için!");
+    }
     return _masterKeyCache;
   }
 
@@ -207,7 +244,10 @@ async function runProductionKmsStartupSelfTest() {
   }
 
   if (provider === "env") {
-    throw new Error("SEC-01 BLOCKER: Production'da KMS_PROVIDER='env' kullanılamaz");
+    _assertEnvKmsAllowedOrThrow();
+    const envKey = await _getMasterKey();
+    _assertMasterKeyLengthOrThrow(envKey, "ENV");
+    return { ok: true, provider };
   }
 
   if (provider === "aws" && !process.env.AWS_ENCRYPTED_DATA_KEY) {
