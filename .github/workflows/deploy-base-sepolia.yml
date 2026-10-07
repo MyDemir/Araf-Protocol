@@ -63,7 +63,7 @@ jobs:
         run: |
           set -euo pipefail
           ADDRESS_RE='^0x[a-fA-F0-9]{40}$'
-          need() { test -n "${!1}" || { echo "::error::$1 is required (see docs/DEPLOY_BASE_SEPOLIA.md)."; exit 1; }; }
+          need() { test -n "${!1}" || { echo "::error::$1 is required (see docs/EN/DEPLOY_BASE_SEPOLIA.md)."; exit 1; }; }
           addr() { [[ "${!1}" =~ $ADDRESS_RE ]] || { echo "::error::$1 must be a 0x + 40 hex address."; exit 1; }; }
 
           need FRONTEND_DOMAIN
@@ -327,7 +327,7 @@ jobs:
             echo "- BASE_SEPOLIA_USDC_ADDRESS: ${USDC:-n/a}"
             echo "- ARAF_DEPLOYMENT_BLOCK: ${DEPLOY_BLOCK:-n/a}"
             echo ""
-            echo "Next (GITHUB_TOKEN cannot write repo variables; run locally, see docs/DEPLOY_BASE_SEPOLIA.md):"
+            echo "Next (GITHUB_TOKEN cannot write repo variables; run locally, see docs/EN/DEPLOY_BASE_SEPOLIA.md):"
             echo '```'
             echo "gh variable set ARAF_ESCROW_ADDRESS --body ${ESCROW:-<address>}"
             echo "gh variable set ARAF_DEPLOYMENT_BLOCK --body ${DEPLOY_BLOCK:-<block>}"

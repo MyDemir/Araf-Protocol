@@ -1,3 +1,7 @@
+> **Durum:** planlanmış, henüz uygulanmadı.
+> Ücret oranları koddaki sabit 15/15 bps'den farklıdır (`contracts/src/ArafEscrow.sol:261-262`);
+> uygulanana kadar kod esastır.
+
 # Araf Spot — Liquidity Peace Tier & Reward Plan
 
 **Versiyon:** v0.1  
