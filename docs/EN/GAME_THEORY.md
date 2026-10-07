@@ -34,6 +34,9 @@ flowchart TD
     parent_order[Parent order open] --> fill_event[OrderFilled]
     fill_event --> child_trade[Child trade LOCKED]
     child_trade --> paid_state[PAID]
+    child_trade --> pay_window[No reportPayment within 48h: expirePaymentWindow]
+    pay_window --> canceled_locked[CANCELED payment window expired]
+    child_trade --> cancel_dual
 
     paid_state --> release_call[Maker calls releaseFunds]
     release_call --> resolved_normal[RESOLVED clean/manual release]
@@ -55,6 +58,7 @@ flowchart TD
     split_offer --> split_accept[Counterparty accepts]
     split_accept --> split_resolved[RESOLVED partial settlement]
 
+    paid_state --> cancel_dual
     challenged_state --> cancel_dual[proposeOrApproveCancel dual approval]
     cancel_dual --> canceled_state[CANCELED]
 
@@ -166,14 +170,17 @@ Reward weight is intentionally outcome-sensitive:
 
 | Terminal outcome | Reward effect | Game-theoretic reason |
 |---|---|---|
-| Fast clean release | Highest positive weight | Makes immediate cooperation the dominant social behavior |
-| Clean release within 24h/72h | Medium positive weight | Still rewards cooperation, but prices delay |
-| Slow clean release | Low positive weight | Accepts late cooperation without treating it as ideal |
-| Partial settlement | Low positive weight | Rewards dispute de-escalation without making disputes profitable |
+| Fast clean release (≤ 1h from `paidAt` to release) | Highest positive weight (×2.5) | Makes immediate cooperation the dominant social behavior |
+| Clean release within ≤ 24h / ≤ 72h | Medium positive weight (×1.5 / ×1.0) | Still rewards cooperation, but prices delay |
+| Slow clean release (> 72h) | Low positive weight (×0.5) | Accepts late cooperation without treating it as ideal |
+| Partial settlement | Low positive weight (×0.3) | Rewards dispute de-escalation without making disputes profitable |
 | Auto-release | Zero weight | Does not reward maker inactivity or liveness failure |
 | Mutual cancel | Zero weight | Avoids cancel-loop farming; neutral exit, not successful trade |
 | Disputed release | Zero weight | Prevents strategic challenge-then-release farming |
+| Payment window expiry (`PAYMENT_WINDOW_EXPIRED`) | Zero weight | An unreported payment is not a successful trade |
 | Burned | Zero weight | Deadlock must never become rewardable |
+
+Weight formula (`ArafRewards`): `weight = stableNotional × outcomeMultiplier × tierMultiplier`; the tier multiplier is ×1.0 / ×1.1 / ×1.2 / ×1.3 for Tier 1–4, Tier 0 is not recorded. Maker and taker receive the same weight. `stableNotional` is the token amount normalized to 6 decimals.
 
 This creates a simple incentive ladder:
 

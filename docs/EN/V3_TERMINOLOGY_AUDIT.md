@@ -10,9 +10,10 @@ This audit classifies remaining `listing`, `createEscrow`, `lockEscrow`, and `le
 
 ## Compatibility/deprecated behavior
 
-- `backend/scripts/routes/listings.js` is a deprecated read-only compatibility alias over `Order` documents. It is not mounted by canonical `app.js`; write routes return 410.
-- `backend/scripts/jobs/cleanupPendingListings.js` is a deprecated no-op compatibility job retained for scheduler/app wiring stability.
-- `Trade.trade_origin = DIRECT_ESCROW` and direct escrow event handlers are historical/deployment compatibility mirror values, not canonical V3 authority.
+- The former `backend/scripts/routes/listings.js` (`/api/listings` alias) and `backend/scripts/jobs/cleanupPendingListings.js` (no-op job) have been **removed** from the repository; `app.js` mounts only `/api/orders` and the other canonical surfaces.
+- Direct escrow event handlers (`EscrowCreated` / `EscrowLocked`) have been removed (B36): the contract never emits these events; child trades are mirrored via `OrderFilled` + `getTrade()`.
+- `DIRECT_ESCROW` remains in the `Trade.trade_origin` enum only as a historical/compat mirror value (default `ORDER_CHILD`; written only if `parentOrderId == 0`). In V3 the contract creates every trade from an order fill; `ArafRewards` also rejects `isOrderChild == false` records with `DirectEscrowNotRewardable`.
+- The names `canonical_refs.listing_ref` (Mongo) and `childListingRef` (ABI) are kept for backward compatibility; their meaning is a child-trade trace reference.
 - Legacy environment aliases and legacy profile fields are compatibility concerns unrelated to the V3 market primitive.
 
 ## Stale/incorrect terminology fixed here

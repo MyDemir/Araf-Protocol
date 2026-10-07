@@ -28,6 +28,9 @@ The dispute system operates at `child trade` level. Parent orders provide market
 ```mermaid
 flowchart TD
     LOCKED --> PAID
+    LOCKED --> EXPIRED[CANCELED payment window expired]
+    LOCKED --> CANCEL
+    PAID --> CANCEL
     PAID --> CLEAN[RESOLVED clean release]
     PAID --> AUTO[RESOLVED auto-release]
     PAID --> CHALLENGED
@@ -40,7 +43,8 @@ flowchart TD
 The dispute architecture communicates:
 
 - Once taker reports payment, maker cannot remain silent without consequence.
-- If maker claims non-payment, the trade moves into the challenge surface.
+- If the taker does not report payment within 48h, the lock unwinds by time through `expirePaymentWindow` (maker fully refunded, 2% penalty from the taker bond).
+- If maker claims non-payment, the maker first calls `pingTakerForChallenge`; `challengeTrade` is maker-only and only open within `[ping+24h, ping+48h)`. If the window is missed the ping lapses and the taker's liveness path (`pingMaker` → `autoRelease`) opens.
 - Challenge is not a judgment of truth; it is economic-pressure mode.
 - Parties can exit through release, partial settlement, or mutual cancel.
 - If deadlock continues, bleeding/burn does not preserve value; it prices unresolved conflict.
@@ -75,6 +79,7 @@ Architectural rule:
 | Auto-release | Zero weight | Maker inactivity is not rewarded |
 | Mutual cancel | Zero weight | Prevents cancel-loop farming |
 | Disputed release | Zero weight | Prevents challenge-then-release farming |
+| Payment window expiry | Zero weight | An unreported payment is not a successful trade |
 | Burn | Zero weight | Deadlock must never be rewardable |
 
 ## 5. Architectural authority boundaries
@@ -82,7 +87,7 @@ Architectural rule:
 | Component | Authority | Non-authority |
 |---|---|---|
 | `ArafEscrow` | State transitions, terminal outcomes, payout math | Proving off-chain fiat truth |
-| `ArafRevenueVault` | Revenue reserve accounting, reward/treasury split | Choosing reward recipients |
+| `ArafRevenueVault` | Revenue reserve accounting, reward/treasury split (`rewardBps` 4000–7000, initial 4000) | Choosing reward recipients |
 | `ArafRewards` | Outcome-derived weight, epoch pool, claim math | Producing off-chain dispute judgment |
 | Backend | Mirror, read model, coordination, PII boundary | Economic outcome, reward eligibility, recipient, multiplier |
 | Frontend | UX guardrail, timing guidance, contract access | Contract outcome override |

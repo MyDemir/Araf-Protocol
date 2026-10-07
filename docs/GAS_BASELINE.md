@@ -131,6 +131,16 @@ fark yalnız dispatcher yerleşiminin kaymasındandır.
 | `finalizeEpochToken` | 54,461 | 54,461 | +0 | +0.0% |
 | `claim` | 120,223 | 120,223 | +0 | +0.0% |
 
+## Re-verification (2026-10-06) / Yeniden doğrulama
+
+`gasBaseline.js` was re-run on the current code (base `d154fe8`, solc 0.8.24 via solc-js, `viaIR`, optimizer 200
+runs, `cancun`). All 26 rows match the "After" column of the K2(B) table above exactly. Runtime bytecode sizes:
+`ArafEscrow` 22,061, `ArafReputationLib` 4,705, `ArafSettlementLib` 2,168, `ArafRevenueVault` 6,547, `ArafRewards`
+7,215 bytes (EIP-170 limit 24,576).
+
+`gasBaseline.js` güncel kodda yeniden çalıştırıldı; 26 satırın tamamı yukarıdaki K2(B) tablosunun "After"
+sütunuyla birebir aynı. Bytecode boyutları yukarıdaki gibidir.
+
 ## Considered and not done / Değerlendirilip yapılmayanlar
 
 - Shrinking `ReputationUpdated`: saves ≈2.5k gas per event but the backend would then need an RPC read per
