@@ -110,9 +110,9 @@ ARAF_ESCROW_ADDRESS=<address_from_deploy_output>
 # Local chain is neither 8453 nor 84532, so the tracked token set is given explicitly
 ARAF_TRACKED_TOKENS=<usdt_address_from_deploy_output>,<usdc_address_from_deploy_output>
 
-# Use Account #2 private key for Relayer (optional: without it the reputation-decay and
-# reward-outcome jobs stay inactive)
-RELAYER_PRIVATE_KEY=0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a
+# Use the Hardhat Account #2 private key for Relayer (optional: without it the reputation-decay and
+# reward-outcome jobs stay inactive). Local only: these keys are public; NEVER use them on mainnet.
+RELAYER_PRIVATE_KEY=<hardhat_account_2_private_key>
 
 SIWE_DOMAIN=localhost
 ALLOWED_ORIGINS=http://localhost:5173
@@ -683,7 +683,7 @@ Production runs a KMS self-test at startup (`runProductionKmsStartupSelfTest`). 
 |---|---|---|---|
 | `BASE_RPC_URL` | prod: **yes** | — | No public fallback. |
 | `BASE_WS_RPC_URL` | no (recommended) | — | Must start with `wss://`, otherwise the HTTP provider is used. |
-| `EXPECTED_CHAIN_ID` | prod: **yes** (also when `BASE_RPC_URL` is set) | — | `8453` or `84532` in production. Providers are checked against it at the worker, config, preview and `/ready` surfaces. |
+| `EXPECTED_CHAIN_ID` | prod: **yes** (also when `BASE_RPC_URL` is set) | — | Any positive integer is accepted (`expectedChain.js`); the `8453` / `84532` restriction in production comes from the token env resolution (`tokenEnv.js`). Providers are checked against it at the worker, config, preview and `/ready` surfaces. |
 | `ALLOW_UNSAFE_CHAIN_ID_BYPASS` | no | `false` | Non-production only: skips the chain check when `EXPECTED_CHAIN_ID` is empty. |
 | `ARAF_ESCROW_ADDRESS` | prod: **yes** | — | Zero address counts as unset (production exits). |
 | `ARAF_REVENUE_VAULT_ADDRESS` | no | — | Reward mirror events; without it (or `ARAF_REWARDS_ADDRESS`) the reward mirror is not watched. |
@@ -882,7 +882,7 @@ PII re-encryption after the HKDF change has no tool in the repository; see `PII_
 - `VITE_*` variables are **public at build/runtime in browser**. Never place API keys, private keys, JWT secrets, DB URLs, or any secret in `VITE_*` vars.
 
 ### Required / forbidden environment matrix (production)
-- Required: `NODE_ENV=production`, `MONGODB_URI`, `REDIS_URL` (TLS), `JWT_SECRET`, `SIWE_DOMAIN`, `SIWE_URI`, `ARAF_ESCROW_ADDRESS`, `BASE_RPC_URL`, `ALLOWED_ORIGINS`, `EXPECTED_CHAIN_ID` (`8453` or `84532`), `KMS_PROVIDER` (`aws` or `vault`) with its key variables, and the chain-matching token addresses (`BASE_MAINNET_*` / `BASE_SEPOLIA_*` or `ARAF_TRACKED_TOKENS`).
+- Required: `NODE_ENV=production`, `MONGODB_URI`, `REDIS_URL` (TLS), `JWT_SECRET`, `SIWE_DOMAIN`, `SIWE_URI`, `ARAF_ESCROW_ADDRESS`, `BASE_RPC_URL`, `ALLOWED_ORIGINS`, `EXPECTED_CHAIN_ID` (any positive integer is accepted, but token resolution only supports `8453` / `84532` in production), `KMS_PROVIDER` (`aws` or `vault`) with its key variables, and the chain-matching token addresses (`BASE_MAINNET_*` / `BASE_SEPOLIA_*` or `ARAF_TRACKED_TOKENS`).
 - Required for worker bootstrap: `ARAF_DEPLOYMENT_BLOCK` or `WORKER_START_BLOCK` (or existing redis checkpoint).
 - Forbidden/insecure in production: `KMS_PROVIDER=env`, `REDIS_TLS_SKIP_VERIFY=true`, wildcard `ALLOWED_ORIGINS=*`, localhost-only fallback origins, `SIWE_DOMAIN=localhost`, and missing `BASE_RPC_URL`.
 - Safe development defaults (local only): localhost `ALLOWED_ORIGINS`, optional non-TLS Redis, and mock/token local addresses.

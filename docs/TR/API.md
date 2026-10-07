@@ -25,7 +25,7 @@ Auth JWT **yalnız** cookie'den okunur; normal auth için bearer fallback yoktur
 | `requireAdminWallet` | Cookie cüzdanı `ADMIN_WALLETS` içinde olmalı (virgülle ayrılmış, büyük/küçük harf duyarsız; boş liste = kimse) | `403 { error: "Admin erişimi reddedildi." }` |
 | `requirePIIToken` | `Authorization: Bearer <piiToken>`: `type=pii`, `tradeId` path'teki `:tradeId` ile eşit, token cüzdanı session cüzdanıyla eşit | `400` (hatalı `tradeId`), `401` (header yok/geçersiz), `403` |
 
-`SESSION_WALLET_MISMATCH` aynı zamanda bir **oturum geçersiz kılma olayıdır**: backend mevcut JWT'yi blacklist'e alır, cüzdanın refresh ailelerini iptal eder, iki cookie'yi de temizler ve `409` döner.
+`requireSessionWalletMatch`'in döndürdüğü `SESSION_WALLET_MISMATCH` aynı zamanda bir **oturum geçersiz kılma olayıdır**: backend mevcut JWT'yi blacklist'e alır, cüzdanın refresh ailelerini iptal eder, iki cookie'yi de temizler ve `409` döner. `GET /api/auth/me` header uyuşmazlığında aynı `409` kodunu döner ama daha az geçersiz kılar: yalnız refresh ailelerini iptal eder ve cookie'leri temizler; JWT orada blacklist'e **alınmaz**.
 
 ### Rate limiter'lar
 
@@ -98,7 +98,7 @@ SIWE imzasını doğrular ve auth/refresh cookie'lerini set eder. Koşul kabulü
 Hatalar: `400` (şema), `401 { code: "TERMS_NOT_ACCEPTED", reason: "UNSUPPORTED_VERSION" | "ACCEPTANCE_REQUIRED", termsVersion }`, `401 { error: "Kimlik doğrulama başarısız: ..." }` (beklenen SIWE hataları), beklenmeyen hatalarda genel mesajlı `500`.
 
 ### `GET /api/auth/me`
-Middleware: `requireAuth` (`x-wallet-address` header'ı burada opsiyoneldir; varsa ve cookie cüzdanından farklıysa oturum geçersiz kılınır ve `409 SESSION_WALLET_MISMATCH` döner).
+Middleware: `requireAuth` (`x-wallet-address` header'ı burada opsiyoneldir; varsa ve cookie cüzdanından farklıysa refresh aileleri iptal edilir, cookie'ler temizlenir (JWT blacklist'e alınmaz) ve `409 SESSION_WALLET_MISMATCH` döner).
 
 Yanıt: `{ wallet, authenticated: true, isAdmin, hasPayoutProfile }`.
 - `isAdmin`: cüzdan `ADMIN_WALLETS` içinde mi (`requireAdminWallet` ile aynı mantık).

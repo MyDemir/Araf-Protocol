@@ -100,6 +100,7 @@ Listing-first / `createEscrow` / `lockEscrow` anlatısı artık **kanonik mimari
 **Canonical reward thesis:** Proof of Peace makes fast clean resolution more valuable than delay, while Bleeding Escrow makes unresolved conflict expensive.
 
 Rollout docs:
+- TR: [docs/TR/REWARDS_ROLLOUT.md](./docs/TR/REWARDS_ROLLOUT.md)
 - EN: [docs/EN/REWARDS_ROLLOUT.md](./docs/EN/REWARDS_ROLLOUT.md)
 - Abuse observability: [docs/EN/REWARDS_ABUSE_OBSERVABILITY.md](./docs/EN/REWARDS_ABUSE_OBSERVABILITY.md) · [docs/TR/REWARDS_ABUSE_OBSERVABILITY.md](./docs/TR/REWARDS_ABUSE_OBSERVABILITY.md)
 - Mainnet checklist (TR): [docs/TR/MAINNET_READINESS_CHECKLIST.md](./docs/TR/MAINNET_READINESS_CHECKLIST.md)
