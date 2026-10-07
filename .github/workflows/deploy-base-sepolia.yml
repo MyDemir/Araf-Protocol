@@ -1,0 +1,248 @@
+name: Deploy Base Sepolia
+
+# Tam deploy: kontrat (contracts/scripts/deploy.js) + backend (Fly.io) + opsiyonel frontend (Vercel).
+# deployRewards.js bilerek dahil DEĞİL (rewards ayrı operasyon).
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_frontend:
+        description: "Also deploy frontend to Vercel"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-base-sepolia
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy contracts and backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      FLY_APP_NAME: ${{ vars.FLY_APP_NAME || 'araf-protocol-backend' }}
+      FRONTEND_DOMAIN: ${{ vars.FRONTEND_DOMAIN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate required config
+        shell: bash
+        env:
+          DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+          BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+          BASE_SEPOLIA_WS_RPC_URL: ${{ secrets.BASE_SEPOLIA_WS_RPC_URL }}
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          MASTER_ENCRYPTION_KEY: ${{ secrets.MASTER_ENCRYPTION_KEY }}
+          TREASURY_ADDRESS: ${{ vars.TREASURY_ADDRESS }}
+          FINAL_OWNER_ADDRESS: ${{ vars.FINAL_OWNER_ADDRESS }}
+          BASE_SEPOLIA_USDT_ADDRESS: ${{ vars.BASE_SEPOLIA_USDT_ADDRESS }}
+          BASE_SEPOLIA_USDC_ADDRESS: ${{ vars.BASE_SEPOLIA_USDC_ADDRESS }}
+        run: |
+          set -euo pipefail
+          ADDRESS_RE='^0x[a-fA-F0-9]{40}$'
+          need() { test -n "${!1}" || { echo "::error::$1 is required (see docs/DEPLOY_BASE_SEPOLIA.md)."; exit 1; }; }
+          addr() { [[ "${!1}" =~ $ADDRESS_RE ]] || { echo "::error::$1 must be a 0x + 40 hex address."; exit 1; }; }
+
+          need FRONTEND_DOMAIN
+          for n in DEPLOYER_PRIVATE_KEY BASE_SEPOLIA_RPC_URL BASE_SEPOLIA_WS_RPC_URL FLY_API_TOKEN MONGODB_URI REDIS_URL JWT_SECRET MASTER_ENCRYPTION_KEY; do need "$n"; done
+          for n in TREASURY_ADDRESS FINAL_OWNER_ADDRESS BASE_SEPOLIA_USDT_ADDRESS BASE_SEPOLIA_USDC_ADDRESS; do need "$n"; addr "$n"; done
+
+          [[ "${TREASURY_ADDRESS,,}" != "${FINAL_OWNER_ADDRESS,,}" ]] || { echo "::error::FINAL_OWNER_ADDRESS must differ from TREASURY_ADDRESS (deploy.js rejects equal values on public chains)."; exit 1; }
+          [[ "$FRONTEND_DOMAIN" != http* && "$FRONTEND_DOMAIN" != */* ]] || { echo "::error::FRONTEND_DOMAIN must be a bare host (no https://, no path)."; exit 1; }
+          [[ "$FRONTEND_DOMAIN" != "localhost" ]] || { echo "::error::FRONTEND_DOMAIN cannot be localhost."; exit 1; }
+          [[ "$BASE_SEPOLIA_RPC_URL" == http* ]] || { echo "::error::BASE_SEPOLIA_RPC_URL must be http(s)."; exit 1; }
+          [[ "$BASE_SEPOLIA_WS_RPC_URL" == ws* ]] || { echo "::error::BASE_SEPOLIA_WS_RPC_URL must be ws(s)."; exit 1; }
+          [[ "$REDIS_URL" == rediss://* ]] || { echo "::error::REDIS_URL must be rediss:// (backend requires Redis TLS in production)."; exit 1; }
+          [[ "$DEPLOYER_PRIVATE_KEY" =~ ^(0x)?[a-fA-F0-9]{64}$ ]] || { echo "::error::DEPLOYER_PRIVATE_KEY must be a 32-byte hex key."; exit 1; }
+          [[ ${#JWT_SECRET} -ge 64 ]] || { echo "::error::JWT_SECRET must be at least 64 characters."; exit 1; }
+          [[ "$MASTER_ENCRYPTION_KEY" =~ ^[a-fA-F0-9]{64}$ ]] || { echo "::error::MASTER_ENCRYPTION_KEY must be exactly 64 hex characters."; exit 1; }
+
+      - name: Install contract dependencies
+        working-directory: contracts
+        run: npm ci
+
+      - name: Compile contracts
+        working-directory: contracts
+        run: npx hardhat compile
+
+      # Secret'lar yalnız bu adımın ortam değişkenlerinde; contracts/.env dosyası yazılmaz.
+      - name: Deploy contracts to Base Sepolia
+        working-directory: contracts
+        shell: bash
+        env:
+          CONFIRM_PUBLIC_DEPLOY: "yes"
+          DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+          BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+          TREASURY_ADDRESS: ${{ vars.TREASURY_ADDRESS }}
+          FINAL_OWNER_ADDRESS: ${{ vars.FINAL_OWNER_ADDRESS }}
+          BASE_SEPOLIA_USDT_ADDRESS: ${{ vars.BASE_SEPOLIA_USDT_ADDRESS }}
+          BASE_SEPOLIA_USDC_ADDRESS: ${{ vars.BASE_SEPOLIA_USDC_ADDRESS }}
+        run: |
+          set -euo pipefail
+          npx hardhat run scripts/deploy.js --network base-sepolia 2>&1 | tee "$RUNNER_TEMP/deploy.log"
+
+      # deploy.js deploy bloğunu ve VITE_* satırlarını basmaz; değerler manifest + tx receipt'ten okunur.
+      - name: Export deployment values
+        working-directory: contracts
+        shell: bash
+        env:
+          BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+        run: |
+          set -euo pipefail
+          node -e '
+            const fs = require("fs");
+            const { ethers } = require("ethers");
+            (async () => {
+              const m = JSON.parse(fs.readFileSync("deployments/base-sepolia.json", "utf8"));
+              const re = /^0x[a-fA-F0-9]{40}$/;
+              if (m.chainId !== 84532 || m.network !== "base-sepolia") throw new Error("manifest is not base-sepolia/84532");
+              if (!re.test(m.escrowAddress || "")) throw new Error("manifest.escrowAddress invalid");
+              if (!m.deployTxHash) throw new Error("manifest.deployTxHash missing");
+              const tok = (s) => (m.tokens || []).find((t) => t.symbol === s);
+              const usdt = tok("USDT") && tok("USDT").address;
+              const usdc = tok("USDC") && tok("USDC").address;
+              if (!re.test(usdt || "") || !re.test(usdc || "")) throw new Error("manifest.tokens USDT/USDC invalid");
+              const provider = new ethers.JsonRpcProvider(process.env.BASE_SEPOLIA_RPC_URL);
+              const rc = await provider.getTransactionReceipt(m.deployTxHash);
+              if (!rc || !rc.blockNumber) throw new Error("deploy tx receipt not found");
+              const out = [
+                "ESCROW=" + m.escrowAddress,
+                "USDT=" + usdt,
+                "USDC=" + usdc,
+                "DEPLOY_BLOCK=" + rc.blockNumber,
+              ];
+              fs.appendFileSync(process.env.GITHUB_ENV, out.join("\n") + "\n");
+              console.log(out.join("\n"));
+            })().catch((e) => { console.error("::error::" + e.message); process.exit(1); });
+          '
+
+      - name: Setup Fly CLI
+        uses: superfly/flyctl-actions/setup-flyctl@1.5
+
+      # Secret'lar komut satırına değil stdin'e (NAME=VALUE) verilir; --stage ile deploy'a kadar uygulanmaz.
+      - name: Stage backend secrets on Fly
+        working-directory: backend
+        shell: bash
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          MASTER_ENCRYPTION_KEY: ${{ secrets.MASTER_ENCRYPTION_KEY }}
+          BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+          BASE_SEPOLIA_WS_RPC_URL: ${{ secrets.BASE_SEPOLIA_WS_RPC_URL }}
+          RELAYER_PRIVATE_KEY: ${{ secrets.RELAYER_PRIVATE_KEY }}
+          ADMIN_WALLETS: ${{ vars.ADMIN_WALLETS }}
+        run: |
+          set -euo pipefail
+          {
+            printf '%s=%s\n' NODE_ENV production
+            printf '%s=%s\n' MONGODB_URI "$MONGODB_URI"
+            printf '%s=%s\n' REDIS_URL "$REDIS_URL"
+            printf '%s=%s\n' JWT_SECRET "$JWT_SECRET"
+            printf '%s=%s\n' JWT_EXPIRES_IN 15m
+            printf '%s=%s\n' PII_TOKEN_EXPIRES_IN 15m
+            printf '%s=%s\n' KMS_PROVIDER env
+            printf '%s=%s\n' ALLOW_ENV_KMS_ON_TESTNET yes
+            printf '%s=%s\n' MASTER_ENCRYPTION_KEY "$MASTER_ENCRYPTION_KEY"
+            printf '%s=%s\n' EXPECTED_CHAIN_ID 84532
+            printf '%s=%s\n' BASE_RPC_URL "$BASE_SEPOLIA_RPC_URL"
+            printf '%s=%s\n' BASE_WS_RPC_URL "$BASE_SEPOLIA_WS_RPC_URL"
+            printf '%s=%s\n' ARAF_ESCROW_ADDRESS "$ESCROW"
+            printf '%s=%s\n' BASE_SEPOLIA_USDT_ADDRESS "$USDT"
+            printf '%s=%s\n' BASE_SEPOLIA_USDC_ADDRESS "$USDC"
+            printf '%s=%s\n' ARAF_DEPLOYMENT_BLOCK "$DEPLOY_BLOCK"
+            printf '%s=%s\n' SIWE_DOMAIN "$FRONTEND_DOMAIN"
+            printf '%s=%s\n' SIWE_URI "https://$FRONTEND_DOMAIN"
+            printf '%s=%s\n' ALLOWED_ORIGINS "https://$FRONTEND_DOMAIN"
+            if [ -n "$RELAYER_PRIVATE_KEY" ]; then printf '%s=%s\n' RELAYER_PRIVATE_KEY "$RELAYER_PRIVATE_KEY"; fi
+            if [ -n "$ADMIN_WALLETS" ]; then printf '%s=%s\n' ADMIN_WALLETS "$ADMIN_WALLETS"; fi
+          } | flyctl secrets import --stage -a "$FLY_APP_NAME"
+
+      - name: Deploy backend to Fly
+        working-directory: backend
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl deploy --remote-only -a "$FLY_APP_NAME"
+
+      - name: Check backend health
+        shell: bash
+        run: |
+          set -euo pipefail
+          sleep 15
+          curl --fail --show-error --silent --retry 12 --retry-delay 10 --retry-all-errors "https://$FLY_APP_NAME.fly.dev/health"
+
+      - name: Validate Vercel config
+        if: ${{ inputs.deploy_frontend }}
+        shell: bash
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$VERCEL_TOKEN" || { echo "::error::VERCEL_TOKEN secret is required when deploy_frontend is true."; exit 1; }
+          test -n "$VERCEL_ORG_ID" || { echo "::error::VERCEL_ORG_ID secret is required when deploy_frontend is true."; exit 1; }
+          test -n "$VERCEL_PROJECT_ID" || { echo "::error::VERCEL_PROJECT_ID secret is required when deploy_frontend is true."; exit 1; }
+          # Production frontend /api'yi vercel.json rewrite'ı ile çağırır (mutlak VITE_API_URL prod'da reddedilir).
+          grep -q "https://$FLY_APP_NAME.fly.dev/api/" frontend/vercel.json || { echo "::error::frontend/vercel.json /api rewrite destination does not match https://$FLY_APP_NAME.fly.dev. Update vercel.json or FLY_APP_NAME."; exit 1; }
+
+      - name: Install Vercel CLI
+        if: ${{ inputs.deploy_frontend }}
+        run: npm install -g vercel@latest
+
+      # VITE_API_URL bilerek verilmez: frontend/src/app/apiConfig.js prod'da mutlak URL'i reddeder, /api rewrite kullanılır.
+      - name: Deploy frontend to Vercel
+        if: ${{ inputs.deploy_frontend }}
+        working-directory: frontend
+        shell: bash
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VITE_RPC_URL: ${{ vars.VITE_RPC_URL }}
+        run: |
+          set -euo pipefail
+          vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+          args=(
+            --build-env VITE_TARGET_CHAIN=base-sepolia
+            --build-env VITE_ESCROW_ADDRESS="$ESCROW"
+            --build-env VITE_USDT_ADDRESS="$USDT"
+            --build-env VITE_USDC_ADDRESS="$USDC"
+          )
+          if [ -n "$VITE_RPC_URL" ]; then args+=(--build-env VITE_RPC_URL="$VITE_RPC_URL"); fi
+          vercel deploy --prod --yes --token="$VERCEL_TOKEN" "${args[@]}"
+
+      - name: Print deployment summary
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          {
+            echo "### Base Sepolia deployment"
+            echo "- Backend: https://$FLY_APP_NAME.fly.dev"
+            echo "- Frontend domain (SIWE/CORS): https://$FRONTEND_DOMAIN"
+            echo "- ARAF_ESCROW_ADDRESS: ${ESCROW:-n/a}"
+            echo "- BASE_SEPOLIA_USDT_ADDRESS: ${USDT:-n/a}"
+            echo "- BASE_SEPOLIA_USDC_ADDRESS: ${USDC:-n/a}"
+            echo "- ARAF_DEPLOYMENT_BLOCK: ${DEPLOY_BLOCK:-n/a}"
+            echo ""
+            echo "Next: gh variable set ARAF_ESCROW_ADDRESS / ARAF_DEPLOYMENT_BLOCK (docs/DEPLOY_BASE_SEPOLIA.md)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cleanup
+        if: ${{ always() }}
+        run: rm -f "$RUNNER_TEMP/deploy.log" contracts/.env
