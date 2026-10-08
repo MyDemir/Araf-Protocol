@@ -394,7 +394,7 @@ Public, read-only mirror of reward events; the whole router sits behind `marketR
 
 ## 10) Admin read-only observability (`/api/admin`)
 
-The whole router runs `requireAuth` → `requireSessionWalletMatch` → `requireAdminWallet` → `adminReadLimiter` (60 / min per wallet). No write/override actions are exposed. Admin access is controlled only by `ADMIN_WALLETS`.
+The whole router runs `requireAuth` → `requireSessionWalletMatch` → `requireAdminWallet` → `adminReadLimiter` (60 / min per wallet). Payment-rail switches are the only write surface (below). Admin access is controlled only by `ADMIN_WALLETS`.
 
 | Route | Query (Joi) | Response |
 |---|---|---|
@@ -406,6 +406,19 @@ The whole router runs `requireAuth` → `requireSessionWalletMatch` → `require
 | `GET /api/admin/rewards/health` | — | `{ mirror_only: true, counts: { epochs, funding, claims } }` |
 
 Non-admin wallets receive `403`; the `scheduler` block of `/summary` lists `reputationDecayLastRunAt`, `statsSnapshotLastRunAt`, `sensitiveCleanupLastRunAt`, `userBankRiskCleanupLastRunAt`.
+
+
+### Payment rail management (admin write)
+
+Same auth chain (`requireAuth` -> `requireSessionWalletMatch` -> `requireAdminWallet`); the `x-wallet-address` header requirement doubles as the CSRF layer next to the `SameSite=Lax` cookie. Writes also pass `adminWriteLimiter` (10 / 10 min per wallet).
+
+| Route | Body / Query | Response |
+|---|---|---|
+| `GET /api/admin/payment-rails` | — | `{ rails: [{ code, name{TR,EN}, countries, riskLevel, enabled, changedAt, changedBy }] }` |
+| `PUT /api/admin/payment-rails/:rail` | `{ enabled: boolean, reason?: string<=300 }` (strict Joi) | `{ success, rail, previousEnabled, enabled, changed }`; unknown rail/body `400`; closing the last enabled rail `409 LAST_ENABLED_RAIL`; concurrent change `409 PAYMENT_RAIL_CONFLICT` |
+| `GET /api/admin/payment-rails/audit` | `page`, `limit` (1-100) | `{ items: [{ rail, previousEnabled, newEnabled, adminWallet, reason, ipHash, createdAt }], total, page, limit }` (append-only collection, IP stored only as HMAC) |
+
+Public effects: `GET /api/orders/config` and `/payment-risk-config` return `enabledPaymentRails` and set `paymentRiskConfig[*][rail].enabled`; `GET /api/orders` rows carry `owner_rail_enabled` (boolean); `GET /api/auth/me` returns `payoutRail` and `payoutRailEnabled` (`false` when the saved profile's rail is closed; `hasPayoutProfile` keeps meaning "data exists"); `PUT /api/auth/profile` and `POST /api/orders/market-meta` answer `409 PAYMENT_RAIL_DISABLED` for a closed rail. Active trades (LOCKED/PAID/CHALLENGED), snapshots and the PII flow never consult rail state. The contract is rail-agnostic: this gate exists at UI/API level only.
 
 ---
 

@@ -1060,6 +1060,12 @@ Legacy içerik yalnız tarihsel bağlam için tutulmalı; operasyonel kararlar b
 
 ---
 
+## 17b. Ödeme yöntemi anahtarları (admin)
+
+Rail durumu tek Mongo belgesindedir (`PaymentRailSetting`, iyimser `version`); 15 sn'lik süreç-içi önbellekle okunur (`services/paymentRails.js`; yerel yazmada geçersiz kılınır, DB okuma hatasında son bilinen/hepsi etkin). Kayıt yoksa `paymentRailRiskConfig.js`'te tanımlı tüm rail'ler etkindir. Her değişiklik değiştirilemez `PaymentRailAudit` koleksiyonuna eklenir (admin cüzdanı, önceki/yeni değer, gerekçe, HMAC'li IP). Rail kapatmak yalnız YENİ işi engeller: profil oluşturma/değiştirme, market-meta ve sahibi kapalı rail'de olan emirleri doldurma (`owner_rail_enabled=false`). Aktif işlemler, ödeme snapshot'ları ve PII akışı etkilenmez. Kontrat rail bilmez; bu kapı UI/API düzeyindedir, kontrat doğrudan çağrılarak aşılabilir.
+
+---
+
 ## 18. Sonuç: bu dokümanın rolü
 
 Bu metin iki rolü aynı anda taşır:
