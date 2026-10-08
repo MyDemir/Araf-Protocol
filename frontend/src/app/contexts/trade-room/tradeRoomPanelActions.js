@@ -43,9 +43,21 @@ export const buildTradeRoomPanelCallbacks = ({
   handleExpirePaymentWindow,
   paymentWindowExpired = false,
   nowMs = Date.now(),
-  confirmFn = typeof window !== 'undefined' ? window.confirm.bind(window) : () => false,
+  showToast,
+  confirmFn = typeof window !== 'undefined' && typeof window.confirm === 'function' ? window.confirm.bind(window) : null,
 }) => {
   const tr = lang === 'TR';
+  // [TR] window.confirm yoksa aksiyon sessizce çıkmaz; kullanıcıya bildirilir ve işlem yapılmaz (fail-closed).
+  // [EN] A missing confirm no longer exits silently: the user is told and the action does not run (fail-closed).
+  const askConfirm = (message) => {
+    if (typeof confirmFn !== 'function') {
+      if (typeof showToast === 'function') showToast(tr
+        ? 'Bu tarayıcıda onay penceresi kullanılamıyor. Lütfen işlemi standart bir tarayıcıdan yapın.'
+        : 'Confirmation dialogs are unavailable in this browser. Please use a standard browser to continue.', 'error');
+      return false;
+    }
+    return Boolean(confirmFn(message));
+  };
   // [TR] Aktif/pasif kararı kontratın süre kurallarının saf aynasından gelir (tradeTimeline.js).
   //      paidAt yoksa (eski/eksik veri) çağıranın verdiği bayraklara düşülür.
   // [EN] Enablement mirrors contract timing rules; falls back to caller flags when paidAt is unknown.
@@ -104,7 +116,7 @@ export const buildTradeRoomPanelCallbacks = ({
     start_challenge: withGuard(() => {
       // [TR] Ping atmadan önce kuralı anlatan onay: ping bir iddiadır, 24 saatlik pencere kaçarsa düşer.
       // [EN] Before pinging, confirm the rule: a ping is a claim and lapses if the 24h window is missed.
-      if (!makerPinged && !activeTrade?.challengePingedAt && !confirmFn(tr
+      if (!makerPinged && !activeTrade?.challengePingedAt && !askConfirm(tr
         ? 'Ping bir iddiadır: ping attıktan 24 saat sonra, sonraki 24 saat içinde itiraz açmazsan ping düşer ve alıcı ödemeyi otomatik serbest bırakma yoluna geçebilir. Ödeme gelmediyse devam et. Onaylıyor musunuz?'
         : 'A ping is a claim: if you do not open a challenge in the 24h window that starts 24h after your ping, the ping lapses and the buyer may move to the auto-release path. Continue only if the payment did not arrive. Confirm?')) return undefined;
       return handleChallenge();
@@ -124,7 +136,7 @@ export const buildTradeRoomPanelCallbacks = ({
       const msg = roomState === 'LOCKED'
         ? (lang === 'TR' ? 'LOCKED aşamasında (henüz ödeme bildirilmeden) iptaller kesintisizdir. Onaylıyor musunuz?' : 'Cancel in LOCKED state has zero fees. Confirm?')
         : (lang === 'TR' ? 'Karşılıklı iptal durumunda standart protokol ücreti kesilecektir. Onaylıyor musunuz?' : 'Standard protocol fees will be deducted upon mutual cancellation. Confirm?');
-      if (confirmFn(msg)) handleProposeCancel();
+      if (askConfirm(msg)) handleProposeCancel();
     }, { disabled: isContractLoading }),
     revoke_cancel: withGuard(() => handleRevokeCancel?.(), { disabled: isContractLoading || typeof handleRevokeCancel !== 'function' }),
     ...(typeof handleExpirePaymentWindow === 'function' ? {

@@ -17,7 +17,7 @@ export const TradeRoomPage = ({ decisionInput, actionCallbacks, beforeActions = 
   return (
     <>
       <TradeSummaryCard {...model.decisionSummary} stateLabel={model.stateLabel} roleLabel={model.roleLabel} lang={lang} />
-      <StateGuidancePanel guidance={model.guidance} riskCopy={model.riskCopy} />
+      <StateGuidancePanel guidance={model.guidance} highlightFirst={Boolean(model.makerChallengeWindow?.open)} riskCopy={model.riskCopy} />
       {beforeActions}
       <PrimaryActionPanel primaryAction={model.primaryAction} disabledReasons={model.disabledReasons} actionCallbacks={actionCallbacks} lang={lang}>
         {primaryInput}
