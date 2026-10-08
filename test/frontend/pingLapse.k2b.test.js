@@ -109,7 +109,7 @@ describe('K2(B) decision model copy', () => {
 
   it('maker: ping rule warning is shown before and after pinging (TR/EN)', () => {
     expect(build(paid, 'maker').guidance.join(' ')).toMatch(/A ping is a claim/);
-    expect(build({ ...paid, challengePingedAt: ago(30) }, 'maker', 'TR').guidance.join(' ')).toMatch(/Ping bir iddiadır/);
+    expect(build({ ...paid, challengePingedAt: ago(30) }, 'maker', 'TR').guidance.join(' ')).toMatch(/Şu an itiraz açabilirsin/);
     expect(build({ ...paid, challengePingedAt: ago(49) }, 'maker').guidance.join(' ')).toMatch(/ping lapsed/);
   });
 

@@ -104,7 +104,9 @@ describe('useArafContract read failures are not masked (F20)', () => {
   });
 
   it('still returns real values on success', async () => {
-    readContract.mockResolvedValueOnce(1234n).mockResolvedValueOnce([25n, 30n]);
+    // [TR] Hook açılışta MAKER_CHALLENGE_WINDOW'u da okur; sıralı Once mock'u bunu yutmasın.
+    const replies = [1234n, [25n, 30n]];
+    readContract.mockImplementation(async ({ functionName }) => (functionName === 'MAKER_CHALLENGE_WINDOW' ? 86400n : replies.shift()));
     const { useArafContract } = await load();
     const { result } = renderHook(() => useArafContract());
     await expect(result.current.getWalletRegisteredAt(WALLET)).resolves.toBe(1234n);

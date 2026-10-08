@@ -16,10 +16,11 @@
  * const { releaseFunds, proposeOrApproveCancel } = useArafContract();
  */
 
-import { useCallback } from 'react';
+import { useCallback, useEffect } from 'react';
 import { usePublicClient, useWalletClient, useChainId, useAccount } from 'wagmi';
 import { parseAbi, getAddress, decodeEventLog } from 'viem';
 import { resolveClientErrorLogUrl } from '../app/apiConfig';
+import { setMakerChallengeWindowMs } from '../app/contexts/trade-room/tradeTimeline';
 import { getSupportedChainsMap, isMintTokenEnabled } from '../app/chainPolicy';
 import { ARAF_CONTRACT_ERROR_ABI, decorateContractError } from '../app/contractErrors';
 
@@ -302,6 +303,24 @@ export function useArafContract({ expectedChainId = null } = {}) {
   // [TR] Cüzdan bağlı değilse (chainId yok) config zincirine düşülür; yazma zaten walletClient ister.
   const chainId = account?.chainId ?? configChainId;
   const supportedChains = getSupportedChainsMap();
+
+  // [TR] MAKER_CHALLENGE_WINDOW bir kez okunur; okunamazsa timeline 24 saat yedeğini kullanır.
+  // [EN] Read MAKER_CHALLENGE_WINDOW once; on failure the timeline keeps its 24h fallback.
+  useEffect(() => {
+    if (!_isValidAddress || !publicClient) return undefined;
+    let alive = true;
+    (async () => {
+      try {
+        const seconds = await publicClient.readContract({
+          address: getAddress(ESCROW_ADDRESS),
+          abi: ArafEscrowABI,
+          functionName: 'MAKER_CHALLENGE_WINDOW',
+        });
+        if (alive) setMakerChallengeWindowMs(Number(seconds) * 1000);
+      } catch { /* fallback stays 24h */ }
+    })();
+    return () => { alive = false; };
+  }, [publicClient]);
 
   /*
    * @throws {Error} Desteklenmeyen ağ algılandığında

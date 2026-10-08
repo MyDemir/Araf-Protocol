@@ -103,11 +103,15 @@ export const tradeRoomScenarios = [
   scenario('paid-maker-can-challenge', 'PAID / maker · can open challenge', { state: 'PAID', role: 'maker', trade: { paidAt: hoursAgo(50), challengePingedAt: hoursAgo(25) } }),
   scenario('paid-maker-taker-pinged', 'PAID / maker · taker pinged first (conflict)', { state: 'PAID', role: 'maker', trade: { paidAt: hoursAgo(50), pingedAt: hoursAgo(2) } }),
 
+  // PAID — ping düştü (challengePingedAt + 48h geçti): maker itiraz açamaz, taker pingMaker açar
+  scenario('paid-maker-ping-lapsed', 'PAID / maker · ping lapsed (49h), challenge closed', { state: 'PAID', role: 'maker', trade: { paidAt: hoursAgo(75), challengePingedAt: hoursAgo(49) } }),
+
   // PAID — taker path: wait GRACE_PERIOD (48h), ping maker, auto-release after 24h
   scenario('paid-taker', 'PAID / taker', { state: 'PAID', role: 'taker', paymentIpfsHash: 'ipfs://proof-paid', trade: { paidAt: hoursAgo(2) } }),
   scenario('paid-taker-can-ping', 'PAID / taker · 48h passed, can ping maker', { state: 'PAID', role: 'taker', trade: { paidAt: hoursAgo(49) } }),
   scenario('paid-taker-pinged', 'PAID / taker · pinged, waiting 24h', { state: 'PAID', role: 'taker', trade: { paidAt: hoursAgo(52), pingedAt: hoursAgo(3) } }),
   scenario('paid-taker-can-auto-release', 'PAID / taker · can auto-release', { state: 'PAID', role: 'taker', trade: { paidAt: hoursAgo(75), pingedAt: hoursAgo(25) } }),
+  scenario('paid-taker-ping-lapsed', 'PAID / taker · maker ping lapsed (49h), can ping maker', { state: 'PAID', role: 'taker', trade: { paidAt: hoursAgo(75), challengePingedAt: hoursAgo(49) } }),
   scenario('paid-taker-maker-pinged', 'PAID / taker · maker pinged first (conflict)', { state: 'PAID', role: 'taker', trade: { paidAt: hoursAgo(30), challengePingedAt: hoursAgo(3) } }),
 
   // CHALLENGED — bonds bleed after 48h, principal after 144h, burn at 240h

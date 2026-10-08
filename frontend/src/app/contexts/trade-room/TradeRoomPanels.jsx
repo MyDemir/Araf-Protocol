@@ -22,12 +22,12 @@ export const TradeSummaryCard = ({
 
 // [TR] Genel risk uyarıları (chargeback/settlement) her durumda tekrarlanıyordu; yalnız duruma özgü rehber kalır.
 // [EN] Generic risk lines repeated in every state; only state-specific guidance remains.
-export const StateGuidancePanel = ({ guidance = [] }) => {
+export const StateGuidancePanel = ({ guidance = [], highlightFirst = false }) => {
   const lines = (Array.isArray(guidance) ? guidance : []).filter(Boolean);
   if (!lines.length) return null;
   return (
     <div className="mb-3 bg-surface border border-borderSubtle rounded-xl p-3 text-sm text-textSecondary space-y-1" data-testid="trade-guidance-panel">
-      {lines.map((g, i) => <p key={i}>{g}</p>)}
+      {lines.map((g, i) => <p key={i} className={highlightFirst && i === 0 ? 'text-warning font-semibold' : undefined} data-highlight={highlightFirst && i === 0 ? 'true' : undefined}>{g}</p>)}
     </div>
   );
 };

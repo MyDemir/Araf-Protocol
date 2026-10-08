@@ -180,7 +180,13 @@ export function buildTradeDecisionModel({
   let primaryAction = action('waiting', 'waiting', t(lang, 'Bekle', 'Wait'), t(lang, 'Bir sonraki kontrat aksiyonu mevcut durum tarafından belirlenir.', 'Next contract action is determined by the current state.'));
   let secondaryActions = [];
   const guidance = [];
-  const { flags } = deriveTradeTimeline(trade || {}, { state: normalizedState, now: nowMs });
+  const { flags, timers: derivedTimers } = deriveTradeTimeline(trade || {}, { state: normalizedState, now: nowMs });
+  // [TR] Maker'ın itiraz penceresi şu an açık mı (T+24s <= şimdi < T+48s)?
+  // [EN] Is the maker's challenge window open right now?
+  const makerWindowOpen = normalizedState === 'PAID' && normalizedRole === 'maker' && flags.canMakerChallenge;
+  const makerWindowDeadline = makerWindowOpen
+    ? formatTimerValue(derivedTimers.makerChallengeDeadline, lang)
+    : null;
 
   if (normalizedState === 'LOCKED' && normalizedRole === 'taker') {
     primaryAction = action(
@@ -209,6 +215,9 @@ export function buildTradeDecisionModel({
       ? t(lang, 'İtiraz Başlat', 'Open Challenge')
       : t(lang, 'Ödeme Gelmedi — Alıcıyı Uyar', 'Payment Not Received — Ping Taker'), null)];
     if (!makerPinged) guidance.push(MAKER_PING_RULE(lang));
+    else if (makerWindowOpen) guidance.push(t(lang,
+      `Şu an itiraz açabilirsin — son süre: ${makerWindowDeadline}`,
+      `You can open a challenge right now — deadline: ${makerWindowDeadline}`));
     else if (flags.pingLapsed) guidance.push(t(lang, 'İtiraz süresi doldu: ping düştü; alıcı artık sizi uyarıp otomatik serbest bırakma yoluna geçebilir. Ödeme geldiyse fonları serbest bırakın.', 'The challenge window closed: your ping lapsed; the taker can now ping you and move to auto-release. Release the funds if the payment arrived.'));
     else guidance.push(MAKER_PING_RULE(lang));
   }
@@ -278,8 +287,11 @@ export function buildTradeDecisionModel({
     secondaryActions,
     disabledReasons: primaryDisabledReasons,
     globalDisabledReasons,
-    timerCards: TERMINAL_TRADE_STATES.includes(normalizedState) ? [] : buildTimerCards(timers, lang, normalizedState, normalizedRole),
+    timerCards: TERMINAL_TRADE_STATES.includes(normalizedState) ? [] : buildTimerCards(timers, lang, normalizedState, normalizedRole)
+      // [TR] Pencere açıkken "açılış" kartı geçmişi gösterir; gizlenir, son süre kartı kalır.
+      .filter((card) => !(makerWindowOpen && card.key === 'makerChallenge')),
     guidance,
+    makerChallengeWindow: { open: makerWindowOpen, deadline: makerWindowDeadline },
     riskCopy: {
       chargeback: t(lang, 'Chargeback riski kullanıcı sorumluluğundadır.', 'Chargeback risk remains user responsibility.'),
       settlement: t(lang, 'Settlement sonucu kontrat kurallarıyla belirlenir.', 'Settlement outcomes are governed by contract rules.'),
