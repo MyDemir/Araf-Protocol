@@ -99,15 +99,23 @@ export const ThemeToggle = ({ lang: langProp }) => {
     ));
   }, []);
 
-  // [TR] Açılınca konumla, ardından seçili (ya da istenen) öğeye odaklan.
+  // [TR] Açılınca önce konumla (menü ölçülene kadar visibility:hidden), görünür olunca seçili ya da istenen öğeye
+  //      odaklan — gizli öğe odak alamaz.
+  // [EN] Position first (menu is visibility:hidden until measured), then focus once visible — hidden nodes can't
+  //      take focus.
+  const isPlaced = position != null;
   React.useLayoutEffect(() => {
-    if (!open) return;
-    place();
+    if (open) place();
+  }, [open, place]);
+  React.useLayoutEffect(() => {
+    if (!open || !isPlaced) return;
     const target = initialFocusRef.current;
+    initialFocusRef.current = null;
+    if (!target) return;
     const index = target === 'first' ? 0 : target === 'last' ? THEME_OPTIONS.length - 1 : currentIndex;
     focusItem(index);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, isPlaced]);
 
   React.useEffect(() => {
     if (!open) return undefined;

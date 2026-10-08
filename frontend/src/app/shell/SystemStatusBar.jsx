@@ -224,7 +224,7 @@ const SystemStatusBarView = ({ statuses, isTestnet, isRegisteringWallet, onRegis
         {visible.map((status) => {
           const critical = isCriticalStatus(status);
           return (
-            <div key={status.key} className={`pl-4 pr-16 md:pr-44 py-1.5 md:py-2 text-xs md:text-sm border-b last:border-b-0 ${toneClass(status.tone)}`} data-status-key={status.key} data-critical={critical ? 'true' : undefined}>
+            <div key={status.key} className={`pl-4 pr-16 md:pr-52 py-1.5 md:py-2 text-xs md:text-sm border-b last:border-b-0 ${toneClass(status.tone)}`} data-status-key={status.key} data-critical={critical ? 'true' : undefined}>
               <div className="max-w-[1200px] mx-auto flex items-center justify-between gap-2 md:gap-3">
                 <div className="min-w-0 flex-1">
                   <p className="font-bold break-words">{status.title}</p>
@@ -263,7 +263,7 @@ const SystemStatusBarView = ({ statuses, isTestnet, isRegisteringWallet, onRegis
                       onClick={() => { pendingFocusRef.current = 'restore'; dismiss(status); }}
                       aria-label={`${dismissLabel}: ${status.title}`}
                       title={dismissLabel}
-                      className={`w-10 h-10 -my-1.5 md:-my-2 -mr-2 flex items-center justify-center rounded-lg opacity-80 hover:opacity-100 transition motion-reduce:transition-none outline-none focus-visible:opacity-100 focus-visible:ring-2 ${dismissToneClass(status.tone)}`}
+                      className={`w-10 h-10 -my-1.5 md:-my-2 md:-mr-2 flex items-center justify-center rounded-lg opacity-80 hover:opacity-100 transition motion-reduce:transition-none outline-none focus-visible:opacity-100 focus-visible:ring-2 ${dismissToneClass(status.tone)}`}
                     >
                       <X className="w-4 h-4" strokeWidth={2} aria-hidden="true" />
                     </button>
@@ -274,7 +274,7 @@ const SystemStatusBarView = ({ statuses, isTestnet, isRegisteringWallet, onRegis
           );
         })}
         {hidden.length > 0 && (
-          <div className="pl-4 pr-16 md:pr-44 border-b last:border-b-0 bg-surface border-borderSubtle text-textMuted text-xs" data-testid="status-hidden-indicator">
+          <div className="pl-4 pr-16 md:pr-52 border-b last:border-b-0 bg-surface border-borderSubtle text-textSecondary text-xs" data-testid="status-hidden-indicator">
             <div className="max-w-[1200px] mx-auto flex items-center gap-2">
               <EyeOff className="w-3.5 h-3.5 shrink-0" strokeWidth={1.8} aria-hidden="true" />
               <span className="min-w-0 truncate">{hiddenText}</span>
@@ -282,7 +282,7 @@ const SystemStatusBarView = ({ statuses, isTestnet, isRegisteringWallet, onRegis
                 type="button"
                 data-testid="status-restore"
                 onClick={() => { pendingFocusRef.current = hidden[0]?.key || null; restore(hidden); }}
-                className="h-10 px-2 -mr-2 rounded-lg font-semibold text-textPrimary hover:bg-elevated outline-none focus-visible:ring-2 focus-visible:ring-brand transition-colors motion-reduce:transition-none"
+                className="h-10 px-2 -mr-2 rounded-lg font-semibold text-textPrimary underline underline-offset-2 decoration-borderStrong hover:bg-elevated outline-none focus-visible:ring-2 focus-visible:ring-brand transition-colors motion-reduce:transition-none"
               >
                 {t(lang, 'Göster', 'Show')}
               </button>
