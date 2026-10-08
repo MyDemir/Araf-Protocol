@@ -2853,6 +2853,8 @@ class EventWorker {
             _toNum(lastNegativeEventAt) > 0 ? new Date(_toNum(lastNegativeEventAt) * 1000) : null,
           "is_banned": isBanned,
           "banned_until": isBanned ? new Date(banTimestamp * 1000) : null,
+          // [TR] Ban geçmişi: bannedUntil zincirde kalıcıdır; decay adayı bunun üzerinden seçilir.
+          "last_ban_ends_at": banTimestamp > 0 ? new Date(banTimestamp * 1000) : null,
           "consecutive_bans": consecutiveBans,
           "last_onchain_sync_at": syncAt,
         },

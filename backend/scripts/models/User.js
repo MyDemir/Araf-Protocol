@@ -124,6 +124,9 @@ const userSchema = new mongoose.Schema(
     // ── Ban Aynası (authority değil, chain sync cache) ───────────────────────
     is_banned: { type: Boolean, default: false },
     banned_until: { type: Date, default: null },
+    // [TR] Son ban bitiş zamanı (zincirdeki bannedUntil aynası). Ban bitince banned_until null'lanır ama bu alan KALIR;
+    //      decay (ban affı) aday seçimi bunu kullanır. / [EN] Last ban end time; survives expiry, used for decay candidates.
+    last_ban_ends_at: { type: Date, default: null },
 
     // [TR] Contract mirror alanları — display/debug amaçlıdır.
     consecutive_bans: { type: Number, default: 0, min: 0 },
@@ -209,6 +212,7 @@ userSchema.methods.toPublicProfile = function () {
 userSchema.methods.checkBanExpiry = async function () {
   if (this.is_banned && this.banned_until && new Date() > this.banned_until) {
     this.is_banned = false;
+    this.last_ban_ends_at = this.banned_until;
     this.banned_until = null;
     await this.save();
     return true;
