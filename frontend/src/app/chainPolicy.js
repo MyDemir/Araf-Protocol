@@ -1,6 +1,8 @@
 // [TR] Frontend zincir/faucet politikası tek authority noktası.
 // [EN] Single authority point for frontend chain/faucet policy.
 
+import { ENV_ERROR_CODES, envError } from './envErrorCodes';
+
 export const BASE_MAINNET_CHAIN_ID = 8453;
 export const BASE_SEPOLIA_CHAIN_ID = 84532;
 export const HARDHAT_CHAIN_ID = 31337;
@@ -59,17 +61,19 @@ export const isMintTokenEnabled = (isProd = import.meta.env.PROD) => !isProd;
 // [TR] Deploy uyumu: frontend ile backend aynı escrow kontratına ve desteklenen bir zincire bakmalı.
 //      Backend değerleri /api/orders/config -> deployment alanından gelir. Uyumsuzlukta uyarı metinleri döner.
 // [EN] Deploy alignment: frontend and backend must point at the same escrow and a supported chain.
+// [TR] Her sorun { code, message } döner; üst bant kritikliği koddan anlar (bkz. envErrorCodes.js).
+// [EN] Each issue is { code, message }; the status bar derives criticality from the code.
 export const checkDeploymentAlignment = ({ frontendEscrowAddress, backendDeployment, isProd = import.meta.env.PROD, targetChain = import.meta.env.VITE_TARGET_CHAIN } = {}) => {
   if (!backendDeployment) return [];
   const issues = [];
   const fe = String(frontendEscrowAddress || '').toLowerCase();
   const be = String(backendDeployment.escrowAddress || '').toLowerCase();
   if (fe && be && fe !== be) {
-    issues.push(`Escrow adresi uyuşmuyor: frontend ${fe.slice(0, 10)}… / backend ${be.slice(0, 10)}… — işlemler yanlış kontrata gidebilir.`);
+    issues.push(envError(ENV_ERROR_CODES.ESCROW_MISMATCH, `Escrow adresi uyuşmuyor: frontend ${fe.slice(0, 10)}… / backend ${be.slice(0, 10)}… — işlemler yanlış kontrata gidebilir.`));
   }
   const chainId = Number(backendDeployment.chainId);
   if (chainId && !getSupportedChainIds(isProd, targetChain).includes(chainId)) {
-    issues.push(`Backend zinciri (${chainId}) frontend'in desteklediği zincirler arasında değil.`);
+    issues.push(envError(ENV_ERROR_CODES.BACKEND_CHAIN_UNSUPPORTED, `Backend zinciri (${chainId}) frontend'in desteklediği zincirler arasında değil.`));
   }
   return issues;
 };

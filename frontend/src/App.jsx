@@ -18,6 +18,7 @@ import { getInitialLang, APP_LANG_STORAGE_KEY } from './app/bootstrapState';
 import { markTermsAcceptedLocally } from './app/legal/terms';
 import { buildApiUrl, resolveApiPolicyDiagnostics } from './app/apiConfig';
 import { checkDeploymentAlignment, getSupportedChainsMap, isMintTokenEnabled, isSupportedChainId } from './app/chainPolicy';
+import { ENV_ERROR_CODES, envError } from './app/envErrorCodes';
 import { resolveRevenueVaultAddress } from './app/envConfig';
 import { useMakerOrderForm } from './app/contexts/marketplace/useMakerOrderForm';
 import { useMarketFilters } from './app/contexts/marketplace/marketFilters';
@@ -26,12 +27,14 @@ import { buildNextActiveTrade, clearAppHashRoute, findEscrowByRouteTradeId, getE
 
 // [TR] Uygulama başlangıcında kritik env değişkenlerini doğrula
 // [EN] Validate critical env variables on app start
+// [TR] Girdiler { code, message }: üst bant kritik (kapatılamaz) uyarıyı koddan tanır.
 const ENV_ERRORS = [];
-const { errors: API_POLICY_ERRORS } = resolveApiPolicyDiagnostics(import.meta.env);
+const { errors: API_POLICY_MESSAGES } = resolveApiPolicyDiagnostics(import.meta.env);
+const API_POLICY_ERRORS = API_POLICY_MESSAGES.map((message) => envError(ENV_ERROR_CODES.API_POLICY_VIOLATION, message));
 ENV_ERRORS.push(...API_POLICY_ERRORS);
 if (!import.meta.env.VITE_ESCROW_ADDRESS ||
     import.meta.env.VITE_ESCROW_ADDRESS === '0x0000000000000000000000000000000000000000') {
-  ENV_ERRORS.push('VITE_ESCROW_ADDRESS tanımlı değil veya sıfır adres — kontrat işlemleri çalışmayacak');
+  ENV_ERRORS.push(envError(ENV_ERROR_CODES.ESCROW_ADDRESS_MISSING, 'VITE_ESCROW_ADDRESS tanımlı değil veya sıfır adres — kontrat işlemleri çalışmayacak'));
 }
 
 // [TR] Desteklenen token adresleri — .env üzerinden yönetilir
