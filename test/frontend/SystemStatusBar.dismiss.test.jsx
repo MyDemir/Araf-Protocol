@@ -10,6 +10,7 @@ import {
   statusSignature,
 } from '../../frontend/src/app/shell/statusDismissal';
 import { checkDeploymentAlignment } from '../../frontend/src/app/chainPolicy';
+import { ENV_ERROR_CODES, envError } from '../../frontend/src/app/envErrorCodes';
 
 const bar = (props) => <SystemStatusBar isTestnet={false} {...props} />;
 
@@ -152,8 +153,80 @@ describe('critical safety warnings cannot be dismissed', () => {
     expect(screen.queryByTestId('status-hidden-indicator')).toBeNull();
   });
 
-  it('a plain missing-config warning (no address mismatch) stays dismissible', () => {
-    expect(isCriticalStatus({ key: 'env_error', details: ['VITE_ESCROW_ADDRESS tanımlı değil veya sıfır adres'] })).toBe(false);
+  it('API base URL policy violations (coded) are critical and render their message', () => {
+    render(bar({ envErrors: [envError(ENV_ERROR_CODES.API_POLICY_VIOLATION, 'Absolute VITE_API_URL is not allowed in production')] }));
+    expect(document.querySelector('[data-status-key="env_error"]')).toHaveAttribute('data-critical', 'true');
+    expect(screen.queryByRole('button', { name: /Dismiss warning/ })).toBeNull();
+    expect(screen.getByText('Absolute VITE_API_URL is not allowed in production')).toBeInTheDocument();
+  });
+
+  it('a missing/zero escrow address (coded) is critical', () => {
+    render(bar({ envErrors: [envError(ENV_ERROR_CODES.ESCROW_ADDRESS_MISSING, 'any wording')] }));
+    expect(screen.queryByRole('button', { name: /Dismiss warning/ })).toBeNull();
+    expect(screen.getByTestId('status-critical-mark')).toBeInTheDocument();
+  });
+
+  it('criticality comes from the code, not the text', () => {
+    expect(isCriticalStatus({ key: 'env_error', details: [envError(ENV_ERROR_CODES.ESCROW_MISMATCH, 'reworded text')] })).toBe(true);
+    expect(isCriticalStatus({ key: 'env_error', details: [envError(ENV_ERROR_CODES.BACKEND_CHAIN_UNSUPPORTED, '')] })).toBe(true);
+    // [TR] Kritik olmayan bir kod, metni "escrow adresi uyuşmuyor" dese bile kapatılabilir kalır.
+    expect(isCriticalStatus({ key: 'env_error', details: [envError('SOME_NOTICE', 'Escrow adresi uyuşmuyor')] })).toBe(false);
+    // [TR] Kodsuz eski düz metin girdiler için geriye dönük yedek. [EN] Legacy fallback for code-less strings.
+    expect(isCriticalStatus({ key: 'env_error', details: ['VITE_ESCROW_ADDRESS tanımlı değil veya sıfır adres'] })).toBe(true);
+    expect(isCriticalStatus({ key: 'env_error', details: ['API policy invalid'] })).toBe(false);
     expect(isCriticalStatus({ key: 'orders_feed_unavailable' })).toBe(false);
+  });
+
+  it('a stored dismissal of an env_error cannot hide it once a critical code appears', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(bar({ envErrors: ['API policy invalid'] }));
+    await user.click(screen.getByRole('button', { name: /Dismiss warning: System Configuration Warning/ }));
+    rerender(bar({ envErrors: ['API policy invalid', envError(ENV_ERROR_CODES.ESCROW_MISMATCH, 'mismatch')] }));
+    expect(screen.getByText('System Configuration Warning')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Dismiss warning: System Configuration Warning/ })).toBeNull();
+  });
+});
+
+describe('dismissals are forgotten when a warning leaves the list', () => {
+  it.each([
+    ['orders_feed_unavailable', 'Market data unavailable', { ordersFeedError: true }],
+    ['auth_required', 'Session Verification Required', { isConnected: true, authChecked: true, isAuthenticated: false }],
+    ['wallet_unregistered', 'Wallet Not Registered', { isConnected: true, isWalletRegistered: false }],
+  ])('%s shows again when the condition recurs', async (key, title, on) => {
+    const user = userEvent.setup();
+    const { rerender } = render(bar(on));
+    await user.click(screen.getByRole('button', { name: new RegExp(`Dismiss warning: ${title}`) }));
+    expect(screen.queryByText(title)).toBeNull();
+    expect(window.sessionStorage.getItem(STATUS_DISMISS_STORAGE_KEY)).toContain(key);
+
+    rerender(bar({}));
+    expect(window.sessionStorage.getItem(STATUS_DISMISS_STORAGE_KEY)).not.toContain(key);
+    expect(screen.queryByTestId('status-hidden-indicator')).toBeNull();
+
+    rerender(bar(on));
+    expect(screen.getByText(title)).toBeInTheDocument();
+  });
+
+  it('only the warning that left is forgotten; others stay dismissed', async () => {
+    const user = userEvent.setup();
+    const both = { ordersFeedError: true, envErrors: ['API policy invalid'] };
+    const { rerender } = render(bar(both));
+    await user.click(screen.getByRole('button', { name: /Dismiss warning: Market data unavailable/ }));
+    await user.click(screen.getByRole('button', { name: /Dismiss warning: System Configuration Warning/ }));
+    rerender(bar({ envErrors: ['API policy invalid'] }));
+    rerender(bar(both));
+    expect(screen.getByText('Market data unavailable')).toBeInTheDocument();
+    expect(screen.queryByText('System Configuration Warning')).toBeNull();
+  });
+
+  it('a fresh mount (page reload) where the warning is not produced yet keeps the record', () => {
+    window.sessionStorage.setItem(STATUS_DISMISS_STORAGE_KEY, JSON.stringify({
+      orders_feed_unavailable: statusSignature({ key: 'orders_feed_unavailable' }),
+    }));
+    const { rerender } = render(bar({}));
+    expect(window.sessionStorage.getItem(STATUS_DISMISS_STORAGE_KEY)).toContain('orders_feed_unavailable');
+    rerender(bar({ ordersFeedError: true }));
+    expect(screen.queryByText('Market data unavailable')).toBeNull();
+    expect(screen.getByTestId('status-hidden-indicator')).toBeInTheDocument();
   });
 });

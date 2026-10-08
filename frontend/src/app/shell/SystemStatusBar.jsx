@@ -4,6 +4,7 @@ import { WALLET_AGE_MIN_DAYS } from '../walletAge';
 import { tx as t } from '../copy';
 import { isTestnetBuild } from '../chainPolicy';
 import { isCriticalStatus, useStatusDismissals } from './statusDismissal';
+import { envErrorMessage } from '../envErrorCodes';
 
 
 const supportedChainNames = (supportedChains) => Object.values(supportedChains || {})
@@ -184,9 +185,25 @@ export const SystemStatusBar = ({
 };
 
 const SystemStatusBarView = ({ statuses, isTestnet, isRegisteringWallet, onRegisterWallet, lang, children }) => {
-  const { isDismissed, dismiss, restore } = useStatusDismissals();
+  const { isDismissed, dismiss, restore, forget } = useStatusDismissals();
   const sectionRef = React.useRef(null);
   const pendingFocusRef = React.useRef(null);
+  const prevKeysRef = React.useRef(null);
+
+  // [TR] Bir uyarı listeden çıkınca kapatma kaydı silinir: koşul sonradan yeniden oluşursa (oturum düştü, akış
+  //      yine koptu…) uyarı tekrar görünür. İlk çizimde silme yapılmaz; yeniden yüklemede uyarı henüz
+  //      üretilmemiş olabilir (ör. akış isteği sürüyor) ve bu "listeden çıkma" sayılmaz.
+  // [EN] When a warning leaves the list its dismissal is dropped, so a later recurrence shows it again.
+  //      Not on first render: after a reload a warning may simply not be produced yet.
+  const keySignature = statuses.map((s) => s.key).join('|');
+  React.useEffect(() => {
+    const current = keySignature ? keySignature.split('|') : [];
+    const prev = prevKeysRef.current;
+    prevKeysRef.current = current;
+    if (!prev) return;
+    const gone = prev.filter((k) => !current.includes(k));
+    if (gone.length > 0) forget(gone);
+  }, [keySignature, forget]);
 
   const visible = statuses.filter((s) => !isDismissed(s));
   const hidden = statuses.filter((s) => isDismissed(s));
@@ -234,7 +251,7 @@ const SystemStatusBarView = ({ statuses, isTestnet, isRegisteringWallet, onRegis
                     <details className="mt-1 opacity-85">
                       <summary className="cursor-pointer">{lang === 'TR' ? 'Teknik Detay' : 'Technical Details'}</summary>
                       <ul className="list-disc pl-4 mt-1 break-words">
-                        {status.details.map((detail, idx) => <li key={idx}>{detail}</li>)}
+                        {status.details.map((detail, idx) => <li key={idx}>{envErrorMessage(detail)}</li>)}
                       </ul>
                     </details>
                   )}

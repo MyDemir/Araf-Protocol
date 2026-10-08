@@ -1,4 +1,5 @@
 import React from 'react';
+import { CRITICAL_ENV_ERROR_CODES, envErrorCode, envErrorMessage } from '../envErrorCodes';
 
 // [TR] Üst bant uyarılarının "kapat" hafızası. Kalıcı değil: yalnız bu sekme oturumu (sessionStorage).
 //      Depolama erişilemezse (gizli mod, engelli site verisi) modül içi bellek kullanılır.
@@ -11,21 +12,31 @@ export const STATUS_DISMISS_STORAGE_KEY = 'araf_dismissed_statuses_v1';
 // [TR] Kullanıcı güvenliği: bu durumlar kapatılamaz.
 //      - unsupported_chain: yanlış ağda imza atmak fon kaybına yol açabilir.
 //      - paused: protokol bakımda / acil durdurmada; yeni işlem açılamaz, kullanıcı bunu her an görmeli.
-//      - env_error içinde escrow adresi ya da backend zinciri uyuşmazlığı: işlemler yanlış kontrata gidebilir.
-// [EN] User safety: these can never be dismissed (wrong network, protocol paused, escrow address / chain mismatch).
+//      - env_error içinde kritik kodlu bir hata (CRITICAL_ENV_ERROR_CODES): escrow adresi/zincir uyuşmazlığı,
+//        eksik escrow adresi, API taban URL politikası ihlali.
+// [EN] User safety: never dismissible — wrong network, protocol paused, and env errors carrying a critical code.
 export const NON_DISMISSABLE_STATUS_KEYS = ['unsupported_chain', 'paused'];
-export const CRITICAL_DETAIL_PATTERNS = [
+
+// [TR] Yalnız geriye dönük yedek: kodsuz (düz metin) eski girdiler için. Asıl karar koddan verilir.
+// [EN] Legacy fallback only, for code-less plain-string entries. The code is the primary signal.
+export const LEGACY_CRITICAL_DETAIL_PATTERNS = [
   /escrow adresi uyuşmuyor/i,
-  /escrow address mismatch/i,
   /backend zinciri/i,
-  /backend chain/i,
+  /VITE_ESCROW_ADDRESS tanımlı değil/i,
 ];
+
+const isCriticalEnvEntry = (entry) => {
+  const code = envErrorCode(entry);
+  if (code) return CRITICAL_ENV_ERROR_CODES.includes(code);
+  const text = envErrorMessage(entry);
+  return LEGACY_CRITICAL_DETAIL_PATTERNS.some((re) => re.test(text));
+};
 
 export const isCriticalStatus = (status) => {
   if (!status) return false;
   if (NON_DISMISSABLE_STATUS_KEYS.includes(status.key)) return true;
   if (status.key === 'env_error' && Array.isArray(status.details)) {
-    return status.details.some((d) => CRITICAL_DETAIL_PATTERNS.some((re) => re.test(String(d))));
+    return status.details.some(isCriticalEnvEntry);
   }
   return false;
 };
@@ -40,7 +51,9 @@ const hash = (input) => {
 // [TR] İmza dilden bağımsızdır (başlık/mesaj çevirisi dahil edilmez): dil değişince kapatılan uyarı geri gelmez.
 // [EN] The signature ignores translated copy, so switching language does not resurrect a dismissed warning.
 export const statusSignature = (status) => {
-  const details = Array.isArray(status?.details) ? status.details.map(String).join('\n') : '';
+  const details = Array.isArray(status?.details)
+    ? status.details.map((d) => `${envErrorCode(d) || ''}:${envErrorMessage(d)}`).join('\n')
+    : '';
   const extra = status?.signature == null ? '' : String(status.signature);
   return hash(`${status?.key}|${details}|${extra}`);
 };
@@ -85,14 +98,19 @@ export const useStatusDismissals = () => {
     });
   }, []);
 
-  const restore = React.useCallback((statuses) => {
+  // [TR] Kayıtları anahtar listesine göre siler (geri getirme ve listeden çıkan uyarılar için).
+  // [EN] Drops records by key (used for restore and for warnings that left the list).
+  const forget = React.useCallback((keys) => {
     setStore((prev) => {
+      if (!keys.some((k) => k in prev)) return prev;
       const next = { ...prev };
-      statuses.forEach((s) => { delete next[s.key]; });
+      keys.forEach((k) => { delete next[k]; });
       writeStore(next);
       return next;
     });
   }, []);
 
-  return { isDismissed, dismiss, restore };
+  const restore = React.useCallback((statuses) => forget(statuses.map((s) => s.key)), [forget]);
+
+  return { isDismissed, dismiss, restore, forget };
 };
