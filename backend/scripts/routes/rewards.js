@@ -72,10 +72,18 @@ router.get("/funding/product/:productId", async (req, res, next) => {
 router.get("/:wallet/claimable", async (req, res) => {
   const wallet = String(req.params.wallet || "");
   if (!WALLET_RE.test(wallet)) return res.status(400).json({ error: "Geçersiz cüzdan adresi." });
+  // [TR] Backend ağırlıkları kalıcı tutmaz (TradeOutcomeRecorded yalnız zaman damgası bırakır) ve claim edilebilir
+  //      tutar userWeight/totalWeight/epochRewardPool'a bağlıdır; mirror'dan güvenilir hesaplanamaz. Sessiz boş liste
+  //      "ödül yok" diye okunabileceğinden açıkça "kaynak zincir" döndürülür.
+  // [EN] The backend does not persist weights, and claimable depends on on-chain userWeight/totalWeight/pool, so it
+  //      cannot be computed reliably from the mirror. An empty list would read as "no rewards"; be explicit instead.
   return res.json({
     wallet: wallet.toLowerCase(),
-    claimable: [],
+    available: false,
+    claimable: null,
+    authority: "chain",
     source: "ESTIMATE_UNAVAILABLE_USE_ONCHAIN_GETTER",
+    note: "Kaynak: zincir. Frontend ArafRewards.claimable(epoch, user, token) on-chain getter'ını kullanmalı. / Source: chain; use the on-chain claimable(epoch, user, token) getter.",
   });
 });
 

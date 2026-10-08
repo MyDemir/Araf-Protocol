@@ -5,6 +5,7 @@ if (typeof mongoose.Schema !== "function") {
     findOneAndUpdate: async () => null,
     find: () => ({ sort: () => ({ limit: () => ({ lean: async () => [] }) }) }),
     countDocuments: async () => 0,
+    updateMany: async () => ({}),
   };
 } else {
 

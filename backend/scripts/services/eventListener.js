@@ -108,7 +108,7 @@ const ESCROW_EVENT_NAMES = [
 // [EN] These events are emitted by ArafRevenueVault / ArafRewards, not by the escrow.
 //      Querying them on the escrow address would never return anything.
 const VAULT_EVENT_NAMES = ["EscrowRevenueReceived", "ExternalRewardFunded", "ProductRewardFunded"];
-const REWARDS_EVENT_NAMES = ["EpochRewardAllocated", "TradeOutcomeRecorded", "RewardClaimed"];
+const REWARDS_EVENT_NAMES = ["EpochRewardAllocated", "TradeOutcomeRecorded", "RewardClaimed", "EpochTokenFinalizedEvent", "EpochDustRolledOver"];
 const EVENT_NAMES = [...ESCROW_EVENT_NAMES, ...VAULT_EVENT_NAMES, ...REWARDS_EVENT_NAMES];
 const EVENT_NAME_SET = new Set(EVENT_NAMES);
 
@@ -162,6 +162,8 @@ const ARAF_ABI = [
   "event EpochRewardAllocated(uint256 indexed epoch, address indexed token, uint256 amount)",
   "event TradeOutcomeRecorded(uint256 indexed tradeId, uint256 indexed epoch, address indexed maker, address taker, uint256 makerWeight, uint256 takerWeight, uint8 outcome)",
   "event RewardClaimed(uint256 indexed epoch, address indexed user, address indexed token, uint256 amount, uint256 userWeight, uint256 totalWeight)",
+  "event EpochTokenFinalizedEvent(uint256 indexed epoch, address indexed token)",
+  "event EpochDustRolledOver(uint256 indexed epoch, address indexed token, uint256 indexed targetEpoch, uint256 amount)",
   "function MAKER_CHALLENGE_WINDOW() view returns (uint256)",
   "function getTrade(uint256 _tradeId) view returns ((uint64 id,uint64 parentOrderId,address maker,address taker,address tokenAddress,uint256 cryptoAmount,uint256 makerBond,uint256 takerBond,uint16 takerFeeBpsSnapshot,uint16 makerFeeBpsSnapshot,uint8 tier,uint8 paymentRiskLevelSnapshot,uint8 state,uint64 lockedAt,uint64 paidAt,uint64 challengedAt,bool cancelProposedByMaker,bool cancelProposedByTaker,uint64 pingedAt,bool pingedByTaker,uint64 challengePingedAt,bool challengePingedByMaker))",
   "function getOrder(uint256 _orderId) view returns ((uint64 id,address owner,uint8 side,address tokenAddress,uint256 totalAmount,uint256 remainingAmount,uint256 minFillAmount,uint256 remainingMakerBondReserve,uint256 remainingTakerBondReserve,uint16 takerFeeBpsSnapshot,uint16 makerFeeBpsSnapshot,uint8 tier,uint8 paymentRiskLevel,uint8 state,bytes32 orderRef))",
@@ -248,6 +250,8 @@ const EVENT_ARG_KEYS = {
   EpochRewardAllocated: ["epoch", "token", "amount"],
   TradeOutcomeRecorded: ["tradeId", "epoch", "maker", "taker", "makerWeight", "takerWeight", "outcome"],
   RewardClaimed: ["epoch", "user", "token", "amount", "userWeight", "totalWeight"],
+  EpochTokenFinalizedEvent: ["epoch", "token"],
+  EpochDustRolledOver: ["epoch", "token", "targetEpoch", "amount"],
 };
 
 function _toNum(v) {
@@ -1731,6 +1735,8 @@ class EventWorker {
       EpochRewardAllocated: this._onEpochRewardAllocated.bind(this),
       TradeOutcomeRecorded: this._onTradeOutcomeRecorded.bind(this),
       RewardClaimed: this._onRewardClaimed.bind(this),
+      EpochTokenFinalizedEvent: this._onEpochTokenFinalized.bind(this),
+      EpochDustRolledOver: this._onEpochDustRolledOver.bind(this),
     };
 
     const handler = handlers[event.eventName];
@@ -2746,6 +2752,43 @@ class EventWorker {
         user_weight: _toStr(userWeight),
         total_weight: _toStr(totalWeight),
       } },
+      { upsert: true }
+    );
+    // [TR] totalWeight kontratta epoch başına tek ve finalize sonrası sabittir; claim event'i bunu taşır.
+    //      Aynı epoch'un tüm token satırlarına yazılır (idempotent $set).
+    // [EN] totalWeight is per-epoch and immutable once claimable; the claim event carries it.
+    await RewardEpoch.updateMany({ epoch: _toStr(epoch) }, { $set: { total_weight: _toStr(totalWeight) } });
+  }
+
+  // [TR] EpochTokenFinalizedEvent: havuz kesinleşti, claim açılabilir (claimDelay kontratta ayrıca uygulanır).
+  //      CLOSED'dan geri düşürülmez (replay/sıra güvenliği).
+  // [EN] Pool is final; claims can open (claimDelay still enforced on-chain). Never downgrades CLOSED.
+  async _onEpochTokenFinalized(event) {
+    const { epoch, token } = event.args;
+    const key = { epoch: _toStr(epoch), token: token?.toLowerCase?.() || null };
+    const existing = await RewardEpoch.findOne(key).lean();
+    if (existing?.status === "CLOSED") return;
+    await RewardEpoch.findOneAndUpdate(
+      key,
+      {
+        $set: { status: "CLAIMABLE", indexed_at: await this._getEventDate(event) },
+        $setOnInsert: { epoch_pool: "0", total_weight: null },
+      },
+      { upsert: true }
+    );
+  }
+
+  // [TR] EpochDustRolledOver: kalan pay devredildi, epoch kapandı.
+  // [EN] Remainder rolled over; the epoch is closed.
+  async _onEpochDustRolledOver(event) {
+    const { epoch, token } = event.args;
+    const key = { epoch: _toStr(epoch), token: token?.toLowerCase?.() || null };
+    await RewardEpoch.findOneAndUpdate(
+      key,
+      {
+        $set: { status: "CLOSED", indexed_at: await this._getEventDate(event) },
+        $setOnInsert: { epoch_pool: "0", total_weight: null },
+      },
       { upsert: true }
     );
   }

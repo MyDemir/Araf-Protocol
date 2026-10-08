@@ -387,7 +387,7 @@ Public, read-only mirror of reward events; the whole router sits behind `marketR
 | `GET /api/rewards/health` | `{ mirror_only: true, counts: { epochs, claims, funding } }` |
 | `GET /api/rewards/funding/global` | `{ rows }` (latest 200 `GLOBAL` funding events) |
 | `GET /api/rewards/funding/product/:productId` | `{ productId, rows }`; `:productId` is `0x` + 64 hex (`400` otherwise); latest 200 |
-| `GET /api/rewards/:wallet/claimable` | `{ wallet, claimable: [], source: "ESTIMATE_UNAVAILABLE_USE_ONCHAIN_GETTER" }`; always empty, use the on-chain `claimable(...)` getter |
+| `GET /api/rewards/:wallet/claimable` | `{ wallet, available: false, claimable: null, authority: "chain", source: "ESTIMATE_UNAVAILABLE_USE_ONCHAIN_GETTER", note }`; the backend cannot compute this (weights are not persisted); `null` means "unknown", not "zero". Use the on-chain `ArafRewards.claimable(epoch, user, token)` getter |
 | `GET /api/rewards/:wallet/history` | `{ wallet, claims }` (latest 200 claim events); bad address `400` |
 
 ---

@@ -387,7 +387,7 @@ Middleware: `marketReadLimiter`. Public, bilgilendirici referans kur şeridi: `{
 | `GET /api/rewards/health` | `{ mirror_only: true, counts: { epochs, claims, funding } }` |
 | `GET /api/rewards/funding/global` | `{ rows }` (son 200 `GLOBAL` funding event'i) |
 | `GET /api/rewards/funding/product/:productId` | `{ productId, rows }`; `:productId` `0x` + 64 hex (aksi halde `400`); son 200 |
-| `GET /api/rewards/:wallet/claimable` | `{ wallet, claimable: [], source: "ESTIMATE_UNAVAILABLE_USE_ONCHAIN_GETTER" }`; her zaman boş, on-chain `claimable(...)` getter'ını kullanın |
+| `GET /api/rewards/:wallet/claimable` | `{ wallet, available: false, claimable: null, authority: "chain", source: "ESTIMATE_UNAVAILABLE_USE_ONCHAIN_GETTER", note }`; backend hesaplayamaz (ağırlıklar saklanmaz); `null` "bilinmiyor" demektir, "sıfır" değil. On-chain `ArafRewards.claimable(epoch, user, token)` getter'ını kullanın |
 | `GET /api/rewards/:wallet/history` | `{ wallet, claims }` (son 200 claim event'i); hatalı adres `400` |
 
 ---
