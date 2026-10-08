@@ -108,6 +108,14 @@ const ESCROW_EVENT_NAMES = [
 // [EN] These events are emitted by ArafRevenueVault / ArafRewards, not by the escrow.
 //      Querying them on the escrow address would never return anything.
 const VAULT_EVENT_NAMES = ["EscrowRevenueReceived", "ExternalRewardFunded", "ProductRewardFunded"];
+// [TR] Profil damgaları sunucu saatiyle, lockedAt zincir saatiyle yazılır; saat sapmasına karşı kanıt için
+//      damga lockedAt'ten EN AZ bu kadar önce olmalıdır.
+// [EN] Profile stamps use server time, lockedAt uses chain time; to absorb clock skew a stamp must predate
+//      lockedAt by at least this margin to count as proof.
+const PROFILE_PROOF_SAFETY_MARGIN_MS = 60 * 1000;
+// [TR] Mirror, zincirdeki kilit anından bu süreden sonra oluşturuluyorsa (geç/backfill) kanıt şartı devreye girer.
+// [EN] If the mirror is created later than this after the on-chain lock (late/backfill), the proof requirement applies.
+const LATE_MIRROR_THRESHOLD_MS = 60 * 1000;
 const REWARDS_EVENT_NAMES = ["EpochRewardAllocated", "TradeOutcomeRecorded", "RewardClaimed", "EpochTokenFinalizedEvent", "EpochDustRolledOver"];
 const EVENT_NAMES = [...ESCROW_EVENT_NAMES, ...VAULT_EVENT_NAMES, ...REWARDS_EVENT_NAMES];
 const EVENT_NAME_SET = new Set(EVENT_NAMES);
@@ -1839,7 +1847,8 @@ class EventWorker {
         status: t.status,
       })),
       dlqPending,
-      driftCount: categories.terminal_trade_drift + categories.duplicate_projection,
+      driftCount:
+        categories.terminal_trade_drift + categories.duplicate_projection + categories.snapshot_missing_after_backfill,
     };
 
     this._reconciliation = { lastRunAt: report.checkedAt, lastReport: report };
@@ -1913,9 +1922,10 @@ class EventWorker {
         // [TR] Backfill: mirror ilk kez PAID/CHALLENGED görüldüyse (OrderFilled geç işlendi) snapshot yalnız
         //      profilin kilitten sonra değişmediği KANITLANIRSA alınır.
         // [EN] Backfill: if the mirror is first seen PAID/CHALLENGED, snapshot only when provably unchanged since lock.
-        advancedStatus: ["PAID", "CHALLENGED"].includes(_normalizeTradeState(tradeData.state))
-          ? _normalizeTradeState(tradeData.state)
-          : null,
+        advancedStatus: this._resolveAdvancedSnapshotStatus(
+          _normalizeTradeState(tradeData.state),
+          _toDateOrNull(tradeData.lockedAt) || fillEventAt
+        ),
         session,
       });
 
@@ -1941,6 +1951,15 @@ class EventWorker {
     const canceledAt = await this._getEventDate(event);
     const orderData = await this._fetchOrderFromChain(orderId);
     await this._upsertOrderMirror(orderData, { canceledAt });
+  }
+
+  // [TR] Kanıt şartı: durum PAID/CHALLENGED ise ya da LOCKED ama mirror zincirdeki kilitten belirgin süre
+  //      sonra oluşuyorsa (geç işleme). Canlı akışta (OrderFilled hemen işlenir) null döner.
+  // [EN] Proof requirement: state PAID/CHALLENGED, or LOCKED but the mirror is created well after the lock.
+  _resolveAdvancedSnapshotStatus(state, lockedAt, now = Date.now()) {
+    if (state === "PAID" || state === "CHALLENGED") return state;
+    if (state === "LOCKED" && lockedAt && now - lockedAt.getTime() > LATE_MIRROR_THRESHOLD_MS) return "LOCKED";
+    return null;
   }
 
   async _captureLockedTradeSnapshot({
@@ -1993,9 +2012,9 @@ class EventWorker {
           .filter(Boolean)
           .map((d) => new Date(d).getTime());
         const hasData = Boolean(profile.payout_details_enc || profile.fingerprint?.hash || profile.rail);
-        if (!hasData) return stamps.every((t) => t < lockedAt.getTime());
-        if (!profile.updated_at) return false;
-        return stamps.every((t) => t < lockedAt.getTime());
+        if (hasData && !profile.updated_at) return false;
+        const limit = lockedAt.getTime() - PROFILE_PROOF_SAFETY_MARGIN_MS;
+        return stamps.every((t) => t < limit);
       };
       const makerOk = !normalizedMaker || unchangedSinceLock(makerUser);
       const takerOk = !normalizedTaker || unchangedSinceLock(takerUser);
@@ -2007,7 +2026,7 @@ class EventWorker {
         await Trade.findOneAndUpdate(
           {
             ..._buildIdentityLookup("onchain_escrow_id", tradeIdNum),
-            status: { $in: ["PAID", "CHALLENGED"] },
+            status: { $in: [advancedStatus] },
             "payout_snapshot.captured_at": null,
           },
           { $set: { "payout_snapshot.is_complete": false, "payout_snapshot.incomplete_reason": reason } },
@@ -2825,16 +2844,22 @@ class EventWorker {
   async _onEpochTokenFinalized(event) {
     const { epoch, token } = event.args;
     const key = { epoch: _toStr(epoch), token: token?.toLowerCase?.() || null };
-    const existing = await RewardEpoch.findOne(key).lean();
-    if (existing?.status === "CLOSED") return;
-    await RewardEpoch.findOneAndUpdate(
-      key,
-      {
-        $set: { status: "CLAIMABLE", indexed_at: await this._getEventDate(event) },
-        $setOnInsert: { epoch_pool: "0", total_weight: null },
-      },
-      { upsert: true }
-    );
+    // [TR] Tek atomik güncelleme: CLOSED satır filtreye girmez. Upsert, satır CLOSED iken unique index
+    //      çakışması (E11000) üretir; bu yalnız "zaten kapalı" demektir ve sessizce geçilir.
+    // [EN] Single atomic update: a CLOSED row never matches. The upsert on a CLOSED row raises a duplicate-key
+    //      error, which just means "already closed" and is ignored.
+    try {
+      await RewardEpoch.findOneAndUpdate(
+        { ...key, status: { $ne: "CLOSED" } },
+        {
+          $set: { status: "CLAIMABLE", indexed_at: await this._getEventDate(event) },
+          $setOnInsert: { epoch_pool: "0", total_weight: null },
+        },
+        { upsert: true }
+      );
+    } catch (err) {
+      if (err?.code !== 11000) throw err;
+    }
   }
 
   // [TR] EpochDustRolledOver: kalan pay devredildi, epoch kapandı.

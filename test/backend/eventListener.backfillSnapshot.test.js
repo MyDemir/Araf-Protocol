@@ -75,9 +75,63 @@ describe("backfill snapshot for PAID/CHALLENGED mirrors", () => {
     expect(mockState.trade.payout_snapshot.captured_at).toBeNull();
   });
 
-  it("reconciliation report exposes snapshot_missing_after_backfill", () => {
-    const fs = require("fs");
-    const src = fs.readFileSync(require.resolve("../../backend/scripts/services/eventListener"), "utf8");
-    expect(src).toContain("snapshot_missing_after_backfill");
+  const stampsAt = (offsetSec) => new Date(LOCK.getTime() + offsetSec * 1000);
+
+  it.each([
+    ["stamp == lockedAt", 0, false],
+    ["stamp 30s before lockedAt (inside safety margin)", -30, false],
+    ["stamp 120s before lockedAt", -120, true],
+  ])("safety margin: %s", async (_n, offsetSec, accepted) => {
+    mockState.users[MAKER] = profile("m1", stampsAt(offsetSec));
+    mockState.users[TAKER] = profile("t1", stampsAt(-3600));
+    await worker._captureLockedTradeSnapshot(args("PAID"));
+    expect(mockState.trade.payout_snapshot.captured_at !== null).toBe(accepted);
+  });
+
+  it("each proof field alone, if after lock, blocks the snapshot", async () => {
+    const early = stampsAt(-3600);
+    const late = stampsAt(10);
+    const cases = [
+      (u) => { u.payout_profile.fingerprint.last_changed_at = late; },
+      (u) => { u.lastBankChangeAt = late; },
+      (u) => { u.payout_profile.updated_at = late; },
+    ];
+    for (const mutate of cases) {
+      mockState.trade = { status: "PAID", payout_snapshot: { captured_at: null }, flat: {} };
+      const maker = profile("m1", early);
+      maker.payout_profile.fingerprint.last_changed_at = early;
+      maker.lastBankChangeAt = early;
+      mutate(maker);
+      mockState.users[MAKER] = maker;
+      mockState.users[TAKER] = profile("t1", early);
+      await worker._captureLockedTradeSnapshot(args("PAID"));
+      expect(mockState.trade.payout_snapshot.captured_at).toBeNull();
+    }
+  });
+
+  it("LOCKED state with a late mirror also requires proof; live flow does not", () => {
+    const now = LOCK.getTime() + 5 * 60 * 1000;
+    expect(worker._resolveAdvancedSnapshotStatus("LOCKED", LOCK, now)).toBe("LOCKED");
+    expect(worker._resolveAdvancedSnapshotStatus("LOCKED", LOCK, LOCK.getTime() + 5000)).toBeNull();
+    expect(worker._resolveAdvancedSnapshotStatus("PAID", LOCK, LOCK.getTime())).toBe("PAID");
+  });
+
+  it("late LOCKED mirror: profile changed after lock is not snapshotted", async () => {
+    mockState.trade.status = "LOCKED";
+    mockState.users[MAKER] = profile("m-CHANGED", stampsAt(30));
+    mockState.users[TAKER] = profile("t1", stampsAt(-3600));
+    await worker._captureLockedTradeSnapshot(args("LOCKED"));
+    expect(mockState.trade.payout_snapshot.captured_at).toBeNull();
+    expect(mockState.trade.status).toBe("LOCKED");
+  });
+
+  it("reconciliation counts snapshot_missing_after_backfill as drift", async () => {
+    const Trade = require("../../backend/scripts/models/Trade");
+    const chain = { select: () => chain, sort: () => chain, limit: () => chain, lean: async () => [] };
+    Trade.find = jest.fn(() => chain);
+    Trade.countDocuments = jest.fn(async (f) => (f["payout_snapshot.is_complete"] === false ? 3 : 0));
+    const report = await worker.runReconciliationReport();
+    expect(report.categories.snapshot_missing_after_backfill).toBe(3);
+    expect(report.driftCount).toBe(3);
   });
 });

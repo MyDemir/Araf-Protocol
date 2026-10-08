@@ -31,14 +31,21 @@ describe("RewardEpoch lifecycle mirror", () => {
   it("EpochTokenFinalizedEvent sets status CLAIMABLE", async () => {
     await worker._onEpochTokenFinalized({ args: { epoch: 5n, token: TOKEN } });
     const [key, update] = mockEpochFindOneAndUpdate.mock.calls[0];
-    expect(key).toEqual({ epoch: "5", token: TOKEN.toLowerCase() });
+    expect(key).toEqual({ epoch: "5", token: TOKEN.toLowerCase(), status: { $ne: "CLOSED" } });
     expect(update.$set.status).toBe("CLAIMABLE");
   });
 
-  it("does not downgrade a CLOSED epoch on replayed finalization", async () => {
-    mockEpochFindOne.mockResolvedValue({ status: "CLOSED" });
+  it("finalization is one atomic update that excludes CLOSED rows", async () => {
     await worker._onEpochTokenFinalized({ args: { epoch: 5n, token: TOKEN } });
-    expect(mockEpochFindOneAndUpdate).not.toHaveBeenCalled();
+    expect(mockEpochFindOne).not.toHaveBeenCalled();
+    expect(mockEpochFindOneAndUpdate.mock.calls[0][0].status).toEqual({ $ne: "CLOSED" });
+  });
+
+  it("ignores the duplicate-key error raised when the row is already CLOSED", async () => {
+    mockEpochFindOneAndUpdate.mockRejectedValueOnce(Object.assign(new Error("dup"), { code: 11000 }));
+    await expect(worker._onEpochTokenFinalized({ args: { epoch: 5n, token: TOKEN } })).resolves.toBeUndefined();
+    mockEpochFindOneAndUpdate.mockRejectedValueOnce(new Error("boom"));
+    await expect(worker._onEpochTokenFinalized({ args: { epoch: 5n, token: TOKEN } })).rejects.toThrow("boom");
   });
 
   it("EpochDustRolledOver sets status CLOSED", async () => {
