@@ -6,10 +6,16 @@ import {
   validateSettlementProposalInput,
   validateSettlementTradeId,
 } from './settlementActionModel';
+import { getChainNowMs } from '../../clock';
 
 const getErrorMessage = (err, lang) => (
   err?.shortMessage || err?.reason || err?.message || (lang === 'TR' ? 'Settlement işlemi başarısız.' : 'Settlement transaction failed.')
 );
+
+// [TR] Kabul/önizleme anındaki canlı teklif kontrolü TIKLAMA anındaki zincir saatiyle yapılır; kartın saniyelik
+//      nowTs state'i bayat olabilir.
+// [EN] The live-offer check at preview/accept time uses the chain clock at CLICK time, not the card's 1s nowTs state.
+const chainNowSec = () => Math.floor(getChainNowMs() / 1000);
 
 export const useSettlementActions = ({
   activeTrade,
@@ -106,7 +112,7 @@ export const useSettlementActions = ({
     const { tradeId, error } = requireTradeId();
     if (error) return { ok: false, error };
     const live = await readLiveProposal(tradeId);
-    const nowSec = Number.isFinite(nowTs) ? nowTs : Math.floor(Date.now() / 1000);
+    const nowSec = chainNowSec();
     const normalized = normalizeLiveProposal(live);
     const check = checkLiveProposalForAccept({
       live,
@@ -121,7 +127,7 @@ export const useSettlementActions = ({
     setAcceptReview(null);
     setAcceptSnapshot({ id: check.live.id, makerShareBps: check.live.makerShareBps });
     return { ok: true, live: check.live };
-  }, [nowTs, readLiveProposal, requireTradeId, reviewMessage]);
+  }, [readLiveProposal, requireTradeId, reviewMessage]);
 
   // [TR] Değişiklik sonrası kullanıcı güncel teklifi bilerek onaylar (tx göndermez; yalnız anlık görüntüyü günceller).
   // [EN] After a change the user knowingly re-confirms the live offer (no tx; only refreshes the snapshot).
@@ -133,6 +139,13 @@ export const useSettlementActions = ({
     return live;
   }, [acceptReview]);
 
+  // [TR] Modal kapanınca sabitlenen anlık görüntü ve inceleme sıfırlanır; bayat snapshot sonraki kabulü etkilemez.
+  // [EN] Closing the modal clears the pinned snapshot and review so a stale snapshot cannot affect a later accept.
+  const resetAccept = React.useCallback(() => {
+    setAcceptSnapshot(null);
+    setAcceptReview(null);
+  }, []);
+
   const accept = React.useCallback(async () => {
     if (isContractLoading) return false;
     if (!context.canAccept) return block(lang === 'TR' ? 'Settlement teklifi kabul edilemez.' : 'Settlement proposal cannot be accepted.');
@@ -143,7 +156,7 @@ export const useSettlementActions = ({
       ? { id: context.proposal.id ?? context.proposal.proposal_id ?? null, makerShareBps: context.proposal.makerShareBps ?? context.proposal.maker_share_bps }
       : null);
     const live = await readLiveProposal(tradeId);
-    const nowSec = Number.isFinite(nowTs) ? nowTs : Math.floor(Date.now() / 1000);
+    const nowSec = chainNowSec();
     const check = checkLiveProposalForAccept({ live, expected, nowTs: nowSec });
     if (!check.ok) {
       setAcceptReview({ reason: check.reason, live: check.live });
@@ -154,7 +167,7 @@ export const useSettlementActions = ({
       () => contractFns.acceptSettlement(tradeId, check.live.id),
       lang === 'TR' ? 'Settlement kabul edildi ve işlem on-chain kapanacak.' : 'Settlement accepted; trade will close on-chain.',
     );
-  }, [acceptSnapshot, block, context.canAccept, context.proposal, contractFns, isContractLoading, lang, nowTs, readLiveProposal, requireTradeId, reviewMessage, runTx]);
+  }, [acceptSnapshot, block, context.canAccept, context.proposal, contractFns, isContractLoading, lang, readLiveProposal, requireTradeId, reviewMessage, runTx]);
 
   const reject = React.useCallback(async () => {
     if (isContractLoading) return false;
@@ -195,13 +208,14 @@ export const useSettlementActions = ({
     accept,
     prepareAccept,
     confirmAcceptReview,
+    resetAccept,
     acceptSnapshot,
     acceptReview,
     acceptReviewMessage: acceptReview ? reviewMessage(acceptReview.reason) : '',
     reject,
     withdraw,
     expire,
-  }), [accept, acceptReview, acceptSnapshot, confirmAcceptReview, context, expire, prepareAccept, propose, reject, reviewMessage, withdraw]);
+  }), [accept, acceptReview, acceptSnapshot, confirmAcceptReview, resetAccept, context, expire, prepareAccept, propose, reject, reviewMessage, withdraw]);
 };
 
 export default useSettlementActions;
