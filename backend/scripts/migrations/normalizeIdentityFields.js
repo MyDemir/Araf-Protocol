@@ -9,8 +9,9 @@
  *  - Trade.parent_order_id
  *
  * Usage:
- *   node scripts/migrations/normalizeIdentityFields.js --dry-run
- *   node scripts/migrations/normalizeIdentityFields.js
+ *   node scripts/migrations/normalizeIdentityFields.js          (varsayılan DRY-RUN, yazmaz)
+ *   node scripts/migrations/normalizeIdentityFields.js --apply  (yazar)
+ *   --dry-run geriye dönük kabul edilir (uyarı verir); --apply ile birlikte verilirse dry-run kazanır.
  */
 
 require("dotenv").config();
@@ -22,9 +23,13 @@ const NUMERIC_BSON_TYPES = ["int", "long", "double", "decimal"];
 const DEFAULT_BATCH_SIZE = 1000;
 
 function parseArgs(argv = process.argv.slice(2)) {
-  return {
-    dryRun: argv.includes("--dry-run"),
-  };
+  const apply = argv.includes("--apply");
+  const legacyDry = argv.includes("--dry-run");
+  if (legacyDry) {
+    // eslint-disable-next-line no-console
+    console.warn("[migrate:identity] UYARI: --dry-run artık varsayılan; yazmak için --apply kullanın.");
+  }
+  return { dryRun: legacyDry || !apply };
 }
 
 function normalizeIdentityValue(raw, { allowZero = false, toNullOnZero = false } = {}) {

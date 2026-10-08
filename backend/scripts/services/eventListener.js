@@ -108,7 +108,15 @@ const ESCROW_EVENT_NAMES = [
 // [EN] These events are emitted by ArafRevenueVault / ArafRewards, not by the escrow.
 //      Querying them on the escrow address would never return anything.
 const VAULT_EVENT_NAMES = ["EscrowRevenueReceived", "ExternalRewardFunded", "ProductRewardFunded"];
-const REWARDS_EVENT_NAMES = ["EpochRewardAllocated", "TradeOutcomeRecorded", "RewardClaimed"];
+// [TR] Profil damgaları sunucu saatiyle, lockedAt zincir saatiyle yazılır; saat sapmasına karşı kanıt için
+//      damga lockedAt'ten EN AZ bu kadar önce olmalıdır.
+// [EN] Profile stamps use server time, lockedAt uses chain time; to absorb clock skew a stamp must predate
+//      lockedAt by at least this margin to count as proof.
+const PROFILE_PROOF_SAFETY_MARGIN_MS = 60 * 1000;
+// [TR] Mirror, zincirdeki kilit anından bu süreden sonra oluşturuluyorsa (geç/backfill) kanıt şartı devreye girer.
+// [EN] If the mirror is created later than this after the on-chain lock (late/backfill), the proof requirement applies.
+const LATE_MIRROR_THRESHOLD_MS = 60 * 1000;
+const REWARDS_EVENT_NAMES = ["EpochRewardAllocated", "TradeOutcomeRecorded", "RewardClaimed", "EpochTokenFinalizedEvent", "EpochDustRolledOver"];
 const EVENT_NAMES = [...ESCROW_EVENT_NAMES, ...VAULT_EVENT_NAMES, ...REWARDS_EVENT_NAMES];
 const EVENT_NAME_SET = new Set(EVENT_NAMES);
 
@@ -162,6 +170,8 @@ const ARAF_ABI = [
   "event EpochRewardAllocated(uint256 indexed epoch, address indexed token, uint256 amount)",
   "event TradeOutcomeRecorded(uint256 indexed tradeId, uint256 indexed epoch, address indexed maker, address taker, uint256 makerWeight, uint256 takerWeight, uint8 outcome)",
   "event RewardClaimed(uint256 indexed epoch, address indexed user, address indexed token, uint256 amount, uint256 userWeight, uint256 totalWeight)",
+  "event EpochTokenFinalizedEvent(uint256 indexed epoch, address indexed token)",
+  "event EpochDustRolledOver(uint256 indexed epoch, address indexed token, uint256 indexed targetEpoch, uint256 amount)",
   "function MAKER_CHALLENGE_WINDOW() view returns (uint256)",
   "function getTrade(uint256 _tradeId) view returns ((uint64 id,uint64 parentOrderId,address maker,address taker,address tokenAddress,uint256 cryptoAmount,uint256 makerBond,uint256 takerBond,uint16 takerFeeBpsSnapshot,uint16 makerFeeBpsSnapshot,uint8 tier,uint8 paymentRiskLevelSnapshot,uint8 state,uint64 lockedAt,uint64 paidAt,uint64 challengedAt,bool cancelProposedByMaker,bool cancelProposedByTaker,uint64 pingedAt,bool pingedByTaker,uint64 challengePingedAt,bool challengePingedByMaker))",
   "function getOrder(uint256 _orderId) view returns ((uint64 id,address owner,uint8 side,address tokenAddress,uint256 totalAmount,uint256 remainingAmount,uint256 minFillAmount,uint256 remainingMakerBondReserve,uint256 remainingTakerBondReserve,uint16 takerFeeBpsSnapshot,uint16 makerFeeBpsSnapshot,uint8 tier,uint8 paymentRiskLevel,uint8 state,bytes32 orderRef))",
@@ -248,6 +258,8 @@ const EVENT_ARG_KEYS = {
   EpochRewardAllocated: ["epoch", "token", "amount"],
   TradeOutcomeRecorded: ["tradeId", "epoch", "maker", "taker", "makerWeight", "takerWeight", "outcome"],
   RewardClaimed: ["epoch", "user", "token", "amount", "userWeight", "totalWeight"],
+  EpochTokenFinalizedEvent: ["epoch", "token"],
+  EpochDustRolledOver: ["epoch", "token", "targetEpoch", "amount"],
 };
 
 function _toNum(v) {
@@ -1731,6 +1743,8 @@ class EventWorker {
       EpochRewardAllocated: this._onEpochRewardAllocated.bind(this),
       TradeOutcomeRecorded: this._onTradeOutcomeRecorded.bind(this),
       RewardClaimed: this._onRewardClaimed.bind(this),
+      EpochTokenFinalizedEvent: this._onEpochTokenFinalized.bind(this),
+      EpochDustRolledOver: this._onEpochDustRolledOver.bind(this),
     };
 
     const handler = handlers[event.eventName];
@@ -1797,7 +1811,21 @@ class EventWorker {
     const ignoredHistogram = { ...(this._ignoredEventsByReason || {}) };
     const ignoredTotal = Object.values(ignoredHistogram).reduce((a, b) => a + Number(b || 0), 0);
 
+    // [TR] Backfill'de kanıtlanamadığı için snapshot'sız kalan PAID/CHALLENGED trade'ler.
+    // [EN] PAID/CHALLENGED trades left without a snapshot because the backfill could not prove the profile unchanged.
+    let snapshotMissingCount = 0;
+    try {
+      snapshotMissingCount = Number(await Trade.countDocuments({
+        status: { $in: ["PAID", "CHALLENGED"] },
+        "payout_snapshot.captured_at": null,
+        "payout_snapshot.is_complete": false,
+      })) || 0;
+    } catch (_) {
+      snapshotMissingCount = 0;
+    }
+
     const categories = {
+      snapshot_missing_after_backfill: snapshotMissingCount,
       terminal_trade_drift: missingTerminalCount,
       duplicate_projection: duplicateProjection.length,
       missing_terminal_timestamp: missingTerminalCount,
@@ -1819,7 +1847,8 @@ class EventWorker {
         status: t.status,
       })),
       dlqPending,
-      driftCount: categories.terminal_trade_drift + categories.duplicate_projection,
+      driftCount:
+        categories.terminal_trade_drift + categories.duplicate_projection + categories.snapshot_missing_after_backfill,
     };
 
     this._reconciliation = { lastRunAt: report.checkedAt, lastReport: report };
@@ -1890,6 +1919,13 @@ class EventWorker {
           (tradeData.taker && tradeData.taker !== ethers.ZeroAddress
             ? tradeData.taker.toLowerCase()
             : null),
+        // [TR] Backfill: mirror ilk kez PAID/CHALLENGED görüldüyse (OrderFilled geç işlendi) snapshot yalnız
+        //      profilin kilitten sonra değişmediği KANITLANIRSA alınır.
+        // [EN] Backfill: if the mirror is first seen PAID/CHALLENGED, snapshot only when provably unchanged since lock.
+        advancedStatus: this._resolveAdvancedSnapshotStatus(
+          _normalizeTradeState(tradeData.state),
+          _toDateOrNull(tradeData.lockedAt) || fillEventAt
+        ),
         session,
       });
 
@@ -1917,11 +1953,21 @@ class EventWorker {
     await this._upsertOrderMirror(orderData, { canceledAt });
   }
 
+  // [TR] Kanıt şartı: durum PAID/CHALLENGED ise ya da LOCKED ama mirror zincirdeki kilitten belirgin süre
+  //      sonra oluşuyorsa (geç işleme). Canlı akışta (OrderFilled hemen işlenir) null döner.
+  // [EN] Proof requirement: state PAID/CHALLENGED, or LOCKED but the mirror is created well after the lock.
+  _resolveAdvancedSnapshotStatus(state, lockedAt, now = Date.now()) {
+    if (state === "PAID" || state === "CHALLENGED") return state;
+    if (state === "LOCKED" && lockedAt && now - lockedAt.getTime() > LATE_MIRROR_THRESHOLD_MS) return "LOCKED";
+    return null;
+  }
+
   async _captureLockedTradeSnapshot({
     tradeId,
     lockedAt,
     makerAddress,
     takerAddress,
+    advancedStatus = null,
     session,
   }) {
     const tradeIdNum = _toIdentityString(tradeId);
@@ -1952,6 +1998,44 @@ class EventWorker {
     const makerProfile = makerUser?.payout_profile || null;
     const takerProfile = takerUser?.payout_profile || null;
 
+    // [TR] İLKE: işlem sırasında değişmiş bilgi ASLA snapshot'a girmez. Kilit anı geçmişse (PAID/CHALLENGED)
+    //      snapshot ancak iki tarafın profili de kilit anından ÖNCE son değiştiyse (sıkı <) alınır. Zaman
+    //      damgası yoksa ya da kilitten sonra/aynı anda ise kanıt yoktur: snapshot alınmaz, eksik işaretlenir
+    //      ve reconciliation raporuna düşer.
+    // [EN] PRINCIPLE: info changed during the trade NEVER enters the snapshot. Past the lock (PAID/CHALLENGED),
+    //      capture only if both profiles last changed strictly before the lock; otherwise leave it missing.
+    if (advancedStatus) {
+      const unchangedSinceLock = (user) => {
+        const profile = user?.payout_profile;
+        if (!user || !profile) return false;
+        const stamps = [profile.updated_at, profile.fingerprint?.last_changed_at, user.lastBankChangeAt]
+          .filter(Boolean)
+          .map((d) => new Date(d).getTime());
+        const hasData = Boolean(profile.payout_details_enc || profile.fingerprint?.hash || profile.rail);
+        if (hasData && !profile.updated_at) return false;
+        const limit = lockedAt.getTime() - PROFILE_PROOF_SAFETY_MARGIN_MS;
+        return stamps.every((t) => t < limit);
+      };
+      const makerOk = !normalizedMaker || unchangedSinceLock(makerUser);
+      const takerOk = !normalizedTaker || unchangedSinceLock(takerUser);
+      if (!makerOk || !takerOk) {
+        const reason = "backfill_profile_change_after_lock_unprovable";
+        logger.error(
+          `[Worker] LOCKED snapshot SKIPPED (backfill, status=${advancedStatus}): trade=${tradeIdNum} reason=${reason}`
+        );
+        await Trade.findOneAndUpdate(
+          {
+            ..._buildIdentityLookup("onchain_escrow_id", tradeIdNum),
+            status: { $in: [advancedStatus] },
+            "payout_snapshot.captured_at": null,
+          },
+          { $set: { "payout_snapshot.is_complete": false, "payout_snapshot.incomplete_reason": reason } },
+          { session }
+        );
+        return;
+      }
+    }
+
     const snapshotComplete =
       _hasRequiredPayoutSnapshot(makerProfile) && _hasRequiredPayoutSnapshot(takerProfile);
     const incompleteReasons = [];
@@ -1960,7 +2044,7 @@ class EventWorker {
     const incompleteReason = incompleteReasons.length > 0 ? incompleteReasons.join(",") : null;
 
     const updateSet = {
-      status: "LOCKED",
+      ...(advancedStatus ? {} : { status: "LOCKED" }),
       "timers.locked_at": lockedAt,
       "payout_snapshot.maker.rail": makerProfile?.rail || null,
       "payout_snapshot.maker.country": makerProfile?.country || null,
@@ -2002,7 +2086,7 @@ class EventWorker {
         //      EscrowLocked yalnız OPEN/LOCKED trade'i etkileyebilir.
         //      PAID/CHALLENGED vb. ileri state'leri geriye sarmayız.
         // [EN] Enforce monotonicity for delayed/replayed EscrowLocked events.
-        status: { $in: ["OPEN", "LOCKED"] },
+        status: { $in: advancedStatus ? [advancedStatus] : ["OPEN", "LOCKED"] },
         // [TR] Snapshot TEK SEFERLİK: captured_at doluysa (tam ya da eksik) hiçbir şey yazılmaz.
         //      Replay / DLQ re-drive / tekrar işlenen OrderFilled mevcut snapshot'ı asla yeniden yazamaz;
         //      eksik snapshot sonradan "tamamlanmaz" (dolandırıcılık önleme). Koşul atomik (tek update).
@@ -2748,6 +2832,49 @@ class EventWorker {
       } },
       { upsert: true }
     );
+    // [TR] totalWeight kontratta epoch başına tek ve finalize sonrası sabittir; claim event'i bunu taşır.
+    //      Aynı epoch'un tüm token satırlarına yazılır (idempotent $set).
+    // [EN] totalWeight is per-epoch and immutable once claimable; the claim event carries it.
+    await RewardEpoch.updateMany({ epoch: _toStr(epoch) }, { $set: { total_weight: _toStr(totalWeight) } });
+  }
+
+  // [TR] EpochTokenFinalizedEvent: havuz kesinleşti, claim açılabilir (claimDelay kontratta ayrıca uygulanır).
+  //      CLOSED'dan geri düşürülmez (replay/sıra güvenliği).
+  // [EN] Pool is final; claims can open (claimDelay still enforced on-chain). Never downgrades CLOSED.
+  async _onEpochTokenFinalized(event) {
+    const { epoch, token } = event.args;
+    const key = { epoch: _toStr(epoch), token: token?.toLowerCase?.() || null };
+    // [TR] Tek atomik güncelleme: CLOSED satır filtreye girmez. Upsert, satır CLOSED iken unique index
+    //      çakışması (E11000) üretir; bu yalnız "zaten kapalı" demektir ve sessizce geçilir.
+    // [EN] Single atomic update: a CLOSED row never matches. The upsert on a CLOSED row raises a duplicate-key
+    //      error, which just means "already closed" and is ignored.
+    try {
+      await RewardEpoch.findOneAndUpdate(
+        { ...key, status: { $ne: "CLOSED" } },
+        {
+          $set: { status: "CLAIMABLE", indexed_at: await this._getEventDate(event) },
+          $setOnInsert: { epoch_pool: "0", total_weight: null },
+        },
+        { upsert: true }
+      );
+    } catch (err) {
+      if (err?.code !== 11000) throw err;
+    }
+  }
+
+  // [TR] EpochDustRolledOver: kalan pay devredildi, epoch kapandı.
+  // [EN] Remainder rolled over; the epoch is closed.
+  async _onEpochDustRolledOver(event) {
+    const { epoch, token } = event.args;
+    const key = { epoch: _toStr(epoch), token: token?.toLowerCase?.() || null };
+    await RewardEpoch.findOneAndUpdate(
+      key,
+      {
+        $set: { status: "CLOSED", indexed_at: await this._getEventDate(event) },
+        $setOnInsert: { epoch_pool: "0", total_weight: null },
+      },
+      { upsert: true }
+    );
   }
 
   async _onMakerPinged(event) {
@@ -2853,6 +2980,8 @@ class EventWorker {
             _toNum(lastNegativeEventAt) > 0 ? new Date(_toNum(lastNegativeEventAt) * 1000) : null,
           "is_banned": isBanned,
           "banned_until": isBanned ? new Date(banTimestamp * 1000) : null,
+          // [TR] Ban geçmişi: bannedUntil zincirde kalıcıdır; decay adayı bunun üzerinden seçilir.
+          "last_ban_ends_at": banTimestamp > 0 ? new Date(banTimestamp * 1000) : null,
           "consecutive_bans": consecutiveBans,
           "last_onchain_sync_at": syncAt,
         },
