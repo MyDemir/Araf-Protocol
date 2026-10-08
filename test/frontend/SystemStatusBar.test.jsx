@@ -51,7 +51,7 @@ describe('SystemStatusBar global warnings', () => {
     );
 
     expect(screen.getByText(/Wallet Not Registered/i)).toBeInTheDocument();
-    const button = screen.getByRole('button', { name: /Register/i });
+    const button = screen.getByRole('button', { name: 'Register' });
     fireEvent.click(button);
     expect(handleRegisterWallet).toHaveBeenCalledTimes(1);
   });
@@ -67,7 +67,8 @@ describe('SystemStatusBar global warnings', () => {
       />,
     );
 
-    const button = screen.getByRole('button');
+    // [TR] Bantta artık bir de "Uyarıyı kapat" düğmesi var; kayıt düğmesi onun dışındaki tek düğmedir.
+    const button = screen.getAllByRole('button').find((el) => !/Dismiss warning/.test(el.getAttribute('aria-label') || ''));
     expect(button).toBeDisabled();
     fireEvent.click(button);
     expect(handleRegisterWallet).not.toHaveBeenCalled();
