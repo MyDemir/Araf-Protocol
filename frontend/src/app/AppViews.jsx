@@ -224,6 +224,7 @@ export const buildAppViews = (ctx) => {
           <img src="/logo-64.png" alt="" width="32" height="32" className="w-8 h-8" />
         </button>
         <button onClick={toggleSidebar} title={lang === 'TR' ? 'Filtreler' : 'Filters'} className={`w-10 h-10 flex items-center justify-center rounded-xl transition ${sidebarOpen ? 'bg-elevated text-textPrimary border border-borderStrong' : 'text-textMuted hover:text-textPrimary hover:bg-elevated'}`}><Menu className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" /></button>
+        {/* [TR] Aktif görünümün solunda bal rengi işaret (logo paleti). [EN] Honey marker left of the active view (logo palette). */}
         {NAV_ORDER.rail.filter((key) => isViewInNav(key, { navUnlocked, canSeeAdminEntry })).map((key) => {
           const view = VIEW_REGISTRY[key];
           const Icon = view.icon;
@@ -234,7 +235,7 @@ export const buildAppViews = (ctx) => {
               : (lang === 'TR' ? 'Admin Gözlem (sunucu yetkisine bağlı, read-only)' : 'Admin Observability (server-authorized, read-only)'))
             : view.label[lang === 'TR' ? 'TR' : 'EN'];
           return (
-            <button key={key} onClick={() => setCurrentView(key)} title={title} className={`w-10 h-10 flex items-center justify-center rounded-xl transition relative ${currentView === key ? `bg-elevated ${view.tone} border border-borderStrong` : 'text-textMuted hover:text-textPrimary hover:bg-elevated'}`}>
+            <button key={key} onClick={() => setCurrentView(key)} title={title} className={`w-10 h-10 flex items-center justify-center rounded-xl transition relative ${currentView === key ? `bg-elevated ${view.tone} border border-borderStrong before:absolute before:-left-[13px] before:top-1/2 before:-translate-y-1/2 before:w-1 before:h-5 before:rounded-r before:bg-honey` : 'text-textMuted hover:text-textPrimary hover:bg-elevated'}`}>
               <Icon className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" />
               {key === 'tradeRoom' && activeEscrows.length > 0 && <span className="absolute top-2 right-2 w-2 h-2 bg-orange-500 rounded-full animate-pulse"></span>}
             </button>

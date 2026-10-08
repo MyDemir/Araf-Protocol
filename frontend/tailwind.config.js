@@ -22,6 +22,7 @@ export default {
         textSecondary: '--color-text-secondary',
         textMuted: '--color-text-muted',
         brand: '--color-brand',
+        honey: '--color-honey',
         info: '--color-info',
         warning: '--color-warning',
         danger: '--color-danger',
