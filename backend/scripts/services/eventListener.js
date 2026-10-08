@@ -1803,7 +1803,21 @@ class EventWorker {
     const ignoredHistogram = { ...(this._ignoredEventsByReason || {}) };
     const ignoredTotal = Object.values(ignoredHistogram).reduce((a, b) => a + Number(b || 0), 0);
 
+    // [TR] Backfill'de kanıtlanamadığı için snapshot'sız kalan PAID/CHALLENGED trade'ler.
+    // [EN] PAID/CHALLENGED trades left without a snapshot because the backfill could not prove the profile unchanged.
+    let snapshotMissingCount = 0;
+    try {
+      snapshotMissingCount = Number(await Trade.countDocuments({
+        status: { $in: ["PAID", "CHALLENGED"] },
+        "payout_snapshot.captured_at": null,
+        "payout_snapshot.is_complete": false,
+      })) || 0;
+    } catch (_) {
+      snapshotMissingCount = 0;
+    }
+
     const categories = {
+      snapshot_missing_after_backfill: snapshotMissingCount,
       terminal_trade_drift: missingTerminalCount,
       duplicate_projection: duplicateProjection.length,
       missing_terminal_timestamp: missingTerminalCount,
@@ -1896,6 +1910,12 @@ class EventWorker {
           (tradeData.taker && tradeData.taker !== ethers.ZeroAddress
             ? tradeData.taker.toLowerCase()
             : null),
+        // [TR] Backfill: mirror ilk kez PAID/CHALLENGED görüldüyse (OrderFilled geç işlendi) snapshot yalnız
+        //      profilin kilitten sonra değişmediği KANITLANIRSA alınır.
+        // [EN] Backfill: if the mirror is first seen PAID/CHALLENGED, snapshot only when provably unchanged since lock.
+        advancedStatus: ["PAID", "CHALLENGED"].includes(_normalizeTradeState(tradeData.state))
+          ? _normalizeTradeState(tradeData.state)
+          : null,
         session,
       });
 
@@ -1928,6 +1948,7 @@ class EventWorker {
     lockedAt,
     makerAddress,
     takerAddress,
+    advancedStatus = null,
     session,
   }) {
     const tradeIdNum = _toIdentityString(tradeId);
@@ -1958,6 +1979,44 @@ class EventWorker {
     const makerProfile = makerUser?.payout_profile || null;
     const takerProfile = takerUser?.payout_profile || null;
 
+    // [TR] İLKE: işlem sırasında değişmiş bilgi ASLA snapshot'a girmez. Kilit anı geçmişse (PAID/CHALLENGED)
+    //      snapshot ancak iki tarafın profili de kilit anından ÖNCE son değiştiyse (sıkı <) alınır. Zaman
+    //      damgası yoksa ya da kilitten sonra/aynı anda ise kanıt yoktur: snapshot alınmaz, eksik işaretlenir
+    //      ve reconciliation raporuna düşer.
+    // [EN] PRINCIPLE: info changed during the trade NEVER enters the snapshot. Past the lock (PAID/CHALLENGED),
+    //      capture only if both profiles last changed strictly before the lock; otherwise leave it missing.
+    if (advancedStatus) {
+      const unchangedSinceLock = (user) => {
+        const profile = user?.payout_profile;
+        if (!user || !profile) return false;
+        const stamps = [profile.updated_at, profile.fingerprint?.last_changed_at, user.lastBankChangeAt]
+          .filter(Boolean)
+          .map((d) => new Date(d).getTime());
+        const hasData = Boolean(profile.payout_details_enc || profile.fingerprint?.hash || profile.rail);
+        if (!hasData) return stamps.every((t) => t < lockedAt.getTime());
+        if (!profile.updated_at) return false;
+        return stamps.every((t) => t < lockedAt.getTime());
+      };
+      const makerOk = !normalizedMaker || unchangedSinceLock(makerUser);
+      const takerOk = !normalizedTaker || unchangedSinceLock(takerUser);
+      if (!makerOk || !takerOk) {
+        const reason = "backfill_profile_change_after_lock_unprovable";
+        logger.error(
+          `[Worker] LOCKED snapshot SKIPPED (backfill, status=${advancedStatus}): trade=${tradeIdNum} reason=${reason}`
+        );
+        await Trade.findOneAndUpdate(
+          {
+            ..._buildIdentityLookup("onchain_escrow_id", tradeIdNum),
+            status: { $in: ["PAID", "CHALLENGED"] },
+            "payout_snapshot.captured_at": null,
+          },
+          { $set: { "payout_snapshot.is_complete": false, "payout_snapshot.incomplete_reason": reason } },
+          { session }
+        );
+        return;
+      }
+    }
+
     const snapshotComplete =
       _hasRequiredPayoutSnapshot(makerProfile) && _hasRequiredPayoutSnapshot(takerProfile);
     const incompleteReasons = [];
@@ -1966,7 +2025,7 @@ class EventWorker {
     const incompleteReason = incompleteReasons.length > 0 ? incompleteReasons.join(",") : null;
 
     const updateSet = {
-      status: "LOCKED",
+      ...(advancedStatus ? {} : { status: "LOCKED" }),
       "timers.locked_at": lockedAt,
       "payout_snapshot.maker.rail": makerProfile?.rail || null,
       "payout_snapshot.maker.country": makerProfile?.country || null,
@@ -2008,7 +2067,7 @@ class EventWorker {
         //      EscrowLocked yalnız OPEN/LOCKED trade'i etkileyebilir.
         //      PAID/CHALLENGED vb. ileri state'leri geriye sarmayız.
         // [EN] Enforce monotonicity for delayed/replayed EscrowLocked events.
-        status: { $in: ["OPEN", "LOCKED"] },
+        status: { $in: advancedStatus ? [advancedStatus] : ["OPEN", "LOCKED"] },
         // [TR] Snapshot TEK SEFERLİK: captured_at doluysa (tam ya da eksik) hiçbir şey yazılmaz.
         //      Replay / DLQ re-drive / tekrar işlenen OrderFilled mevcut snapshot'ı asla yeniden yazamaz;
         //      eksik snapshot sonradan "tamamlanmaz" (dolandırıcılık önleme). Koşul atomik (tek update).
