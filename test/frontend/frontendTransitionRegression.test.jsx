@@ -148,7 +148,7 @@ describe('frontend transition regression invariants', () => {
     const appViewsSource = fs.readFileSync(path.resolve(process.cwd(), 'src/app/AppViews.jsx'), 'utf8');
     expect(statusSource).not.toMatch(/fixed[\s\S]*top-0|top-0[\s\S]*fixed/);
     expect(appViewsSource).toContain("import ThemeToggle from './shell/ThemeToggle';");
-    expect(appViewsSource).toContain('<ThemeToggle />');
+    expect(appViewsSource).toContain('<ThemeToggle lang={lang} />');
   });
 
   it('migration_system_status_bar_covers_wrong_chain_paused_auth_and_pending_sync_states', () => {

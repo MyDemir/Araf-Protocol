@@ -51,16 +51,17 @@ describe('getInitialThemeMode', () => {
 
 
   it('ThemeToggle updates provider mode and persisted theme', async () => {
-    render(React.createElement(ThemeProvider, null, React.createElement(ThemeToggle)));
+    render(React.createElement(ThemeProvider, null, React.createElement(ThemeToggle, { lang: 'EN' })));
 
-    const toggle = screen.getByRole('combobox', { name: /theme mode/i });
-    expect(toggle).toHaveValue('system');
+    const toggle = screen.getByRole('button', { name: 'Theme: System' });
+    expect(toggle).toHaveAttribute('aria-haspopup', 'menu');
 
-    fireEvent.change(toggle, { target: { value: 'day' } });
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Day' }));
 
     await waitFor(() => expect(window.localStorage.getItem(APP_THEME_STORAGE_KEY)).toBe('day'));
     expect(document.documentElement.dataset.theme).toBe('day');
-    expect(toggle).toHaveValue('day');
+    expect(screen.getByRole('button', { name: 'Theme: Day' })).toBeInTheDocument();
   });
 
 });
