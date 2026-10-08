@@ -17,6 +17,7 @@ function loadOrders({ Order, Trade, User, tokenMap }) {
       requireAuth: (req, _res, next) => { req.wallet = OWNER; next(); },
       requireSessionWalletMatch: passMw,
     }));
+    jest.doMock("../../backend/scripts/services/paymentRails", () => require("./helpers/paymentRailsPassthrough"));
     jest.doMock("../../backend/scripts/middleware/rateLimiter", () => ({
       marketReadLimiter: passMw, ordersReadLimiter: passMw, ordersWriteLimiter: passMw,
     }));
@@ -136,6 +137,7 @@ describe("logs route (B34)", () => {
     const error = jest.fn();
     jest.isolateModules(() => {
       jest.doMock("../../backend/scripts/utils/logger", () => ({ info: jest.fn(), warn: jest.fn(), error }));
+      jest.doMock("../../backend/scripts/services/paymentRails", () => require("./helpers/paymentRailsPassthrough"));
       jest.doMock("../../backend/scripts/middleware/rateLimiter", () => ({ clientLogLimiter: passMw }));
       router = require("../../backend/scripts/routes/logs");
     });
@@ -181,6 +183,7 @@ describe("trades route (B38, B33, B36)", () => {
         requireAuth: (req, _res, next) => { req.wallet = OWNER; next(); },
         requireSessionWalletMatch: passMw,
       }));
+      jest.doMock("../../backend/scripts/services/paymentRails", () => require("./helpers/paymentRailsPassthrough"));
       jest.doMock("../../backend/scripts/middleware/rateLimiter", () => ({ roomReadLimiter: passMw, coordinationWriteLimiter: passMw }));
       jest.doMock("../../backend/scripts/models/Trade", () => Trade);
       jest.doMock("../../backend/scripts/models/User", () => ({ find: jest.fn() }));

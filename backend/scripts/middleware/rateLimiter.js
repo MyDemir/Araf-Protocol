@@ -632,6 +632,42 @@ const adminReadLimiterWithFallback = makeSensitiveLimiter({
   inMemoryLimiter: adminReadInMemoryLimiter,
 });
 
+// ─── Admin Write Surface (payment rails) ────────────────────────────────────
+// [TR] Admin yazma yolu ilk kez ekleniyor: cüzdan başına 10 dk / 10 istek. Redis yokken
+//      fail-open yerine proses-içi sayaç kullanılır.
+// [EN] First admin write surface: 10 requests / 10 min per wallet; in-memory fallback when Redis is down.
+const ADMIN_WRITE_WINDOW_MS = 10 * 60 * 1000;
+const ADMIN_WRITE_MAX = 10;
+const adminWriteErrorBody = () => ({
+  error: "Admin yazma limiti aşıldı. Lütfen daha sonra tekrar deneyin.",
+  retryAfter: Math.ceil(ADMIN_WRITE_WINDOW_MS / 1000),
+});
+const adminWriteRedisLimiter = rateLimit({
+  windowMs: ADMIN_WRITE_WINDOW_MS,
+  max: ADMIN_WRITE_MAX,
+  keyGenerator: (req) => req.wallet || req.ip,
+  store: makeStore("admin-write"),
+  skip: makeSkipFn(),
+  handler: (req, res) => {
+    onLimitReached(req);
+    res.status(429).json(adminWriteErrorBody());
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+const adminWriteInMemoryLimiter = makeInMemoryLimiter({
+  label: "ADMIN-WRITE",
+  windowMs: ADMIN_WRITE_WINDOW_MS,
+  max: ADMIN_WRITE_MAX,
+  keyGenerator: (req) => req.wallet || req.ip,
+  errorMessage: adminWriteErrorBody,
+});
+const adminWriteLimiter = makeSensitiveLimiter({
+  label: "ADMIN-WRITE",
+  redisLimiter: adminWriteRedisLimiter,
+  inMemoryLimiter: adminWriteInMemoryLimiter,
+});
+
 // ─── Client Error Log Surface — Public Write (Telemetry) ───────────────────
 const clientLogRedisLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -691,6 +727,7 @@ module.exports = {
   receiptUploadLimiter,
   coordinationWriteLimiter,
   adminReadLimiter: adminReadLimiterWithFallback,
+  adminWriteLimiter,
   clientLogLimiter,
   feedbackLimiter,
   __private: {

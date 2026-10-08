@@ -36,8 +36,10 @@ describe("admin routes resilience + pagination semantics", () => {
         requireAuth: (_req, _res, next) => next(),
         requireSessionWalletMatch: (_req, _res, next) => next(),
       }));
+      jest.doMock("../../backend/scripts/services/paymentRails", () => require("./helpers/paymentRailsPassthrough"));
       jest.doMock("../../backend/scripts/middleware/rateLimiter", () => ({
         adminReadLimiter,
+        adminWriteLimiter: adminReadLimiter,
       }));
       jest.doMock("../../backend/scripts/services/health", () => ({
         getReadiness: jest.fn().mockResolvedValue({ ok: true, checks: { db: true } }),
@@ -94,7 +96,8 @@ describe("admin routes resilience + pagination semantics", () => {
         requireAuth: (_req, _res, next) => next(),
         requireSessionWalletMatch: (_req, _res, next) => next(),
       }));
-      jest.doMock("../../backend/scripts/middleware/rateLimiter", () => ({ adminReadLimiter }));
+      jest.doMock("../../backend/scripts/services/paymentRails", () => require("./helpers/paymentRailsPassthrough"));
+      jest.doMock("../../backend/scripts/middleware/rateLimiter", () => ({ adminReadLimiter, adminWriteLimiter: adminReadLimiter }));
       jest.doMock("../../backend/scripts/services/health", () => ({
         getReadiness: jest.fn().mockResolvedValue({ ok: true }),
       }));
@@ -197,8 +200,10 @@ describe("admin routes resilience + pagination semantics", () => {
         requireAuth: (_req, _res, next) => next(),
         requireSessionWalletMatch: (_req, _res, next) => next(),
       }));
+      jest.doMock("../../backend/scripts/services/paymentRails", () => require("./helpers/paymentRailsPassthrough"));
       jest.doMock("../../backend/scripts/middleware/rateLimiter", () => ({
         adminReadLimiter,
+        adminWriteLimiter: adminReadLimiter,
       }));
       jest.doMock("../../backend/scripts/services/health", () => ({
         getReadiness: jest.fn().mockResolvedValue({ ok: true }),
@@ -329,7 +334,8 @@ describe("admin routes resilience + pagination semantics", () => {
         requireAuth: (_req, _res, next) => next(),
         requireSessionWalletMatch: (_req, _res, next) => next(),
       }));
-      jest.doMock("../../backend/scripts/middleware/rateLimiter", () => ({ adminReadLimiter }));
+      jest.doMock("../../backend/scripts/services/paymentRails", () => require("./helpers/paymentRailsPassthrough"));
+      jest.doMock("../../backend/scripts/middleware/rateLimiter", () => ({ adminReadLimiter, adminWriteLimiter: adminReadLimiter }));
       jest.doMock("../../backend/scripts/services/health", () => ({ getReadiness: jest.fn().mockResolvedValue({ ok: true }) }));
       jest.doMock("../../backend/scripts/services/dlqProcessor", () => ({ getDlqMetrics: jest.fn(() => ({})) }));
       jest.doMock("../../backend/scripts/config/redis", () => ({ getRedisClient: jest.fn(() => ({ lLen: jest.fn().mockResolvedValue(0) })) }));
@@ -383,7 +389,8 @@ describe("admin routes resilience + pagination semantics", () => {
         requireAuth: (_req, _res, next) => next(),
         requireSessionWalletMatch: (_req, _res, next) => next(),
       }));
-      jest.doMock("../../backend/scripts/middleware/rateLimiter", () => ({ adminReadLimiter }));
+      jest.doMock("../../backend/scripts/services/paymentRails", () => require("./helpers/paymentRailsPassthrough"));
+      jest.doMock("../../backend/scripts/middleware/rateLimiter", () => ({ adminReadLimiter, adminWriteLimiter: adminReadLimiter }));
       jest.doMock("../../backend/scripts/services/health", () => ({ getReadiness: jest.fn().mockResolvedValue({ ok: true }) }));
       jest.doMock("../../backend/scripts/services/dlqProcessor", () => ({ getDlqMetrics: jest.fn(() => ({})) }));
       jest.doMock("../../backend/scripts/config/redis", () => ({ getRedisClient: jest.fn(() => ({ lLen: jest.fn().mockResolvedValue(0) })) }));

@@ -4,7 +4,7 @@ const express = require("express");
 const Joi = require("joi");
 
 const { requireAuth, requireSessionWalletMatch } = require("../middleware/auth");
-const { adminReadLimiter } = require("../middleware/rateLimiter");
+const { adminReadLimiter, adminWriteLimiter } = require("../middleware/rateLimiter");
 const { getRedisClient } = require("../config/redis");
 const { getReadiness } = require("../services/health");
 const { getDlqMetrics } = require("../services/dlqProcessor");
@@ -19,6 +19,8 @@ const RewardFunding = require("../models/RewardFunding");
 const RewardClaim = require("../models/RewardClaim");
 const { buildBankProfileRisk, buildTradeHealthSignals } = require("./tradeRisk");
 const { isAdminWallet } = require("../utils/adminWallets");
+const paymentRails = require("../services/paymentRails");
+const { hmacDigest } = require("../services/encryption");
 
 const router = express.Router();
 
@@ -685,6 +687,69 @@ router.get("/settlement-proposals", async (req, res, next) => {
       limit: value.limit,
     });
   } catch (err) {
+    return next(err);
+  }
+});
+
+// ─── Ödeme yöntemleri (rail) yönetimi ────────────────────────────────────────
+// [TR] Admin yazma yolu. Zincir (router.use): requireAuth (cookie JWT, SameSite=Lax) →
+//      requireSessionWalletMatch (x-wallet-address özel başlığı: cross-site istekle gönderilemez, CSRF'e
+//      karşı ikinci katman) → requireAdminWallet; ayrıca sıkı yazma limiti (10 dk / 10).
+//      Kontrat rail bilmez; bu kapı yalnız UI/API düzeyindedir.
+// [EN] Admin write path behind the full auth chain plus a strict write limiter. Contract is rail-agnostic.
+const RAIL_PUT_SCHEMA = Joi.object({
+  enabled: Joi.boolean().strict().required(),
+  reason: Joi.string().trim().max(300).allow("").optional(),
+}).required();
+const AUDIT_QUERY_SCHEMA = Joi.object({
+  page: Joi.number().integer().min(1).max(10000).default(1),
+  limit: Joi.number().integer().min(1).max(100).default(20),
+});
+
+router.get("/payment-rails", async (_req, res, next) => {
+  try {
+    return res.json({ rails: await paymentRails.listRails() });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+router.get("/payment-rails/audit", async (req, res, next) => {
+  try {
+    const { error, value } = AUDIT_QUERY_SCHEMA.validate(req.query || {});
+    if (error) return res.status(400).json({ error: error.message });
+    return res.json(await paymentRails.listAudit(value));
+  } catch (err) {
+    return next(err);
+  }
+});
+
+router.put("/payment-rails/:rail", adminWriteLimiter, async (req, res, next) => {
+  try {
+    const rail = String(req.params.rail || "").toUpperCase();
+    if (!paymentRails.isKnownRail(rail)) {
+      return res.status(400).json({ error: "Bilinmeyen ödeme yöntemi.", code: "PAYMENT_RAIL_UNKNOWN" });
+    }
+    const { error, value } = RAIL_PUT_SCHEMA.validate(req.body);
+    if (error) return res.status(400).json({ error: error.message });
+
+    const ipHash = await hmacDigest("admin-audit-ip", req.ip || "");
+    const result = await paymentRails.setRailEnabled(rail, value.enabled, {
+      wallet: req.wallet,
+      reason: value.reason || "",
+      ipHash,
+    });
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    if (err.code === "LAST_ENABLED_RAIL") {
+      return res.status(409).json({ error: err.message, code: "LAST_ENABLED_RAIL" });
+    }
+    if (err.code === "RAIL_CONFLICT") {
+      return res.status(409).json({ error: err.message, code: "PAYMENT_RAIL_CONFLICT" });
+    }
+    if (err.code === "RAIL_UNKNOWN") {
+      return res.status(400).json({ error: err.message, code: "PAYMENT_RAIL_UNKNOWN" });
+    }
     return next(err);
   }
 });

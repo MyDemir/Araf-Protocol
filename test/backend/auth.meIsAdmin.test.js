@@ -23,6 +23,7 @@ function buildApp(adminWallets) {
     revokeRefreshToken: jest.fn().mockResolvedValue(),
     blacklistJWT: jest.fn().mockResolvedValue(),
   }));
+  jest.doMock("../../backend/scripts/services/paymentRails", () => require("./helpers/paymentRailsPassthrough"));
   jest.doMock("../../backend/scripts/middleware/rateLimiter", () => new Proxy({}, { get: () => (_req, _res, next) => next() }));
   const app = express();
   app.use(express.json());
@@ -41,7 +42,7 @@ describe("/api/auth/me isAdmin", () => {
     const app = buildApp(` ${ADMIN.toUpperCase().replace("0X", "0x")} , 0xbbbb `);
     const res = await me(app, "admin", ADMIN);
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ wallet: ADMIN, authenticated: true, isAdmin: true, hasPayoutProfile: false });
+    expect(res.body).toEqual({ wallet: ADMIN, authenticated: true, isAdmin: true, hasPayoutProfile: false, payoutRail: null, payoutRailEnabled: null });
   });
 
   it("is false for a normal wallet", async () => {
@@ -62,7 +63,7 @@ describe("/api/auth/me hasPayoutProfile", () => {
     mockUserExists = jest.fn().mockResolvedValue({ _id: "x" });
     const res = await me(buildApp(undefined), "good", WALLET);
     expect(res.body.hasPayoutProfile).toBe(true);
-    expect(Object.keys(res.body).sort()).toEqual(["authenticated", "hasPayoutProfile", "isAdmin", "wallet"]);
+    expect(Object.keys(res.body).sort()).toEqual(["authenticated", "hasPayoutProfile", "isAdmin", "payoutRail", "payoutRailEnabled", "wallet"]);
   });
 
   it("is false when no saved profile exists", async () => {

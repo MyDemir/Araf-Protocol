@@ -28,6 +28,7 @@ const { ACCEPTED_TERMS_VERSIONS, CURRENT_TERMS_VERSION, parseTermsAcceptance } =
 const TermsAcceptance = require("../models/TermsAcceptance");
 const { requireAuth, requireSessionWalletMatch } = require("../middleware/auth");
 const { isAdminWallet } = require("../utils/adminWallets");
+const { isRailEnabled } = require("../services/paymentRails");
 const {
   generateNonce,
   verifySiweSignature,
@@ -572,11 +573,29 @@ router.get("/me", requireAuth, async (req, res) => {
     logger.warn(`[Auth] /me hasPayoutProfile lookup failed: ${err.message}`);
   }
 
+  // [TR] Kayıtlı profilin rail'i admin tarafından kapatıldıysa payoutRailEnabled=false. hasPayoutProfile
+  //      "veri var" anlamını korur (profil silinmez); yeni işlem kapısı istemcide ikisinin birleşimidir.
+  //      Profil yoksa / okunamazsa null (bilinmiyor → istemci yalnız hasPayoutProfile'a bakar).
+  // [EN] false when the saved profile's rail is disabled; null when no profile / unknown.
+  let payoutRail = null;
+  let payoutRailEnabled = null;
+  if (hasPayoutProfile) {
+    try {
+      const row = await User.findOne({ wallet_address: req.wallet }).select("payout_profile.rail").lean();
+      payoutRail = row?.payout_profile?.rail || null;
+      if (payoutRail) payoutRailEnabled = await isRailEnabled(payoutRail);
+    } catch (err) {
+      logger.warn(`[Auth] /me payoutRailEnabled lookup failed: ${err.message}`);
+    }
+  }
+
   return res.json({
     wallet: req.wallet,
     authenticated: true,
     isAdmin: isAdminWallet(req.wallet),
     hasPayoutProfile,
+    payoutRail,
+    payoutRailEnabled,
   });
 });
 
@@ -640,6 +659,19 @@ router.put("/profile", requireAuth, requireSessionWalletMatch, authLimiter, asyn
       (await buildPayoutFingerprintHmac(nextGenericDetails));
 
     const bankProfileChanged = railChanged || countryChanged || detailsChanged;
+
+    // [TR] Devre dışı rail ile yeni profil oluşturma / rail-ülke-detay değiştirme yasak. Zaten kayıtlı ve
+    //      değişmeyen profil (yalnız contact güncellemesi) engellenmez; profil silinmez.
+    //      Bu kapı yalnız UI/API düzeyindedir, kontrat rail bilmez.
+    // [EN] Block creating/changing a profile on a disabled rail; unchanged saved profiles are untouched.
+    const isNewProfile = !user.payout_profile?.payout_details_enc;
+    if ((isNewProfile || bankProfileChanged) && !(await isRailEnabled(incoming.rail))) {
+      return res.status(409).json({
+        error: "Bu ödeme yöntemi şu an kapalı.",
+        code: "PAYMENT_RAIL_DISABLED",
+        rail: incoming.rail,
+      });
+    }
 
     // [TR] Ürün kararı: aktif trade varken (ilk oluşturma dahil) ödeme profili yazımı yapılamaz;
     //      snapshot kilit anında alınır ve işlem boyunca değişmemelidir (dolandırıcılık önleme).
