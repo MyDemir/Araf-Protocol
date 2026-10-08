@@ -237,6 +237,11 @@ export function useAppSessionData({
   //      bilinmeyen durumda emir oluşturma/doldurma kapalıdır (fail-closed). Taslak form değeri buraya yansımaz.
   // [EN] Whether a payout profile is SAVED on the backend. null = unknown -> create/fill stay blocked (fail-closed).
   const [hasPayoutProfile, setHasPayoutProfile] = useState(null);
+  // [TR] Kayıtlı profilin rail'i admin tarafından kapatıldı mı (/auth/me.payoutRailEnabled === false)?
+  //      hasPayoutProfile "etkin kayıtlı profil" olarak sunulur: rail kapalıyken false → mevcut kapılar
+  //      (emir açma/doldurma) kendiliğinden kapanır; profil verisi silinmez, kullanıcı açık bir yönteme geçebilir.
+  const [payoutRailDisabled, setPayoutRailDisabled] = useState(false);
+  const [enabledPaymentRails, setEnabledPaymentRails] = useState(null);
   const adminResolvedWalletRef = React.useRef(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [authenticatedWallet, setAuthenticatedWallet] = useState(null);
@@ -653,6 +658,7 @@ export function useAppSessionData({
         if (data.reputationPolicy) setReputationPolicy(data.reputationPolicy);
         if (data.deployment) setBackendDeployment(data.deployment);
         if (data.paymentRiskConfig) setPaymentRiskConfig(data.paymentRiskConfig);
+        if (Array.isArray(data.enabledPaymentRails)) setEnabledPaymentRails(data.enabledPaymentRails);
       })
       .catch((err) => console.error('[ProtocolConfig] fetch failed:', err));
   }, []);
@@ -788,7 +794,8 @@ export function useAppSessionData({
         setAuthenticatedWallet(sessionWallet);
         authenticatedWalletRef.current = sessionWallet;
         setIsAdmin(typeof data?.isAdmin === 'boolean' ? data.isAdmin : null);
-        setHasPayoutProfile(typeof data?.hasPayoutProfile === 'boolean' ? data.hasPayoutProfile : null);
+        setPayoutRailDisabled(data?.payoutRailEnabled === false);
+        setHasPayoutProfile(typeof data?.hasPayoutProfile === 'boolean' ? (data.hasPayoutProfile && data?.payoutRailEnabled !== false) : null);
         adminResolvedWalletRef.current = sessionWallet;
         setAuthChecked(true);
       })
@@ -815,7 +822,8 @@ export function useAppSessionData({
         const data = await res.json().catch(() => ({}));
         if (cancelled || data?.wallet?.toLowerCase?.() !== authenticatedWallet) return;
         setIsAdmin(typeof data?.isAdmin === 'boolean' ? data.isAdmin : null);
-        setHasPayoutProfile(typeof data?.hasPayoutProfile === 'boolean' ? data.hasPayoutProfile : null);
+        setPayoutRailDisabled(data?.payoutRailEnabled === false);
+        setHasPayoutProfile(typeof data?.hasPayoutProfile === 'boolean' ? (data.hasPayoutProfile && data?.payoutRailEnabled !== false) : null);
         adminResolvedWalletRef.current = authenticatedWallet;
       })
       .catch(() => {});
@@ -1395,6 +1403,8 @@ export function useAppSessionData({
     setIsWalletRegistered,
     isAdmin,
     hasPayoutProfile,
+    payoutRailDisabled,
+    enabledPaymentRails,
     setHasPayoutProfile,
     isRegisteringWallet,
     setIsRegisteringWallet,

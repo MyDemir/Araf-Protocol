@@ -462,6 +462,7 @@ export const mapApiOrderToUi = ({ order, lang = 'TR', bondMap = {}, tokenMap = {
     ownerBannedUntil: parseOwnerBannedUntil(order),
     // [TR] Backend boolean'ı: emir sahibinin KAYITLI ödeme profili var mı. Bilgi yoksa null (engelleme yok).
     ownerHasPayoutProfile: typeof order?.owner_has_payout_profile === 'boolean' ? order.owner_has_payout_profile : null,
+    ownerRailEnabled: typeof order?.owner_rail_enabled === 'boolean' ? order.owner_rail_enabled : null,
     maker: formatAddress(ownerAddress),
     makerFull: ownerAddress,
     side,

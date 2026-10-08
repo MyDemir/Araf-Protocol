@@ -233,6 +233,12 @@ describe('payout profile gate on market fill', () => {
     expect(screen.getByTestId('fill-owner-no-profile')).toHaveTextContent("The seller has no payout profile.");
   });
 
+  it('locks fill and explains when the order owner payout rail is closed by admin', () => {
+    renderMarketWith({ hasPayoutProfile: true, filteredOrders: [makeOrder({ ownerHasPayoutProfile: true, ownerRailEnabled: false })] });
+    expect(screen.getByRole('button', { name: /Method currently closed/i })).toBeDisabled();
+    expect(screen.getByTestId('fill-owner-rail-closed')).toHaveTextContent("The seller's payment method is currently closed.");
+  });
+
   it('keeps the fill CTA enabled when both sides have profiles', () => {
     renderMarketWith({ hasPayoutProfile: true, filteredOrders: [makeOrder({ ownerHasPayoutProfile: true })] });
     expect(screen.getByRole('button', { name: 'Buy' })).toBeEnabled();
