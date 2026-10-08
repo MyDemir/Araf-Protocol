@@ -841,7 +841,7 @@ Run the scripts from `backend/` (`node scripts/migrations/<name>.js`). They read
 
 | Script | Default mode | Switch | Purpose |
 |---|---|---|---|
-| `normalizeIdentityFields.js` (`npm run migrate:identity`) | **writes** | `--dry-run` (`npm run migrate:identity:dry`) | Converts legacy numeric `Order.onchain_order_id`, `Trade.onchain_escrow_id`, `Trade.parent_order_id` to canonical strings. |
+| `normalizeIdentityFields.js` (`npm run migrate:identity`) | **writes** | dry-run by default; writes only with `--apply` (`npm run migrate:identity:dry` = dry-run, `npm run migrate:identity` = `--apply`; `--dry-run` still accepted with a warning) | Converts legacy numeric `Order.onchain_order_id`, `Trade.onchain_escrow_id`, `Trade.parent_order_id` to canonical strings. |
 | `backfillTerminalTradeStats.js` | dry-run | `--apply` | Fills the permanent `TerminalTradeStat` counters from existing terminal trades. Idempotent (`$setOnInsert` on `trade_key`). |
 | `dedupeRevenueEvents.js` | dry-run | `--apply` | Removes duplicate `RevenueEvent` rows written by the old worker (escrow row duplicating the vault row for the same tx/token/amount/kind/trade). Idempotent. |
 

@@ -845,7 +845,7 @@ Script'leri `backend/` dizininden çalıştırın (`node scripts/migrations/<ad>
 
 | Script | Varsayılan mod | Anahtar | Amaç |
 |---|---|---|---|
-| `normalizeIdentityFields.js` (`npm run migrate:identity`) | **yazar** | `--dry-run` (`npm run migrate:identity:dry`) | Legacy numeric `Order.onchain_order_id`, `Trade.onchain_escrow_id`, `Trade.parent_order_id` değerlerini kanonik string'e çevirir. |
+| `normalizeIdentityFields.js` (`npm run migrate:identity`) | **yazar** | varsayılan dry-run; yazmak için `--apply` (`npm run migrate:identity:dry` = dry-run, `npm run migrate:identity` = `--apply`; `--dry-run` geriye dönük kabul, uyarı verir) | Legacy numeric `Order.onchain_order_id`, `Trade.onchain_escrow_id`, `Trade.parent_order_id` değerlerini kanonik string'e çevirir. |
 | `backfillTerminalTradeStats.js` | dry-run | `--apply` | Kalıcı `TerminalTradeStat` sayaçlarını mevcut terminal trade'lerden doldurur. Idempotent (`trade_key` üzerinde `$setOnInsert`). |
 | `dedupeRevenueEvents.js` | dry-run | `--apply` | Eski worker'ın yazdığı mükerrer `RevenueEvent` satırlarını siler (aynı tx/token/amount/kind/trade için vault satırını tekrarlayan escrow satırı). Idempotent. |
 
