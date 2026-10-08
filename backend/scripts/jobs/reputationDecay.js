@@ -90,10 +90,16 @@ async function runReputationDecay() {
   // [EN] Mirror fields may be stale. This query only builds a candidate pool.
   const candidates = await User.find({
     consecutive_bans: { $gt: 0 },
-    banned_until: { $ne: null, $lte: new Date(cutoffMs) },
+    // [TR] banned_until ban bitince null'lanır; bu yüzden kalıcı last_ban_ends_at esas alınır
+    //      (banned_until yalnız eski kayıtlar için yedek).
+    // [EN] banned_until is nulled on expiry, so the persistent last_ban_ends_at is the primary key.
+    $or: [
+      { last_ban_ends_at: { $ne: null, $lte: new Date(cutoffMs) } },
+      { banned_until: { $ne: null, $lte: new Date(cutoffMs) } },
+    ],
   })
-    .select("wallet_address consecutive_bans banned_until")
-    .sort({ banned_until: 1, wallet_address: 1 })
+    .select("wallet_address consecutive_bans banned_until last_ban_ends_at")
+    .sort({ last_ban_ends_at: 1, banned_until: 1, wallet_address: 1 })
     .limit(DEFAULT_CANDIDATE_LIMIT)
     .lean();
 

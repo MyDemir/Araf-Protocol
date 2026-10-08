@@ -841,8 +841,9 @@ Run the scripts from `backend/` (`node scripts/migrations/<name>.js`). They read
 
 | Script | Default mode | Switch | Purpose |
 |---|---|---|---|
-| `normalizeIdentityFields.js` (`npm run migrate:identity`) | **writes** | `--dry-run` (`npm run migrate:identity:dry`) | Converts legacy numeric `Order.onchain_order_id`, `Trade.onchain_escrow_id`, `Trade.parent_order_id` to canonical strings. |
+| `normalizeIdentityFields.js` (`npm run migrate:identity`) | **writes** | dry-run by default; writes only with `--apply` (`npm run migrate:identity:dry` = dry-run, `npm run migrate:identity` = `--apply`; `--dry-run` still accepted with a warning) | Converts legacy numeric `Order.onchain_order_id`, `Trade.onchain_escrow_id`, `Trade.parent_order_id` to canonical strings. |
 | `backfillTerminalTradeStats.js` | dry-run | `--apply` | Fills the permanent `TerminalTradeStat` counters from existing terminal trades. Idempotent (`$setOnInsert` on `trade_key`). |
+| `backfillLastBanEndsAt.js` (`npm run migrate:last-ban-ends-at`; `:dry` = dry-run) | dry-run | `--apply` | Fills `User.last_ban_ends_at` from chain (`getReputation().bannedUntil`) for users whose `banned_until` was nulled earlier, so the reputation-decay job can pick them up. Idempotent, read-only RPC (`BASE_RPC_URL`, `ARAF_ESCROW_ADDRESS`). |
 | `dedupeRevenueEvents.js` | dry-run | `--apply` | Removes duplicate `RevenueEvent` rows written by the old worker (escrow row duplicating the vault row for the same tx/token/amount/kind/trade). Idempotent. |
 
 Order of operations for an upgrade:

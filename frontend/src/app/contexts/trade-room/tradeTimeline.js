@@ -26,6 +26,16 @@ export const TRADE_TIMING = Object.freeze({
   MAX_BLEEDING_MS: 240 * H,
 });
 
+// [TR] MAKER_CHALLENGE_WINDOW kontrattan bir kez okunur (useArafContract); okunamazsa 24 saat yedek kalır.
+// [EN] MAKER_CHALLENGE_WINDOW is read from the contract once (useArafContract); 24h is the fallback.
+export const DEFAULT_MAKER_CHALLENGE_WINDOW_MS = TRADE_TIMING.MAKER_CHALLENGE_WINDOW_MS;
+let makerChallengeWindowMs = DEFAULT_MAKER_CHALLENGE_WINDOW_MS;
+export const setMakerChallengeWindowMs = (ms) => {
+  const n = Number(ms);
+  makerChallengeWindowMs = Number.isFinite(n) && n > 0 ? n : DEFAULT_MAKER_CHALLENGE_WINDOW_MS;
+};
+export const getMakerChallengeWindowMs = () => makerChallengeWindowMs;
+
 const toMs = (value) => {
   if (value === null || value === undefined || value === '' || value === 0 || value === '0') return null;
   if (typeof value === 'number') return value < 1e12 ? value * 1000 : value; // unix seconds or ms
@@ -47,7 +57,7 @@ export const countdownTo = (endMs, nowMs = Date.now()) => {
   };
 };
 
-export function deriveTradeTimeline(trade, { state = trade?.state, now = Date.now() } = {}) {
+export function deriveTradeTimeline(trade, { state = trade?.state, now = Date.now(), makerChallengeWindowMs: windowMs = makerChallengeWindowMs } = {}) {
   const nowMs = typeof now === 'number' ? now : new Date(now).getTime();
   const lockedAt = toMs(trade?.lockedAt);
   const paidAt = toMs(trade?.paidAt);
@@ -61,7 +71,7 @@ export function deriveTradeTimeline(trade, { state = trade?.state, now = Date.no
 
   // [TR] Ping düştü: maker ping'i attı, T+24h+MAKER_CHALLENGE_WINDOW geçti, taker uyarmadı (kontrat formülü).
   // [EN] Ping lapsed: maker pinged, T+24h+MAKER_CHALLENGE_WINDOW passed, taker has not pinged (contract formula).
-  const challengeDeadlineSpan = TRADE_TIMING.PING_RESPONSE_MS + TRADE_TIMING.MAKER_CHALLENGE_WINDOW_MS;
+  const challengeDeadlineSpan = TRADE_TIMING.PING_RESPONSE_MS + windowMs;
   const pingLapsed = state === 'PAID' && makerPinged && !takerPinged && passed(challengePingedAt, challengeDeadlineSpan);
   const makerChallengeOpen = state === 'PAID' && makerPinged && passed(challengePingedAt, TRADE_TIMING.PING_RESPONSE_MS) && !passed(challengePingedAt, challengeDeadlineSpan);
 

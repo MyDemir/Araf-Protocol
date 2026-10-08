@@ -231,7 +231,7 @@ export default function SettlementProposalCard({
       return;
     }
     const ok = await settlementActions.accept();
-    if (ok) setPreviewOpen(false);
+    if (ok) { setPreviewOpen(false); settlementActions.resetAccept?.(); }
   };
 
   // [TR] Kabul önizlemesinde gösterilen değerler: değişiklik incelemesindeki canlı teklif > sabitlenen anlık görüntü > ekrandaki teklif.
@@ -442,7 +442,7 @@ export default function SettlementProposalCard({
 
       <SettlementPreviewModal
         isOpen={previewOpen}
-        onClose={() => setPreviewOpen(false)}
+        onClose={() => { setPreviewOpen(false); settlementActions.resetAccept?.(); }}
         lang={lang}
         isLoading={isContractLoading || previewLoading}
         error={previewError}

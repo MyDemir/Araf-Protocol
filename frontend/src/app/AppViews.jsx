@@ -962,6 +962,7 @@ export const buildAppViews = (ctx) => {
       handleExpirePaymentWindow: labHandlers?.handleExpirePaymentWindow || handleExpirePaymentWindow,
       paymentWindowExpired,
       nowMs,
+      showToast,
       confirmFn: labHandlers ? () => true : undefined,
     });
     const defaultTradeDecisionInput = {
