@@ -132,8 +132,7 @@ async function _getMasterKey() {
   //
   // .env'de gerekli değişkenler:
   //   KMS_PROVIDER=aws
-  //   AWS_KMS_KEY_ARN=arn:aws:kms:eu-west-1:123456789:key/xxx-xxx-xxx
-  //   AWS_ENCRYPTED_DATA_KEY=<base64-encoded CiphertextBlob>
+  //   AWS_ENCRYPTED_DATA_KEY=<base64-encoded CiphertextBlob>  (AWS_KMS_KEY_ARN gerekmez: anahtar kimliği CiphertextBlob içindedir)
   //   AWS_REGION=eu-west-1
   if (provider === "aws") {
     try {
