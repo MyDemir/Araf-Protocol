@@ -31,6 +31,7 @@ function buildApp({ wallet = OWNER, existingOrder = null, redisSetResult = "OK" 
       requireAuth: (req, _res, next) => { req.wallet = wallet; next(); },
       requireSessionWalletMatch: (_req, _res, next) => next(),
     }));
+    jest.doMock("../../backend/scripts/services/paymentRails", () => require("./helpers/paymentRailsPassthrough"));
     jest.doMock("../../backend/scripts/middleware/rateLimiter", () => ({
       marketReadLimiter: (_req, _res, next) => next(),
       ordersReadLimiter: (_req, _res, next) => next(),
@@ -41,6 +42,7 @@ function buildApp({ wallet = OWNER, existingOrder = null, redisSetResult = "OK" 
     jest.doMock("../../backend/scripts/models/Order", () => Order);
     jest.doMock("../../backend/scripts/models/Trade", () => ({ aggregate: jest.fn().mockResolvedValue([]) }));
     jest.doMock("../../backend/scripts/models/User", () => ({
+      findOne: jest.fn().mockReturnValue({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) }) }),
       find: jest.fn().mockReturnValue({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([]) }) }),
     }));
     jest.doMock("../../backend/scripts/services/protocolConfig", () => ({ getConfig: jest.fn(() => ({})) }));

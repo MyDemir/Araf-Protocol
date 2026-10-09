@@ -407,6 +407,19 @@ Router'ın tamamı `requireAuth` → `requireSessionWalletMatch` → `requireAdm
 
 Admin olmayan cüzdanlar `403` alır; `/summary` içindeki `scheduler` bloğu `reputationDecayLastRunAt`, `statsSnapshotLastRunAt`, `sensitiveCleanupLastRunAt`, `userBankRiskCleanupLastRunAt` alanlarını listeler.
 
+
+### Ödeme yöntemi (rail) yönetimi (admin yazma)
+
+Aynı yetki zinciri (`requireAuth` -> `requireSessionWalletMatch` -> `requireAdminWallet`); `x-wallet-address` başlığı zorunluluğu `SameSite=Lax` çerezin yanında CSRF katmanı işi görür. Yazma ayrıca `adminWriteLimiter`'dan geçer (cüzdan başına 10 dk / 10).
+
+| Route | Gövde / Query | Yanıt |
+|---|---|---|
+| `GET /api/admin/payment-rails` | — | `{ rails: [{ code, name{TR,EN}, countries, riskLevel, enabled, changedAt, changedBy }] }` |
+| `PUT /api/admin/payment-rails/:rail` | `{ enabled: boolean, reason?: string<=300 }` (sıkı Joi) | `{ success, rail, previousEnabled, enabled, changed }`; bilinmeyen rail/gövde `400`; son açık rail'i kapatma `409 LAST_ENABLED_RAIL`; eşzamanlı değişiklik `409 PAYMENT_RAIL_CONFLICT` |
+| `GET /api/admin/payment-rails/audit` | `page`, `limit` (1-100) | `{ items: [{ rail, previousEnabled, newEnabled, adminWallet, reason, ipHash, createdAt }], total, page, limit }` (yalnız-ekleme koleksiyonu, IP yalnız HMAC) |
+
+Herkese açık etkiler: `GET /api/orders/config` ve `/payment-risk-config` `enabledPaymentRails` döner ve `paymentRiskConfig[*][rail].enabled` değerini yansıtır; `GET /api/orders` satırlarında `owner_rail_enabled` (boolean) bulunur; `GET /api/auth/me` `payoutRail` ve `payoutRailEnabled` döner (kayıtlı profilin rail'i kapalıysa `false`; `hasPayoutProfile` "veri var" anlamını korur); `PUT /api/auth/profile` ve `POST /api/orders/market-meta` kapalı rail için `409 PAYMENT_RAIL_DISABLED` döner. Aktif işlemler (LOCKED/PAID/CHALLENGED), snapshot ve PII akışı rail durumuna bakmaz. Kontrat rail bilmez: bu kapı yalnız UI/API düzeyindedir.
+
 ---
 
 ## 11) Health endpoint'leri

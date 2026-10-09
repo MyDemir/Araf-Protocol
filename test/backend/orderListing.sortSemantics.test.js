@@ -25,6 +25,7 @@ function buildOrdersApp({ tokenMap = {} } = {}) {
       requireAuth: (_req, _res, next) => next(),
       requireSessionWalletMatch: (_req, _res, next) => next(),
     }));
+    jest.doMock("../../backend/scripts/services/paymentRails", () => require("./helpers/paymentRailsPassthrough"));
     jest.doMock("../../backend/scripts/middleware/rateLimiter", () => ({
       marketReadLimiter: (_req, _res, next) => next(),
       ordersReadLimiter: (_req, _res, next) => next(),
@@ -73,6 +74,7 @@ describe("orders and trades routes use deterministic _id tie-break sort semantic
         requireAuth: (_req, _res, next) => next(),
         requireSessionWalletMatch: (_req, _res, next) => next(),
       }));
+      jest.doMock("../../backend/scripts/services/paymentRails", () => require("./helpers/paymentRailsPassthrough"));
       jest.doMock("../../backend/scripts/middleware/rateLimiter", () => ({
         marketReadLimiter: (_req, _res, next) => next(),
         ordersReadLimiter: (_req, _res, next) => next(),
@@ -169,6 +171,7 @@ describe("orders and trades routes use deterministic _id tie-break sort semantic
     let router;
     jest.isolateModules(() => {
       jest.doMock("../../backend/scripts/middleware/auth", () => ({ requireAuth: (_q, _s, n) => n(), requireSessionWalletMatch: (_q, _s, n) => n() }));
+      jest.doMock("../../backend/scripts/services/paymentRails", () => require("./helpers/paymentRailsPassthrough"));
       jest.doMock("../../backend/scripts/middleware/rateLimiter", () => ({ marketReadLimiter: (_q, _s, n) => n(), ordersReadLimiter: (_q, _s, n) => n(), ordersWriteLimiter: (_q, _s, n) => n() }));
       jest.doMock("../../backend/scripts/models/Order", () => ({ find: jest.fn(() => findChain), countDocuments: jest.fn().mockResolvedValue(1) }));
       jest.doMock("../../backend/scripts/models/Trade", () => trustTrade);
@@ -211,6 +214,7 @@ describe("orders and trades routes use deterministic _id tie-break sort semantic
         requireAuth: (req, _res, next) => { req.wallet = "0x1111111111111111111111111111111111111111"; next(); },
         requireSessionWalletMatch: (_req, _res, next) => next(),
       }));
+      jest.doMock("../../backend/scripts/services/paymentRails", () => require("./helpers/paymentRailsPassthrough"));
       jest.doMock("../../backend/scripts/middleware/rateLimiter", () => ({
         roomReadLimiter: (_req, _res, next) => next(),
         coordinationWriteLimiter: (_req, _res, next) => next(),

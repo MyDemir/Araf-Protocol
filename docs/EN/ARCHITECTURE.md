@@ -1063,6 +1063,12 @@ Legacy references should be treated as historical context only; operational deci
 
 ---
 
+## 17b. Payment rail switches (admin)
+
+Rail availability lives in one Mongo document (`PaymentRailSetting`, optimistic `version`), read through a 15 s in-process cache (`services/paymentRails.js`, invalidated on local writes; DB read failure falls back to last known / all-enabled). No record means every rail defined in `paymentRailRiskConfig.js` is enabled. Every change is appended to the immutable `PaymentRailAudit` collection (admin wallet, previous/new value, reason, HMAC'd IP). Disabling a rail blocks only NEW work: profile create/change, market-meta, and filling orders whose owner sits on a closed rail (`owner_rail_enabled=false`). Active trades, payout snapshots and the PII flow are untouched. The contract does not know rails; this is a UI/API gate and can be bypassed by calling the contract directly.
+
+---
+
 ## 18. Final role of this document
 
 This architecture document deliberately serves both:

@@ -37,6 +37,7 @@ describe("auth profile payout rail validation", () => {
         },
         requireSessionWalletMatch: (_req, _res, next) => next(),
       }));
+      jest.doMock("../../backend/scripts/services/paymentRails", () => require("./helpers/paymentRailsPassthrough"));
       jest.doMock("../../backend/scripts/middleware/rateLimiter", () => ({
         authLimiter: (_req, _res, next) => next(),
         nonceLimiter: (_req, _res, next) => next(),

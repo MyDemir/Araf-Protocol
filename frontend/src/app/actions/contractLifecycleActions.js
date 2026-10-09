@@ -6,7 +6,7 @@ import { WALLET_AGE_MIN_DAYS } from '../walletAge';
 import { mapChainTradeState, resolveConfirmedState } from '../tradeStateSync';
 import { computeFillAllowance } from './allowanceMath';
 import { clearAppHashRoute } from './tradeNavigationActions';
-import { isOwnerPayoutProfileMissing, isPayoutProfileSaved, ownerProfileMissingMessage, profileRequiredMessage } from '../payoutProfileGate';
+import { isOwnerRailDisabled, ownerRailDisabledMessage, isOwnerPayoutProfileMissing, isPayoutProfileSaved, ownerProfileMissingMessage, profileRequiredMessage } from '../payoutProfileGate';
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
@@ -139,6 +139,10 @@ export const buildStartTradeAction = ({
   }
   if (isOwnerPayoutProfileMissing(order)) {
     showToast(ownerProfileMissingMessage(lang), 'error');
+    return;
+  }
+  if (isOwnerRailDisabled(order)) {
+    showToast(ownerRailDisabledMessage(lang), 'error');
     return;
   }
   const confirm = confirmFn || getConfirm();
