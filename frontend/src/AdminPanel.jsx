@@ -3,6 +3,7 @@ import { buildApiUrl } from './app/apiConfig';
 import { fmtPct, shortAddress as shortenWallet } from './app/copy';
 import { mapResolutionTypeLabel } from './app/useAppSessionData';
 import AdminRevenuePanel from './app/contexts/admin/AdminRevenuePanel';
+import AdminRailsPanel from './app/contexts/admin/AdminRailsPanel';
 // [TR] P5 — Zincir sekmesi yalnız açılınca yüklenir. [EN] Chain tab loads on first open.
 const AdminChainPanel = React.lazy(() => import('./app/contexts/admin/AdminChainPanel'));
 
@@ -14,7 +15,8 @@ const TAB_SETTLEMENT = 'settlement';
 // [TR] Önceden hiç gösterilmeyen backend uçları ve kontrat owner ayarları için sekmeler.
 const TAB_REVENUE = 'revenue';
 const TAB_CHAIN = 'chain';
-const ALL_TABS = [TAB_OVERVIEW, TAB_SYNC, TAB_FEEDBACK, TAB_TRADES, TAB_SETTLEMENT, TAB_REVENUE, TAB_CHAIN];
+const TAB_RAILS = 'rails';
+const ALL_TABS = [TAB_OVERVIEW, TAB_SYNC, TAB_FEEDBACK, TAB_TRADES, TAB_SETTLEMENT, TAB_REVENUE, TAB_RAILS, TAB_CHAIN];
 
 const FEEDBACK_CATEGORY_OPTIONS = ['', 'bug', 'suggestion', 'ui/ux', 'other'];
 const FEEDBACK_RATING_OPTIONS = ['', '1', '2', '3', '4', '5'];
@@ -512,7 +514,9 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
                     ? (lang === 'TR' ? 'Settlement' : 'Settlement')
                     : tab === TAB_REVENUE
                       ? (lang === 'TR' ? 'Gelir & Ödül' : 'Revenue & Rewards')
-                      : (lang === 'TR' ? 'Kontrat' : 'On-chain');
+                      : tab === TAB_RAILS
+                        ? (lang === 'TR' ? 'Ödeme yöntemleri' : 'Payment methods')
+                        : (lang === 'TR' ? 'Kontrat' : 'On-chain');
           const active = activeTab === tab;
           return (
             <button
@@ -1130,6 +1134,10 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
 
       {activeTab === TAB_REVENUE && (
         <AdminRevenuePanel lang={lang} authenticatedFetch={authenticatedFetch} tokenSymbols={tokenSymbols} />
+      )}
+
+      {activeTab === TAB_RAILS && (
+        <AdminRailsPanel lang={lang} authenticatedFetch={authenticatedFetch} showToast={showToast} />
       )}
 
       {activeTab === TAB_CHAIN && (

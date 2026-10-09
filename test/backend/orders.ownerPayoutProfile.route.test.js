@@ -46,6 +46,7 @@ describe("orders route owner_has_payout_profile boolean", () => {
       jest.doMock("../../backend/scripts/middleware/auth", () => ({
         requireAuth: (_r, _s, n) => n(), requireSessionWalletMatch: (_r, _s, n) => n(),
       }));
+      jest.doMock("../../backend/scripts/services/paymentRails", () => require("./helpers/paymentRailsPassthrough"));
       jest.doMock("../../backend/scripts/middleware/rateLimiter", () => ({
         marketReadLimiter: (_r, _s, n) => n(), ordersReadLimiter: (_r, _s, n) => n(), ordersWriteLimiter: (_r, _s, n) => n(),
       }));

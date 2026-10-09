@@ -37,6 +37,7 @@ jest.mock("../../backend/scripts/middleware/auth", () => ({
   requireSessionWalletMatch: (_req, _res, next) => next(),
 }));
 
+jest.mock("../../backend/scripts/services/paymentRails", () => require("./helpers/paymentRailsPassthrough"));
 jest.mock("../../backend/scripts/middleware/rateLimiter", () => ({
   marketReadLimiter: (_req, _res, next) => next(),
   ordersReadLimiter: (_req, _res, next) => next(),
@@ -106,6 +107,7 @@ describe("GET /api/orders/config", () => {
           },
         },
       },
+      enabledPaymentRails: ["TR_IBAN", "US_ACH", "SEPA_IBAN"],
       selectedOrderRiskLevel: {
         source: "onchain_order_snapshot",
         nonAuthoritative: true,

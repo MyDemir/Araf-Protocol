@@ -21,6 +21,7 @@ const Trade = require("../models/Trade");
 const User = require("../models/User");
 const logger = require("../utils/logger");
 const { getConfig } = require("../services/protocolConfig");
+const { getRailStates, applyRailStatesToRiskConfig, getEnabledRailCodes, isRailEnabledStrict } = require("../services/paymentRails");
 const { buildTradeHealthSignals } = require("./tradeRisk");
 const { ALLOWED_FIAT, normalizeMarketMeta, storePendingMarketMeta } = require("../services/orderMarketMeta");
 
@@ -194,7 +195,7 @@ async function _attachMarketTrustVisibilitySummary(orders = []) {
     ]);
   };
 
-  const [makerUsers, latestSellRows, latestBuyRows, ownersWithProfile] = await Promise.all([
+  const [makerUsers, latestSellRows, latestBuyRows, ownersWithProfile, railStates] = await Promise.all([
     // [TR] B25: şifreli payout_profile blob'u çekilmez; risk sinyali yalnız fingerprint.version ister.
     User.find({ wallet_address: { $in: makerAddresses } })
       .select("wallet_address profileVersion payout_profile.fingerprint.version reputation_cache is_banned banned_until consecutive_bans")
@@ -213,10 +214,19 @@ async function _attachMarketTrustVisibilitySummary(orders = []) {
       wallet_address: { $in: makerAddresses },
       "payout_profile.payout_details_enc": { $exists: true, $nin: [null, ""] },
     })
-      .select("wallet_address")
+      .select("wallet_address payout_profile.rail")
       .lean(),
+    getRailStates(),
   ]);
   const profileSet = new Set((ownersWithProfile || []).map((u) => u.wallet_address));
+  // [TR] owner_rail_enabled: sahibin kayıtlı profilinin rail'i açık mı? Profil yoksa "uygulanamaz" → true
+  //      (o durum owner_has_payout_profile=false ile ayrıca ele alınır). Yalnız boolean, PII yok.
+  const railEnabledByOwner = new Map(
+    (ownersWithProfile || []).map((u) => {
+      const rail = u.payout_profile?.rail;
+      return [u.wallet_address, rail && railStates[rail] ? railStates[rail].enabled : true];
+    })
+  );
 
   const userMap = new Map(makerUsers.map((u) => [u.wallet_address, u]));
   const toMap = (rows) => new Map(rows.filter((row) => row?._id && row?.trade).map((row) => [row._id, row.trade]));
@@ -238,6 +248,7 @@ async function _attachMarketTrustVisibilitySummary(orders = []) {
       ...order,
       trust_visibility_summary: _toCompactTrustSummary(signal),
       owner_has_payout_profile: profileSet.has(maker),
+      owner_rail_enabled: railEnabledByOwner.has(maker) ? railEnabledByOwner.get(maker) : true,
     };
   });
 }
@@ -250,12 +261,15 @@ function _buildIdentityLookup(field, idString) {
 router.get("/config", marketReadLimiter, async (_req, res, next) => {
   try {
     const config = getConfig();
+    const paymentRiskConfig = await applyRailStatesToRiskConfig(config.paymentRiskConfig || {});
+    const enabledPaymentRails = await getEnabledRailCodes();
     return res.json({
       bondMap: config.bondMap,
       feeConfig: config.feeConfig,
       cooldownConfig: config.cooldownConfig,
       tokenMap: config.tokenMap || {},
-      paymentRiskConfig: config.paymentRiskConfig || {},
+      paymentRiskConfig,
+      enabledPaymentRails,
       reputationPolicy: config.reputationPolicy || null,
       // [TR] Frontend kendi escrow adresi/zinciriyle karşılaştırır; farklıysa uyarı gösterir (deploy uyumu).
       // [EN] The frontend compares these with its own escrow/chain and warns on drift (deploy alignment).
@@ -278,7 +292,8 @@ router.get("/payment-risk-config", marketReadLimiter, async (_req, res, next) =>
   try {
     const config = getConfig();
     return res.json({
-      paymentRiskConfig: config.paymentRiskConfig || {},
+      paymentRiskConfig: await applyRailStatesToRiskConfig(config.paymentRiskConfig || {}),
+      enabledPaymentRails: await getEnabledRailCodes(),
       selectedOrderRiskLevel: {
         source: "onchain_order_snapshot",
         nonAuthoritative: true,
@@ -451,6 +466,24 @@ router.post("/market-meta", requireAuth, requireSessionWalletMatch, ordersWriteL
     const meta = normalizeMarketMeta(value);
     if (!meta) return res.status(400).json({ error: "Geçersiz kur veya para birimi." });
     const orderRef = value.orderRef.toLowerCase();
+
+    // [TR] Sahibin kayıtlı profili devre dışı bir rail'deyse yeni emir meta'sı yazılmaz (yalnız UI/API kapısı).
+    const ownerRow = await User.findOne({ wallet_address: req.wallet }).select("payout_profile.rail").lean();
+    const ownerRail = ownerRow?.payout_profile?.rail;
+    let ownerRailOpen = true;
+    if (ownerRail) {
+      try {
+        ownerRailOpen = await isRailEnabledStrict(ownerRail);
+      } catch (railErr) {
+        if (railErr.code === "RAIL_STATE_UNAVAILABLE") {
+          return res.status(503).json({ error: railErr.message, code: "PAYMENT_RAIL_STATE_UNAVAILABLE" });
+        }
+        throw railErr;
+      }
+    }
+    if (!ownerRailOpen) {
+      return res.status(409).json({ error: "Bu ödeme yöntemi şu an kapalı.", code: "PAYMENT_RAIL_DISABLED", rail: ownerRail });
+    }
 
     const existing = await Order.findOne({ "refs.order_ref": orderRef })
       .select("owner_address market")

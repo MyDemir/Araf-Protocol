@@ -11,6 +11,15 @@ export const isPayoutProfileSaved = (hasPayoutProfile) => hasPayoutProfile === t
 /** Emir sahibinin profili yok mu? Yalnız backend açıkça false dediyse true (bilinmiyorsa engelleme yapma: sunucu boolean verir). */
 export const isOwnerPayoutProfileMissing = (order) => order?.ownerHasPayoutProfile === false;
 
+/** Emir sahibinin profil rail'i admin tarafından kapatıldı mı? Yalnız backend açıkça false dediyse true. */
+export const isOwnerRailDisabled = (order) => order?.ownerRailEnabled === false;
+
+export const OWNER_RAIL_DISABLED_MESSAGE = {
+  TR: 'Satıcının ödeme yöntemi şu an kapalı.',
+  EN: "The seller's payment method is currently closed.",
+};
+export const ownerRailDisabledMessage = (lang) => OWNER_RAIL_DISABLED_MESSAGE[lang === 'TR' ? 'TR' : 'EN'];
+
 export const PROFILE_REQUIRED_MESSAGE = {
   TR: 'Önce ödeme profilini doldurun.',
   EN: 'Fill in your payout profile first.',

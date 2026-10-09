@@ -15,7 +15,7 @@ import { mapResolutionTypeLabel } from './useAppSessionData';
 import TradeRoomPage from './contexts/trade-room/TradeRoomPage';
 import ThemeToggle from './shell/ThemeToggle';
 import NowBoundary from './shell/NowBoundary';
-import { isOwnerPayoutProfileMissing, isPayoutProfileSaved, ownerProfileMissingMessage, profileRequiredMessage } from './payoutProfileGate';
+import { isOwnerRailDisabled, ownerRailDisabledMessage, isOwnerPayoutProfileMissing, isPayoutProfileSaved, ownerProfileMissingMessage, profileRequiredMessage } from './payoutProfileGate';
 import { deriveTradeTimeline } from './contexts/trade-room/tradeTimeline';
 import { isViewInNav, NAV_ORDER, VIEW_REGISTRY } from './viewRegistry';
 import {
@@ -704,7 +704,9 @@ export const buildAppViews = (ctx) => {
               // [TR] Ödeme profili kapısı: kayıtlı profilin yoksa (ya da durum bilinmiyorsa) ve emir sahibinin profili yoksa doldurma kapalı.
               const needsOwnProfile = isConnected && isAuthenticated && !isPayoutProfileSaved(hasPayoutProfile);
               const ownerProfileMissing = isOwnerPayoutProfileMissing(order);
-              const finalCanTakeOrder = canTakeOrder && !needsOwnProfile && !ownerProfileMissing && !isOwnerBanned && isCooldownOk && isFunded && isAged && !isPaused && isTokenConfigured && isCorrectChain;
+              // [TR] Emir sahibinin profil rail'i admin tarafından kapatıldıysa yeni doldurma kapalı (aktif işlemler etkilenmez).
+              const ownerRailDisabled = isOwnerRailDisabled(order);
+              const finalCanTakeOrder = canTakeOrder && !needsOwnProfile && !ownerProfileMissing && !ownerRailDisabled && !isOwnerBanned && isCooldownOk && isFunded && isAged && !isPaused && isTokenConfigured && isCorrectChain;
               // [TR] Renk kullanıcının yapacağı işi anlatır: "Satın Al" yeşil, "Sat" kırmızı. Emir yönü rozeti nötrdür;
               //      renkli rozet (ör. yeşil "Satış emri") yanındaki butonla çelişiyordu.
               // [EN] Colour follows the viewer's action (buy green, sell red); the order-side badge stays neutral.
@@ -724,6 +726,7 @@ export const buildAppViews = (ctx) => {
                 isTierLocked        ? <>{icon(Lock)} {tr ? `Tier ${order.tier} gerekli` : `Tier ${order.tier} required`}</> :
                 needsOwnProfile     ? <>{icon(Lock)} {tr ? 'Profil gerekli' : 'Profile needed'}</> :
                 ownerProfileMissing ? <>{icon(Lock)} {tr ? 'Profil yok' : 'No profile'}</> :
+                ownerRailDisabled   ? <>{icon(Lock)} {tr ? 'Yöntem şu an kapalı' : 'Method currently closed'}</> :
                 isOwnerBanned       ? <>{icon(Lock)} {tr ? 'Satıcı kısıtlı' : 'Seller restricted'}</> :
                 !canTakeOrder       ? <>{icon(Lock)} {tr ? 'Kilitli' : 'Locked'}</> :
                 !isAged             ? <>{icon(Hourglass)} {tr ? 'Cüzdan çok yeni' : 'Wallet too new'}</> :
@@ -769,6 +772,9 @@ export const buildAppViews = (ctx) => {
                         <button type="button" data-testid="fill-needs-profile" onClick={() => openProfilePage?.('account')} className="max-w-[10rem] text-right text-[11px] leading-tight text-brand underline">
                           {profileRequiredMessage(lang)}
                         </button>
+                      )}
+                      {!needsOwnProfile && !ownerProfileMissing && ownerRailDisabled && (
+                        <p data-testid="fill-owner-rail-closed" className="max-w-[10rem] text-right text-[11px] leading-tight text-danger">{ownerRailDisabledMessage(lang)}</p>
                       )}
                       {!needsOwnProfile && ownerProfileMissing && (
                         <p data-testid="fill-owner-no-profile" className="max-w-[10rem] text-right text-[11px] leading-tight text-danger">{ownerProfileMissingMessage(lang)}</p>
@@ -1225,6 +1231,7 @@ export const buildAppViews = (ctx) => {
         isAuthenticated={isAuthenticated || labSession}
         authenticatedWallet={lp ? address : ctx.authenticatedWallet}
         payoutProfileDraft={lp?.payoutProfileDraft || ctx.payoutProfileDraft}
+        paymentRiskConfig={ctx.paymentRiskConfig}
         setPayoutProfileDraft={ctx.setPayoutProfileDraft}
         handleUpdatePII={ctx.handleUpdatePII}
         userReputation={lp ? lp.userReputation : userReputation}

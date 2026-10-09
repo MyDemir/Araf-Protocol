@@ -70,6 +70,7 @@ describe("orders route market trust visibility summary", () => {
         requireAuth: (_req, _res, next) => next(),
         requireSessionWalletMatch: (_req, _res, next) => next(),
       }));
+      jest.doMock("../../backend/scripts/services/paymentRails", () => require("./helpers/paymentRailsPassthrough"));
       jest.doMock("../../backend/scripts/middleware/rateLimiter", () => ({
         marketReadLimiter: (_req, _res, next) => next(),
         ordersReadLimiter: (_req, _res, next) => next(),

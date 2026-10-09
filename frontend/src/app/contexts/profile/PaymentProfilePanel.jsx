@@ -22,6 +22,7 @@ export const PaymentProfilePanel = ({
   handleUpdatePII,
   canonicalizePayoutProfileDraft = identity,
   isContractLoading = false,
+  paymentRiskConfig = null,
 }) => {
   const draft = payoutProfileDraft || {};
   const fields = draft.fields || {};
@@ -32,6 +33,12 @@ export const PaymentProfilePanel = ({
 
   const update = (patch) => setPayoutProfileDraft((prev) => canonicalizePayoutProfileDraft({ ...prev, ...patch }));
   const updateField = (key, value) => setPayoutProfileDraft((prev) => ({ ...prev, fields: { ...(prev?.fields || {}), [key]: value } }));
+  // [TR] Kapalı rail'ler: risk config overlay'inde enabled === false. Seçenek görünür ama seçilemez, "şu an kapalı" yazar.
+  const disabledRails = new Set();
+  Object.values(paymentRiskConfig || {}).forEach((bucket) => {
+    Object.entries(bucket || {}).forEach(([code, entry]) => { if (entry?.enabled === false) disabledRails.add(code); });
+  });
+  const selectedRailClosed = disabledRails.has(rail);
   const countryOptions = rail === 'TR_IBAN' ? ['TR'] : rail === 'US_ACH' ? ['US'] : SEPA_COUNTRY_CODES;
 
   return (
@@ -41,9 +48,18 @@ export const PaymentProfilePanel = ({
           <label className={labelClass} htmlFor="payout-rail">{isTR ? 'Ödeme yöntemi' : 'Payment method'}</label>
           <select id="payout-rail" value={rail} onChange={(e) => update({ rail: e.target.value })} className={inputClass}>
             {Object.keys(RAIL_LABELS).map((key) => (
-              <option key={key} value={key}>{RAIL_LABELS[key][isTR ? 'TR' : 'EN']}</option>
+              <option key={key} value={key} disabled={disabledRails.has(key) && key !== rail}>
+                {RAIL_LABELS[key][isTR ? 'TR' : 'EN']}{disabledRails.has(key) ? (isTR ? ' — şu an kapalı' : ' — currently closed') : ''}
+              </option>
             ))}
           </select>
+          {selectedRailClosed && (
+            <p role="alert" className="mt-1 text-xs text-danger">
+              {isTR
+                ? 'Seçili ödeme yöntemi şu an kapalı. Yeni emir açmak veya doldurmak için açık bir yöntem seçin.'
+                : 'The selected payment method is currently closed. Choose an open method to create or fill orders.'}
+            </p>
+          )}
         </div>
         <div>
           <label className={labelClass} htmlFor="payout-country">{isTR ? 'Ülke' : 'Country'}</label>

@@ -37,6 +37,7 @@ function loadApp({ cookies = {}, siwe = {}, user = null, tradeExists = false } =
   };
   let router;
   jest.isolateModules(() => {
+    jest.doMock("../../backend/scripts/services/paymentRails", () => require("./helpers/paymentRailsPassthrough"));
     jest.doMock("../../backend/scripts/middleware/rateLimiter", () => ({
       authLimiter: (_req, _res, next) => next(),
       nonceLimiter: (_req, _res, next) => next(),
