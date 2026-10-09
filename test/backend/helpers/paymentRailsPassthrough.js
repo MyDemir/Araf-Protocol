@@ -7,6 +7,8 @@ const states = Object.fromEntries(CODES.map((c) => [c, { enabled: true, changed_
 module.exports = {
   getRailStates: async () => states,
   isRailEnabled: async () => true,
+  isRailEnabledStrict: async () => true,
+  getRailStatesDetailed: async () => ({ states, degraded: false, source: "db" }),
   getEnabledRailCodes: async () => [...CODES],
   applyRailStatesToRiskConfig: async (cfg) => cfg,
   isKnownRail: (c) => CODES.includes(String(c).toUpperCase()),

@@ -21,7 +21,7 @@ const Trade = require("../models/Trade");
 const User = require("../models/User");
 const logger = require("../utils/logger");
 const { getConfig } = require("../services/protocolConfig");
-const { getRailStates, applyRailStatesToRiskConfig, getEnabledRailCodes, isRailEnabled } = require("../services/paymentRails");
+const { getRailStates, applyRailStatesToRiskConfig, getEnabledRailCodes, isRailEnabledStrict } = require("../services/paymentRails");
 const { buildTradeHealthSignals } = require("./tradeRisk");
 const { ALLOWED_FIAT, normalizeMarketMeta, storePendingMarketMeta } = require("../services/orderMarketMeta");
 
@@ -470,7 +470,18 @@ router.post("/market-meta", requireAuth, requireSessionWalletMatch, ordersWriteL
     // [TR] Sahibin kayıtlı profili devre dışı bir rail'deyse yeni emir meta'sı yazılmaz (yalnız UI/API kapısı).
     const ownerRow = await User.findOne({ wallet_address: req.wallet }).select("payout_profile.rail").lean();
     const ownerRail = ownerRow?.payout_profile?.rail;
-    if (ownerRail && !(await isRailEnabled(ownerRail))) {
+    let ownerRailOpen = true;
+    if (ownerRail) {
+      try {
+        ownerRailOpen = await isRailEnabledStrict(ownerRail);
+      } catch (railErr) {
+        if (railErr.code === "RAIL_STATE_UNAVAILABLE") {
+          return res.status(503).json({ error: railErr.message, code: "PAYMENT_RAIL_STATE_UNAVAILABLE" });
+        }
+        throw railErr;
+      }
+    }
+    if (!ownerRailOpen) {
       return res.status(409).json({ error: "Bu ödeme yöntemi şu an kapalı.", code: "PAYMENT_RAIL_DISABLED", rail: ownerRail });
     }
 

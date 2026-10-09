@@ -9,7 +9,7 @@ const CLOSED_OWNER = "0x2222222222222222222222222222222222222222";
 const ENABLED = { enabled: true, changed_at: null, changed_by: null };
 const DISABLED = { enabled: false, changed_at: null, changed_by: null };
 
-function build({ states, ownerRail = null, getConfigResult }) {
+function build({ states, ownerRail = null, getConfigResult, dbDown = false }) {
   jest.resetModules();
   const base = {
     side: "SELL_CRYPTO", status: "OPEN", tier: 1,
@@ -53,7 +53,7 @@ function build({ states, ownerRail = null, getConfigResult }) {
     }));
     // Gerçek servis; yalnız Mongo modelleri sahte.
     jest.doMock("../../backend/scripts/models/PaymentRailSetting", () => ({
-      findOne: () => ({ lean: async () => ({ key: "payment_rails", rails: states, version: 1 }) }),
+      findOne: () => ({ lean: async () => { if (dbDown) throw new Error("mongo down"); return { key: "payment_rails", rails: states, version: 1 }; } }),
     }));
     jest.doMock("../../backend/scripts/models/PaymentRailAudit", () => ({}));
     jest.doMock("../../backend/scripts/middleware/rateLimiter", () => ({
@@ -120,6 +120,30 @@ describe("payment rails on orders surfaces", () => {
     const open = build({ states: { TR_IBAN: ENABLED, US_ACH: ENABLED, SEPA_IBAN: ENABLED }, ownerRail: "TR_IBAN" });
     const ok = await request(open.app).post("/api/orders/market-meta").send(payload);
     expect(ok.status).toBe(202);
+  });
+});
+
+describe("cold start + DB error: reads stay open, write gates fail closed", () => {
+  afterEach(() => jest.resetModules());
+  const states = { TR_IBAN: ENABLED, US_ACH: ENABLED, SEPA_IBAN: ENABLED };
+
+  it("market list and config keep working (all enabled)", async () => {
+    const { app } = build({ states, dbDown: true });
+    const list = await request(app).get("/api/orders");
+    expect(list.status).toBe(200);
+    expect(list.body.orders.every((o) => o.owner_rail_enabled === true)).toBe(true);
+    const cfg = await request(app).get("/api/orders/payment-risk-config");
+    expect(cfg.status).toBe(200);
+    expect(cfg.body.enabledPaymentRails).toEqual(["TR_IBAN", "US_ACH", "SEPA_IBAN"]);
+  });
+
+  it("market-meta answers 503 PAYMENT_RAIL_STATE_UNAVAILABLE when the owner has a rail", async () => {
+    const payload = { orderRef: `0x${"a".repeat(64)}`, fiatCurrency: "TRY", exchangeRate: 34 };
+    const { app, redis } = build({ states, ownerRail: "TR_IBAN", dbDown: true });
+    const res = await request(app).post("/api/orders/market-meta").send(payload);
+    expect(res.status).toBe(503);
+    expect(res.body.code).toBe("PAYMENT_RAIL_STATE_UNAVAILABLE");
+    expect(redis.set).not.toHaveBeenCalled();
   });
 });
 

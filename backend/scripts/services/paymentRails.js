@@ -50,7 +50,8 @@ function isKnownRail(code) {
   return getRailCodes().includes(String(code || "").toUpperCase());
 }
 
-let cache = null; // { at, states }
+const NEGATIVE_CACHE_TTL_MS = 5_000;
+let cache = null; // { at, ttl, result: { states, degraded, source } }
 let lastKnown = null;
 
 function _defaultStates() {
@@ -80,20 +81,54 @@ function invalidateRailCache() {
   cache = null;
 }
 
-/** @returns {Promise<Record<string,{enabled:boolean,changed_at:Date|null,changed_by:string|null}>>} */
-async function getRailStates() {
+function _err(code, message) {
+  const e = new Error(message);
+  e.code = code;
+  return e;
+}
+
+/**
+ * Durum + kaynak bilgisi. source: "db" | "last_known" (DB hatası, son bilinen değer) | "default" (DB hatası,
+ * hiç bilinen değer yok: soğuk açılış). degraded=true iken DB'ye ulaşılamamıştır.
+ * DB hatası 5 sn negatif önbelleğe alınır: hata sürerken her istek DB'ye gitmez.
+ * @returns {Promise<{states: Record<string,{enabled:boolean,changed_at:Date|null,changed_by:string|null}>, degraded: boolean, source: string}>}
+ */
+async function getRailStatesDetailed() {
   const now = Date.now();
-  if (cache && now - cache.at < CACHE_TTL_MS) return cache.states;
+  if (cache && now - cache.at < cache.ttl) return cache.result;
   try {
     const doc = await PaymentRailSetting.findOne({ key: SETTING_KEY }).lean();
     const states = _fromDoc(doc);
-    cache = { at: now, states };
+    const result = { states, degraded: false, source: "db" };
+    cache = { at: now, ttl: CACHE_TTL_MS, result };
     lastKnown = states;
-    return states;
+    return result;
   } catch (err) {
-    logger.warn(`[PaymentRails] ayar okunamadı, son bilinen/varsayılan kullanılıyor: ${err.message}`);
-    return lastKnown || _defaultStates();
+    logger.warn(`[PaymentRails] ayar okunamadı (${lastKnown ? "son bilinen" : "varsayılan"} kullanılıyor): ${err.message}`);
+    const result = lastKnown
+      ? { states: lastKnown, degraded: true, source: "last_known" }
+      : { states: _defaultStates(), degraded: true, source: "default" };
+    cache = { at: now, ttl: NEGATIVE_CACHE_TTL_MS, result };
+    return result;
   }
+}
+
+/** Okuma yolları için: hata durumunda son bilinen / hepsi etkin (açık). */
+async function getRailStates() {
+  return (await getRailStatesDetailed()).states;
+}
+
+/**
+ * Yazma kapıları için (fail-closed): hiç bilinen durum yokken DB okunamadıysa RAIL_STATE_UNAVAILABLE fırlatır.
+ * Son bilinen değer varsa onunla karar verilir.
+ */
+async function isRailEnabledStrict(code) {
+  const { states, degraded, source } = await getRailStatesDetailed();
+  if (degraded && source === "default") {
+    throw _err("RAIL_STATE_UNAVAILABLE", "Ödeme yöntemi durumu şu an doğrulanamıyor.");
+  }
+  const st = states[String(code || "").toUpperCase()];
+  return st ? st.enabled : true;
 }
 
 async function isRailEnabled(code) {
@@ -132,12 +167,6 @@ async function applyRailStatesToRiskConfig(riskConfig) {
     }
   }
   return out;
-}
-
-function _err(code, message) {
-  const e = new Error(message);
-  e.code = code;
-  return e;
 }
 
 /**
@@ -196,15 +225,21 @@ async function setRailEnabled(rawCode, enabled, { wallet, reason = "", ipHash = 
   } catch (auditErr) {
     // Audit yazılamadıysa değişiklik geri alınır: denetimsiz değişiklik bırakılmaz.
     logger.error(`[PaymentRails] audit yazılamadı, değişiklik geri alınıyor: ${auditErr.message}`);
+    // Geri alma yalnız kendi yazdığımız version'a koşulludur: arada başka admin yazdıysa onun değişikliği ezilmez.
+    let rollbackRes = null;
     try {
-      await PaymentRailSetting.updateOne(
-        { key: SETTING_KEY },
-        { $set: { [`rails.${code}`]: { enabled: previous, changed_at: now, changed_by: String(wallet || "").toLowerCase() } }, $inc: { version: 1 } }
+      rollbackRes = await PaymentRailSetting.updateOne(
+        { key: SETTING_KEY, version: currentVersion + 1 },
+        { $set: { [`rails.${code}`]: states[code] }, $inc: { version: 1 } }
       );
     } catch (rollbackErr) {
       logger.error(`[PaymentRails] geri alma başarısız: ${rollbackErr.message}`);
     }
     invalidateRailCache();
+    if (rollbackRes && rollbackRes.matchedCount === 0) {
+      logger.error(`[PaymentRails] PAYMENT_RAIL_ROLLBACK_CONFLICT: audit yazılamadı ve araya başka değişiklik girdi (rail=${code}); geri alma uygulanmadı.`);
+      throw _err("RAIL_CONFLICT", "Eşzamanlı değişiklik; denetim kaydı yazılamadı, yeniden deneyin.");
+    }
     throw _err("RAIL_AUDIT_FAILED", "Denetim kaydı yazılamadı; değişiklik uygulanmadı.");
   }
 
@@ -242,6 +277,8 @@ module.exports = {
   getRailCodes,
   isKnownRail,
   getRailStates,
+  getRailStatesDetailed,
+  isRailEnabledStrict,
   isRailEnabled,
   getEnabledRailCodes,
   listRails,

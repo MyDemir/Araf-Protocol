@@ -28,7 +28,7 @@ const { ACCEPTED_TERMS_VERSIONS, CURRENT_TERMS_VERSION, parseTermsAcceptance } =
 const TermsAcceptance = require("../models/TermsAcceptance");
 const { requireAuth, requireSessionWalletMatch } = require("../middleware/auth");
 const { isAdminWallet } = require("../utils/adminWallets");
-const { isRailEnabled } = require("../services/paymentRails");
+const { isRailEnabled, isRailEnabledStrict } = require("../services/paymentRails");
 const {
   generateNonce,
   verifySiweSignature,
@@ -665,12 +665,24 @@ router.put("/profile", requireAuth, requireSessionWalletMatch, authLimiter, asyn
     //      Bu kapı yalnız UI/API düzeyindedir, kontrat rail bilmez.
     // [EN] Block creating/changing a profile on a disabled rail; unchanged saved profiles are untouched.
     const isNewProfile = !user.payout_profile?.payout_details_enc;
-    if ((isNewProfile || bankProfileChanged) && !(await isRailEnabled(incoming.rail))) {
-      return res.status(409).json({
-        error: "Bu ödeme yöntemi şu an kapalı.",
-        code: "PAYMENT_RAIL_DISABLED",
-        rail: incoming.rail,
-      });
+    if (isNewProfile || bankProfileChanged) {
+      // [TR] Yazma kapısı fail-closed: durum hiç okunamadıysa (soğuk açılış + DB hatası) 503.
+      let railOpen;
+      try {
+        railOpen = await isRailEnabledStrict(incoming.rail);
+      } catch (railErr) {
+        if (railErr.code === "RAIL_STATE_UNAVAILABLE") {
+          return res.status(503).json({ error: railErr.message, code: "PAYMENT_RAIL_STATE_UNAVAILABLE" });
+        }
+        throw railErr;
+      }
+      if (!railOpen) {
+        return res.status(409).json({
+          error: "Bu ödeme yöntemi şu an kapalı.",
+          code: "PAYMENT_RAIL_DISABLED",
+          rail: incoming.rail,
+        });
+      }
     }
 
     // [TR] Ürün kararı: aktif trade varken (ilk oluşturma dahil) ödeme profili yazımı yapılamaz;

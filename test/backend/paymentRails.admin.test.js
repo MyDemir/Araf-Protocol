@@ -226,6 +226,21 @@ describe("admin payment rails API", () => {
     expect(await b.rails.isRailEnabled("US_ACH")).toBe(true);
   });
 
+  it("rollback is version-guarded: a concurrent admin change is not overwritten, client gets 409", async () => {
+    const { app, store, Audit } = build();
+    Audit.create.mockImplementationOnce(async () => {
+      // audit yazılırken başka bir admin SEPA_IBAN'ı kapatıp version'ı ilerletti
+      store.setting.rails.SEPA_IBAN = { enabled: false, changed_by: OTHER };
+      store.setting.version += 1;
+      throw new Error("audit down");
+    });
+    const res = await as(request(app).put("/api/admin/payment-rails/US_ACH").send({ enabled: false }));
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe("PAYMENT_RAIL_CONFLICT");
+    expect(store.setting.rails.SEPA_IBAN.enabled).toBe(false); // ezilmedi
+    expect(store.audit).toHaveLength(0);
+  });
+
   it("is a no-op (no audit) when the value does not change", async () => {
     const { app, store } = build();
     const res = await as(request(app).put("/api/admin/payment-rails/US_ACH").send({ enabled: true }));
@@ -249,6 +264,25 @@ describe("admin payment rails API", () => {
     expect(await rails.isRailEnabled("US_ACH")).toBe(true);
   });
 
+  it("negative cache: DB read failure with last-known value is cached for 5 s", async () => {
+    const { rails, Setting } = build();
+    const realNow = Date.now();
+    const nowSpy = jest.spyOn(Date, "now").mockReturnValue(realNow);
+    await rails.getRailStates(); // iyi okuma → lastKnown
+    nowSpy.mockReturnValue(realNow + 16_000); // normal TTL (15 sn) doldu
+    Setting.findOne.mockClear();
+    Setting.findOne.mockImplementation(() => ({ lean: async () => { throw new Error("mongo down"); } }));
+    const first = await rails.getRailStatesDetailed();
+    expect(first).toMatchObject({ degraded: true, source: "last_known" });
+    await rails.getRailStates();
+    await rails.getRailStates();
+    expect(Setting.findOne).toHaveBeenCalledTimes(1);
+    nowSpy.mockReturnValue(realNow + 16_000 + 5_100);
+    await rails.getRailStates();
+    expect(Setting.findOne).toHaveBeenCalledTimes(2);
+    nowSpy.mockRestore();
+  });
+
   it("falls back to last known / all-enabled when the DB read fails", async () => {
     const { rails, Setting } = build();
     Setting.findOne.mockImplementationOnce(() => ({ lean: async () => { throw new Error("mongo down"); } }));
@@ -264,6 +298,20 @@ describe("enforcement: PUT /api/auth/profile and /me", () => {
       contact: { channel: "telegram", value: "tester1" },
       fields: { account_holder_name: "Test User", iban: "TR963456789012345678901234", bank_name: "Bank" },
     },
+  });
+
+  it("cold start + DB error: PUT /profile fails closed with 503, /me stays open", async () => {
+    const { app, Setting } = build({ profile: { rail: "TR_IBAN" } });
+    Setting.findOne.mockImplementation(() => ({ lean: async () => { throw new Error("mongo down"); } }));
+    const res = await as(request(app).put("/api/auth/profile").send({
+      payoutProfile: { rail: "TR_IBAN", country: "TR", contact: { channel: "telegram", value: "tester2" },
+        fields: { account_holder_name: "Other Name", iban: "TR963456789012345678901234", bank_name: "Bank" } },
+    }), "good", USER);
+    expect(res.status).toBe(503);
+    expect(res.body.code).toBe("PAYMENT_RAIL_STATE_UNAVAILABLE");
+    const me = await as(request(app).get("/api/auth/me"), "good", USER);
+    expect(me.status).toBe(200);
+    expect(me.body.payoutRailEnabled).toBe(true);
   });
 
   it("rejects creating a profile on a disabled rail with PAYMENT_RAIL_DISABLED", async () => {
