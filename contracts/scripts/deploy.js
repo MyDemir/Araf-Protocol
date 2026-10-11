@@ -316,8 +316,9 @@ function updateFrontendEnvIfPresent(values) {
 async function main() {
   const [deployer] = await ethers.getSigners();
   const feeData = await ethers.provider.getFeeData();
-  const chainId = await hre.getChainId();
-  const chainIdBig = BigInt(chainId);
+  const networkObj = await ethers.provider.getNetwork();
+  const chainIdBig = networkObj.chainId;
+  const chainId = chainIdBig.toString();
   const deployMode = getDeployMode(chainIdBig, network.name);
   const isPublic = deployMode === "public";
   const isLocal = deployMode === "local";
