@@ -25,13 +25,15 @@ function redactString(value) {
 function redactValue(value, keyHint = "") {
   if (value == null) return value;
 
-  // [TR] Non-invasive Error yakalayıcı: Hata nesnesinin stack ve message 
-  // detaylarının JSON içinde kaybolup "{}" dönmesini engeller.
-  if (value instanceof Error) {
+  // [TR] Gelişmiş Error ve Hata Benzeri Nesne Yakalayıcı
+  if (value instanceof Error || (typeof value === "object" && (value.message || value.stack || value.code || value.name))) {
     return {
-      name: value.name,
-      message: redactString(value.message),
+      name: value.name || "Error",
+      message: redactString(value.message || String(value)),
       stack: value.stack ? redactString(value.stack) : undefined,
+      code: value.code,
+      errno: value.errno,
+      syscall: value.syscall,
     };
   }
 
@@ -56,6 +58,12 @@ function redactValue(value, keyHint = "") {
     }
     out[key] = redactValue(val, key);
   }
+
+  // [TR] Eğer obje boş kaldıysa ({}) ve key 'reason' veya hata bağlamındaysa boş bırakma.
+  if (Object.keys(out).length === 0 && /reason|error|err/i.test(keyHint)) {
+    return "[Empty Error / Rejection Object - Check Promise Catch Blocks]";
+  }
+
   return out;
 }
 
