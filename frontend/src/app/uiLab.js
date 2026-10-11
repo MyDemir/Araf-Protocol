@@ -9,8 +9,11 @@ export const isUiLabEnabled = (env = import.meta.env) => {
   return Boolean(env?.DEV);
 };
 
-export const loadUiLab = () => (
-  import.meta.env.DEV || import.meta.env.VITE_ENABLE_UI_LAB === 'true'
-    ? import('../../../test/ui-lab/index.js')
-    : Promise.resolve(null)
-);
+export const loadUiLab = () => {
+  if (!(import.meta.env.DEV || import.meta.env.VITE_ENABLE_UI_LAB === 'true')) {
+    return Promise.resolve(null);
+  }
+  // @vite-ignore ile Rollup'ın static analizini engelli
+  const path = '../../../test/ui-lab/index.js';
+  return import(/* @vite-ignore */ path);
+};
