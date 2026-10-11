@@ -13,7 +13,7 @@ primary_region = "ams" # Amsterdam. İhtiyaca göre değiştirilebilir.
   PORT       = "4000"
   NODE_ENV   = "production"
 
-[[http_service]]
+[http_service]
   internal_port = 4000
   force_https = true
   # KRİTİK: Event listener'ın sürekli çalışması için makine asla durdurulmamalı.
