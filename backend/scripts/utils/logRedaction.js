@@ -25,6 +25,16 @@ function redactString(value) {
 function redactValue(value, keyHint = "") {
   if (value == null) return value;
 
+  // [TR] Non-invasive Error yakalayıcı: Hata nesnesinin stack ve message 
+  // detaylarının JSON içinde kaybolup "{}" dönmesini engeller.
+  if (value instanceof Error) {
+    return {
+      name: value.name,
+      message: redactString(value.message),
+      stack: value.stack ? redactString(value.stack) : undefined,
+    };
+  }
+
   if (typeof value === "string") {
     if (SENSITIVE_KEY_RX.test(keyHint)) return REDACTED;
     return redactString(value);
