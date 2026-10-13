@@ -88,7 +88,7 @@ function classifyStartupError(err) {
     return _isTransientText(reason) ? "transient" : "fatal";
   }
 
-  return _isTransientText(message) ? "transient" : "fatal";
+  return (isRateLimitError(err) || isMonthlyCapacityError(err) || isNetworkError(err)) ? "transient" : "fatal";
 }
 
 const BACKOFF_MIN_MS = 5_000;
