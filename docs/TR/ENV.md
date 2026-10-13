@@ -158,7 +158,8 @@ Ortak okuma: Y = Yerel, S = Base Sepolia (Fly'da yine `NODE_ENV=production` çal
 | Değişken | Ne işe yarar | Zorunlu mu? | Y | S | M | Nereye | Kullanıldığı yer |
 |---|---|---|---|---|---|---|---|
 | 🔒 `BASE_RPC_URL` | Zincir RPC adresi (anahtar URL'de olur) | Prod'da (public fallback yok) | `https://…/v2/KEY` | Sepolia RPC | Mainnet RPC | B/.env, Fly | `eventListener.js:589`, `health.js:103` |
-| 🔒 `BASE_WS_RPC_URL` | WebSocket RPC; yoksa HTTP kullanılır (`wss://` olmalı) | Önerilir (opsiyonel) | boş | `wss://…` | `wss://…` | B/.env, Fly | `eventListener.js:619` |
+| 🔒 `BASE_RPC_URL_FALLBACKS` | Virgülle ayrık yedek RPC URL'leri (429/ağ hatasında sıralı failover; her biri ilk kullanımdan önce `EXPECTED_CHAIN_ID` ile zincir doğrulamasından geçer, doğrulanamayan URL hiç kullanılmaz) | Opsiyonel | boş | `https://sepolia.base.org` | 2. sağlayıcı URL'si | B/.env, Fly | `rpcProvider.js` |
+| 🔒 `BASE_WS_RPC_URL` | **Canlı izlemede kullanılmaz** (WS aboneliği açılmaz; Alchemy CU yakar). Yalnız uyumluluk/readiness raporu için tutulur | Opsiyonel | boş | boş | boş | B/.env, Fly | `health.js` |
 | `EXPECTED_CHAIN_ID` | Beklenen zincir: `8453` Base, `84532` Sepolia | Prod'da; `BASE_RPC_URL` varsa dev'de de | `84532` ya da `31337` | `84532` | `8453` | B/.env, Fly | `expectedChain.js:19`, `tokenEnv.js:35` |
 | `ALLOW_UNSAFE_CHAIN_ID_BYPASS` | Yalnız dev: `EXPECTED_CHAIN_ID` boşken zincir kontrolünü atlar | Opsiyonel (`false`); prod'da etkisiz | opsiyonel | asla | asla | B/.env | `expectedChain.js:20` |
 | `ARAF_ESCROW_ADDRESS` | ArafEscrow adresi | Prod'da (yoksa worker çıkar); dev'de worker "dry-run" | `0x…40 hex` | deploy çıktısı | deploy çıktısı | B/.env, Fly | `eventListener.js:590`, `protocolConfig.js:107` |
@@ -201,7 +202,9 @@ Prod'da `KMS_PROVIDER=env` **reddedilir**; tek istisna dar testnet kuralıdır: 
 | `WORKER_START_BLOCK` | Yukarıdakine alternatif | Aynı (ikisinden biri) | boş | alternatif | alternatif | B/.env, Fly | `eventListener.js:1095` |
 | `WORKER_DISABLED` | `true` ise worker hiç başlamaz (yalnız API) | Opsiyonel (`false`) | boş | boş | boş | B/.env, Fly | `eventListener.js:591` |
 | `WORKER_FINALITY_DEPTH` | Safe checkpoint için blok derinliği | Opsiyonel (prod `6`, diğer `1`) | boş | boş | boş | B/.env, Fly | `eventListener.js:80-81` |
-| `WORKER_BLOCK_BATCH_SIZE` | Replay batch boyutu | Opsiyonel (`1000`) | boş | boş | boş | B/.env, Fly | `eventListener.js:78` |
+| `WORKER_BLOCK_BATCH_SIZE` | Replay VE canlı turlarda `eth_getLogs` başına blok aralığı. **Alchemy ücretsiz plan: `10` yapın** | Opsiyonel (`1000`) | boş | `10` (ücretsiz plan) | `10` (ücretsiz plan) | B/.env, Fly | `eventListener.js:78` |
+| `LIVE_POLL_INTERVAL_MS` | Canlı yoklama periyodu (zamanlayıcı, blok başına DEĞİL). Her tur = 1x `eth_blockNumber` + 1x `eth_getLogs`. Alt sınır 2000 | Opsiyonel (`15000`; blok watchdog'u sessiz kalsın diye ≤ 30000 tutun) | boş | `15000` | `15000` | B/.env, Fly | `eventListener.js` |
+| `WORKER_REPLAY_BATCH_DELAY_MS` | Replay / geri yetişme batch'leri arası bekleme (saniyelik CU sınırı; 10 blokluk batch ile ≈ 4 getLogs/sn ≈ 300 CU/sn) | Opsiyonel (`250`) | boş | boş | boş | B/.env, Fly | `eventListener.js` |
 | `WORKER_CHECKPOINT_INTERVAL_BLOCKS` | Checkpoint aralığı (blok) | Opsiyonel (`50`) | boş | boş | boş | B/.env, Fly | `eventListener.js:79` |
 | `WORKER_REPLAY_BACKOFF_BASE_MS` / `_MAX_MS` | Replay hata backoff'u taban/tavan | Opsiyonel (`5000` / `300000`) | boş | boş | boş | B/.env, Fly | `eventListener.js:83-84` |
 | `WORKER_BLOCK_STALE_MS` | Bu kadar ms yeni blok yoksa reconnect, hâlâ yoksa süreç çıkar | Opsiyonel (`75000`) | boş | boş | boş | B/.env, Fly | `eventListener.js:87` |
@@ -210,6 +213,26 @@ Prod'da `KMS_PROVIDER=env` **reddedilir**; tek istisna dar testnet kuralıdır: 
 | `WORKER_MAX_LAG_BLOCKS` | `/ready` için en büyük blok gecikmesi | Opsiyonel (`25`) | boş | boş | boş | B/.env, Fly | `health.js:20` |
 | 🔒 `READY_INTERNAL_TOKEN` | `/ready` tam gövdesi için `x-internal-token` değeri | Opsiyonel (yoksa özellik kapalı) | boş | uzun rastgele | uzun rastgele | B/.env, Fly | `health.js:348` |
 | `READY_CACHE_TTL_MS` | `/ready` önbellek süresi (5000-10000'e sıkıştırılır) | Opsiyonel (`7000`) | boş | boş | boş | B/.env, Fly | `health.js:291` |
+
+### 3.7.1 RPC bütçesi (Alchemy ücretsiz plan) ve önerilen profil
+
+- Canlı izleme, zamanlayıcıyla HTTP yoklamadır (`eth_blockNumber` + izlenen tüm kontratlar için tek `eth_getLogs`). `BASE_WS_RPC_URL` tanımlı olsa bile **hiçbir WebSocket aboneliği açılmaz**; çünkü Alchemy WS abonelikleri de CU yakar. Tüm HTTP kullanıcıları (worker, protokol config, zincir üstü trade durumu, job'lar) statik ağlı tek sağlayıcıyı paylaşır: zincir kimliği her çağrıda değil, bir kez doğrulanır.
+- 429 / "compute units" / "capacity" / blok aralığı hatalarında worker geri çekilir (aralık x2 + jitter, en çok 5 dk; aylık kapasite mesajında 30 dk), okunmamış aralığı atlamaz, geri çekilme penceresi başına tek uyarı ve iyileşince tek info yazar. `/ready` `degradedReasons` içinde `rpc_rate_limited` bildirir.
+- Ücretsiz planda `eth_getLogs` **10 blok aralığıyla** sınırlıdır -> `WORKER_BLOCK_BATCH_SIZE=10`. Aralık hatası "WORKER_BLOCK_BATCH_SIZE'ı düşür" mesajıyla loglanır.
+- Ücretsiz kota (~30M CU/ay) **aynı Alchemy hesabındaki tüm uygulamalar** arasında paylaşılır. Testnet ve mainnet aynı hesabı kullanırsa kota ikiye bölünür.
+- Sırlar: RPC URL'leri (API anahtarı) her log/hata mesajında maskelenir (`/v2/[REDACTED]`).
+
+Aylık CU tahmini (`eth_getLogs` ~75 CU + `eth_blockNumber` ~10 CU = tur başına ~85 CU, 30 gün):
+
+| `LIVE_POLL_INTERVAL_MS` | Tur / ay | CU / ay | 30M'e sığar mı? |
+|---|---|---|---|
+| 2000 (eski blok-başı davranışla yaklaşık aynı) | 1 296 000 | ~110 M | Hayır |
+| 12000 | 216 000 | ~18,4 M | Evet, ama yalnız ~1 ortam |
+| **15000 (varsayılan)** | 172 800 | **~14,7 M** | Evet (iki ortam sığmaz) |
+| 30000 | 86 400 | ~7,3 M | Evet (iki ortam sığar) |
+
+Önerilen ücretsiz plan profili: `LIVE_POLL_INTERVAL_MS=15000`, `WORKER_BLOCK_BATCH_SIZE=10`, `WORKER_REPLAY_BATCH_DELAY_MS=250`, `BASE_RPC_URL_FALLBACKS=<2. ücretsiz sağlayıcı>` (Base Sepolia için herkese açık `https://sepolia.base.org` kullanılabilir). Diğer RPC yükü küçüktür: `/ready` (5-10 sn önbellek, yenilemede ~10 CU), protokol config yenilemesi (olay tetikli, ~12 `eth_call`), zincir üstü trade durumu (10 sn önbellek), günlük/saatlik job'lar.
+
 
 ### 3.8 Relayer / ödüller
 
