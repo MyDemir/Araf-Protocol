@@ -54,6 +54,7 @@ const { refreshReferenceTicker } = require("./services/referenceTicker");
 const { createReadyHandler, createHealthHandler } = require("./services/health");
 const { verifyIdentityNormalization } = require("./services/identityNormalizationGuard");
 const { parsePositiveTimerMs } = require("./utils/timeEnv");
+const { getAdminWallets } = require("./utils/adminWallets");
 const { didScheduledJobSucceed } = require("./utils/schedulerSuccess");
 
 // [TR] Global Express hata yakalayıcı
@@ -545,8 +546,14 @@ async function bootstrap() {
     app.use((_req, res) => res.status(404).json({ error: "İstenen endpoint bulunamadı" }));
     app.use(globalErrorHandler);
 
+    // [TR] ADMIN_WALLETS boşsa kimse admin değildir (menü/panel hiç açılmaz): açılışta tek uyarı. Adres listelenmez.
+    // [EN] Empty ADMIN_WALLETS means nobody is admin (panel never opens): one startup warning. No addresses logged.
+    if (getAdminWallets().length === 0) {
+      logger.warn("[Config] ADMIN_WALLETS boş veya tanımsız: hiçbir cüzdan admin değil, /api/admin/* tüm isteklere 403 döner. Fly secret olarak tanımlayın (virgülle ayrılmış 0x adresleri).");
+    }
+
     const PORT = process.env.PORT || 4000;
-    server = app.listen(PORT, () => {
+    server =app.listen(PORT, () => {
       logger.info("===========================================================");
       logger.info(`🚀 Araf Protocol Backend Dinleniyor: Port ${PORT}`);
       logger.info(`🌍 Ortam: ${process.env.NODE_ENV || "development"}`);
