@@ -123,4 +123,83 @@ describe("eventListener reads runtime settings every round", () => {
     expect(worker._cfg("WORKER_BLOCK_BATCH_SIZE")).toBe(10); // env
     expect(worker._cfg("LIVE_POLL_INTERVAL_MS")).toBe(15_000);
   });
+
+  describe("worker/watchdog thresholds apply on the next round, no restart", () => {
+    it("checkpoint interval (blocks)", async () => {
+      delete worker._shouldTriggerLiveReplay; // gerçek metot
+      worker._replayInProgress = false;
+      worker._replayNextAttemptAt = 0;
+      worker._lastSafeCheckpointBlock = 0;
+      await worker._refreshRuntimeSettings();
+      expect(worker._shouldTriggerLiveReplay(60)).toBe(true); // varsayılan 50
+      await svc.setSetting("WORKER_CHECKPOINT_INTERVAL_BLOCKS", 100, { wallet: ADMIN });
+      await worker._refreshRuntimeSettings();
+      expect(worker._shouldTriggerLiveReplay(60)).toBe(false);
+      expect(worker._shouldTriggerLiveReplay(100)).toBe(true);
+    });
+
+    it("replay backoff base/max", async () => {
+      await svc.setSetting("WORKER_REPLAY_BACKOFF_BASE_MS", 1_000, { wallet: ADMIN });
+      await svc.setSetting("WORKER_REPLAY_BACKOFF_MAX_MS", 5_000, { wallet: ADMIN });
+      await worker._refreshRuntimeSettings();
+      worker._replayFailureCount = 0;
+      const t0 = Date.now();
+      worker._noteReplayFailure(); // 1000
+      expect(worker._replayNextAttemptAt - t0).toBeGreaterThanOrEqual(1_000);
+      expect(worker._replayNextAttemptAt - t0).toBeLessThan(1_500);
+      for (let i = 0; i < 10; i += 1) worker._noteReplayFailure();
+      expect(worker._replayNextAttemptAt - Date.now()).toBeLessThanOrEqual(5_000);
+    });
+
+    it("watchdog block-stale threshold", async () => {
+      worker.isRunning = true;
+      worker._state = "live";
+      worker._reconnectPromise = null;
+      worker._staleReconnects = 0;
+      worker._rpcRateLimitedUntil = 0;
+      worker._recoverOrExit = jest.fn().mockResolvedValue(undefined);
+      worker._lastBlockSeenAt = Date.now() - 80_000;
+      await worker._refreshRuntimeSettings();
+      await worker._watchdogTick();
+      expect(worker._recoverOrExit).toHaveBeenCalledTimes(1); // varsayılan 75 sn aşıldı
+
+      await svc.setSetting("WORKER_BLOCK_STALE_MS", 120_000, { wallet: ADMIN });
+      await worker._refreshRuntimeSettings();
+      worker._staleReconnects = 0;
+      worker._recoverOrExit.mockClear();
+      worker._lastBlockSeenAt = Date.now() - 80_000;
+      await worker._watchdogTick();
+      expect(worker._recoverOrExit).not.toHaveBeenCalled(); // eşik 120 sn'ye çıktı
+    });
+
+    it("liveness threshold in /health snapshot", async () => {
+      worker.isRunning = true;
+      worker._state = "live";
+      worker._rpcRateLimitedUntil = 0;
+      worker._lastBlockSeenAt = Date.now() - 200_000;
+      await worker._refreshRuntimeSettings();
+      expect(worker.getLivenessSnapshot().stale).toBe(true); // varsayılan 180 sn
+      await svc.setSetting("WORKER_LIVENESS_STALE_MS", 400_000, { wallet: ADMIN });
+      await worker._refreshRuntimeSettings();
+      expect(worker.getLivenessSnapshot().stale).toBe(false);
+    });
+
+    it("watchdog interval is re-read each round (chained timer)", async () => {
+      jest.useFakeTimers();
+      worker._watchdogTick = jest.fn().mockResolvedValue(undefined);
+      await svc.setSetting("WORKER_WATCHDOG_INTERVAL_MS", 30_000, { wallet: ADMIN });
+      await worker._refreshRuntimeSettings();
+      worker._watchdogTimer = null;
+      worker._startWatchdog();
+      await jest.advanceTimersByTimeAsync(29_000);
+      expect(worker._watchdogTick).not.toHaveBeenCalled();
+      await jest.advanceTimersByTimeAsync(2_000);
+      expect(worker._watchdogTick).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(30_000);
+      expect(worker._watchdogTick).toHaveBeenCalledTimes(2);
+      worker._stopWatchdog();
+      await jest.advanceTimersByTimeAsync(60_000);
+      expect(worker._watchdogTick).toHaveBeenCalledTimes(2);
+    });
+  });
 });

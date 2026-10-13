@@ -90,6 +90,7 @@ function _rtSvc() {
   return _runtimeSettingsSvc;
 }
 
+const _runtimeDefs = require("../config/runtimeSettingDefs");
 const BLOCK_BATCH_SIZE = _getPositiveIntEnv("WORKER_BLOCK_BATCH_SIZE", 1_000);
 // [TR] Canlı izleme "block" olayına değil zamanlayıcıya bağlıdır (Base ~2 sn'de bir blok = çok fazla eth_getLogs).
 //      Alt sınır 2 sn. Her turda 1x eth_blockNumber + 1x eth_getLogs (~85 CU).
@@ -108,15 +109,11 @@ const CHECKPOINT_INTERVAL_BLOCKS = _getPositiveIntEnv("WORKER_CHECKPOINT_INTERVA
 const DEFAULT_WORKER_FINALITY_DEPTH = process.env.NODE_ENV === "production" ? 6 : 1;
 const WORKER_FINALITY_DEPTH = _getPositiveIntEnv("WORKER_FINALITY_DEPTH", DEFAULT_WORKER_FINALITY_DEPTH);
 const BLOCK_TIMESTAMP_CACHE_LIMIT = 2_048;
-const REPLAY_BACKOFF_BASE_MS = _getPositiveIntEnv("WORKER_REPLAY_BACKOFF_BASE_MS", 5_000);
-const REPLAY_BACKOFF_MAX_MS = _getPositiveIntEnv("WORKER_REPLAY_BACKOFF_MAX_MS", 5 * 60 * 1000);
 // [TR] B6: bu süre boyunca yeni blok görülmezse watchdog reconnect dener; reconnect sonrası da blok yoksa çıkar.
 // [EN] B6: when no new block is seen for this long the watchdog reconnects; still nothing afterwards -> exit.
-const BLOCK_STALE_MS = _getPositiveIntEnv("WORKER_BLOCK_STALE_MS", 75_000);
-const WATCHDOG_INTERVAL_MS = _getPositiveIntEnv("WORKER_WATCHDOG_INTERVAL_MS", 15_000);
 // [TR] /health liveness eşiği: watchdog'un iki penceresini kapsar (arka plan güvence).
 // [EN] /health liveness threshold: covers two watchdog windows (backstop).
-const LIVENESS_STALE_MS = _getPositiveIntEnv("WORKER_LIVENESS_STALE_MS", BLOCK_STALE_MS * 2 + 30_000);
+// (Eşikler artık runtime ayarlarıdır: _cfg("WORKER_BLOCK_STALE_MS" | "WORKER_WATCHDOG_INTERVAL_MS" | "WORKER_LIVENESS_STALE_MS").)
 
 const ESCROW_EVENT_NAMES = [
   "WalletRegistered",
@@ -857,8 +854,8 @@ class EventWorker {
   _noteReplayFailure() {
     this._replayFailureCount += 1;
     const delay = Math.min(
-      REPLAY_BACKOFF_BASE_MS * 2 ** (this._replayFailureCount - 1),
-      REPLAY_BACKOFF_MAX_MS
+      this._cfg("WORKER_REPLAY_BACKOFF_BASE_MS") * 2 ** Math.min(this._replayFailureCount - 1, 30),
+      this._cfg("WORKER_REPLAY_BACKOFF_MAX_MS")
     );
     this._replayNextAttemptAt = Date.now() + delay;
   }
@@ -878,7 +875,7 @@ class EventWorker {
   _shouldTriggerLiveReplay(blockNumber) {
     return (
       !this._replayInProgress &&
-      blockNumber - this._lastSafeCheckpointBlock >= CHECKPOINT_INTERVAL_BLOCKS &&
+      blockNumber - this._lastSafeCheckpointBlock >= this._cfg("WORKER_CHECKPOINT_INTERVAL_BLOCKS") &&
       Date.now() >= this._replayNextAttemptAt
     );
   }
@@ -913,7 +910,7 @@ class EventWorker {
   }
 
   /**
-   * [TR] Çalışma ayarlarını (LIVE_POLL_INTERVAL_MS, WORKER_BLOCK_BATCH_SIZE, WORKER_REPLAY_BATCH_DELAY_MS)
+   * [TR] Çalışma ayarlarını (LIVE_POLL_INTERVAL_MS, WORKER_BLOCK_BATCH_SIZE, replay/watchdog/checkpoint ayarları)
    *      ayar servisinden okur (15 sn önbellekli). Asla fırlatmaz; okunamazsa önceki değerler korunur.
    * [EN] Reads runtime settings from the service (15s cached). Never throws; keeps previous values on failure.
    */
@@ -930,7 +927,9 @@ class EventWorker {
     if (svc && Number.isInteger(v) && svc.isInBounds(name, v)) return v;
     if (name === "WORKER_BLOCK_BATCH_SIZE") return BLOCK_BATCH_SIZE;
     if (name === "LIVE_POLL_INTERVAL_MS") return LIVE_POLL_INTERVAL_MS;
-    return REPLAY_BATCH_DELAY_MS;
+    if (name === "WORKER_REPLAY_BATCH_DELAY_MS") return REPLAY_BATCH_DELAY_MS;
+    // [TR] Diğer ayarlar: env (sınıra kırpılmış) ya da varsayılan; liveness varsayılanı blok bayatlığına bağlıdır.
+    return _runtimeDefs.resolveValues({}).values[name];
   }
 
   _stopLiveTimer() {
@@ -1112,14 +1111,26 @@ class EventWorker {
 
   _startWatchdog() {
     if (this._watchdogTimer) return;
-    this._watchdogTimer = setInterval(() => {
-      this._watchdogTick().catch((err) => logger.error(`[Worker] Watchdog hatası: ${err.message}`));
-    }, WATCHDOG_INTERVAL_MS);
-    if (typeof this._watchdogTimer.unref === "function") this._watchdogTimer.unref();
+    this._scheduleWatchdog();
+  }
+
+  // [TR] Aralık her turda ayardan okunur (zincirleme setTimeout): admin değişikliği bir sonraki turda uygulanır.
+  _scheduleWatchdog() {
+    const timer = setTimeout(async () => {
+      try {
+        await this._watchdogTick();
+      } catch (err) {
+        logger.error(`[Worker] Watchdog hatası: ${err.message}`);
+      }
+      // Tick sırasında durdurulup yeniden başlatıldıysa (reconnect) ikinci bir zincir kurma.
+      if (this._watchdogTimer === timer) this._scheduleWatchdog();
+    }, this._cfg("WORKER_WATCHDOG_INTERVAL_MS"));
+    this._watchdogTimer = timer;
+    if (typeof timer.unref === "function") timer.unref();
   }
 
   _stopWatchdog() {
-    if (this._watchdogTimer) clearInterval(this._watchdogTimer);
+    if (this._watchdogTimer) clearTimeout(this._watchdogTimer);
     this._watchdogTimer = null;
   }
 
@@ -1137,7 +1148,7 @@ class EventWorker {
     if (this._isRpcBackoffSuppressing()) return;
 
     const idleMs = Date.now() - this._lastBlockSeenAt;
-    if (idleMs < Math.max(BLOCK_STALE_MS, this._cfg("LIVE_POLL_INTERVAL_MS") * 3)) return;
+    if (idleMs < Math.max(this._cfg("WORKER_BLOCK_STALE_MS"), this._cfg("LIVE_POLL_INTERVAL_MS") * 3)) return;
 
     if (this._staleReconnects >= 1) {
       this._fatalExit(`yeniden bağlanmaya rağmen ${Math.round(idleMs / 1000)} sn blok görülmedi`);
@@ -1159,7 +1170,7 @@ class EventWorker {
       isRunning: this.isRunning,
       state: this._state,
       lastBlockAgeMs: ageMs,
-      stale: Boolean(watching && !this._isRpcBackoffSuppressing() && ageMs > Math.max(LIVENESS_STALE_MS, this._cfg("LIVE_POLL_INTERVAL_MS") * 6)),
+      stale: Boolean(watching && !this._isRpcBackoffSuppressing() && ageMs > Math.max(this._cfg("WORKER_LIVENESS_STALE_MS"), this._cfg("LIVE_POLL_INTERVAL_MS") * 6)),
       rpcRateLimited: Boolean(this._rpcRateLimited),
     };
   }
