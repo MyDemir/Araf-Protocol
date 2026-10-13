@@ -1078,6 +1078,7 @@ function App() {
     setShowWalletModal,
     connectors,
     connect,
+    showToast,
     getWalletIcon,
     showFeedbackModal,
     setShowFeedbackModal,
