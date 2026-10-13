@@ -17,7 +17,7 @@ on:
         default: false
         type: boolean
       verify_contracts:
-        description: "Experimental: verify contracts on BaseScan via Etherscan V2 + Sourcify (needs ETHERSCAN_API_KEY secret; legacy BASESCAN_API_KEY is still read)"
+        description: "Experimental: verify contracts on BaseScan via Etherscan V2, Sourcify and Blockscout (ETHERSCAN_API_KEY secret optional; legacy BASESCAN_API_KEY is still read; Sourcify/Blockscout are keyless)"
         required: false
         default: false
         type: boolean
@@ -211,7 +211,9 @@ jobs:
           BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
         run: |
           set -euo pipefail
-          test -n "$ETHERSCAN_API_KEY" || { echo "::error::ETHERSCAN_API_KEY (or legacy BASESCAN_API_KEY) secret is required when verify_contracts is true."; exit 1; }
+          if [ -z "$ETHERSCAN_API_KEY" ]; then
+            echo "::warning::ETHERSCAN_API_KEY (or legacy BASESCAN_API_KEY) secret is not set; Etherscan will be skipped, keyless Sourcify + Blockscout will be used."
+          fi
           npm run verify:base-sepolia
 
       - name: Setup Fly CLI

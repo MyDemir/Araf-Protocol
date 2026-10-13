@@ -98,7 +98,7 @@ Deploy:
 
 ```bash
 gh workflow run deploy-base-sepolia.yml -f deploy_frontend=true
-# opsiyonel (deneysel) Basescan doğrulama: -f verify_contracts=true  (ETHERSCAN_API_KEY secret gerekir; eski BASESCAN_API_KEY hâlâ okunur)
+# opsiyonel (deneysel) Basescan doğrulama: -f verify_contracts=true  (ETHERSCAN_API_KEY secret opsiyonel; eski BASESCAN_API_KEY hâlâ okunur; Sourcify + Blockscout anahtarsız çalışır)
 gh run watch
 ```
 
