@@ -105,7 +105,7 @@ const SETTING_DEFS = {
     },
   },
   CONFIG_CACHE_TTL_SECONDS: {
-    group: "cache", unit: "s", min: 60, max: 86_400, default: 3_600,
+    group: "cache", unit: "s", min: 60, max: 21_600, default: 3_600,
     description: {
       TR: "Zincirden okunan protokol parametrelerinin Redis önbellek süresi (olaylarla ayrıca tazelenir).",
       EN: "Redis cache lifetime of on-chain protocol parameters (also refreshed by events).",
@@ -174,7 +174,9 @@ const SETTING_DEFS = {
     },
   },
   REWARD_RECORDER_BATCH_LIMIT: {
-    group: "jobs", unit: "trades", min: 1, max: 100, default: 50,
+    // Gas notu: id başına yaklaşık 100k gas tahmini (kayıtlı id'ler ~2k); tx revert olursa aynı id'ler bir sonraki
+    // turda yeniden denenir (reward_recorded_at işaretlenmez). Bu yüzden üst sınır 50'de tutulur.
+    group: "jobs", unit: "trades", min: 1, max: 50, default: 50,
     warning: {
       TR: "Maliyet uyarısı: tek relayer işleminde kaydedilen işlem sayısı; büyüdükçe işlem başına gas artar.",
       EN: "Cost warning: trades recorded in one relayer transaction; gas per transaction grows with it.",
@@ -198,12 +200,20 @@ const SETTING_CONSTRAINTS = [
     keys: ["WORKER_LIVENESS_STALE_MS", "WORKER_BLOCK_STALE_MS"],
     check: (v) => v.WORKER_LIVENESS_STALE_MS >= 2 * v.WORKER_BLOCK_STALE_MS,
     message: "WORKER_LIVENESS_STALE_MS, WORKER_BLOCK_STALE_MS değerinin en az 2 katı olmalı.",
+    hints: {
+      WORKER_LIVENESS_STALE_MS: { TR: "≥ 2 × Blok bayatlık eşiği (WORKER_BLOCK_STALE_MS)", EN: "≥ 2 × Block stale threshold (WORKER_BLOCK_STALE_MS)" },
+      WORKER_BLOCK_STALE_MS: { TR: "≤ Liveness eşiği ÷ 2 (WORKER_LIVENESS_STALE_MS)", EN: "≤ Liveness threshold ÷ 2 (WORKER_LIVENESS_STALE_MS)" },
+    },
   },
   {
     id: "backoff_base_vs_max",
     keys: ["WORKER_REPLAY_BACKOFF_BASE_MS", "WORKER_REPLAY_BACKOFF_MAX_MS"],
     check: (v) => v.WORKER_REPLAY_BACKOFF_BASE_MS <= v.WORKER_REPLAY_BACKOFF_MAX_MS,
     message: "WORKER_REPLAY_BACKOFF_BASE_MS, WORKER_REPLAY_BACKOFF_MAX_MS değerinden büyük olamaz.",
+    hints: {
+      WORKER_REPLAY_BACKOFF_BASE_MS: { TR: "≤ Backoff üst sınırı (WORKER_REPLAY_BACKOFF_MAX_MS)", EN: "≤ Backoff max (WORKER_REPLAY_BACKOFF_MAX_MS)" },
+      WORKER_REPLAY_BACKOFF_MAX_MS: { TR: "≥ Backoff tabanı (WORKER_REPLAY_BACKOFF_BASE_MS)", EN: "≥ Backoff base (WORKER_REPLAY_BACKOFF_BASE_MS)" },
+    },
   },
   {
     // Yalnız BLOCK_STALE değiştirilirken zorlanır: poll yükseltmesi watchdog'da max(stale, poll*3) ile zaten korunur.
@@ -211,18 +221,29 @@ const SETTING_CONSTRAINTS = [
     keys: ["WORKER_BLOCK_STALE_MS"],
     check: (v) => v.WORKER_BLOCK_STALE_MS >= 3 * v.LIVE_POLL_INTERVAL_MS,
     message: "WORKER_BLOCK_STALE_MS, LIVE_POLL_INTERVAL_MS değerinin en az 3 katı olmalı (aksi halde watchdog yanlış alarm verir).",
+    hints: {
+      WORKER_BLOCK_STALE_MS: { TR: "≥ 3 × Canlı tur aralığı (LIVE_POLL_INTERVAL_MS)", EN: "≥ 3 × Live poll interval (LIVE_POLL_INTERVAL_MS)" },
+      LIVE_POLL_INTERVAL_MS: { TR: "Blok bayatlık eşiği ≥ 3 × bu değer olmalı (watchdog zaten max(eşik, 3 × tur) kullanır)", EN: "Block stale threshold must be ≥ 3 × this value (the watchdog already uses max(threshold, 3 × poll))" },
+    },
   },
   {
     id: "last_good_vs_max_stale",
     keys: ["REFERENCE_TICKER_LAST_GOOD_TTL_SECONDS", "REFERENCE_TICKER_MAX_STALE_SECONDS"],
     check: (v) => v.REFERENCE_TICKER_LAST_GOOD_TTL_SECONDS >= v.REFERENCE_TICKER_MAX_STALE_SECONDS,
     message: "REFERENCE_TICKER_LAST_GOOD_TTL_SECONDS, REFERENCE_TICKER_MAX_STALE_SECONDS değerinden küçük olamaz.",
+    hints: {
+      REFERENCE_TICKER_LAST_GOOD_TTL_SECONDS: { TR: "≥ Azami bayatlık (REFERENCE_TICKER_MAX_STALE_SECONDS)", EN: "≥ Max stale age (REFERENCE_TICKER_MAX_STALE_SECONDS)" },
+      REFERENCE_TICKER_MAX_STALE_SECONDS: { TR: "≤ Son iyi TTL ve ≥ Fiat TTL", EN: "≤ Last-good TTL and ≥ Fiat TTL" },
+    },
   },
   {
     id: "fiat_ttl_vs_max_stale",
     keys: ["REFERENCE_TICKER_FIAT_TTL_SECONDS", "REFERENCE_TICKER_MAX_STALE_SECONDS"],
     check: (v) => v.REFERENCE_TICKER_FIAT_TTL_SECONDS <= v.REFERENCE_TICKER_MAX_STALE_SECONDS,
     message: "REFERENCE_TICKER_FIAT_TTL_SECONDS, REFERENCE_TICKER_MAX_STALE_SECONDS değerinden büyük olamaz.",
+    hints: {
+      REFERENCE_TICKER_FIAT_TTL_SECONDS: { TR: "≤ Azami bayatlık (REFERENCE_TICKER_MAX_STALE_SECONDS)", EN: "≤ Max stale age (REFERENCE_TICKER_MAX_STALE_SECONDS)" },
+    },
   },
 ];
 
@@ -287,7 +308,36 @@ function findConstraintViolation(values, changedKey) {
   return null;
 }
 
+/** Env sorunları (açılış denetimi): tam sayı olmayan ya da sınıra kırpılan ham değerler. */
+function envIssues() {
+  const out = [];
+  for (const key of SETTING_KEYS) {
+    const raw = process.env[key];
+    if (raw === undefined || raw === null || String(raw).trim() === "") continue;
+    const n = Number(raw);
+    if (!Number.isInteger(n)) {
+      out.push({ key, raw: String(raw), kind: "not_integer", applied: null });
+    } else if (clamp(key, n) !== n) {
+      out.push({ key, raw: String(raw), kind: "clamped", applied: clamp(key, n) });
+    }
+  }
+  return out;
+}
+
+/** Etkin değerler üzerinde ihlal edilen TÜM kısıtlar: [{ id, keys, message }]. */
+function allConstraintViolations(values) {
+  return SETTING_CONSTRAINTS.filter((c) => !c.check(values)).map((c) => ({ id: c.id, keys: c.keys, message: c.message }));
+}
+
+/** Bir ayara ait kısa kısıt ipuçları: [{ TR, EN }]. */
+function hintsFor(key) {
+  return SETTING_CONSTRAINTS.filter((c) => c.hints && c.hints[key]).map((c) => c.hints[key]);
+}
+
 module.exports = {
+  envIssues,
+  allConstraintViolations,
+  hintsFor,
   SETTING_GROUPS,
   SETTING_DEFS,
   SETTING_KEYS,

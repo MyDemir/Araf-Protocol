@@ -55,8 +55,32 @@ function _overridesFromDoc(doc) {
   return out;
 }
 
+/**
+ * Açılışta bir kez: env sorunlarını (tam sayı değil / sınıra kırpıldı) ve env+varsayılan üzerindeki kısıt ihlallerini
+ * uyarı olarak loglar. Sessiz kırpma yok. Her okumada değil, yalnız modül yüklenirken çalışır.
+ */
+function auditEnvAtStartup() {
+  try {
+    for (const i of defs.envIssues()) {
+      if (i.kind === "not_integer") {
+        logger.warn(`[RuntimeSettings] env ${i.key}="${i.raw}" tam sayı değil; yok sayıldı (varsayılan/admin değeri kullanılır).`);
+      } else {
+        logger.warn(`[RuntimeSettings] env ${i.key}="${i.raw}" sınır dışı; uygulanan değer ${i.applied}.`);
+      }
+    }
+    for (const v of defs.allConstraintViolations(defs.resolveValues({}).values)) {
+      logger.warn(`[RuntimeSettings] env/varsayılan kısıt ihlali (${v.id}): ${v.message}`);
+    }
+  } catch { /* denetim yardımcıdır; asla fırlatmaz */ }
+}
+
 function _resolve(overrides) {
-  const { values, sources } = defs.resolveValues(overrides);
+  const { values } = defs.resolveValues(overrides);
+  return _resolveWith(overrides, values);
+}
+
+function _resolveWith(overrides, values) {
+  const { sources } = defs.resolveValues(overrides);
   const settings = {};
   for (const key of SETTING_KEYS) {
     const d = SETTING_DEFS[key];
@@ -74,6 +98,9 @@ function _resolve(overrides) {
       source: sources[key],
       description: d.description,
       warning: d.warning || null,
+      constraints: defs.hintsFor(key),
+      constraintViolations: defs.allConstraintViolations(values)
+        .filter((v) => v.keys.includes(key)).map((v) => v.message),
       changedAt: ov ? ov.changed_at : null,
       changedBy: ov ? ov.changed_by : null,
     };
@@ -271,6 +298,8 @@ async function listAudit({ page = 1, limit = 20 } = {}) {
   };
 }
 
+auditEnvAtStartup();
+
 /** Test yardımcısı. */
 function _resetForTests() {
   cache = null;
@@ -291,6 +320,7 @@ module.exports = {
   listAudit,
   invalidateCache,
   _resetForTests,
+  auditEnvAtStartup,
   SETTING_CONSTRAINTS: defs.SETTING_CONSTRAINTS,
   SETTING_GROUPS: defs.SETTING_GROUPS,
 };

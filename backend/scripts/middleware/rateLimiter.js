@@ -167,7 +167,6 @@ function makeSensitiveLimiter({
 const { runtimeValueSync } = require("../utils/runtimeValue");
 
 // [TR] Yalnız tier ÖNBELLEK süresi (limit sayıları değil); her yazımda çalışma ayarından okunur.
-const RATE_LIMIT_TIER_CACHE_TTL_SECONDS = Number(process.env.RATE_LIMIT_TIER_CACHE_TTL_SECONDS || 120); // env/varsayılan (dışa aktarım)
 const tierCacheTtlSeconds = () => runtimeValueSync("RATE_LIMIT_TIER_CACHE_TTL_SECONDS");
 const DEFAULT_ANON_TIER = 0;
 const MIN_TIER = 0;
@@ -738,6 +737,6 @@ module.exports = {
     clampTier,
     normalizeTierFromMirror,
     resolveRequestTier,
-    RATE_LIMIT_TIER_CACHE_TTL_SECONDS,
+    get RATE_LIMIT_TIER_CACHE_TTL_SECONDS() { return tierCacheTtlSeconds(); },
   },
 };

@@ -488,3 +488,73 @@ describe("extended runtime settings: applied while running (no restart)", () => 
     expect(q.limit).toHaveBeenLastCalledWith(10);
   });
 });
+
+describe("env visibility: startup warnings and constraintViolations", () => {
+  const ENVS = ["WORKER_BLOCK_STALE_MS", "WORKER_LIVENESS_STALE_MS", "READY_CACHE_TTL_MS", "WORKER_MAX_LAG_BLOCKS", "MARKET_CACHE_TTL_MS"];
+  afterEach(() => ENVS.forEach((k) => delete process.env[k]));
+
+  function loadWithLogger() {
+    const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
+    const fakes = makeFakes();
+    jest.resetModules();
+    jest.doMock("../../backend/scripts/utils/logger", () => logger);
+    jest.doMock("../../backend/scripts/models/RuntimeSetting", () => fakes.Setting);
+    jest.doMock("../../backend/scripts/models/RuntimeSettingAudit", () => fakes.Audit);
+    return { logger, fakes };
+  }
+
+  it("warns once at startup for clamped and non-integer env values; no per-read spam", async () => {
+    const { logger } = loadWithLogger();
+    process.env.READY_CACHE_TTL_MS = "99999"; // clamped to 10000
+    process.env.WORKER_MAX_LAG_BLOCKS = "abc"; // not an integer
+    process.env.MARKET_CACHE_TTL_MS = "5000"; // fine: no warning
+    const svc = require("../../backend/scripts/services/runtimeSettings");
+    const msgs = logger.warn.mock.calls.map((c) => c[0]);
+    expect(msgs.some((m) => m.includes("READY_CACHE_TTL_MS") && m.includes("99999") && m.includes("10000"))).toBe(true);
+    expect(msgs.some((m) => m.includes("WORKER_MAX_LAG_BLOCKS") && m.includes("abc"))).toBe(true);
+    expect(msgs.some((m) => m.includes("MARKET_CACHE_TTL_MS"))).toBe(false);
+    const before = logger.warn.mock.calls.length;
+    await svc.getEffectiveValues();
+    await svc.getEffectiveValues();
+    expect(logger.warn.mock.calls.filter((c) => /sınır dışı|tam sayı değil/.test(c[0])).length).toBe(before);
+  });
+
+  it("warns at startup when env values violate a cross-field constraint", () => {
+    const { logger } = loadWithLogger();
+    process.env.WORKER_BLOCK_STALE_MS = "200000";
+    process.env.WORKER_LIVENESS_STALE_MS = "250000"; // < 2 x 200000
+    require("../../backend/scripts/services/runtimeSettings");
+    const msgs = logger.warn.mock.calls.map((c) => c[0]);
+    expect(msgs.some((m) => m.includes("liveness_vs_block_stale"))).toBe(true);
+  });
+
+  it("no startup warnings with a clean environment", () => {
+    const { logger } = loadWithLogger();
+    require("../../backend/scripts/services/runtimeSettings");
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it("GET returns constraintViolations per setting and constraint hints", async () => {
+    const { app } = build();
+    process.env.WORKER_BLOCK_STALE_MS = "200000";
+    process.env.WORKER_LIVENESS_STALE_MS = "250000";
+    const res = await as(request(app).get("/api/admin/runtime-settings"));
+    const by = Object.fromEntries(res.body.settings.map((s) => [s.key, s]));
+    expect(by.WORKER_LIVENESS_STALE_MS.constraintViolations.length).toBe(1);
+    expect(by.WORKER_BLOCK_STALE_MS.constraintViolations.length).toBe(1);
+    expect(by.READY_CACHE_TTL_MS.constraintViolations).toEqual([]);
+    expect(by.WORKER_LIVENESS_STALE_MS.constraints[0].EN).toMatch(/2 ×/);
+  });
+
+  it("tightened caps: reward batch <= 50, config cache <= 21600; exports follow effective values", async () => {
+    const { SETTING_DEFS } = require("../../backend/scripts/config/runtimeSettingDefs");
+    expect(SETTING_DEFS.REWARD_RECORDER_BATCH_LIMIT.max).toBe(50);
+    expect(SETTING_DEFS.CONFIG_CACHE_TTL_SECONDS.max).toBe(21_600);
+    const { svc } = build();
+    await svc.setSetting("REFERENCE_TICKER_FIAT_TTL_SECONDS", 3_600, { wallet: ADMIN });
+    await svc.setSetting("REFERENCE_TICKER_MAX_STALE_SECONDS", 7_200, { wallet: ADMIN });
+    jest.doMock("../../backend/scripts/config/redis", () => ({ getRedisClient: jest.fn(), isReady: () => false }));
+    const ticker = require("../../backend/scripts/services/referenceTicker");
+    expect(ticker.MAX_STALE_SECONDS).toBe(7_200);
+  });
+});

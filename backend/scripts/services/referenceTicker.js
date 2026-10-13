@@ -29,7 +29,6 @@ const maxStaleSeconds = () => runtimeValueSync("REFERENCE_TICKER_MAX_STALE_SECON
 //      Aksi halde her başarılı yenileme last-good TTL'ini yenileyip bayat satırı sonsuza dek taşırdı.
 // [EN] Staleness cap: a row older than this (by its original updatedAt) is dropped instead of being carried
 //      forward; otherwise each refresh would renew the last-good TTL and keep stale rows forever.
-const MAX_STALE_SECONDS = Number(process.env.REFERENCE_TICKER_MAX_STALE_SECONDS || 86400); // env/varsayılan (dışa aktarım)
 
 const PAIRS = Object.freeze([
   "BTC/USDT",
@@ -504,5 +503,5 @@ module.exports = {
   refreshReferenceTicker,
   getReferenceTickerPayload,
   _mergeWithLastGood: mergeWithLastGood,
-  MAX_STALE_SECONDS,
+  get MAX_STALE_SECONDS() { return maxStaleSeconds(); },
 };
