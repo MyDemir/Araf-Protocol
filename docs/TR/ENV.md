@@ -328,7 +328,7 @@ Adresler (`ARAF_ESCROW_ADDRESS`, token adresleri) sır değildir.
 | `AWS_KMS_KEY_ARN` (`KMS_KEY_ARN`) | `docs/TR/MAINNET_READINESS_CHECKLIST.md:54`; `backend/.env.example:66` (okunmaz der) | Okunmaz; anahtar kimliği `CiphertextBlob` içindedir. Girmeyin. |
 | `MIN_REWARD_BPS`, `MAX_REWARD_BPS` | `docs/TR/REWARDS_ROLLOUT.md` | Kodda env olarak okunmaz (kontrat sabiti; **doğrulanmadı**, env olarak okunmadığı grep ile görüldü). |
 | `VITE_ADMIN_WALLETS` | Eski belgeler | Kaldırıldı (`AppViews.jsx:206`). |
-| `BASESCAN_API_KEY` (GitHub secret olarak) | `docs/TR/DEPLOY_BASE_SEPOLIA.md:14` | Hiçbir workflow okumaz; yalnız elle `hardhat verify` için `contracts/.env`'de anlamlı. |
+| `BASESCAN_API_KEY` (GitHub secret olarak) | `.github/workflows/deploy-base-sepolia.yml` | **Eski ad.** `deploy-base-sepolia.yml` yalnız `verify_contracts=true` iken `ETHERSCAN_API_KEY` yoksa yedek olarak okur (`ETHERSCAN_API_KEY \|\| BASESCAN_API_KEY`). Yeni kurulumda `ETHERSCAN_API_KEY` kullanın. |
 | `NODE_PATH` | `contracts/hardhat.config.js:9-10` | Okunmaz, script kendisi ayarlar; sizin girmeniz gerekmez. |
 
 ### 6.2 Takma adlar (hangisi tercih edilir)

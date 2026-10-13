@@ -119,35 +119,71 @@ function isBytecodeNotIndexedError(err) {
     errorText(err)
   );
 }
+// [TR] Etherscan ücretsiz plan / desteklenmeyen zincir / geçersiz anahtar: başarısızlık değil, "atlandı".
+// [EN] Free plan / unsupported chain / bad key: treated as "skipped", not as a failure.
+function isEtherscanPlanOrKeyError(err) {
+  return /free (api )?plan|upgrade your api plan|not supported|unsupported chain|invalid api key|missing or invalid api key|api key.*(invalid|missing|required)|missing api key|no api key|api key is empty/i.test(
+    errorText(err)
+  );
+}
 
 const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function verifyStep(hre, step, { retries, delayMs, sleep, log }) {
+// [TR] verify:verify yalnız Etherscan+Sourcify çalıştırır (Blockscout'u çalıştırmaz) ve Etherscan hata verirse
+//      Sourcify'a hiç geçmez. Bu yüzden her doğrulayıcı ayrı subtask ile, bağımsız denenir.
+// [EN] hardhat-verify's verify:verify runs only Etherscan+Sourcify (never Blockscout) and aborts on the first
+//      Etherscan error, so each verifier is invoked through its own subtask, independently.
+const VERIFIERS = [
+  {
+    name: "Etherscan",
+    task: "verify:etherscan",
+    configKey: "etherscan",
+    args: (s) => ({ address: s.address, constructorArgsParams: s.constructorArguments, contract: s.contract, ...(s.libraries ? { libraries: s.libraries } : {}) }),
+    isSkippable: isEtherscanPlanOrKeyError,
+  },
+  {
+    name: "Sourcify",
+    task: "verify:sourcify",
+    configKey: "sourcify",
+    args: (s) => ({ address: s.address, contract: s.contract, ...(s.libraries ? { libraries: s.libraries } : {}) }),
+  },
+  {
+    name: "Blockscout",
+    task: "verify:blockscout",
+    configKey: "blockscout",
+    args: (s) => ({ address: s.address, contract: s.contract, ...(s.libraries ? { libraries: s.libraries } : {}) }),
+  },
+];
+
+async function runVerifier(hre, verifier, step, { retries, delayMs, sleep, log }) {
+  const cfg = hre.config && hre.config[verifier.configKey];
+  if (cfg && cfg.enabled === false) return { status: "skipped", detail: "disabled in config" };
+  if (verifier.name === "Etherscan" && hre.config && hre.config.etherscan && !hre.config.etherscan.apiKey) {
+    return { status: "skipped", detail: "no ETHERSCAN_API_KEY" };
+  }
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      await hre.run("verify:verify", {
-        address: step.address,
-        constructorArguments: step.constructorArguments,
-        contract: step.contract,
-        ...(step.libraries ? { libraries: step.libraries } : {}),
-      });
+      await hre.run(verifier.task, verifier.args(step));
       return { status: "verified" };
     } catch (err) {
       if (isAlreadyVerifiedError(err)) return { status: "already-verified" };
       if (isBytecodeNotIndexedError(err) && attempt < retries) {
-        log(`   ⏳ ${step.label}: bytecode henüz indekslenmedi, ${delayMs / 1000}s sonra yeniden (${attempt}/${retries})`);
+        log(`   ⏳ ${step.label}/${verifier.name}: bytecode henüz indekslenmedi, ${delayMs / 1000}s sonra yeniden (${attempt}/${retries})`);
         await sleep(delayMs);
         continue;
       }
-      return { status: "failed", error: errorText(err).split("\n")[0] };
+      const detail = errorText(err).split("\n")[0];
+      if (verifier.isSkippable && verifier.isSkippable(err)) return { status: "skipped", detail };
+      return { status: "failed", detail };
     }
   }
-  return { status: "failed", error: "retries exhausted" };
+  return { status: "failed", detail: "retries exhausted" };
 }
 
 /**
- * [TR] Planı sırayla çalıştırır. Hata fırlatmaz; sonuç listesi döner.
- * [EN] Runs the plan in order. Never throws; returns per-step results.
+ * [TR] Planı sırayla çalıştırır; her kontrat için Etherscan V2, Sourcify, Blockscout denenir. Biri başarılıysa
+ *      kontrat doğrulanmış sayılır. Hata fırlatmaz.
+ * [EN] Runs the plan in order; each contract is tried on all verifiers; any success counts. Never throws.
  */
 async function runVerify(hre, plan, opts = {}) {
   const {
@@ -164,14 +200,42 @@ async function runVerify(hre, plan, opts = {}) {
     if (dryRun) {
       log(`   [dry-run] contract=${step.contract} args=${JSON.stringify(step.constructorArguments)}` +
         (step.libraries ? ` libraries=${JSON.stringify(step.libraries)}` : ""));
-      results.push({ label: step.label, status: "dry-run" });
+      results.push({ label: step.label, address: step.address, status: "dry-run", verifiers: {} });
       continue;
     }
-    const r = await verifyStep(hre, step, { retries, delayMs, sleep, log });
-    log(r.status === "failed" ? `   ❌ ${r.error}` : `   ✅ ${r.status}`);
-    results.push({ label: step.label, ...r });
+    const verifiers = {};
+    for (const v of VERIFIERS) {
+      const r = await runVerifier(hre, v, step, { retries, delayMs, sleep, log });
+      verifiers[v.name] = r;
+      const icon = { verified: "✅", "already-verified": "✅", skipped: "⚠️ ", failed: "❌" }[r.status];
+      log(`   ${icon} ${v.name}: ${r.status}${r.detail ? ` (${r.detail})` : ""}`);
+    }
+    const all = Object.values(verifiers);
+    const status = all.some((r) => r.status === "verified")
+      ? "verified"
+      : all.some((r) => r.status === "already-verified")
+        ? "already-verified"
+        : "failed";
+    results.push({ label: step.label, address: step.address, status, verifiers });
   }
   return results;
+}
+
+/** [TR] Kontrat başına doğrulayıcı sonuç tablosu. [EN] Per-contract, per-verifier result table. */
+function formatReportTable(results) {
+  const names = VERIFIERS.map((v) => v.name);
+  const rows = [["Contract", ...names, "Overall"]];
+  for (const r of results) {
+    rows.push([r.label, ...names.map((n) => (r.verifiers[n] ? r.verifiers[n].status : "-")), r.status]);
+  }
+  const widths = rows[0].map((_, i) => Math.max(...rows.map((row) => String(row[i]).length)));
+  return rows.map((row) => row.map((c, i) => String(c).padEnd(widths[i])).join("  ")).join("\n");
+}
+
+/** [TR] Hiçbir doğrulayıcı başarılı olmayan kontrat varsa çıkış kodu 1. */
+function summarize(results) {
+  const failed = results.filter((r) => r.status === "failed");
+  return { failed, exitCode: failed.length ? 1 : 0 };
 }
 
 function manualCommandHint(networkName) {
@@ -187,16 +251,17 @@ async function main() {
   if (plan.steps.length === 0) {
     throw new Error(`Doğrulanacak kayıt yok (deployments/${networkName}*.json). Önce deploy edin.`);
   }
-  if (!dryRun && !process.env.ETHERSCAN_API_KEY && !process.env.BASESCAN_API_KEY) {
-    console.warn("⚠️  ETHERSCAN_API_KEY tanımlı değil; yalnız Sourcify denenecek, Etherscan V2 başarısız olabilir.");
+  if (!dryRun && !hre.config.etherscan.apiKey) {
+    console.warn("⚠️  ETHERSCAN_API_KEY tanımlı değil; Etherscan atlanacak, Sourcify + Blockscout (anahtarsız) denenecek.");
   }
   const results = await runVerify(hre, plan, { dryRun });
-  const failed = results.filter((r) => r.status === "failed");
+  console.log("\n" + formatReportTable(results));
+  const { failed, exitCode } = summarize(results);
   if (failed.length) {
-    console.error(`\n❌ Doğrulanamayanlar: ${failed.map((f) => f.label).join(", ")}`);
+    console.error(`\n❌ Hiçbir doğrulayıcıda doğrulanamayanlar: ${failed.map((f) => f.label).join(", ")}`);
     console.error(`   Yeniden dene: ${manualCommandHint(networkName)}`);
-    process.exitCode = 1;
   }
+  process.exitCode = exitCode;
   return results;
 }
 
@@ -211,7 +276,10 @@ module.exports = {
   buildVerifyPlan,
   loadManifests,
   runVerify,
+  formatReportTable,
+  summarize,
   manualCommandHint,
   isAlreadyVerifiedError,
   isBytecodeNotIndexedError,
+  isEtherscanPlanOrKeyError,
 };

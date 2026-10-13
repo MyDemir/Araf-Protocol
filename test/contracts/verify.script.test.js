@@ -44,6 +44,22 @@ describe("verify script + Etherscan V2 config", function () {
       });
     }
 
+    it("enables blockscout with keyless Base customChains that resolve via hardhat-verify", async function () {
+      const config = loadConfig({});
+      expect(config.blockscout.enabled).to.equal(true);
+      const { Blockscout } = require("@nomicfoundation/hardhat-verify/internal/blockscout");
+      for (const [name, chainId, api, browser] of [
+        ["base-sepolia", 84532, "https://base-sepolia.blockscout.com/api", "https://base-sepolia.blockscout.com"],
+        ["base", 8453, "https://base.blockscout.com/api", "https://base.blockscout.com"],
+      ]) {
+        const provider = { send: async () => "0x" + chainId.toString(16) };
+        const cc = await Blockscout.getCurrentChainConfig(name, provider, config.blockscout.customChains);
+        const b = Blockscout.fromChainConfig(cc);
+        expect(b.apiUrl).to.equal(api);
+        expect(b.browserUrl).to.equal(browser);
+      }
+    });
+
     it("a per-network apiKey object would fall back to V1 (regression guard)", function () {
       const { Etherscan } = require("@nomicfoundation/hardhat-verify/internal/etherscan");
       const legacy = Etherscan.fromChainConfig(
@@ -90,55 +106,117 @@ describe("verify script + Etherscan V2 config", function () {
   });
 
   describe("runVerify", function () {
-    const { runVerify, buildVerifyPlan } = require(VERIFY_PATH);
+    const { runVerify, buildVerifyPlan, summarize, formatReportTable } = require(VERIFY_PATH);
     const plan = buildVerifyPlan({
       escrowManifest: { escrowAddress: A(1), treasuryAddress: A(2), libraries: { ArafReputationLib: A(3), ArafSettlementLib: A(4) } },
     });
+    const one = { steps: [plan.steps[0]], warnings: [] };
     const quiet = { log: () => {}, sleep: async () => {}, delayMs: 1 };
+    // fake hre: handlers keyed by task name
+    const fakeHre = (handlers, calls = []) => ({
+      run: async (task, args) => {
+        calls.push([task, args]);
+        if (handlers[task]) return handlers[task](args);
+      },
+    });
 
     it("dry-run makes no hre.run calls", async function () {
-      let calls = 0;
-      const res = await runVerify({ run: async () => { calls++; } }, plan, { ...quiet, dryRun: true });
-      expect(calls).to.equal(0);
+      const calls = [];
+      const res = await runVerify(fakeHre({}, calls), plan, { ...quiet, dryRun: true });
+      expect(calls.length).to.equal(0);
       expect(res.every((r) => r.status === "dry-run")).to.equal(true);
     });
 
-    it("passes libraries + args to verify:verify and treats Already Verified as success", async function () {
-      const seen = [];
-      const hre = {
-        run: async (task, args) => {
-          seen.push([task, args]);
-          if (args.address === A(3)) throw new Error("Contract source code already verified");
-        },
-      };
-      const res = await runVerify(hre, plan, quiet);
-      expect(res.map((r) => r.status)).to.deep.equal(["already-verified", "verified", "verified"]);
-      const escrowCall = seen.find(([, a]) => a.address === A(1))[1];
-      expect(escrowCall.constructorArguments).to.deep.equal([A(2)]);
-      expect(escrowCall.libraries).to.deep.equal({ ArafReputationLib: A(3), ArafSettlementLib: A(4) });
+    it("tries Etherscan, Sourcify and Blockscout separately (never verify:verify), passing libraries + args", async function () {
+      const calls = [];
+      const res = await runVerify(fakeHre({}, calls), { steps: [plan.steps[2]], warnings: [] }, quiet);
+      expect(calls.map(([t]) => t)).to.deep.equal(["verify:etherscan", "verify:sourcify", "verify:blockscout"]);
+      const eth = calls[0][1];
+      expect(eth.constructorArgsParams).to.deep.equal([A(2)]);
+      expect(eth.libraries).to.deep.equal({ ArafReputationLib: A(3), ArafSettlementLib: A(4) });
+      expect(calls[2][1].libraries).to.deep.equal(eth.libraries);
+      expect(res[0].status).to.equal("verified");
+    });
+
+    it("treats Already Verified as success", async function () {
+      const hre = fakeHre({
+        "verify:etherscan": () => { throw new Error("Contract source code already verified"); },
+        "verify:sourcify": () => { throw new Error("nope"); },
+        "verify:blockscout": () => { throw new Error("nope"); },
+      });
+      const res = await runVerify(hre, one, quiet);
+      expect(res[0].status).to.equal("already-verified");
+      expect(res[0].verifiers.Etherscan.status).to.equal("already-verified");
+    });
+
+    it("Etherscan free-plan/invalid-key rejection is skipped (not a failure); Sourcify success => overall success", async function () {
+      const hre = fakeHre({
+        "verify:etherscan": () => { throw new Error("Free API access is not supported for this chain. Upgrade your API plan"); },
+        "verify:blockscout": () => { throw new Error("boom"); },
+      });
+      const res = await runVerify(hre, one, quiet);
+      expect(res[0].verifiers.Etherscan.status).to.equal("skipped");
+      expect(res[0].verifiers.Sourcify.status).to.equal("verified");
+      expect(res[0].verifiers.Blockscout.status).to.equal("failed");
+      expect(res[0].status).to.equal("verified");
+      expect(summarize(res).exitCode).to.equal(0);
+    });
+
+    it("Etherscan rejection + Sourcify failure + Blockscout success => overall success", async function () {
+      const hre = fakeHre({
+        "verify:etherscan": () => { throw new Error("Invalid API Key"); },
+        "verify:sourcify": () => { throw new Error("sourcify down"); },
+      });
+      const res = await runVerify(hre, one, quiet);
+      expect(res[0].verifiers.Blockscout.status).to.equal("verified");
+      expect(res[0].status).to.equal("verified");
+    });
+
+    it("skips Etherscan when config has no apiKey and continues with the others", async function () {
+      const calls = [];
+      const hre = { ...fakeHre({}, calls), config: { etherscan: { apiKey: "" }, sourcify: { enabled: true }, blockscout: { enabled: true } } };
+      const res = await runVerify(hre, one, quiet);
+      expect(calls.map(([t]) => t)).to.deep.equal(["verify:sourcify", "verify:blockscout"]);
+      expect(res[0].verifiers.Etherscan.status).to.equal("skipped");
+      expect(res[0].status).to.equal("verified");
+    });
+
+    it("all verifiers failing => failed, exit code 1, table shows each verifier", async function () {
+      const boom = () => { throw new Error("Invalid API Key"); };
+      const hre = fakeHre({ "verify:etherscan": boom, "verify:sourcify": () => { throw new Error("x"); }, "verify:blockscout": () => { throw new Error("y"); } });
+      const res = await runVerify(hre, one, quiet);
+      expect(res[0].status).to.equal("failed");
+      const { failed, exitCode } = summarize(res);
+      expect(failed.length).to.equal(1);
+      expect(exitCode).to.equal(1);
+      const table = formatReportTable(res);
+      expect(table).to.match(/Etherscan\s+Sourcify\s+Blockscout/);
+      expect(table).to.include("skipped");
+      expect(table).to.include("failed");
     });
 
     it("retries when bytecode is not indexed yet, then succeeds; gives up after retries", async function () {
       let n = 0;
-      const flaky = { run: async () => { if (++n < 3) throw new Error("The Etherscan API responded that the address 0x does not have bytecode."); } };
-      const one = { steps: [plan.steps[0]], warnings: [] };
+      const flaky = fakeHre({
+        "verify:etherscan": () => { if (++n < 3) throw new Error("The Etherscan API responded that the address 0x does not have bytecode."); },
+      });
       const ok = await runVerify(flaky, one, { ...quiet, retries: 5 });
-      expect(ok[0].status).to.equal("verified");
+      expect(ok[0].verifiers.Etherscan.status).to.equal("verified");
       expect(n).to.equal(3);
 
       let m = 0;
-      const dead = { run: async () => { m++; throw new Error("address does not have bytecode"); } };
+      const dead = fakeHre({ "verify:etherscan": () => { m++; throw new Error("address does not have bytecode"); } });
       const bad = await runVerify(dead, one, { ...quiet, retries: 3 });
-      expect(bad[0].status).to.equal("failed");
+      expect(bad[0].verifiers.Etherscan.status).to.equal("failed");
       expect(m).to.equal(3);
     });
 
     it("does not retry other errors and never throws", async function () {
       let n = 0;
-      const hre = { run: async () => { n++; throw new Error("Invalid API Key"); } };
-      const res = await runVerify(hre, { steps: [plan.steps[0]], warnings: [] }, { ...quiet, retries: 5 });
+      const hre = fakeHre({ "verify:etherscan": () => { n++; throw new Error("compile mismatch"); } });
+      const res = await runVerify(hre, one, { ...quiet, retries: 5 });
       expect(n).to.equal(1);
-      expect(res[0]).to.include({ status: "failed" });
+      expect(res[0].verifiers.Etherscan.status).to.equal("failed");
     });
   });
 });

@@ -330,7 +330,7 @@ Addresses (`ARAF_ESCROW_ADDRESS`, token addresses) are not secrets.
 | `AWS_KMS_KEY_ARN` (`KMS_KEY_ARN`) | `docs/TR/MAINNET_READINESS_CHECKLIST.md:54`; `backend/.env.example:66` (says it is not read) | Not read; the key ID is inside the `CiphertextBlob`. Do not set it. |
 | `MIN_REWARD_BPS`, `MAX_REWARD_BPS` | `docs/TR/REWARDS_ROLLOUT.md` | Not read as env in code (contract constant; **not verified**, only seen via grep that it is not read as env). |
 | `VITE_ADMIN_WALLETS` | Old docs | Removed (`AppViews.jsx:206`). |
-| `BASESCAN_API_KEY` (as a GitHub secret) | `docs/EN/DEPLOY_BASE_SEPOLIA.md:14` | No workflow reads it; meaningful only in `contracts/.env` for a manual `hardhat verify`. |
+| `BASESCAN_API_KEY` (as a GitHub secret) | `.github/workflows/deploy-base-sepolia.yml` | **Legacy name.** `deploy-base-sepolia.yml` reads it only as a fallback when `ETHERSCAN_API_KEY` is missing and `verify_contracts=true` (`ETHERSCAN_API_KEY \|\| BASESCAN_API_KEY`). Use `ETHERSCAN_API_KEY` for new setups. |
 | `NODE_PATH` | `contracts/hardhat.config.js:9-10` | Not read; the script sets it itself; you do not need to set it. |
 
 ### 6.2 Aliases (which one to prefer)

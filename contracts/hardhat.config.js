@@ -134,6 +134,30 @@ const config = {
   sourcify: {
     enabled: true,
   },
+  // [TR] Ücretsiz yedek: Blockscout anahtar istemez. hardhat-verify'ın yerleşik blockscout zincir listesinde
+  //      Base yok, bu yüzden customChains gerekir (apiURL = Etherscan uyumlu /api).
+  // [EN] Keyless fallback. Base is not in hardhat-verify's builtin blockscout chains, hence customChains.
+  blockscout: {
+    enabled: true,
+    customChains: [
+      {
+        network: "base-sepolia",
+        chainId: 84532,
+        urls: {
+          apiURL: "https://base-sepolia.blockscout.com/api",
+          browserURL: "https://base-sepolia.blockscout.com",
+        },
+      },
+      {
+        network: "base",
+        chainId: 8453,
+        urls: {
+          apiURL: "https://base.blockscout.com/api",
+          browserURL: "https://base.blockscout.com",
+        },
+      },
+    ],
+  },
   gasReporter: {
     enabled: process.env.REPORT_GAS === "true",
     currency: "USD",
