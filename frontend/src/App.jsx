@@ -10,7 +10,7 @@ import { useSessionActions } from './app/providers/SessionProvider';
 import { useAppSessionData } from './app/useAppSessionData';
 // [TR] Admin paneli yalnız yöneticiler içindir; ayrı chunk olarak ilk ihtiyaçta yüklenir.
 // [EN] The admin panel is for admins only; loaded as a separate chunk on first use.
-const AdminPanel = React.lazy(() => import('./AdminPanel'));
+const AdminPanel = lazyWithRetry(() => import('./AdminPanel'));
 import useFullscreen from './app/shell/useFullscreen';
 import { isUiLabEnabled, loadUiLab } from './app/uiLab';
 import { SESSION_ONLY_VIEWS } from './app/viewRegistry';
@@ -19,6 +19,9 @@ import { markTermsAcceptedLocally } from './app/legal/terms';
 import { buildApiUrl, resolveApiPolicyDiagnostics } from './app/apiConfig';
 import { checkDeploymentAlignment, getSupportedChainsMap, isMintTokenEnabled, isSupportedChainId } from './app/chainPolicy';
 import { ENV_ERROR_CODES, envError } from './app/envErrorCodes';
+import ErrorBoundary from './components/ErrorBoundary';
+import { lazyWithRetry } from './app/lazyWithRetry';
+import { useInfraHealth } from './app/infraHealth';
 import { resolveRevenueVaultAddress } from './app/envConfig';
 import { useMakerOrderForm } from './app/contexts/marketplace/useMakerOrderForm';
 import { useMarketFilters } from './app/contexts/marketplace/marketFilters';
@@ -51,11 +54,21 @@ const ADMIN_TOKEN_SYMBOLS = Object.fromEntries(
   Object.entries(SUPPORTED_TOKEN_ADDRESSES).filter(([, a]) => a).map(([sym, a]) => [String(a).toLowerCase(), sym])
 );
 
+// [TR] Render fonksiyonunu alt bileşen olarak çalıştırır; böylece fırlattığı hata App'i değil en yakın
+//      ErrorBoundary'yi düşürür. (Bu fonksiyonlarda hook yoktur.)
+// [EN] Runs a render function as a child component so its throw reaches the nearest ErrorBoundary, not App.
+const ViewSlot = ({ render }) => render();
+
 function App() {
   // ═══════════════════════════════════════════
   // 1. EKRAN VE UI STATE YÖNETİMİ
   //    View routing + modal open/close flags
   // ═══════════════════════════════════════════
+  // [TR] Fail-closed: backend ya da RPC erişilemezken yeni pozisyon açan işlemler (emir oluştur / emre gir) kapalıdır.
+  //      Mevcut işlemden çıkış eylemleri (serbest bırak, itiraz vb.) kapatılmaz; kullanıcı süre kaybetmesin.
+  // [EN] Fail-closed: new-position txs are disabled while backend or RPC is unreachable; exit actions stay available.
+  const infra = useInfraHealth();
+  const infraTxBlocked = infra.backend || infra.rpc;
   const uiLabEnabled = isUiLabEnabled();
   // [TR] Lab kodu yalnız etkinse ve ilk ihtiyaçta yüklenir. [EN] Lab code loads only when enabled.
   const [uiLab, setUiLab] = useState(null);
@@ -539,7 +552,7 @@ function App() {
     handleCreateOrder,
     handleOpenMakerModal,
   } = useMakerOrderForm({
-    isPaused,
+    isPaused: isPaused || infraTxBlocked,
     requireSignedSessionForActiveWallet,
     setShowMakerModal,
     showToast,
@@ -925,7 +938,7 @@ function App() {
     isLoggingIn,
     isContractLoading,
     loadingText,
-    isPaused,
+    isPaused: isPaused || infraTxBlocked,
     authChecked: effectiveAuthChecked,
     currentView,
     setCurrentView,
@@ -1110,12 +1123,15 @@ function App() {
     <div className="flex h-dvh min-h-dvh max-h-dvh w-full max-w-full flex-col overflow-hidden bg-app text-textPrimary font-sans selection:bg-emerald-500/30 relative">
       <AppShell
         status={systemStatus}
-        navigation={renderSlimRail()}
-        panel={renderContextSidebar()}
-        mobileBottom={renderMobileNav()}
+        navigation={<ErrorBoundary scope="section" fallback={null}><ViewSlot render={renderSlimRail} /></ErrorBoundary>}
+        panel={<ErrorBoundary scope="section" fallback={null}><ViewSlot render={renderContextSidebar} /></ErrorBoundary>}
+        mobileBottom={<ErrorBoundary scope="section" fallback={null}><ViewSlot render={renderMobileNav} /></ErrorBoundary>}
         outlet={(
           <div className="flex-1 min-w-0 w-full max-w-full overflow-y-auto overflow-x-hidden relative bg-app">
             <div className="box-border min-h-full w-full max-w-full min-w-0 flex flex-col pt-4 md:pt-10 pb-[calc(4rem_+_env(safe-area-inset-bottom))] md:pb-10 items-center">
+              {/* [TR] Görünüm render hatası yalnız bu bölümü düşürür; ray, bant ve diğer sekmeler çalışır. */}
+              <ErrorBoundary scope="section" resetKeys={[currentView]}>
+              <ViewSlot render={() => (<>
               {renderAdminHint()}
               {currentView === 'home'
                 ? renderHome()
@@ -1144,6 +1160,8 @@ function App() {
                     )
                     : renderTradeRoom()}
               {currentView === 'home' && renderFooter()}
+              </>)} />
+              </ErrorBoundary>
             </div>
           </div>
         )}

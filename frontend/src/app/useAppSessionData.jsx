@@ -6,6 +6,8 @@ import { toUnixSeconds } from './contexts/settlement/settlementActionModel';
 import { buildMarketOrdersQuery, MARKET_FILTER_DEFAULTS, matchesMarketFilters } from './contexts/marketplace/marketFilters';
 import { mapApiOrderToUi, formatTokenAmount as formatTokenAmountFromRaw, tokenToNumber as rawTokenToDisplayNumber } from './orderUiModel';
 import { buildApiUrl } from './apiConfig';
+import { fetchWithTimeout } from './fetchWithTimeout';
+import { markInfraFailure, markInfraOk, registerInfraProbe, useInfraHealth } from './infraHealth';
 import { WALLET_AGE_MIN_SEC } from './walletAge';
 import { applyStatePin, createStatePin, isTerminalTradeState } from './tradeStateSync';
 
@@ -300,6 +302,8 @@ export function useAppSessionData({
   const [walletAgeRemainingDays, setWalletAgeRemainingDays] = useState(null);
   const [takerNameState, setTakerNameState] = useState({ onchainId: null, name: '' });
   const [isPaused, setIsPaused] = useState(false);
+  // [TR] Altyapı toparlanma sayacı: değişince açılış verisi yeniden çekilir. [EN] Recovery counter: refetch boot data.
+  const infraEpoch = useInfraHealth().epoch;
 
   const [protocolStats, setProtocolStats] = useState(null);
   const [statsLoading, setStatsLoading] = useState(true);
@@ -413,7 +417,7 @@ export function useAppSessionData({
       ...requestOptions.headers,
       ...walletHeader,
     });
-    const res = await fetch(url, {
+    const res = await fetchWithTimeout(url, {
       ...requestOptions,
       headers: buildHeaders(),
       credentials: 'include',
@@ -444,7 +448,7 @@ export function useAppSessionData({
     if (skipRefresh) return res;
 
     try {
-      const refreshRes = await fetch(buildApiUrl('auth/refresh'), {
+      const refreshRes = await fetchWithTimeout(() => buildApiUrl('auth/refresh'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -469,7 +473,7 @@ export function useAppSessionData({
       // [EN] Reset auth-toast wave only after successful session refresh.
       sessionToastShownRef.current = false;
 
-      return fetch(url, {
+      return fetchWithTimeout(url, {
         ...requestOptions,
         headers: buildHeaders(),
         credentials: 'include',
@@ -493,7 +497,8 @@ export function useAppSessionData({
     try {
       setStatsError(false);
       setStatsLoading(true);
-      const res = await fetch(buildApiUrl('stats'), { credentials: 'include' });
+      const res = await fetchWithTimeout(() => buildApiUrl('stats'), { credentials: 'include', infra: 'backend' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (data.stats) setProtocolStats(data.stats);
       else setStatsError(true);
@@ -647,11 +652,23 @@ export function useAppSessionData({
     }
   }, [devScenarioActive, isAuthenticated, isConnected, address, lang, authenticatedFetch, tokenDecimalsMap, showToast, setActiveEscrows, setActiveTrade, formatAddress]);
 
+  // [TR] Backend toparlanma yoklaması: arıza işaretliyken tek bir arka plan isteği (üstel geri çekilme).
+  // [EN] Backend recovery probe: one background request with exponential backoff while marked failed.
+  useEffect(() => registerInfraProbe('backend', async () => {
+    const r = await fetchWithTimeout(() => buildApiUrl('orders/config'), { credentials: 'include', timeoutMs: 8000 });
+    return r.ok;
+  }), []);
+
   // Protocol configuration and read models
   useEffect(() => {
-    fetch(buildApiUrl('orders/config'), { credentials: 'include' })
-      .then((r) => r.json())
+    let cancelled = false;
+    fetchWithTimeout(() => buildApiUrl('orders/config'), { credentials: 'include', infra: 'backend' })
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
       .then((data) => {
+        if (cancelled) return;
         if (data.bondMap) setOnchainBondMap(data.bondMap);
         if (data.tokenMap) setOnchainTokenMap(data.tokenMap);
         if (data.feeConfig) setProtocolFeeConfig(data.feeConfig);
@@ -660,8 +677,10 @@ export function useAppSessionData({
         if (data.paymentRiskConfig) setPaymentRiskConfig(data.paymentRiskConfig);
         if (Array.isArray(data.enabledPaymentRails)) setEnabledPaymentRails(data.enabledPaymentRails);
       })
-      .catch((err) => console.error('[ProtocolConfig] fetch failed:', err));
-  }, []);
+      .catch((err) => { if (!cancelled) console.error('[ProtocolConfig] fetch failed:', err); });
+    return () => { cancelled = true; };
+    // [TR] infraEpoch: backend toparlanınca config yeniden okunur (sayfa yenilemeden).
+  }, [infraEpoch]);
 
   useEffect(() => {
     if (!getTakerFeeBps) return;
@@ -674,7 +693,7 @@ export function useAppSessionData({
       }
     };
     run();
-  }, [getTakerFeeBps]);
+  }, [getTakerFeeBps, infraEpoch]);
 
   useEffect(() => {
     const loadTokenDecimals = async () => {
@@ -739,7 +758,7 @@ export function useAppSessionData({
     }
 
     let cancelled = false;
-    fetch(buildApiUrl('auth/me'), {
+    fetchWithTimeout(() => buildApiUrl('auth/me'), {
       credentials: 'include',
       headers: { 'x-wallet-address': connectedWallet },
     })
@@ -816,7 +835,7 @@ export function useAppSessionData({
     if (!isAuthenticated || !authenticatedWallet) return undefined;
     if (adminResolvedWalletRef.current === authenticatedWallet) return undefined;
     let cancelled = false;
-    fetch(buildApiUrl('auth/me'), { credentials: 'include', headers: { 'x-wallet-address': authenticatedWallet } })
+    fetchWithTimeout(() => buildApiUrl('auth/me'), { credentials: 'include', headers: { 'x-wallet-address': authenticatedWallet } })
       .then(async (res) => {
         if (cancelled || !res.ok) return;
         const data = await res.json().catch(() => ({}));
@@ -871,7 +890,7 @@ export function useAppSessionData({
       const isStale = () => cancelled || seq !== ordersSeqRef.current;
       try {
         if (initialLoad) setLoading(true);
-        const res = await fetch(buildApiUrl(marketOrdersQuery), { credentials: 'include', signal: controller?.signal });
+        const res = await fetchWithTimeout(() => buildApiUrl(marketOrdersQuery), { credentials: 'include', signal: controller?.signal, infra: 'backend' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (isStale()) return;
@@ -900,7 +919,7 @@ export function useAppSessionData({
     }
     const interval = setInterval(whenVisible(fetchOrders), 30000);
     return () => { cancelled = true; controller?.abort(); clearInterval(interval); };
-  }, [lang, onchainBondMap, onchainTokenMap, paymentRiskConfig, marketOrdersQuery, marketViewOpen, formatAddress]);
+  }, [lang, onchainBondMap, onchainTokenMap, paymentRiskConfig, marketOrdersQuery, marketViewOpen, formatAddress, infraEpoch]);
 
   useEffect(() => {
     if (!isAuthenticated || !isConnected) {
@@ -941,7 +960,7 @@ export function useAppSessionData({
     return () => { cancelled = true; controller?.abort(); };
   }, [isAuthenticated, isConnected, authenticatedFetch, lang, onchainBondMap, onchainTokenMap, paymentRiskConfig, formatAddress]);
 
-  useEffect(() => { fetchStats(); }, [fetchStats]);
+  useEffect(() => { fetchStats(); }, [fetchStats, infraEpoch]);
 
   useEffect(() => {
     if (!isConnected || !address || !getWalletRegisteredAt) {
@@ -1055,13 +1074,19 @@ export function useAppSessionData({
       try {
         const paused = await getPaused();
         setIsPaused(paused);
+        markInfraOk('rpc');
+        return true;
       } catch (err) {
+        // [TR] Okunamadı = bilinmiyor: RPC arıza bandı + işlem açma kapalı (fail-closed); arka planda geri çekilmeli yoklama.
         console.error('Paused durumu çekilemedi:', err);
+        markInfraFailure('rpc');
+        return false;
       }
     };
+    const unregisterProbe = registerInfraProbe('rpc', fetchPausedStatus);
     fetchPausedStatus();
     const interval = setInterval(whenVisible(fetchPausedStatus), 120000);
-    return () => clearInterval(interval);
+    return () => { clearInterval(interval); unregisterProbe(); };
   }, [getPaused]);
 
   // [TR] Ad trade'e (onchainId) bağlıdır; trade değişince sıfırlanır, eski istek iptal edilir (F8).

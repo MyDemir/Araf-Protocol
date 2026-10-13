@@ -4,7 +4,8 @@ import { WALLET_AGE_MIN_DAYS } from '../walletAge';
 import { tx as t } from '../copy';
 import { isTestnetBuild } from '../chainPolicy';
 import { isCriticalStatus, useStatusDismissals } from './statusDismissal';
-import { envErrorMessage } from '../envErrorCodes';
+import { ENV_ERROR_CODES, envError, envErrorMessage } from '../envErrorCodes';
+import { useInfraHealth } from '../infraHealth';
 
 
 const supportedChainNames = (supportedChains) => Object.values(supportedChains || {})
@@ -25,6 +26,8 @@ export const resolveSystemStatuses = ({
   walletAgeRemainingDays = null,
   activeTrade = null,
   ordersFeedError = false,
+  backendUnreachable = false,
+  rpcUnreachable = false,
   lang = 'EN',
 }) => {
   const statuses = [];
@@ -108,7 +111,27 @@ export const resolveSystemStatuses = ({
     });
   }
 
-  if (ordersFeedError) {
+  if (backendUnreachable) {
+    statuses.push({
+      key: 'backend_unreachable',
+      tone: 'warning',
+      title: t(lang, 'Sunucuya ulaşılamıyor', 'Server unreachable'),
+      message: t(lang, 'Pazar verileri ve oturum doğrulaması şu an alınamıyor. Yeni işlem başlatma kapalı; bağlantı gelince otomatik toparlanacak.', 'Market data and session checks are unavailable. New trades are disabled; the page will recover automatically.'),
+      details: [envError(ENV_ERROR_CODES.BACKEND_UNREACHABLE, 'Backend API unreachable / timed out / 5xx')],
+    });
+  }
+
+  if (rpcUnreachable) {
+    statuses.push({
+      key: 'rpc_unreachable',
+      tone: 'warning',
+      title: t(lang, 'Blokzincir (RPC) erişilemiyor', 'Blockchain (RPC) unreachable'),
+      message: t(lang, 'Zincir verisi okunamıyor; değerler "bilinmiyor" gösterilir ve yeni işlem başlatma kapalıdır. Otomatik yeniden denenecek.', 'On-chain data cannot be read; values show as unknown and new trades are disabled. Retrying automatically.'),
+      details: [envError(ENV_ERROR_CODES.RPC_UNREACHABLE, 'Chain RPC read failed')],
+    });
+  }
+
+  if (ordersFeedError && !backendUnreachable) {
     statuses.push({
       key: 'orders_feed_unavailable',
       tone: 'warning',
@@ -134,6 +157,8 @@ const dismissToneClass = (tone) => {
 };
 
 export const SystemStatusBar = ({
+  backendUnreachable: backendUnreachableProp,
+  rpcUnreachable: rpcUnreachableProp,
   envErrors = [],
   isPaused = false,
   isConnected = false,
@@ -153,7 +178,12 @@ export const SystemStatusBar = ({
   children = null,
   isTestnet = isTestnetBuild(),
 }) => {
+  const infra = useInfraHealth();
+  const backendUnreachable = backendUnreachableProp ?? infra.backend;
+  const rpcUnreachable = rpcUnreachableProp ?? infra.rpc;
   const statuses = resolveSystemStatuses({
+    backendUnreachable,
+    rpcUnreachable,
     envErrors,
     isPaused,
     isConnected,

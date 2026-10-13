@@ -306,7 +306,7 @@ describe('frontend migration scaffold baseline', () => {
 
   it('keeps AppShell runtime-integrated after inlining pass-through shell scaffolds', () => {
     expect(appShellSource).toContain('export const AppShell');
-    expect(appShellSource).toContain('{status ? <SystemStatusBar {...status} /> : null}');
+    expect(appShellSource).toContain('<SystemStatusBar {...status} />');
     expect(appShellSource).toContain('{mobileTop}');
     expect(appShellSource).toContain('<div className="flex min-w-0 flex-col md:flex-row min-h-0 flex-1">');
     expect(appShellSource).toContain('{navigation}');
