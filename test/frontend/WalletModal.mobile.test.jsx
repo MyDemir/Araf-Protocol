@@ -35,7 +35,7 @@ describe('wallet modal on mobile', () => {
     setUa(IPHONE);
     const ctx = renderModal();
     expect(screen.getByTestId('mobile-wallet-picker')).toBeTruthy();
-    expect(screen.queryByText('Injected')).toBeNull();
+    expect(screen.getAllByText('Browser wallet')).toHaveLength(1); // injected connector is not listed next to the toggle
     const toggle = screen.getByTestId('browser-wallet-toggle');
     expect(screen.getByText('Coinbase Wallet')).toBeTruthy();
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
@@ -64,7 +64,7 @@ describe('wallet modal on mobile', () => {
     setUa(IPHONE);
     window.ethereum = {};
     const ctx = renderModal();
-    await userEvent.click(screen.getByText('Injected'));
+    await userEvent.click(screen.getByText('Browser wallet'));
     expect(ctx.connect).toHaveBeenCalledWith({ connector: connectors[0] }, expect.anything());
   });
 
@@ -73,7 +73,7 @@ describe('wallet modal on mobile', () => {
     window.ethereum = {};
     renderModal();
     expect(screen.queryByTestId('mobile-wallet-picker')).toBeNull();
-    expect(screen.getByText('Injected')).toBeTruthy();
+    expect(screen.getByText('Browser wallet')).toBeTruthy();
   });
 
   it('keeps the normal list on desktop', () => {
@@ -86,7 +86,7 @@ describe('wallet modal on mobile', () => {
     setUa(DESKTOP);
     const connect = vi.fn((_v, opts) => opts.onError({ name: 'ProviderNotFoundError' }));
     const ctx = renderModal({ connect });
-    await userEvent.click(screen.getByText('Injected'));
+    await userEvent.click(screen.getByText('Browser wallet'));
     expect(ctx.showToast).toHaveBeenCalledWith(expect.stringMatching(/No wallet found/), 'error');
   });
 });
