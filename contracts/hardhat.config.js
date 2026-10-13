@@ -101,17 +101,21 @@ const config = {
       chainId: 8453,
     },
   },
+  // [TR] Etherscan V2: tek bir etherscan.io API anahtarı tüm zincirlerde geçerlidir. hardhat-verify
+  //      apiKey TEK STRING ise https://api.etherscan.io/v2/api + chainid kullanır (internal/etherscan.js
+  //      fromChainConfig: isV2 = typeof apiKey === "string"). Ağ başına apiKey nesnesi kapatılan V1'e
+  //      (api.basescan.org) düşürür. BASESCAN_API_KEY yalnız geriye uyumluluk için okunur.
+  // [EN] Etherscan V2: one etherscan.io key works for every chain. A plain-string apiKey makes
+  //      hardhat-verify use the V2 endpoint + chainid; a per-network object falls back to retired V1.
   etherscan: {
-    apiKey: {
-      "base-sepolia": process.env.BASESCAN_API_KEY || "",
-      base:           process.env.BASESCAN_API_KEY || "",
-    },
+    apiKey: process.env.ETHERSCAN_API_KEY || process.env.BASESCAN_API_KEY || "",
+    // V2'de apiURL yok sayılır (ETHERSCAN_V2_API_URL + chainid kullanılır); browserURL link içindir.
     customChains: [
       {
         network: "base-sepolia",
         chainId: 84532,
         urls: {
-          apiURL:   "https://api-sepolia.basescan.org/api",
+          apiURL: "https://api.etherscan.io/v2/api",
           browserURL: "https://sepolia.basescan.org",
         },
       },
@@ -119,11 +123,16 @@ const config = {
         network: "base",
         chainId: 8453,
         urls: {
-          apiURL:   "https://api.basescan.org/api",
+          apiURL: "https://api.etherscan.io/v2/api",
           browserURL: "https://basescan.org",
         },
       },
     ],
+  },
+  // [TR] Yedek doğrulama yolu (API anahtarı gerektirmez).
+  // [EN] Fallback verification path (no API key needed).
+  sourcify: {
+    enabled: true,
   },
   gasReporter: {
     enabled: process.env.REPORT_GAS === "true",
