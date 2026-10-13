@@ -4,6 +4,8 @@ import { buildMakerPreview, getMakerModalCopy, getOrderSideCopy, resolveEffectiv
 import { resolveTierMaxAmounts } from './actions/orderCreationActions';
 import { TERMS_ACKNOWLEDGEMENTS, TERMS_SECTIONS, TERMS_VERSION } from './legal/terms';
 import PaymentRiskBadge from '../components/PaymentRiskBadge';
+import MobileWalletPicker from '../components/MobileWalletPicker';
+import { describeConnectError, shouldShowMobileWalletPicker } from './mobileWallet';
 import { fmtBps, isKnownNumber, fmtNum } from './copy';
 import { profileRequiredMessage } from './payoutProfileGate';
 
@@ -83,6 +85,7 @@ export const buildAppModals = (ctx) => {
     setShowWalletModal,
     connectors,
     connect,
+    showToast,
     getWalletIcon,
     showFeedbackModal,
     setShowFeedbackModal,
@@ -143,8 +146,19 @@ export const buildAppModals = (ctx) => {
     </button>
   );
 
+  // [TR] Hata sessiz kalmaz: bağlantı başarısızsa toast ile anlaşılır mesaj gösterilir.
+  const connectWith = (connector) => {
+    setShowWalletModal(false);
+    try {
+      connect({ connector }, { onError: (err) => showToast?.(describeConnectError(err, lang), 'error') });
+    } catch (err) {
+      showToast?.(describeConnectError(err, lang), 'error');
+    }
+  };
+
   const renderWalletModal = () => {
     if (!showWalletModal) return null;
+    const mobilePicker = typeof window !== 'undefined' && shouldShowMobileWalletPicker(window.navigator, window);
     return (
       <div className="fixed inset-0 max-w-full overflow-x-hidden bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center sm:p-4 safe-area-x z-[100]" role="dialog" aria-modal="true" aria-labelledby="wallet-modal-title">
         <div className="bg-surface border border-borderSubtle rounded-t-2xl sm:rounded-2xl p-5 sm:p-6 w-full sm:max-w-sm shadow-2xl max-h-[calc(100dvh_-_2rem_-_env(safe-area-inset-top)_-_env(safe-area-inset-bottom))] overflow-x-hidden overflow-y-auto overscroll-contain pb-[calc(1.25rem_+_env(safe-area-inset-bottom))] sm:pb-6">
@@ -153,6 +167,9 @@ export const buildAppModals = (ctx) => {
             {closeBtn(() => setShowWalletModal(false), lang === 'TR' ? 'Kapat' : 'Close')}
           </div>
           <p className="text-xs text-textMuted mb-4">{lang === 'TR' ? 'Bağlandıktan sonra oturumu cüzdan imzasıyla açarsınız.' : 'After connecting, you sign in with a wallet signature.'}</p>
+          {mobilePicker ? (
+            <MobileWalletPicker lang={lang} location={window.location} connectors={connectors} onConnect={connectWith} />
+          ) : (
           <div className="space-y-2">
             {connectors.length === 0 && (
               <p className="text-sm text-textSecondary bg-elevated border border-borderSubtle rounded-xl p-4">{lang === 'TR' ? 'Tarayıcıda cüzdan bulunamadı. MetaMask, Coinbase Wallet veya Rabby kurun.' : 'No wallet found in this browser. Install MetaMask, Coinbase Wallet or Rabby.'}</p>
@@ -161,7 +178,7 @@ export const buildAppModals = (ctx) => {
               <button
                 key={connector.uid}
                 type="button"
-                onClick={() => { connect({ connector }); setShowWalletModal(false); }}
+                onClick={() => connectWith(connector)}
                 className="w-full flex items-center justify-between bg-elevated hover:border-brand/50 border border-borderSubtle px-4 py-3 rounded-xl transition group"
               >
                 <span className="flex items-center gap-3">
@@ -172,6 +189,7 @@ export const buildAppModals = (ctx) => {
               </button>
             ))}
           </div>
+          )}
           <p className="mt-4 text-xs text-textMuted flex items-center justify-center gap-1.5">
             <ShieldCheck className="w-3.5 h-3.5 text-success" strokeWidth={1.8} aria-hidden="true" />
             {lang === 'TR' ? 'Araf hiçbir zaman özel anahtar veya kurtarma ifadesi istemez.' : 'Araf never asks for private keys or seed phrases.'}
