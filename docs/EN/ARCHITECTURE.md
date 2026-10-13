@@ -1094,3 +1094,10 @@ So it is neither a shallow summary nor a stale legacy dump; it is a modern, oper
 - Recovery: one background probe with exponential backoff (5 s to 60 s, jitter); a successful probe clears the banner and refetches data without a reload.
 - Fail-closed: NEW-position txs (create order / fill order) are gated by `txGate` while paused, before the first chain read, or during an infra outage; action functions check it before approve. Exit actions on an existing trade are never gated (the contract enforces timers on-chain); the trade room only shows a calm notice.
 - A render error takes down only its own section (`ErrorBoundary scope="section"`); `public/boot-guard.js` shows a reload prompt if the main bundle never loads.
+
+## Degraded (restricted) mode
+
+- If a TRANSIENT RPC error (429, network, timeout) hits an RPC-bound boot step (SEC-01 chain check, protocol config, worker), the backend does not exit. It starts degraded: one `warn` (RPC URL redacted), `/ready` returns 503 with `degradedReasons: ["rpc_unavailable_at_boot"]`. A definite error (ChainGuard / wrong chain / unknown error) or a DB failure still exits with code 1. There is no bypass flag.
+- The KMS key is NOT loaded until SEC-01 verifies chain 84532 (`blockKeyLoadingUntilSelfTest`); encryption calls are refused with `KMS_UNAVAILABLE_DEGRADED`.
+- `middleware/requireFullService.js` is a default-deny gate on `/api`: only the allowlist (public order/stat/ticker/rewards reads, SIWE auth, client log) passes; everything else returns 503 `SERVICE_DEGRADED`. The test enumerates the real routers, so a new route is closed until added to the allowlist. Chain-bound schedulers (DLQ, reputation decay, reward recorder, reconciliation) are skipped while degraded. The protocol config comes from the last-known Redis copy and is flagged stale (`X-Araf-Config-Stale`).
+- Recovery: a single background loop (5 s to 5 min exponential backoff, jitter) retries SEC-01 + KMS key, then protocol config, then the worker. On success `degraded=false`, `/ready` returns 200 and one info line is logged.

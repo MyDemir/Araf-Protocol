@@ -29,6 +29,11 @@ const {
 // [TR] Kısıtlı (degraded) mod: RPC'ye bağlı açılış adımları geçici hatada süreci öldürmez.
 // [EN] Degraded mode: RPC-bound boot steps do not kill the process on transient errors.
 const serviceMode = require("./services/serviceMode");
+
+// [TR] Çalışma ayarları açılışta yüklenir; modül yüklenirken auditEnvAtStartup() tam bir kez çalışır (tekrar çağrı
+//      aynı uyarıları çiftler). Worker da bu süreçte çalıştığı için audit açılışta kesin yapılmış olur.
+// [EN] Loading the module runs auditEnvAtStartup() exactly once at process start (worker lives in this process).
+require("./services/runtimeSettings");
 const { requireFullService } = require("./middleware/requireFullService");
 const { getRpcUrls, redactRpcUrl, redactRpcSecrets } = require("./services/rpcProvider");
 
@@ -439,14 +444,11 @@ async function bootstrap() {
       { name: "protocol_config", run: () => refreshProtocolConfig() },
       {
         name: "worker",
-        run: async () => {
-          try {
-            await worker.start();
-          } catch (err) {
-            await worker.stop().catch(() => {});
-            throw err;
-          }
-        },
+        // [TR] Yalnız toparlanma döngüsü başlatır (açılış yolu worker.start()'ı beklemez, B19).
+        run: () => worker.start().catch(async (err) => {
+          await worker.stop().catch(() => {});
+          throw err;
+        }),
       },
     ];
     const startRecoveryLoop = () => {
