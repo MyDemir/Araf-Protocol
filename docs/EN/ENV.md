@@ -255,7 +255,7 @@ Recommended free-plan profile: `LIVE_POLL_INTERVAL_MS=15000`, `WORKER_BLOCK_BATC
 
 | Variable | What it does | Required? | L | S | M | Where | Used at |
 |---|---|---|---|---|---|---|---|
-| `ADMIN_WALLETS` | Wallets for `/api/admin/*` and `isAdmin` (comma-separated) | Optional (if empty, nobody is admin) | your own wallet | `0x…40 hex` | `0x…40 hex` | B/.env, Fly | `utils/adminWallets.js:6` |
+| `ADMIN_WALLETS` | Wallets for `/api/admin/*` and `isAdmin` (comma-separated) | Optional but **effectively required in production**: if empty nobody is admin, the admin menu never appears and one warning is logged at startup. Fly: `fly secrets set ADMIN_WALLETS=0x…,0x…` (the deploy workflow writes it only if the GitHub variable is set); restart after changing | your own wallet | `0x…40 hex` | `0x…40 hex` | B/.env, Fly | `utils/adminWallets.js:6` |
 | `IDENTITY_NORMALIZATION_GUARD` | `off` / `warn` / `enforce` (mixed numeric id guard) | Optional (`enforce` in prod, `warn` otherwise) | empty | empty | empty | B/.env, Fly | `app.js:88-94` |
 | `PII_IDENTITY_NORMALIZATION_GUARD` | Separate mode for PII routes | Optional (falls back to the previous variable, then `enforce`) | empty | empty | empty | B/.env, Fly | `routes/pii.js:80` |
 | `IDENTITY_MIGRATION_BATCH_SIZE` | Batch size for `migrate:identity` | Optional (`1000`) | empty | empty | empty | B/.env | `migrations/normalizeIdentityFields.js:170` |
@@ -455,3 +455,20 @@ Fixed items are marked "fixed"; the others are open. (The earlier draft's items 
 11. **[fixed: `scripts/init-env.js` / `npm run init:env` generates the secrets; a local `EXPECTED_CHAIN_ID=31337` note was added to `.env.example`, the example value stayed 8453]** **`backend/.env.example` does not work as is when copied with a plain `cp` (deliberate):** the `JWT_SECRET` example is 60 characters (`:30`), the code requires at least 64 (`siwe.js:95`); the `MASTER_ENCRYPTION_KEY` example (`:75`) is not 64 hex (`encryption.js:114`); the `EXPECTED_CHAIN_ID=8453` example (`:83`) gives a mismatch error locally if the RPC is different (`expectedChain.js:55-58`).
 12. **[fixed: backend/.env.example comments were clarified]** **Fail-fast in prod but under-emphasized in the example:** `JWT_SECRET` is not prod-specific; it is required in **every environment** (`siwe.js:94`, at module load; `/ready` also requires it via `health.js:96-99`). A localhost-only `ALLOWED_ORIGINS` stops the process at startup (`app.js:161-163`). If `ARAF_DEPLOYMENT_BLOCK`/`WORKER_START_BLOCK` and the Redis checkpoint are both missing, the worker `throw`s in prod (`eventListener.js:1098-1100`).
 13. **[fixed: rewards deploy is deliberately kept outside the workflow; however, if the repo variable `ARAF_REVENUE_VAULT_ADDRESS`/`ARAF_REWARDS_ADDRESS` is defined (validated with an address regex), both workflows pass them as Fly secrets (same names) and Vercel build-env (`VITE_REVENUE_VAULT_ADDRESS`, `VITE_REWARDS_ADDRESS`); if not defined, nothing is written]** **Rewards is outside the workflow.** Rewards is a separate operation (`DEPLOY_BASE_SEPOLIA.md`); until the addresses are entered as variables, the reward mirror and recorder stay inactive in the Sepolia demo.
+
+
+### Runtime settings (admin panel)
+
+Precedence: **admin value > env > code default**; bounds are enforced server-side for every source. Changes apply from the next round without a restart (15 s cache; if the DB is unreadable the last known value, else env/default, is used).
+
+| Setting | Bounds | Default |
+|---|---|---|
+| `LIVE_POLL_INTERVAL_MS` | 5000–300000 | 15000 |
+| `WORKER_BLOCK_BATCH_SIZE` | 1–2000 | 1000 |
+| `WORKER_REPLAY_BATCH_DELAY_MS` | 0–10000 | 250 |
+
+Extreme combinations (e.g. `WORKER_BLOCK_BATCH_SIZE=1` with `WORKER_REPLAY_BATCH_DELAY_MS=0`) make the worker hammer the RPC and can exhaust the quota or trigger 429s.
+
+Recommendation: enforce append-only at the DB role level for the audit collections (`runtimesettingaudits`, `paymentrailaudits`): grant the application role only `insert` and `find`, no `update`/`remove`. Schema-level immutability is enforced in code only; the DB role is the second layer.
+
+RPC URLs (`BASE_RPC_URL`, `BASE_RPC_URL_FALLBACKS`) are intentionally not in the panel and stay env-only: a hijacked admin session could supply an RPC that reports the right chain ID but returns forged logs, and the worker trusts those logs. Secrets, contract addresses, `EXPECTED_CHAIN_ID`, finality, CORS, `ADMIN_WALLETS`, KMS and SEC-01 settings are also env-only.

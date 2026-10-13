@@ -20,6 +20,7 @@ const RewardClaim = require("../models/RewardClaim");
 const { buildBankProfileRisk, buildTradeHealthSignals } = require("./tradeRisk");
 const { isAdminWallet } = require("../utils/adminWallets");
 const paymentRails = require("../services/paymentRails");
+const runtimeSettings = require("../services/runtimeSettings");
 const { hmacDigest } = require("../services/encryption");
 
 const router = express.Router();
@@ -741,6 +742,9 @@ router.put("/payment-rails/:rail", adminWriteLimiter, async (req, res, next) => 
     });
     return res.json({ success: true, ...result });
   } catch (err) {
+    if (err.code === "DB_UNAVAILABLE") {
+      return res.status(503).json({ error: err.message, code: "DB_UNAVAILABLE" });
+    }
     if (err.code === "LAST_ENABLED_RAIL") {
       return res.status(409).json({ error: err.message, code: "LAST_ENABLED_RAIL" });
     }
@@ -749,6 +753,75 @@ router.put("/payment-rails/:rail", adminWriteLimiter, async (req, res, next) => 
     }
     if (err.code === "RAIL_UNKNOWN") {
       return res.status(400).json({ error: err.message, code: "PAYMENT_RAIL_UNKNOWN" });
+    }
+    return next(err);
+  }
+});
+
+// ─── Çalışma ayarları (runtime settings) ─────────────────────────────────────
+// [TR] Aynı yetki zinciri (router.use) + adminWriteLimiter. Yalnız performans/operasyon ayarları; RPC URL'leri,
+//      anahtarlar, finality vb. BİLEREK yoktur (yalnız env). Değer: admin > env > varsayılan; sınırlar sunucuda.
+// [EN] Same auth chain + write limiter. Performance/ops knobs only; RPC URLs/secrets/finality are env-only.
+const SETTING_PUT_SCHEMA = Joi.object({
+  value: Joi.number().integer().strict().optional(),
+  reset: Joi.boolean().strict().optional(),
+  reason: Joi.string().trim().max(300).allow("").optional(),
+  expectedVersion: Joi.number().integer().min(0).strict().optional(),
+}).xor("value", "reset").required();
+
+router.get("/runtime-settings", async (_req, res, next) => {
+  try {
+    const { settings, version, degraded } = await runtimeSettings.getEffectiveSettings();
+    return res.json({ settings: runtimeSettings.SETTING_KEYS.map((k) => settings[k]), version, degraded });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+router.get("/runtime-settings/audit", async (req, res, next) => {
+  try {
+    const { error, value } = AUDIT_QUERY_SCHEMA.validate(req.query || {});
+    if (error) return res.status(400).json({ error: error.message });
+    return res.json(await runtimeSettings.listAudit(value));
+  } catch (err) {
+    return next(err);
+  }
+});
+
+router.put("/runtime-settings/:key", adminWriteLimiter, async (req, res, next) => {
+  try {
+    const key = String(req.params.key || "");
+    if (!runtimeSettings.isKnownSetting(key)) {
+      return res.status(400).json({ error: "Bilinmeyen ayar.", code: "RUNTIME_SETTING_UNKNOWN" });
+    }
+    const { error, value } = SETTING_PUT_SCHEMA.validate(req.body);
+    if (error) return res.status(400).json({ error: error.message });
+    const nextValue = value.reset ? null : value.value;
+    if (nextValue !== null && !runtimeSettings.isInBounds(key, nextValue)) {
+      const d = runtimeSettings.SETTING_DEFS[key];
+      return res.status(400).json({ error: `Değer ${d.min}-${d.max} aralığında olmalı.`, code: "RUNTIME_SETTING_OUT_OF_RANGE" });
+    }
+
+    const ipHash = await hmacDigest("admin-audit-ip", req.ip || "");
+    const result = await runtimeSettings.setSetting(key, nextValue, {
+      wallet: req.wallet,
+      reason: value.reason || "",
+      ipHash,
+      expectedVersion: value.expectedVersion,
+    });
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    if (err.code === "DB_UNAVAILABLE") {
+      return res.status(503).json({ error: err.message, code: "DB_UNAVAILABLE" });
+    }
+    if (err.code === "SETTING_CONFLICT") {
+      return res.status(409).json({ error: err.message, code: "RUNTIME_SETTING_CONFLICT" });
+    }
+    if (err.code === "SETTING_OUT_OF_RANGE" || err.code === "SETTING_UNKNOWN") {
+      return res.status(400).json({ error: err.message, code: `RUNTIME_${err.code}` });
+    }
+    if (err.code === "SETTING_AUDIT_FAILED") {
+      return res.status(500).json({ error: err.message, code: "RUNTIME_SETTING_AUDIT_FAILED" });
     }
     return next(err);
   }

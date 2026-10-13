@@ -81,6 +81,15 @@ function _sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// [TR] Lazy: ayar servisi Mongoose modellerine bağlıdır; yüklenemezse (ör. mock'lu ortam) env/varsayılan kullanılır.
+let _runtimeSettingsSvc;
+function _rtSvc() {
+  if (_runtimeSettingsSvc === undefined) {
+    try { _runtimeSettingsSvc = require("./runtimeSettings"); } catch { _runtimeSettingsSvc = null; }
+  }
+  return _runtimeSettingsSvc;
+}
+
 const BLOCK_BATCH_SIZE = _getPositiveIntEnv("WORKER_BLOCK_BATCH_SIZE", 1_000);
 // [TR] Canlı izleme "block" olayına değil zamanlayıcıya bağlıdır (Base ~2 sn'de bir blok = çok fazla eth_getLogs).
 //      Alt sınır 2 sn. Her turda 1x eth_blockNumber + 1x eth_getLogs (~85 CU).
@@ -774,11 +783,13 @@ class EventWorker {
     this._setState("replaying", `replay aralığı: ${fromBlock}-${finalizedToBlock}`);
 
     try {
-      for (let from = fromBlock; from <= finalizedToBlock; from += BLOCK_BATCH_SIZE) {
+      await this._refreshRuntimeSettings();
+      const batchSize = this._cfg("WORKER_BLOCK_BATCH_SIZE");
+      for (let from = fromBlock; from <= finalizedToBlock; from += batchSize) {
         // [TR] stop() süren replay'i durdurur (kapanış sırasında DB/Redis yazımı sürmesin).
         // [EN] stop() halts an in-flight replay so writes do not continue during shutdown.
         if (this._stopRequested) return;
-        const to = Math.min(from + BLOCK_BATCH_SIZE - 1, finalizedToBlock);
+        const to = Math.min(from + batchSize - 1, finalizedToBlock);
         let allEvents;
         try {
           allEvents = await this._fetchRangeEvents(from, to);
@@ -824,7 +835,7 @@ class EventWorker {
 
         await this._updateSafeCheckpointIfHigher(to);
         // [TR] Batch'ler art arda patlamasın (saniyelik CU sınırı).
-        if (to < finalizedToBlock && REPLAY_BATCH_DELAY_MS > 0) await _sleep(REPLAY_BATCH_DELAY_MS);
+        if (to < finalizedToBlock && this._cfg("WORKER_REPLAY_BATCH_DELAY_MS") > 0) await _sleep(this._cfg("WORKER_REPLAY_BATCH_DELAY_MS"));
       }
 
       this._noteReplaySuccess();
@@ -855,7 +866,7 @@ class EventWorker {
   // [TR] Replay'de 429: replay geri çekilmesi en az canlı geri çekilme kadar uzatılır (checkpoint ilerlemez).
   _noteReplayRateLimited(err) {
     const kind = classifyRpcError(err);
-    const floor = kind === "monthly" ? RPC_MONTHLY_WAIT_MS : Math.min(LIVE_POLL_INTERVAL_MS * 2, RPC_BACKOFF_MAX_MS);
+    const floor = kind === "monthly" ? RPC_MONTHLY_WAIT_MS : Math.min(this._cfg("LIVE_POLL_INTERVAL_MS") * 2, RPC_BACKOFF_MAX_MS);
     this._replayNextAttemptAt = Math.max(this._replayNextAttemptAt, Date.now() + floor);
   }
 
@@ -890,7 +901,7 @@ class EventWorker {
     this._lastBlockSeenAt = Date.now();
     this._startWatchdog();
 
-    this._scheduleLiveTick(LIVE_POLL_INTERVAL_MS);
+    this._scheduleLiveTick(this._cfg("LIVE_POLL_INTERVAL_MS"));
 
     this.provider.on("error", (err) => {
       logger.error(`[Worker] Provider hatası: ${err?.message}. Yeniden bağlanılıyor...`);
@@ -899,6 +910,27 @@ class EventWorker {
 
     this._listenersAttached = true;
     this._setState("live", "canlı block-range zamanlayıcı bağlandı");
+  }
+
+  /**
+   * [TR] Çalışma ayarlarını (LIVE_POLL_INTERVAL_MS, WORKER_BLOCK_BATCH_SIZE, WORKER_REPLAY_BATCH_DELAY_MS)
+   *      ayar servisinden okur (15 sn önbellekli). Asla fırlatmaz; okunamazsa önceki değerler korunur.
+   * [EN] Reads runtime settings from the service (15s cached). Never throws; keeps previous values on failure.
+   */
+  async _refreshRuntimeSettings() {
+    try {
+      const svc = _rtSvc();
+      if (svc) this._rt = await svc.getEffectiveValues();
+    } catch { /* fail-open: önceki / env değerleri */ }
+  }
+
+  _cfg(name) {
+    const v = this._rt && this._rt[name];
+    const svc = _rtSvc();
+    if (svc && Number.isInteger(v) && svc.isInBounds(name, v)) return v;
+    if (name === "WORKER_BLOCK_BATCH_SIZE") return BLOCK_BATCH_SIZE;
+    if (name === "LIVE_POLL_INTERVAL_MS") return LIVE_POLL_INTERVAL_MS;
+    return REPLAY_BATCH_DELAY_MS;
   }
 
   _stopLiveTimer() {
@@ -911,7 +943,9 @@ class EventWorker {
     if (this._stopRequested) return;
     this._liveTimer = setTimeout(() => {
       this._liveTimer = null;
-      this._liveTick().catch((err) => logger.error(`[Worker] Live tick beklenmeyen hata: ${redactRpcSecrets(err?.message)}`));
+      // [TR] Her tur başında admin/env/varsayılan ayarları okunur (yeniden başlatma gerekmez); hata fail-open.
+      // [EN] Runtime settings are re-read at the start of every tick (no restart needed); failures are fail-open.
+      this._refreshRuntimeSettings().then(() => this._liveTick()).catch((err) => logger.error(`[Worker] Live tick beklenmeyen hata: ${redactRpcSecrets(err?.message)}`));
     }, delayMs);
     if (typeof this._liveTimer.unref === "function") this._liveTimer.unref();
   }
@@ -925,13 +959,13 @@ class EventWorker {
    */
   async _liveTick() {
     if (this._livePollInProgress || this._stopRequested || !this.provider || !this.contract) {
-      if (!this._stopRequested && this._listenersAttached) this._scheduleLiveTick(LIVE_POLL_INTERVAL_MS);
+      if (!this._stopRequested && this._listenersAttached) this._scheduleLiveTick(this._cfg("LIVE_POLL_INTERVAL_MS"));
       return;
     }
     const epoch = this._liveEpoch;
     const stale = () => epoch !== this._liveEpoch;
     this._livePollInProgress = true;
-    let nextDelay = LIVE_POLL_INTERVAL_MS;
+    let nextDelay = this._cfg("LIVE_POLL_INTERVAL_MS");
     try {
       const head = await this.provider.getBlockNumber();
       if (stale()) return;
@@ -942,12 +976,12 @@ class EventWorker {
       let from = this._lastLivePolledBlock + 1;
       while (from <= head) {
         if (this._stopRequested || stale()) return;
-        const to = Math.min(from + BLOCK_BATCH_SIZE - 1, head);
+        const to = Math.min(from + this._cfg("WORKER_BLOCK_BATCH_SIZE") - 1, head);
         await this._pollLiveRange(from, to);
         if (stale()) return; // yeniden bağlanma sırasında: imleç ilerletilmez
         this._lastLivePolledBlock = to;
         from = to + 1;
-        if (from <= head && REPLAY_BATCH_DELAY_MS > 0) await _sleep(REPLAY_BATCH_DELAY_MS);
+        if (from <= head && this._cfg("WORKER_REPLAY_BATCH_DELAY_MS") > 0) await _sleep(this._cfg("WORKER_REPLAY_BATCH_DELAY_MS"));
       }
 
       if (stale()) return;
@@ -980,7 +1014,7 @@ class EventWorker {
    */
   _isRpcBackoffSuppressing() {
     if (!this._rpcRateLimited) return false;
-    return Date.now() < this._rpcRateLimitedUntil + LIVE_POLL_INTERVAL_MS + 60_000;
+    return Date.now() < this._rpcRateLimitedUntil + this._cfg("LIVE_POLL_INTERVAL_MS") + 60_000;
   }
 
   /**
@@ -999,10 +1033,10 @@ class EventWorker {
       this._rpcRateLimitedUntil = 0;
       this._rpcRateLimitKind = null;
       logger.error(`[Worker] Live block-range poll hatası: ${safeMessage}`);
-      return LIVE_POLL_INTERVAL_MS;
+      return this._cfg("LIVE_POLL_INTERVAL_MS");
     }
 
-    const previous = this._rpcBackoffMs || LIVE_POLL_INTERVAL_MS;
+    const previous = this._rpcBackoffMs || this._cfg("LIVE_POLL_INTERVAL_MS");
     const base = kind === "monthly"
       ? RPC_MONTHLY_WAIT_MS
       : Math.min(previous * 2, RPC_BACKOFF_MAX_MS);
@@ -1015,7 +1049,7 @@ class EventWorker {
       // [TR] Sessizce döngüye girme: her denemede açık yönlendirme (geri çekilme ile sınırlı sıklık).
       logger.error(
         `[Worker] RPC eth_getLogs blok aralığı sınırı aşıldı. WORKER_BLOCK_BATCH_SIZE'ı düşür ` +
-        `(Alchemy ücretsiz plan: 10). Mevcut=${BLOCK_BATCH_SIZE}. ${Math.round(delay / 1000)} sn sonra yeniden denenecek. | ${safeMessage}`
+        `(Alchemy ücretsiz plan: 10). Mevcut=${this._cfg("WORKER_BLOCK_BATCH_SIZE")}. ${Math.round(delay / 1000)} sn sonra yeniden denenecek. | ${safeMessage}`
       );
     }
     if (!this._rpcRateLimited) {
@@ -1103,7 +1137,7 @@ class EventWorker {
     if (this._isRpcBackoffSuppressing()) return;
 
     const idleMs = Date.now() - this._lastBlockSeenAt;
-    if (idleMs < Math.max(BLOCK_STALE_MS, LIVE_POLL_INTERVAL_MS * 3)) return;
+    if (idleMs < Math.max(BLOCK_STALE_MS, this._cfg("LIVE_POLL_INTERVAL_MS") * 3)) return;
 
     if (this._staleReconnects >= 1) {
       this._fatalExit(`yeniden bağlanmaya rağmen ${Math.round(idleMs / 1000)} sn blok görülmedi`);
@@ -1125,7 +1159,7 @@ class EventWorker {
       isRunning: this.isRunning,
       state: this._state,
       lastBlockAgeMs: ageMs,
-      stale: Boolean(watching && !this._isRpcBackoffSuppressing() && ageMs > Math.max(LIVENESS_STALE_MS, LIVE_POLL_INTERVAL_MS * 6)),
+      stale: Boolean(watching && !this._isRpcBackoffSuppressing() && ageMs > Math.max(LIVENESS_STALE_MS, this._cfg("LIVE_POLL_INTERVAL_MS") * 6)),
       rpcRateLimited: Boolean(this._rpcRateLimited),
     };
   }
@@ -1169,8 +1203,9 @@ class EventWorker {
   async _pollLiveRange(fromBlock, toBlock) {
     if (!this.contract || fromBlock > toBlock) return;
 
-    for (let from = fromBlock; from <= toBlock; from += BLOCK_BATCH_SIZE) {
-      const to = Math.min(from + BLOCK_BATCH_SIZE - 1, toBlock);
+    const batchSize = this._cfg("WORKER_BLOCK_BATCH_SIZE");
+    for (let from = fromBlock; from <= toBlock; from += batchSize) {
+      const to = Math.min(from + batchSize - 1, toBlock);
 
       try {
         const allEvents = await this._fetchRangeEvents(from, to);

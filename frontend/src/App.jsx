@@ -911,6 +911,7 @@ function App() {
     renderProfileContext,
     renderTradeRoom,
     renderSlimRail,
+    renderAdminHint,
     renderContextSidebar,
     renderMobileNav,
     renderFooter,
@@ -1115,6 +1116,7 @@ function App() {
         outlet={(
           <div className="flex-1 min-w-0 w-full max-w-full overflow-y-auto overflow-x-hidden relative bg-app">
             <div className="box-border min-h-full w-full max-w-full min-w-0 flex flex-col pt-4 md:pt-10 pb-[calc(4rem_+_env(safe-area-inset-bottom))] md:pb-10 items-center">
+              {renderAdminHint()}
               {currentView === 'home'
                 ? renderHome()
                 : currentView === 'market'

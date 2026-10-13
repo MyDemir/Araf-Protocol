@@ -12,6 +12,7 @@
  * - Bu kapı yalnız UI/API düzeyindedir; kontrat rail bilmez.
  */
 
+const mongoose = require("mongoose");
 const PaymentRailSetting = require("../models/PaymentRailSetting");
 const PaymentRailAudit = require("../models/PaymentRailAudit");
 const { PAYMENT_RAIL_RISK_CONFIG, SEPA_COUNTRY_ALLOWLIST } = require("../config/paymentRailRiskConfig");
@@ -176,6 +177,8 @@ async function applyRailStatesToRiskConfig(riskConfig) {
 async function setRailEnabled(rawCode, enabled, { wallet, reason = "", ipHash = null } = {}) {
   const code = String(rawCode || "").toUpperCase();
   if (!isKnownRail(code)) throw _err("RAIL_UNKNOWN", "Bilinmeyen ödeme yöntemi.");
+  // Bağlantı yoksa Mongoose işlemi tamponda bekletir: hemen 503.
+  if (mongoose.connection.readyState !== 1) throw _err("DB_UNAVAILABLE", "Veritabanı şu an kullanılamıyor.");
 
   const doc = await PaymentRailSetting.findOne({ key: SETTING_KEY }).lean();
   const states = _fromDoc(doc);
