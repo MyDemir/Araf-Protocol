@@ -32,6 +32,7 @@ describe("protocolConfig refresh keeps the old config on failure (B8)", () => {
     }
     jest.doMock("../../backend/scripts/config/redis", () => ({ getRedisClient: () => redis }));
     jest.doMock("../../backend/scripts/utils/logger", () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }));
+    jest.doMock("../../backend/scripts/services/rpcProvider", () => ({ getSharedProvider: () => new (require("ethers").ethers.JsonRpcProvider)() }));
     jest.doMock("ethers", () => ({
       ethers: {
         JsonRpcProvider: jest.fn(() => ({ getNetwork: jest.fn().mockResolvedValue({ chainId: 8453n }) })),

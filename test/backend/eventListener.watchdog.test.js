@@ -53,17 +53,20 @@ describe("eventListener block watchdog (B6)", () => {
     expect(worker._exitProcess).toHaveBeenCalledWith(1);
   });
 
-  it("a received block resets the stale counter (block handler wiring)", () => {
-    let blockHandler;
+  it("a successful head read resets the stale counter (timer-driven poll, no block subscription)", async () => {
     worker.contract = {};
-    worker._listenersAttached = false;
-    worker.provider = { on: jest.fn((evt, cb) => { if (evt === "block") blockHandler = cb; }) };
-    worker._attachLiveListeners();
+    worker._listenersAttached = true;
+    worker._stopRequested = false;
+    worker._lastLivePolledBlock = 123;
+    worker._lastSafeCheckpointBlock = 123;
+    worker.provider = { on: jest.fn(), getBlockNumber: jest.fn().mockResolvedValue(123), getLogs: jest.fn() };
     worker._staleReconnects = 1;
     now.mockReturnValue(10_000_000 + 5_000);
-    blockHandler(123);
+    await worker._liveTick();
+    worker._stopLiveTimer();
     expect(worker._staleReconnects).toBe(0);
     expect(worker._lastBlockSeenAt).toBe(10_000_000 + 5_000);
+    expect(worker.provider.on).not.toHaveBeenCalledWith("block", expect.anything());
     worker._listenersAttached = false;
   });
 

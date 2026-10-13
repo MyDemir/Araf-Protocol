@@ -43,6 +43,8 @@ const {
   refreshProtocolConfig,
 } = require("./protocolConfig");
 const { assertProviderExpectedChainOrThrow } = require("./expectedChain");
+const { getSharedProvider, classifyRpcError } = require("./rpcProvider");
+const { redactRpcSecrets } = require("../utils/logRedaction");
 const { inferCryptoAssetFromTokenAddress } = require("./tokenEnv");
 const { readPendingMarketMeta } = require("./orderMarketMeta");
 
@@ -75,7 +77,24 @@ function _getPositiveIntEnv(name, fallback) {
   return parsed;
 }
 
+function _sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 const BLOCK_BATCH_SIZE = _getPositiveIntEnv("WORKER_BLOCK_BATCH_SIZE", 1_000);
+// [TR] Canlı izleme "block" olayına değil zamanlayıcıya bağlıdır (Base ~2 sn'de bir blok = çok fazla eth_getLogs).
+//      Alt sınır 2 sn. Her turda 1x eth_blockNumber + 1x eth_getLogs (~85 CU).
+// [EN] Live polling is timer-driven, not per-block. Floor 2s. Each tick: 1x eth_blockNumber + 1x eth_getLogs.
+const LIVE_POLL_INTERVAL_MS = Math.max(2_000, _getPositiveIntEnv("LIVE_POLL_INTERVAL_MS", 15_000));
+// [TR] Replay/canlı batch'leri arası bekleme (saniyelik CU sınırı): 10 blokluk batch ile ~4 getLogs/sn.
+const REPLAY_BATCH_DELAY_MS = (() => {
+  const raw = process.env.WORKER_REPLAY_BATCH_DELAY_MS;
+  if (raw === undefined || raw === "") return 250;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 0 ? n : 250;
+})();
+const RPC_BACKOFF_MAX_MS = 5 * 60 * 1000;
+const RPC_MONTHLY_WAIT_MS = 30 * 60 * 1000;
 const CHECKPOINT_INTERVAL_BLOCKS = _getPositiveIntEnv("WORKER_CHECKPOINT_INTERVAL_BLOCKS", 50);
 const DEFAULT_WORKER_FINALITY_DEPTH = process.env.NODE_ENV === "production" ? 6 : 1;
 const WORKER_FINALITY_DEPTH = _getPositiveIntEnv("WORKER_FINALITY_DEPTH", DEFAULT_WORKER_FINALITY_DEPTH);
@@ -507,6 +526,12 @@ class EventWorker {
     this._replayNextAttemptAt = 0;
     this._livePollInProgress = false;
     this._lastLivePolledBlock = 0;
+    this._liveTimer = null;
+    this._liveEpoch = 0;
+    this._rpcRateLimited = false;
+    this._rpcBackoffMs = 0;
+    this._rpcRateLimitedUntil = 0;
+    this._rpcRateLimitKind = null;
     this._blockTimestampCache = new Map();
     this._ignoredEventsByReason = {};
     this._reconciliation = { lastRunAt: null, lastReport: null };
@@ -554,6 +579,8 @@ class EventWorker {
     this.isRunning = false;
     this._stopRequested = true;
     this._stopWatchdog();
+    this._stopLiveTimer();
+    this._liveEpoch += 1;
     if (this.provider) this.provider.removeAllListeners();
     this._listenersAttached = false;
     this._livePollInProgress = false;
@@ -628,21 +655,15 @@ class EventWorker {
       throw new Error("[Worker] KRİTİK: BASE_RPC_URL zorunludur (public mainnet fallback kapalı).");
     }
 
-    const wsRpcUrl = process.env.BASE_WS_RPC_URL;
-
-    if (wsRpcUrl && wsRpcUrl.startsWith("wss://")) {
-      try {
-        this.provider = new ethers.WebSocketProvider(wsRpcUrl);
-        this._watchWebSocketClose(this.provider);
-        logger.info("[Worker] WebSocket RPC bağlandı.");
-      } catch (err) {
-        logger.warn(`[Worker] WebSocket başarısız, HTTP fallback: ${err.message}`);
-        this.provider = new ethers.JsonRpcProvider(rpcUrl);
-      }
-    } else {
-      this.provider = new ethers.JsonRpcProvider(rpcUrl);
-      if (isProduction) logger.warn("[Worker] HTTP RPC kullanılıyor. BASE_WS_RPC_URL önerilir.");
+    // [TR] Canlı izleme zamanlayıcı + HTTP eth_getLogs ile yapılır; WebSocket abonelikleri (newHeads/logs) de
+    //      Alchemy CU yakar, bu yüzden BASE_WS_RPC_URL tanımlı olsa bile abonelik AÇILMAZ.
+    // [EN] Live monitoring is timer + HTTP eth_getLogs; WS subscriptions also burn CU, so none are opened
+    //      even when BASE_WS_RPC_URL is set.
+    if (process.env.BASE_WS_RPC_URL) {
+      logger.info("[Worker] BASE_WS_RPC_URL tanımlı ama kullanılmıyor: canlı izleme HTTP zamanlayıcı ile yapılır (abonelik yok).");
     }
+    this.provider = getSharedProvider();
+    if (isProduction) logger.info("[Worker] Paylaşılan HTTP RPC sağlayıcısı kullanılıyor.");
 
     await assertProviderExpectedChainOrThrow(this.provider, {
       rpcUrl,
@@ -765,8 +786,9 @@ class EventWorker {
           // [TR] Aralık okunamadıysa checkpoint ilerletilmez; bir sonraki replay aynı aralığı yeniden dener.
           //      (Eskiden tek bir event sorgusu düşerse o event tipi sessizce atlanıp checkpoint ilerliyordu.)
           // [EN] If the range cannot be read the checkpoint does not move; the next replay retries it.
-          logger.warn(`[Worker] Replay: log sorgusu başarısız (${from}-${to}): ${err.message}`);
+          logger.warn(`[Worker] Replay: log sorgusu başarısız (${from}-${to}): ${redactRpcSecrets(err.message)}`);
           this._noteReplayFailure();
+          if (classifyRpcError(err)) this._noteReplayRateLimited(err);
           return;
         }
 
@@ -801,6 +823,8 @@ class EventWorker {
         }
 
         await this._updateSafeCheckpointIfHigher(to);
+        // [TR] Batch'ler art arda patlamasın (saniyelik CU sınırı).
+        if (to < finalizedToBlock && REPLAY_BATCH_DELAY_MS > 0) await _sleep(REPLAY_BATCH_DELAY_MS);
       }
 
       this._noteReplaySuccess();
@@ -826,6 +850,13 @@ class EventWorker {
       REPLAY_BACKOFF_MAX_MS
     );
     this._replayNextAttemptAt = Date.now() + delay;
+  }
+
+  // [TR] Replay'de 429: replay geri çekilmesi en az canlı geri çekilme kadar uzatılır (checkpoint ilerlemez).
+  _noteReplayRateLimited(err) {
+    const kind = classifyRpcError(err);
+    const floor = kind === "monthly" ? RPC_MONTHLY_WAIT_MS : Math.min(LIVE_POLL_INTERVAL_MS * 2, RPC_BACKOFF_MAX_MS);
+    this._replayNextAttemptAt = Math.max(this._replayNextAttemptAt, Date.now() + floor);
   }
 
   _noteReplaySuccess() {
@@ -859,39 +890,7 @@ class EventWorker {
     this._lastBlockSeenAt = Date.now();
     this._startWatchdog();
 
-    this.provider.on("block", async (blockNumber) => {
-      // [TR] B6: watchdog için "son blok görülme" zamanı (poll meşgul olsa bile güncellenir).
-      // [EN] B6: "last block seen" time for the watchdog (updated even when a poll is in flight).
-      this._lastBlockSeenAt = Date.now();
-      this._staleReconnects = 0;
-      if (this._livePollInProgress) return;
-
-      this._livePollInProgress = true;
-      try {
-        await this._updateSeenBlockIfHigher(blockNumber);
-
-        const fromBlock = this._lastLivePolledBlock + 1;
-        const toBlock = blockNumber;
-
-        if (fromBlock <= toBlock) {
-          await this._pollLiveRange(fromBlock, toBlock);
-          this._lastLivePolledBlock = toBlock;
-        }
-
-        const finalizedUpTo = this._computeFinalizedUpTo(blockNumber);
-        if (finalizedUpTo > this._lastSafeCheckpointBlock) {
-          await this._advanceSafeCheckpointFromAcks(finalizedUpTo);
-        }
-
-        if (this._shouldTriggerLiveReplay(blockNumber)) {
-          await this._runLiveReplay();
-        }
-      } catch (err) {
-        logger.error(`[Worker] Live block-range poll hatası: ${err.message}`);
-      } finally {
-        this._livePollInProgress = false;
-      }
-    });
+    this._scheduleLiveTick(LIVE_POLL_INTERVAL_MS);
 
     this.provider.on("error", (err) => {
       logger.error(`[Worker] Provider hatası: ${err?.message}. Yeniden bağlanılıyor...`);
@@ -899,7 +898,145 @@ class EventWorker {
     });
 
     this._listenersAttached = true;
-    this._setState("live", "canlı block-range listener bağlandı");
+    this._setState("live", "canlı block-range zamanlayıcı bağlandı");
+  }
+
+  _stopLiveTimer() {
+    if (this._liveTimer) clearTimeout(this._liveTimer);
+    this._liveTimer = null;
+  }
+
+  _scheduleLiveTick(delayMs) {
+    this._stopLiveTimer();
+    if (this._stopRequested) return;
+    this._liveTimer = setTimeout(() => {
+      this._liveTimer = null;
+      this._liveTick().catch((err) => logger.error(`[Worker] Live tick beklenmeyen hata: ${redactRpcSecrets(err?.message)}`));
+    }, delayMs);
+    if (typeof this._liveTimer.unref === "function") this._liveTimer.unref();
+  }
+
+  /**
+   * [TR] Tek canlı tur: 1x eth_blockNumber, sonra [son+1, head] aralığı (WORKER_BLOCK_BATCH_SIZE parçalarıyla)
+   *      eth_getLogs. Başarılı head okuması watchdog için "blok görüldü" sayılır. Hata/429'da _lastLivePolledBlock
+   *      ilerlemez (parça başarıyla okunmadıkça); kaçan aralık sonraki turda okunur.
+   * [EN] One live tick: one eth_blockNumber, then [last+1, head] via chunked eth_getLogs. A successful head read
+   *      counts as "block seen". On error/429 _lastLivePolledBlock does not advance past unread chunks.
+   */
+  async _liveTick() {
+    if (this._livePollInProgress || this._stopRequested || !this.provider || !this.contract) {
+      if (!this._stopRequested && this._listenersAttached) this._scheduleLiveTick(LIVE_POLL_INTERVAL_MS);
+      return;
+    }
+    const epoch = this._liveEpoch;
+    const stale = () => epoch !== this._liveEpoch;
+    this._livePollInProgress = true;
+    let nextDelay = LIVE_POLL_INTERVAL_MS;
+    try {
+      const head = await this.provider.getBlockNumber();
+      if (stale()) return;
+      this._lastBlockSeenAt = Date.now();
+      this._staleReconnects = 0;
+      await this._updateSeenBlockIfHigher(head);
+
+      let from = this._lastLivePolledBlock + 1;
+      while (from <= head) {
+        if (this._stopRequested || stale()) return;
+        const to = Math.min(from + BLOCK_BATCH_SIZE - 1, head);
+        await this._pollLiveRange(from, to);
+        if (stale()) return; // yeniden bağlanma sırasında: imleç ilerletilmez
+        this._lastLivePolledBlock = to;
+        from = to + 1;
+        if (from <= head && REPLAY_BATCH_DELAY_MS > 0) await _sleep(REPLAY_BATCH_DELAY_MS);
+      }
+
+      if (stale()) return;
+      const finalizedUpTo = this._computeFinalizedUpTo(head);
+      if (finalizedUpTo > this._lastSafeCheckpointBlock) {
+        await this._advanceSafeCheckpointFromAcks(finalizedUpTo);
+      }
+
+      if (!stale() && this._shouldTriggerLiveReplay(head)) {
+        await this._runLiveReplay();
+      }
+      if (stale()) return;
+      this._noteRpcSuccess();
+    } catch (err) {
+      if (stale()) return;
+      nextDelay = this._noteLivePollFailure(err);
+    } finally {
+      if (!stale()) {
+        this._livePollInProgress = false;
+        if (!this._stopRequested && this._listenersAttached) this._scheduleLiveTick(nextDelay);
+      }
+    }
+  }
+
+  /**
+   * [TR] Geri çekilme bastırması SINIRLIDIR: yalnız son geri çekilme bitişi + (bir tur aralığı + 60 sn) payına
+   *      kadar watchdog/liveness bastırılır. Sonrasında gerçek takılma görünür olur.
+   * [EN] Backoff suppression is BOUNDED: watchdog/liveness are suppressed only until the last backoff end plus
+   *      one poll interval plus 60s. After that a real stall becomes visible again.
+   */
+  _isRpcBackoffSuppressing() {
+    if (!this._rpcRateLimited) return false;
+    return Date.now() < this._rpcRateLimitedUntil + LIVE_POLL_INTERVAL_MS + 60_000;
+  }
+
+  /**
+   * [TR] RPC hatası sınıflandırması: 429/kapasite/aralık sınırı -> üstel geri çekilme (+jitter, aralık x2, en çok
+   *      5 dk); aylık kapasite -> doğrudan uzun bekleme. Pencere başına tek warn, iyileşince tek info.
+   *      Dönen değer bir sonraki turun gecikmesidir (ms).
+   * [EN] Classifies the RPC error and returns the next tick delay (exponential backoff + jitter).
+   */
+  _noteLivePollFailure(err) {
+    const kind = classifyRpcError(err);
+    const safeMessage = redactRpcSecrets(err?.message);
+    if (!kind) {
+      // [TR] 429 dışı yeni hata: geri çekilme bastırması kalkar (gerçek takılma watchdog'a görünür olsun).
+      this._rpcRateLimited = false;
+      this._rpcBackoffMs = 0;
+      this._rpcRateLimitedUntil = 0;
+      this._rpcRateLimitKind = null;
+      logger.error(`[Worker] Live block-range poll hatası: ${safeMessage}`);
+      return LIVE_POLL_INTERVAL_MS;
+    }
+
+    const previous = this._rpcBackoffMs || LIVE_POLL_INTERVAL_MS;
+    const base = kind === "monthly"
+      ? RPC_MONTHLY_WAIT_MS
+      : Math.min(previous * 2, RPC_BACKOFF_MAX_MS);
+    const delay = Math.round(base * (1 + Math.random() * 0.2));
+    this._rpcBackoffMs = base;
+    this._rpcRateLimitedUntil = Date.now() + delay;
+    this._rpcRateLimitKind = kind;
+
+    if (kind === "range") {
+      // [TR] Sessizce döngüye girme: her denemede açık yönlendirme (geri çekilme ile sınırlı sıklık).
+      logger.error(
+        `[Worker] RPC eth_getLogs blok aralığı sınırı aşıldı. WORKER_BLOCK_BATCH_SIZE'ı düşür ` +
+        `(Alchemy ücretsiz plan: 10). Mevcut=${BLOCK_BATCH_SIZE}. ${Math.round(delay / 1000)} sn sonra yeniden denenecek. | ${safeMessage}`
+      );
+    }
+    if (!this._rpcRateLimited) {
+      this._rpcRateLimited = true;
+      if (kind !== "range") {
+        logger.warn(
+          `[Worker] RPC ${kind === "monthly" ? "aylık kapasite sınırı" : "429/kapasite sınırı"}: ` +
+          `${Math.round(delay / 1000)} sn geri çekiliyor (aralık kaybolmaz). | ${safeMessage}`
+        );
+      }
+    }
+    return delay;
+  }
+
+  _noteRpcSuccess() {
+    if (!this._rpcRateLimited) return;
+    this._rpcRateLimited = false;
+    this._rpcBackoffMs = 0;
+    this._rpcRateLimitedUntil = 0;
+    this._rpcRateLimitKind = null;
+    logger.info("[Worker] RPC kapasitesi normale döndü; canlı izleme sürüyor.");
   }
 
   /**
@@ -961,9 +1098,12 @@ class EventWorker {
   async _watchdogTick() {
     if (!this.isRunning || this._state === "stopped" || this._reconnectPromise) return;
     if (!this._lastBlockSeenAt) return;
+    // [TR] 429/kapasite geri çekilmesi sırasında bilerek RPC'ye gidilmez; bu "blok yok" arızası değildir.
+    // [EN] During a deliberate 429/capacity backoff we do not poll; that is not a stalled-block failure.
+    if (this._isRpcBackoffSuppressing()) return;
 
     const idleMs = Date.now() - this._lastBlockSeenAt;
-    if (idleMs < BLOCK_STALE_MS) return;
+    if (idleMs < Math.max(BLOCK_STALE_MS, LIVE_POLL_INTERVAL_MS * 3)) return;
 
     if (this._staleReconnects >= 1) {
       this._fatalExit(`yeniden bağlanmaya rağmen ${Math.round(idleMs / 1000)} sn blok görülmedi`);
@@ -985,7 +1125,8 @@ class EventWorker {
       isRunning: this.isRunning,
       state: this._state,
       lastBlockAgeMs: ageMs,
-      stale: Boolean(watching && ageMs > LIVENESS_STALE_MS),
+      stale: Boolean(watching && !this._isRpcBackoffSuppressing() && ageMs > Math.max(LIVENESS_STALE_MS, LIVE_POLL_INTERVAL_MS * 6)),
+      rpcRateLimited: Boolean(this._rpcRateLimited),
     };
   }
 
@@ -1267,6 +1408,10 @@ class EventWorker {
         this._livePollInProgress = false;
         this._blockTimestampCache.clear();
       }
+      this._stopLiveTimer();
+      // [TR] Eski epoch'tan dönen canlı tur imleci/durumu değiştirmesin.
+      // [EN] A live tick returning from an older epoch must not touch the cursor or state.
+      this._liveEpoch += 1;
 
       await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
       await this._connect();

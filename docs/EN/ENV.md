@@ -164,7 +164,8 @@ Shared reading: L = Local, S = Base Sepolia (still runs with `NODE_ENV=productio
 | Variable | What it does | Required? | L | S | M | Where | Used at |
 |---|---|---|---|---|---|---|---|
 | 🔒 `BASE_RPC_URL` | Chain RPC URL (the key is in the URL) | In prod (no public fallback) | `https://…/v2/KEY` | Sepolia RPC | Mainnet RPC | B/.env, Fly | `eventListener.js:589`, `health.js:103` |
-| 🔒 `BASE_WS_RPC_URL` | WebSocket RPC; if missing, HTTP is used (must be `wss://`) | Recommended (optional) | empty | `wss://…` | `wss://…` | B/.env, Fly | `eventListener.js:619` |
+| 🔒 `BASE_RPC_URL_FALLBACKS` | Comma-separated backup RPC URLs (ordered failover on 429/network error; each is chain-verified against `EXPECTED_CHAIN_ID` before first use, unverifiable URLs are never used) | Optional | empty | `https://sepolia.base.org` | 2nd provider URL | B/.env, Fly | `rpcProvider.js` |
+| 🔒 `BASE_WS_RPC_URL` | **Not used for live monitoring** (no WS subscriptions are opened; they burn Alchemy CU). Kept for compatibility/readiness reporting only | Optional | empty | empty | empty | B/.env, Fly | `health.js` |
 | `EXPECTED_CHAIN_ID` | Expected chain: `8453` Base, `84532` Sepolia | In prod; also in dev if `BASE_RPC_URL` is set | `84532` or `31337` | `84532` | `8453` | B/.env, Fly | `expectedChain.js:19`, `tokenEnv.js:35` |
 | `ALLOW_UNSAFE_CHAIN_ID_BYPASS` | Dev only: skips the chain check when `EXPECTED_CHAIN_ID` is empty | Optional (`false`); no effect in prod | optional | never | never | B/.env | `expectedChain.js:20` |
 | `ARAF_ESCROW_ADDRESS` | ArafEscrow address | In prod (worker exits if missing); in dev the worker runs "dry-run" | `0x…40 hex` | deploy output | deploy output | B/.env, Fly | `eventListener.js:590`, `protocolConfig.js:107` |
@@ -207,7 +208,9 @@ In prod `KMS_PROVIDER=env` is **rejected**; the only exception is a narrow testn
 | `WORKER_START_BLOCK` | Alternative to the above | Same (one of the two) | empty | alternative | alternative | B/.env, Fly | `eventListener.js:1095` |
 | `WORKER_DISABLED` | If `true`, the worker never starts (API only) | Optional (`false`) | empty | empty | empty | B/.env, Fly | `eventListener.js:591` |
 | `WORKER_FINALITY_DEPTH` | Block depth for the safe checkpoint | Optional (`6` in prod, `1` otherwise) | empty | empty | empty | B/.env, Fly | `eventListener.js:80-81` |
-| `WORKER_BLOCK_BATCH_SIZE` | Replay batch size | Optional (`1000`) | empty | empty | empty | B/.env, Fly | `eventListener.js:78` |
+| `WORKER_BLOCK_BATCH_SIZE` | Block range per `eth_getLogs` for replay AND live ticks. **Alchemy free plan: set `10`** | Optional (`1000`) | empty | `10` (free plan) | `10` (free plan) | B/.env, Fly | `eventListener.js:78` |
+| `LIVE_POLL_INTERVAL_MS` | Live polling period (timer, NOT per block). Each tick = 1x `eth_blockNumber` + 1x `eth_getLogs`. Lower bound 2000 | Optional (`15000`; keep ≤ 30000 so the block watchdog stays quiet) | empty | `15000` | `15000` | B/.env, Fly | `eventListener.js` |
+| `WORKER_REPLAY_BATCH_DELAY_MS` | Pause between replay / catch-up batches (per-second CU cap; with 10-block batches ≈ 4 getLogs/s ≈ 300 CU/s) | Optional (`250`) | empty | empty | empty | B/.env, Fly | `eventListener.js` |
 | `WORKER_CHECKPOINT_INTERVAL_BLOCKS` | Checkpoint interval (blocks) | Optional (`50`) | empty | empty | empty | B/.env, Fly | `eventListener.js:79` |
 | `WORKER_REPLAY_BACKOFF_BASE_MS` / `_MAX_MS` | Floor/ceiling of the replay error backoff | Optional (`5000` / `300000`) | empty | empty | empty | B/.env, Fly | `eventListener.js:83-84` |
 | `WORKER_BLOCK_STALE_MS` | If no new block for this many ms, reconnect; if still none, the process exits | Optional (`75000`) | empty | empty | empty | B/.env, Fly | `eventListener.js:87` |
@@ -216,6 +219,27 @@ In prod `KMS_PROVIDER=env` is **rejected**; the only exception is a narrow testn
 | `WORKER_MAX_LAG_BLOCKS` | Maximum block lag for `/ready` | Optional (`25`) | empty | empty | empty | B/.env, Fly | `health.js:20` |
 | 🔒 `READY_INTERNAL_TOKEN` | `x-internal-token` value for the full `/ready` body | Optional (feature is off if missing) | empty | long random | long random | B/.env, Fly | `health.js:348` |
 | `READY_CACHE_TTL_MS` | `/ready` cache duration (clamped to 5000-10000) | Optional (`7000`) | empty | empty | empty | B/.env, Fly | `health.js:291` |
+
+### 3.7.1 RPC budget (Alchemy free plan) and recommended profile
+
+- Live monitoring is timer-driven HTTP polling (`eth_blockNumber` + one `eth_getLogs` for all watched contracts). **No WebSocket subscription is ever opened**, even if `BASE_WS_RPC_URL` is set, because Alchemy WS subscriptions also burn CU. All HTTP users (worker, protocol config, on-chain trade state, jobs) share one provider with a static network: chain ID is verified once, not on every call.
+- On 429 / "compute units" / "capacity" / block-range errors the worker backs off (interval x2 + jitter, max 5 min; monthly-capacity message: 30 min), never advances past the unread range, logs one warning per backoff window and one info on recovery. `/ready` reports `rpc_rate_limited` in `degradedReasons`.
+- Free plan: `eth_getLogs` is limited to a **10-block range** -> set `WORKER_BLOCK_BATCH_SIZE=10`. A range error is logged with "WORKER_BLOCK_BATCH_SIZE'ı düşür".
+- The free quota (~30M CU/month) is shared by **all apps in the same Alchemy account**. If testnet and mainnet use the same account the quota is split in two.
+- Failover note: a backup RPC that lags behind the primary only adds latency (events are read later); fork/reorg differences are covered by `WORKER_FINALITY_DEPTH` (the safe checkpoint only advances past finalized blocks).
+- Secrets: RPC URLs (API keys) are masked in every log/error (`/v2/[REDACTED]`).
+
+Monthly CU estimate (`eth_getLogs` ~75 CU + `eth_blockNumber` ~10 CU = ~85 CU per tick, 30 days):
+
+| `LIVE_POLL_INTERVAL_MS` | Ticks / month | CU / month | Fits in 30M? |
+|---|---|---|---|
+| 2000 (old per-block behaviour ~ same) | 1 296 000 | ~110 M | No |
+| 12000 | 216 000 | ~18.4 M | Yes, but only ~1 environment |
+| **15000 (default)** | 172 800 | **~14.7 M** | Yes (two environments do not fit) |
+| 30000 | 86 400 | ~7.3 M | Yes (two environments fit) |
+
+Recommended free-plan profile: `LIVE_POLL_INTERVAL_MS=15000`, `WORKER_BLOCK_BATCH_SIZE=10`, `WORKER_REPLAY_BATCH_DELAY_MS=250`, `BASE_RPC_URL_FALLBACKS=<2nd free provider>` (for Base Sepolia the public `https://sepolia.base.org` works). Other RPC load is small: `/ready` (cached 5-10 s, ~10 CU per refresh), protocol config refresh (event-driven, ~12 `eth_call`), on-chain trade state (cached 10 s), daily/hourly jobs.
+
 
 ### 3.8 Relayer / rewards
 

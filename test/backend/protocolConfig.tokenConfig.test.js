@@ -65,6 +65,7 @@ describe("protocolConfig token config compatibility", () => {
       error: jest.fn(),
       debug: jest.fn(),
     }));
+    jest.doMock("../../backend/scripts/services/rpcProvider", () => ({ getSharedProvider: () => new (require("ethers").ethers.JsonRpcProvider)() }));
     jest.doMock("ethers", () => ({
       ethers: {
         JsonRpcProvider: jest.fn(() => ({
@@ -166,6 +167,7 @@ describe("protocolConfig token config compatibility", () => {
       error: jest.fn(),
       debug: jest.fn(),
     }));
+    jest.doMock("../../backend/scripts/services/rpcProvider", () => ({ getSharedProvider: () => new (require("ethers").ethers.JsonRpcProvider)() }));
     jest.doMock("ethers", () => ({
       ethers: {
         JsonRpcProvider: jest.fn(() => ({

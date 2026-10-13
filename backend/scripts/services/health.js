@@ -220,6 +220,8 @@ async function getReadiness({ worker, provider } = {}) {
   if (!redisReady) degradedReasons.push("redis_unavailable");
   if (!providerReady) degradedReasons.push("provider_unavailable");
   if (workerDiagnostics?.reconciliation?.lastReport?.dlqPending > 0) degradedReasons.push("dlq_pending");
+  // [TR] Worker RPC 429/kapasite geri çekilmesinde: hizmet sürer ama gecikmeli olabilir (readiness'i düşürmez).
+  if (worker?._rpcRateLimited) degradedReasons.push("rpc_rate_limited");
 
   return {
     ok:

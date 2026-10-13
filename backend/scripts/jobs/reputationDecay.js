@@ -20,6 +20,7 @@
 const { ethers } = require("ethers");
 const User = require("../models/User");
 const logger = require("../utils/logger");
+const { getSharedProvider } = require("../services/rpcProvider");
 
 const DECAY_ABI = [
   "function decayReputation(address _wallet)",
@@ -49,7 +50,7 @@ function getRelayer() {
     return null;
   }
 
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const provider = getSharedProvider();
   relayerWallet = new ethers.Wallet(privateKey, provider);
   logger.info(`[DecayJob] Relayer cüzdanı yüklendi: ${relayerWallet.address}`);
   return relayerWallet;
