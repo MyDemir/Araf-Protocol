@@ -259,6 +259,16 @@ jobs:
           ARAF_ESCROW_ADDRESS="$ESCROW" BASE_SEPOLIA_USDT_ADDRESS="$USDT" BASE_SEPOLIA_USDC_ADDRESS="$USDC" \
             npx hardhat run scripts/deployRewards.js --network base-sepolia 2>&1 | tee "$RUNNER_TEMP/deploy-rewards.log"
 
+      # deployRewards başarısızsa (pending) manifest kaybolmasın: adresler ve deployer owner bilgisi için yükle.
+      - name: Upload rewards manifest on failure
+        if: ${{ failure() && inputs.deploy_rewards }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: base-sepolia-rewards-manifest
+          path: contracts/deployments/base-sepolia-rewards.json
+          if-no-files-found: warn
+          retention-days: 30
+
       # deploy_rewards=true: adresler manifest'ten (repo variable'larıyla çelişirse hata).
       # deploy_rewards=false: repo variable'ları yedektir. Her iki modda zincir kontrolü (eth_call):
       # vault.escrow()==ESCROW, rewards.escrow()==ESCROW, rewards.revenueVault()==vault.
@@ -424,7 +434,7 @@ jobs:
             gh variable set ARAF_DEPLOYMENT_BLOCK --body "$DEPLOY_BLOCK" --repo "$GITHUB_REPOSITORY"
             echo "Repository variables ARAF_ESCROW_ADDRESS / ARAF_DEPLOYMENT_BLOCK updated."
             # Yalnız bu çalıştırmada deploy edilen (manifest kaynaklı) vault/rewards yazılır; yedek değer geri yazılmaz.
-            if [ "${REWARDS_SOURCE:-}" = "manifest" ] && [ -n "${REVENUE_VAULT:-}" ] && [ -n "${REWARDS:-}" ]; then
+            if [ "${REWARDS_SOURCE:-}" = "manifest" ] && [ "${REWARDS_BOUND:-}" = "1" ] && [ -n "${REVENUE_VAULT:-}" ] && [ -n "${REWARDS:-}" ]; then
               gh variable set ARAF_REVENUE_VAULT_ADDRESS --body "$REVENUE_VAULT" --repo "$GITHUB_REPOSITORY"
               gh variable set ARAF_REWARDS_ADDRESS --body "$REWARDS" --repo "$GITHUB_REPOSITORY"
               echo "Repository variables ARAF_REVENUE_VAULT_ADDRESS / ARAF_REWARDS_ADDRESS updated."

@@ -30,6 +30,8 @@ async function ethCallAddress(rpcUrl, to, data, fetchImpl) {
   if (json.error) throw new Error(`RPC error ${json.error.code}`);
   const r = String(json.result || '');
   if (!/^0x[0-9a-fA-F]{64}$/.test(r)) throw new Error('unexpected eth_call result');
+  // ABI address = 32 bayt; üst 12 bayt sıfır olmalı (aksi halde dönüş bir adres değildir).
+  if (!/^0x0{24}/.test(r)) throw new Error('eth_call result is not an ABI-encoded address (upper 12 bytes non-zero)');
   return normalizeAddress('result', '0x' + r.slice(26)) || '0x0000000000000000000000000000000000000000';
 }
 
@@ -65,7 +67,11 @@ async function cli(env = process.env) {
     rpcUrl: env.BASE_SEPOLIA_RPC_URL, escrow: env.ESCROW, vault: env.REVENUE_VAULT, rewards: env.REWARDS,
   });
   if (res.skipped) { console.log('No vault/rewards configured; binding check skipped.'); return 0; }
-  if (res.ok) { console.log(`Vault/rewards are bound to escrow ${env.ESCROW}.`); return 0; }
+  if (res.ok) {
+    console.log(`Vault/rewards are bound to escrow ${env.ESCROW}.`);
+    if (env.GITHUB_ENV) fs.appendFileSync(env.GITHUB_ENV, 'REWARDS_BOUND=1\n');
+    return 0;
+  }
   const msg = `vault/rewards are NOT bound to escrow ${env.ESCROW}: ${res.problems.join('; ')}`;
   if (mode === 'error') { console.error(`::error::${msg}`); return 1; }
   console.log(`::warning::${msg}. They will NOT be given to the runtime and the Fly/Vercel values are cleared; re-run with deploy_rewards=true.`);

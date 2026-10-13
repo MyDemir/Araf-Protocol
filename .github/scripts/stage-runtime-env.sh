@@ -118,11 +118,20 @@ cmd_fly_secrets() {
   echo "Staged Fly secrets: $(printf '%s\n' "$lines" | cut -d= -f1 | paste -sd' ' -)"
   # Bu escrow'a bağlı olmayan eski vault/rewards canlıda kalmasın.
   if [ "$(val REWARDS_UNBOUND)" = "1" ]; then
-    local k
+    # Koşulsuz unset: yalnız "not found" türü hata tolere edilir; başka hatada iş durur (eski değer canlıda kalmasın).
+    local k out
     for k in ARAF_REVENUE_VAULT_ADDRESS ARAF_REWARDS_ADDRESS; do
-      if flyctl secrets list -a "$FLY_APP_NAME" 2>/dev/null | grep -Eq "(^|[[:space:]])$k([[:space:]]|$)"; then
-        flyctl secrets unset --stage -a "$FLY_APP_NAME" "$k" >/dev/null
+      if out="$(flyctl secrets unset --stage -a "$FLY_APP_NAME" "$k" 2>&1)"; then
         echo "Unset stale Fly secret $k (not bound to this escrow)."
+      else
+        shopt -s nocasematch
+        if [[ "$out" =~ (not[[:space:]]+found|does[[:space:]]+not[[:space:]]+exist|no[[:space:]]+such) ]]; then
+          shopt -u nocasematch
+          echo "Fly secret $k was not set; nothing to unset."
+        else
+          shopt -u nocasematch
+          die "Could not unset stale Fly secret $k; the old vault/rewards would stay live. Fix Fly access and re-run."
+        fi
       fi
     done
   fi

@@ -288,20 +288,70 @@ describe('workflow scripts: check-rewards-binding.js (eth_call over fetch)', fun
     expect(v.status, v.stderr).to.equal(0);
     expect(v.stdout.split('\n')).to.include.members(['VITE_REVENUE_VAULT_ADDRESS=', 'VITE_REWARDS_ADDRESS=']);
 
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'araf-fly-'));
-    const log = path.join(dir, 'calls.log');
-    fs.writeFileSync(path.join(dir, 'flyctl'), `#!/usr/bin/env bash
+    const runFly = (unsetVaultMsg) => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'araf-fly-'));
+      const log = path.join(dir, 'calls.log');
+      fs.writeFileSync(path.join(dir, 'flyctl'), `#!/usr/bin/env bash
 echo "$*" >> "${log}"
-if [ "$1 $2" = "secrets list" ]; then printf 'NAME\\tDIGEST\\nARAF_REWARDS_ADDRESS\\tabc\\nMONGODB_URI\\tdef\\n'; fi
-if [ "$1 $2" = "secrets import" ]; then cat >/dev/null; fi
+if [ "$1 $2" = "secrets import" ]; then cat >/dev/null; exit 0; fi
+if [ "$1 $2" = "secrets unset" ] && [ "\${6:-}" = "ARAF_REVENUE_VAULT_ADDRESS" ]; then echo "${unsetVaultMsg}" >&2; exit 1; fi
+exit 0
 `, { mode: 0o755 });
-    const r = spawnSync('bash', [STAGE, 'fly-secrets'], { env: { PATH: `${dir}:${process.env.PATH}`, ...BASE_ENV, FLY_APP_NAME: 'app', REWARDS_UNBOUND: '1' }, encoding: 'utf8' });
-    expect(r.status, r.stderr).to.equal(0);
-    const calls = fs.readFileSync(log, 'utf8');
-    expect(calls).to.include('secrets unset --stage -a app ARAF_REWARDS_ADDRESS');
-    expect(calls).to.not.include('unset --stage -a app ARAF_REVENUE_VAULT_ADDRESS'); // listede yok
-    expect(r.stdout).to.not.match(/mongodb\+srv|rediss:/);
-    fs.rmSync(dir, { recursive: true, force: true });
+      const r = spawnSync('bash', [STAGE, 'fly-secrets'], { env: { PATH: `${dir}:${process.env.PATH}`, ...BASE_ENV, FLY_APP_NAME: 'app', REWARDS_UNBOUND: '1' }, encoding: 'utf8' });
+      const calls = fs.readFileSync(log, 'utf8');
+      fs.rmSync(dir, { recursive: true, force: true });
+      return { r, calls };
+    };
+
+    // "not found" tolere edilir; unset koşulsuz denenir, `secrets list` kullanılmaz.
+    const ok = runFly('Error: secret ARAF_REVENUE_VAULT_ADDRESS not found');
+    expect(ok.r.status, ok.r.stderr).to.equal(0);
+    expect(ok.calls).to.include('secrets unset --stage -a app ARAF_REVENUE_VAULT_ADDRESS');
+    expect(ok.calls).to.include('secrets unset --stage -a app ARAF_REWARDS_ADDRESS');
+    expect(ok.calls).to.not.include('secrets list');
+    expect(ok.r.stdout).to.not.match(/mongodb\+srv|rediss:/);
+
+    // Başka hata: ::error:: ve iş durur.
+    const bad = runFly('Error: unauthorized');
+    expect(bad.r.status).to.equal(1);
+    expect(bad.r.stderr).to.match(/::error::Could not unset stale Fly secret ARAF_REVENUE_VAULT_ADDRESS/);
+  });
+
+  it('binding: upper 12 bytes of the eth_call result must be zero; success writes REWARDS_BOUND=1', async function () {
+    const binding = require('../../.github/scripts/check-rewards-binding.js');
+    const dirty = '0x' + 'ff'.repeat(12) + ESCROW.slice(2).toLowerCase();
+    const srv = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (d) => { body += d; });
+      req.on('end', () => {
+        const { id, params } = JSON.parse(body);
+        const to = params[0].to.toLowerCase();
+        const data = params[0].data;
+        let result = '0x' + ESCROW.slice(2).toLowerCase().padStart(64, '0');
+        if (to === REWARDS.toLowerCase() && data === binding.SEL.revenueVault) result = '0x' + VAULT.slice(2).toLowerCase().padStart(64, '0');
+        if (srv.dirty && to === VAULT.toLowerCase()) result = dirty;
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ jsonrpc: '2.0', id, result }));
+      });
+    });
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const u = `http://127.0.0.1:${srv.address().port}`;
+    try {
+      srv.dirty = false;
+      expect((await binding.checkRewardsBinding({ rpcUrl: u, escrow: ESCROW, vault: VAULT, rewards: REWARDS })).ok).to.equal(true);
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'araf-bound-'));
+      const ghEnv = path.join(dir, 'env');
+      await binding.cli({ ON_MISMATCH: 'error', BASE_SEPOLIA_RPC_URL: u, ESCROW, REVENUE_VAULT: VAULT, REWARDS, GITHUB_ENV: ghEnv });
+      expect(fs.readFileSync(ghEnv, 'utf8')).to.equal('REWARDS_BOUND=1\n');
+      fs.rmSync(dir, { recursive: true, force: true });
+
+      srv.dirty = true;
+      const r = await binding.checkRewardsBinding({ rpcUrl: u, escrow: ESCROW, vault: VAULT, rewards: REWARDS });
+      expect(r.ok).to.equal(false);
+      expect(r.problems.join()).to.match(/upper 12 bytes non-zero/);
+    } finally {
+      await new Promise((r) => srv.close(r));
+    }
   });
 });
 
@@ -365,5 +415,14 @@ describe('deploy workflows (YAML structure)', function () {
     const summary = load('deploy-base-sepolia.yml').jobs.deploy.steps.find((s) => s.name === 'Print deployment summary').run;
     expect(summary).to.include('REWARDS_UNBOUND');
     expect(summary).to.include('deploy_rewards=true ile yeniden çalıştırın');
+    const steps = load('deploy-base-sepolia.yml').jobs.deploy.steps;
+    const persist = steps.find((s) => s.name === 'Persist deployment variables').run;
+    expect(persist).to.include('"${REWARDS_BOUND:-}" = "1"');
+    const up = steps.find((s) => s.name === 'Upload rewards manifest on failure');
+    expect(up.uses).to.match(/^actions\/upload-artifact@[0-9a-f]{40}$/);
+    expect(up.if).to.equal('${{ failure() && inputs.deploy_rewards }}');
+    expect(up.with.path).to.equal('contracts/deployments/base-sepolia-rewards.json');
+    const idx = (n) => steps.findIndex((s) => s.name === n);
+    expect(idx('Upload rewards manifest on failure')).to.equal(idx('Deploy revenue vault + rewards (optional)') + 1);
   });
 });
