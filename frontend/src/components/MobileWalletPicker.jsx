@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowUpRight, ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import { buildWalletDeepLinks } from '../app/mobileWallet';
 import { BrowserWalletBadge, ConnectorIcon, MetaMaskBadge, OkxBadge, TrustBadge, WalletLinkIcon } from './wallet-icons';
 
@@ -92,12 +92,11 @@ export default function MobileWalletPicker({ lang = 'TR', location, connectors =
                         rel="noopener noreferrer"
                         data-wallet-link={l.id}
                         aria-label={tr ? `${l.name} ile aç` : `Open in ${l.name}`}
-                        className="group/tile relative flex min-h-[56px] items-center gap-2.5 rounded-xl border border-borderSubtle bg-surface py-2 pl-2.5 pr-6 transition duration-150 hover:border-brand/40 hover:bg-brand/[0.06] active:bg-brand/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand motion-reduce:transition-none"
+                        className="flex min-h-[56px] items-center gap-2.5 rounded-xl border border-borderSubtle bg-surface px-2.5 py-2 transition duration-150 hover:border-brand/40 hover:bg-brand/[0.06] active:bg-brand/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand motion-reduce:transition-none"
                       >
                         <WalletLinkIcon id={l.id} className="h-8 w-8" />
                         {/* [TR] Kutucukta kısa ad (simge zaten tanıtır); tam ad aria-label'da. [EN] Short name; full name in aria-label. */}
                         <span className="min-w-0 truncate text-sm font-semibold text-textPrimary">{l.name.replace(/\s+Wallet$/, '')}</span>
-                        <ArrowUpRight className="absolute right-1.5 top-1.5 h-3.5 w-3.5 text-textSecondary group-hover/tile:text-textPrimary" strokeWidth={2} aria-hidden="true" />
                       </a>
                     </li>
                   ))}
