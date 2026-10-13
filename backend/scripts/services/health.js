@@ -4,6 +4,7 @@
 const crypto = require("crypto");
 const mongoose = require("mongoose");
 const { isReady: isRedisReady, getRedisClient } = require("../config/redis");
+const serviceMode = require("./serviceMode");
 const { EXPECTED_CHAIN_ENV, resolveExpectedChainIdOrThrow } = require("./expectedChain");
 
 const CHECKPOINT_KEY = "worker:last_block";
@@ -217,6 +218,9 @@ async function getReadiness({ worker, provider } = {}) {
   const workerDiagnostics = typeof worker?.getDiagnostics === "function" ? worker.getDiagnostics() : null;
 
   const degradedReasons = [];
+  // [TR] Kısıtlı servis modu (açılışta RPC'ye ulaşılamadı vb.): hizmet tam değil, /ready 503.
+  const fullService = !serviceMode.isDegraded();
+  for (const reason of serviceMode.getDegradedReasons()) degradedReasons.push(reason);
   if (!redisReady) degradedReasons.push("redis_unavailable");
   if (!providerReady) degradedReasons.push("provider_unavailable");
   if (workerDiagnostics?.reconciliation?.lastReport?.dlqPending > 0) degradedReasons.push("dlq_pending");
@@ -225,6 +229,7 @@ async function getReadiness({ worker, provider } = {}) {
 
   return {
     ok:
+      fullService &&
       mongoReady &&
       redisReady &&
       providerReady &&
@@ -234,6 +239,8 @@ async function getReadiness({ worker, provider } = {}) {
       workerReady,
 
     checks: {
+      fullService,
+      configStale: serviceMode.isConfigStale(),
       mongo: mongoReady,
       redis: redisReady,
       provider: providerReady,
@@ -384,4 +391,5 @@ module.exports = {
   createReadyHandler,
   createHealthHandler,
   _resetReadinessCacheForTests,
+  invalidateReadinessCache: _resetReadinessCacheForTests,
 };

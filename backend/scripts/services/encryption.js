@@ -36,6 +36,17 @@ const hkdfAsync = promisify(crypto.hkdf);
 // Uygulama restart'ında otomatik temizlenir.
 let _masterKeyCache = null;
 
+// [TR] Kısıtlı (degraded) açılışta SEC-01 zincir doğrulaması yapılamadıysa anahtar yüklemesi kapalıdır.
+//      Yalnız runProductionKmsStartupSelfTest başarıyla zinciri doğruladıktan sonra açılır (atlatma yolu yok).
+// [EN] While booted degraded (SEC-01 chain check not yet done) key loading is refused until
+//      runProductionKmsStartupSelfTest re-verifies the chain.
+let _keyLoadBlocked = false;
+
+function blockKeyLoadingUntilSelfTest() {
+  _keyLoadBlocked = true;
+  clearMasterKeyCache();
+}
+
 function _normalizeWalletAddress(walletAddress) {
   if (typeof walletAddress !== "string") {
     throw new Error("walletAddress must be a string");
@@ -99,6 +110,11 @@ function _warnEnvKmsTestnetException() {
  */
 async function _getMasterKey() {
   // Cache varsa tekrar KMS'e gitme
+  if (_keyLoadBlocked) {
+    const blockedErr = new Error("KMS anahtarı yüklenmedi: servis kısıtlı modda (SEC-01 doğrulaması bekleniyor).");
+    blockedErr.code = "KMS_UNAVAILABLE_DEGRADED";
+    throw blockedErr;
+  }
   const provider = (process.env.KMS_PROVIDER || "env").toLowerCase();
 
   // env provider: cache'ten dönmeden önce de SEC-01 kontrolü (env sonradan değişse bile fail-closed)
@@ -291,15 +307,27 @@ async function _assertTestnetRpcChainOrThrow() {
 }
 
 async function runProductionKmsStartupSelfTest() {
+  const wasBlocked = _keyLoadBlocked;
+  try {
+    return await _runProductionKmsStartupSelfTestInner(() => { _keyLoadBlocked = false; });
+  } catch (err) {
+    if (wasBlocked) _keyLoadBlocked = true;
+    throw err;
+  }
+}
+
+async function _runProductionKmsStartupSelfTestInner(unblockAfterChainCheck) {
   const provider = (process.env.KMS_PROVIDER || "env").toLowerCase();
 
   if (process.env.NODE_ENV !== "production") {
+    unblockAfterChainCheck();
     return { skipped: true, provider };
   }
 
   if (provider === "env") {
     _assertEnvKmsAllowedOrThrow();
     if (_isEnvKmsTestnetExceptionActive()) await _assertTestnetRpcChainOrThrow();
+    unblockAfterChainCheck();
     const envKey = await _getMasterKey();
     _assertMasterKeyLengthOrThrow(envKey, "ENV");
     return { ok: true, provider };
@@ -322,6 +350,7 @@ async function runProductionKmsStartupSelfTest() {
     throw new Error(`Bilinmeyen KMS_PROVIDER: "${provider}". Geçerli değerler: env, aws, vault`);
   }
 
+  unblockAfterChainCheck();
   const masterKey = await _getMasterKey();
   _assertMasterKeyLengthOrThrow(masterKey, provider.toUpperCase());
   return { ok: true, provider };
@@ -580,5 +609,6 @@ module.exports = {
   encryptField,
   decryptField,
   clearMasterKeyCache,
+  blockKeyLoadingUntilSelfTest,
   runProductionKmsStartupSelfTest,
 };

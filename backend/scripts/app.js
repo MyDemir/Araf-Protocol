@@ -20,7 +20,17 @@ const worker = require("./services/eventListener");
 
 // [TR] V3 mutable protocol config'ini startup'ta on-chain'den yükler
 // [EN] Loads V3 mutable protocol config from on-chain at startup
-const { loadProtocolConfig } = require("./services/protocolConfig");
+const {
+  loadProtocolConfig,
+  refreshProtocolConfig,
+  loadStaleProtocolConfig,
+} = require("./services/protocolConfig");
+
+// [TR] Kısıtlı (degraded) mod: RPC'ye bağlı açılış adımları geçici hatada süreci öldürmez.
+// [EN] Degraded mode: RPC-bound boot steps do not kill the process on transient errors.
+const serviceMode = require("./services/serviceMode");
+const { requireFullService } = require("./middleware/requireFullService");
+const { getRpcUrls, redactRpcUrl, redactRpcSecrets } = require("./services/rpcProvider");
 
 // [TR] Başarısız event'leri izleyen ve yeniden süren DLQ monitörü
 // [EN] DLQ monitor that re-drives failed events
@@ -51,7 +61,7 @@ const {
 } = require("./jobs/cleanupUserBankRiskMetadata");
 
 const { refreshReferenceTicker } = require("./services/referenceTicker");
-const { createReadyHandler, createHealthHandler } = require("./services/health");
+const { createReadyHandler, createHealthHandler, invalidateReadinessCache } = require("./services/health");
 const { verifyIdentityNormalization } = require("./services/identityNormalizationGuard");
 const { parsePositiveTimerMs } = require("./utils/timeEnv");
 const { getAdminWallets } = require("./utils/adminWallets");
@@ -63,7 +73,11 @@ const { globalErrorHandler } = require("./middleware/errorHandler");
 
 // [TR] Shutdown sırasında AES master key'i RAM'den sıfırlar
 // [EN] Zeroes out AES master key from RAM on shutdown
-const { clearMasterKeyCache, runProductionKmsStartupSelfTest } = require("./services/encryption");
+const {
+  clearMasterKeyCache,
+  runProductionKmsStartupSelfTest,
+  blockKeyLoadingUntilSelfTest,
+} = require("./services/encryption");
 
 const app = express();
 // [TR] Admin read-only gözlem endpoint'leri için scheduler çalışma zamanını paylaşır.
@@ -201,6 +215,11 @@ async function bootstrap() {
   let userBankRiskCleanupInterval = null;
   let referenceTickerInterval = null;
   let reconciliationInterval = null;
+  let recoveryLoop = null;
+
+  // [TR] Zincire/RPC'ye bağlı job'lar kısıtlı modda ATLANIR (zincir durumunu riske atmamak için).
+  // [EN] Chain-bound jobs are skipped while degraded.
+  const CHAIN_BOUND_JOBS = new Set(["dlq", "reputationDecay", "rewardRecorder", "reconciliation"]);
 
   // [TR] Aynı job'ın üst üste binmesini engelleyen hafif scheduler lock'ları.
   // [EN] Lightweight scheduler locks to prevent overlapping runs.
@@ -228,6 +247,7 @@ async function bootstrap() {
     if (userBankRiskCleanupInterval) clearInterval(userBankRiskCleanupInterval);
     if (referenceTickerInterval) clearInterval(referenceTickerInterval);
     if (reconciliationInterval) clearInterval(reconciliationInterval);
+    if (recoveryLoop) recoveryLoop.stop();
   };
 
   /**
@@ -238,6 +258,7 @@ async function bootstrap() {
    *      If the same job is still running, the next tick is skipped.
    */
   const runScheduledJob = async (jobKey, jobFn, onSuccess) => {
+    if (CHAIN_BOUND_JOBS.has(jobKey) && serviceMode.isDegraded()) return;
     if (jobLocks[jobKey]) {
       logger.warn(`[Scheduler] ${jobKey} hâlâ çalışıyor — bu tick atlandı.`);
       return;
@@ -358,7 +379,24 @@ async function bootstrap() {
       }
     }
 
-    await runProductionKmsStartupSelfTest();
+    // [TR] SEC-01 + KMS: RPC GEÇİCİ hatasında kısıtlı moda düşer (anahtar yüklenmez, PII kapalı).
+    //      ChainGuard/yanlış zincir/bilinmeyen hata => bugünkü gibi çıkış (fail-closed).
+    const completedRpcSteps = new Set();
+    const enterDegradedBoot = (step, err) => {
+      const first = serviceMode.enterDegraded("rpc_unavailable_at_boot");
+      if (first) {
+        const urls = getRpcUrls().map((u) => redactRpcUrl(u)).join(", ") || "n/a";
+        logger.warn(`[Degraded] Açılışta RPC'ye ulaşılamadı (adım=${step}, rpc=${urls}); KISITLI modda açılıyor. Neden: ${redactRpcSecrets(err?.message)}`);
+      }
+    };
+    try {
+      await runProductionKmsStartupSelfTest();
+      completedRpcSteps.add("sec01_kms");
+    } catch (err) {
+      if (serviceMode.classifyStartupError(err) !== "transient") throw err;
+      blockKeyLoadingUntilSelfTest();
+      enterDegradedBoot("sec01_kms", err);
+    }
 
     await connectDB();
     await connectRedis();
@@ -374,7 +412,53 @@ async function bootstrap() {
     // [TR] V3 mutable protocol config mirror'ı yüklenir.
     //      Config yüklenemiyorsa server tamamen çökmez; route'lar CONFIG_UNAVAILABLE dönebilir.
     // [EN] V3 mutable protocol config mirror is loaded here.
-    await loadProtocolConfig();
+    if (serviceMode.isDegraded()) {
+      // [TR] RPC zaten erişilemez: tekrar vurma; Redis'teki son bilinen config'i BAYAT işaretiyle yükle.
+      if (await loadStaleProtocolConfig()) {
+        serviceMode.setConfigStale(true);
+        logger.warn("[Degraded] Protocol config Redis'teki son bilinen kopyadan yüklendi (BAYAT olabilir).");
+      }
+    } else {
+      try {
+        await loadProtocolConfig();
+        completedRpcSteps.add("protocol_config");
+      } catch (err) {
+        if (serviceMode.classifyStartupError(err) !== "transient") throw err;
+        enterDegradedBoot("protocol_config", err);
+        if (await loadStaleProtocolConfig()) {
+          serviceMode.setConfigStale(true);
+          logger.warn("[Degraded] Protocol config Redis'teki son bilinen kopyadan yüklendi (BAYAT olabilir).");
+        }
+      }
+    }
+
+    // [TR] Toparlanma adımları (sıra önemli): SEC-01 + KMS anahtarı -> protocol config -> worker.
+    // [EN] Recovery steps (order matters): SEC-01 + KMS key -> protocol config -> worker.
+    const recoverySteps = [
+      { name: "sec01_kms", run: () => runProductionKmsStartupSelfTest() },
+      { name: "protocol_config", run: () => refreshProtocolConfig() },
+      {
+        name: "worker",
+        run: async () => {
+          try {
+            await worker.start();
+          } catch (err) {
+            await worker.stop().catch(() => {});
+            throw err;
+          }
+        },
+      },
+    ];
+    const startRecoveryLoop = () => {
+      if (recoveryLoop) return;
+      recoveryLoop = serviceMode.createRecoveryLoop({
+        steps: recoverySteps,
+        completed: completedRpcSteps,
+        onRecovered: () => invalidateReadinessCache(),
+        onFatal: (err) => shutdown({ signal: "degradedRecoveryFatal", exitCode: 1, reason: { message: err?.message } }),
+      });
+      recoveryLoop.start();
+    };
 
     // [TR] B19: worker.start() (bağlan + replay) burada AWAIT EDİLMEZ; HTTP önce dinlemeye başlar, replay arka
     //      planda sürer ve /ready "replaying" raporlar. Başlatma app.listen'den sonra yapılır.
@@ -522,6 +606,9 @@ async function bootstrap() {
     const rewardsRoutes = require("./routes/rewards");
 
     // [TR] Log rotası en üstte tanımlanır
+    // [TR] Kısıtlı modda varsayılan-kapalı kapı: izin listesi dışındaki her /api ucu 503 SERVICE_DEGRADED.
+    app.use("/api", requireFullService);
+
     app.use("/api/logs", logRoutes);
 
     app.use("/api/auth", authRoutes);
@@ -563,8 +650,21 @@ async function bootstrap() {
       logger.info("===========================================================");
     });
 
-    worker.startInBackground({
-      onFatal: (err) => shutdown({ signal: "workerStart", exitCode: 1, reason: { message: err.message, stack: err.stack } }),
+    if (serviceMode.isDegraded()) {
+      // [TR] Kısıtlı mod: worker burada BAŞLATILMAZ; tek toparlanma döngüsü RPC gelince başlatır.
+      startRecoveryLoop();
+    } else worker.startInBackground({
+      onFatal: (err) => {
+        if (serviceMode.classifyStartupError(err) === "transient") {
+          completedRpcSteps.add("sec01_kms");
+          completedRpcSteps.add("protocol_config");
+          enterDegradedBoot("worker", err);
+          worker.stop().catch(() => {});
+          startRecoveryLoop();
+          return;
+        }
+        shutdown({ signal: "workerStart", exitCode: 1, reason: { message: err.message, stack: err.stack } });
+      },
     }).then(() => {
       if (worker.isRunning) {
         logger.info("Event Listener aktif: V3 Order + Child Trade topology izleniyor.");

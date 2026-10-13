@@ -29,6 +29,8 @@ const { getSharedProvider } = require("./rpcProvider");
 const { resolveTrackedTokensOrThrow } = require("./tokenEnv");
 
 const CONFIG_CACHE_KEY = "cache:protocol_config:v3";
+// [TR] TTL'siz "son bilinen" kopya: RPC erişilemezken kısıtlı modda bayat olarak sunulur (yetki kaynağı değildir).
+const CONFIG_LAST_KNOWN_KEY = "cache:protocol_config:v3:last_known";
 const CONFIG_CACHE_TTL = Number(process.env.CONFIG_CACHE_TTL_SECONDS || 3600);
 
 const CONFIG_ABI = [
@@ -74,6 +76,30 @@ async function _writeCache(redis, value) {
     await redis.setEx(CONFIG_CACHE_KEY, CONFIG_CACHE_TTL, JSON.stringify(value));
   } catch (err) {
     logger.warn(`[Config] Redis yazma hatası: ${err.message}`);
+  }
+  try {
+    if (typeof redis.set === "function") await redis.set(CONFIG_LAST_KNOWN_KEY, JSON.stringify(value));
+  } catch (err) {
+    logger.warn(`[Config] Redis son-bilinen yazma hatası: ${err.message}`);
+  }
+}
+
+/**
+ * [TR] Kısıtlı mod: RPC olmadan, Redis'teki son bilinen config'i (varsa) belleğe yükler. Zincirden doğrulanmış
+ *      DEĞİLDİR (bayat olabilir); çağıran bunu işaretlemelidir. Yoksa null döner ve config yüklenmemiş kalır.
+ * [EN] Degraded mode: loads the last-known config from Redis without RPC. May be stale; the caller flags it.
+ */
+async function loadStaleProtocolConfig() {
+  try {
+    const raw = await getRedisClient().get(CONFIG_LAST_KNOWN_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!_isConfigLoaded(parsed)) return null;
+    protocolConfig = parsed;
+    return protocolConfig;
+  } catch (err) {
+    logger.warn(`[Config] Son bilinen config okunamadı: ${err.message}`);
+    return null;
   }
 }
 
@@ -306,6 +332,7 @@ function getConfig() {
 
 module.exports = {
   loadProtocolConfig,
+  loadStaleProtocolConfig,
   refreshProtocolConfig,
   getConfig,
   updateCachedFeeConfig,
