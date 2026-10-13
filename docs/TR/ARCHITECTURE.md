@@ -1084,3 +1084,10 @@ Dolayısıyla doküman ne yalnız “özet”, ne de stale legacy metin kopyası
 [![Redis](https://img.shields.io/badge/Redis-DC382D?style=for-the-badge&logo=redis&logoColor=white)](https://redis.io)
 
 </div>
+
+## Altyapı arızasında frontend davranışı
+
+- Açılış istekleri `fetchWithTimeout` (10 sn; yazma/yükleme 60 sn, otomatik tekrar yok) ile yapılır. Backend/RPC arızası `infraHealth` deposuna işlenir; `BACKEND_UNREACHABLE` / `RPC_UNREACHABLE` bantları kapatılabilir, kritik güvenlik uyarıları (`ESCROW_MISMATCH` vb.) kapatılamaz kalır.
+- Toparlanma: tek arka plan yoklaması, üstel geri çekilme (5 sn → 60 sn, jitter); yoklama başarısında bant kalkar ve veri sayfa yenilenmeden yeniden çekilir.
+- Fail-closed: YENİ pozisyon açan işlemler (emir oluştur / emre gir) `txGate` ile paused, "ilk zincir okuması gelmedi" ya da altyapı arızasında kapalıdır; eylem fonksiyonları approve öncesi kontrol eder. Mevcut işlemden çıkış eylemleri kapatılmaz (kontrat zaman kurallarını zincirde uygular); trade room yalnız sakin bir uyarı gösterir.
+- Render hatası yalnız ilgili bölümü düşürür (`ErrorBoundary scope="section"`); `public/boot-guard.js` ana paket yüklenmezse "yenile" gösterir.

@@ -1087,3 +1087,10 @@ So it is neither a shallow summary nor a stale legacy dump; it is a modern, oper
 [![Redis](https://img.shields.io/badge/Redis-DC382D?style=for-the-badge&logo=redis&logoColor=white)](https://redis.io)
 
 </div>
+
+## Frontend behaviour during infrastructure outages
+
+- Boot requests use `fetchWithTimeout` (10 s; writes/uploads 60 s, never auto-resent). Backend/RPC failures feed the `infraHealth` store; `BACKEND_UNREACHABLE` / `RPC_UNREACHABLE` banners are dismissible, critical safety alerts (`ESCROW_MISMATCH` etc.) stay non-dismissible.
+- Recovery: one background probe with exponential backoff (5 s to 60 s, jitter); a successful probe clears the banner and refetches data without a reload.
+- Fail-closed: NEW-position txs (create order / fill order) are gated by `txGate` while paused, before the first chain read, or during an infra outage; action functions check it before approve. Exit actions on an existing trade are never gated (the contract enforces timers on-chain); the trade room only shows a calm notice.
+- A render error takes down only its own section (`ErrorBoundary scope="section"`); `public/boot-guard.js` shows a reload prompt if the main bundle never loads.
