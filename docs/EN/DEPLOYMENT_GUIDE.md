@@ -905,6 +905,7 @@ PII re-encryption after the HKDF change has no tool in the repository; see `PII_
 ### Frontend hosting security headers
 Minimum recommended response headers for frontend hosting (Nginx/Cloudflare/Vercel equivalents; `frontend/vercel.json` ships them):
 - `Content-Security-Policy` (strict allowlist, no unsafe-inline unless nonce/hash controlled)
+- Mobile wallets: `connect-src` adds only `wss://www.walletlink.org` (Coinbase WalletLink). On mobile without an injected wallet the connect modal offers deeplinks that open the site in the wallet app browser (`frontend/src/app/mobileWallet.js`; link formats must be verified against official docs).
 - `Strict-Transport-Security: max-age=31536000; includeSubDomains; preload`
 - `X-Content-Type-Options: nosniff`
 - `Referrer-Policy: strict-origin-when-cross-origin`
