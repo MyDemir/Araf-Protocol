@@ -806,6 +806,9 @@ Production açılışta KMS self-test çalıştırır (`runProductionKmsStartupS
 | `FINAL_TREASURY_ADDRESS` | `deployRewards.js` | Public zincirlerde zorunlu; local varsayılan = deployer. |
 | `CONFIRM_FRESH_ESCROW_DEPLOY` | `deployRewards.js` | Yalnız hata metnini değiştirir; bu script public zincirde yeni escrow deploy etmez. |
 | `CONFIRM_OVERWRITE_REWARDS_MANIFEST` | `deployRewards.js` | Mevcut `<network>-rewards.json` içindeki kritik adresleri ezmek için `yes` gerekir. |
+| `CONFIRM_REDEPLOY_REWARDS` | `deployRewards.js` | Mevcut bir rewards kurulumu algılandığında yeniden deploy için birebir `YES`. |
+| `EXISTING_REVENUE_VAULT_ADDRESS`, `EXISTING_REWARDS_ADDRESS` | `deployRewards.js` | Kilit için zincir üstü ön kontrol adresleri (workflow repo variable'larından verir). |
+| `ARAF_DEPLOYMENTS_DIR`, `SKIP_ABI_EXPORT`, `SKIP_FRONTEND_ENV_WRITE` | `deploy.js`, `deployRewards.js` | Test/araç amaçlı: manifest dizini, ABI dışa aktarımını ve local `frontend/.env` yazımını atla. |
 | `ARAF_REVENUE_VAULT_ADDRESS`, `ARAF_REWARDS_ADDRESS`, `USDT_ADDRESS`, `USDC_ADDRESS` | `rewardsOps.js` | Önce env, sonra `deployments/<network>-rewards.json`. |
 | `REWARDS_OP` | `rewardsOps.js` | `configure` · `verify` · `switch-treasury` (ya da npm script adından çıkarılır). |
 | `CONFIRM_TREASURY_SWITCH`, `EXPECTED_CURRENT_TREASURY_ADDRESS` | `rewardsOps.js` | Escrow treasury'sini vault'a geçirmek için ikisi de gerekir. |
@@ -833,13 +836,16 @@ Production açılışta KMS self-test çalıştırır (`runProductionKmsStartupS
 6. Manifest `contracts/deployments/<network>.json` (escrow, `libraries`, `libraryDeployTxHashes`, token'lar, fee/cooldown snapshot'ı). Yalnız local: `frontend/.env` güncellenir.
 
 **Rewards (`contracts/scripts/deployRewards.js`)** — escrow var olduktan sonra çalıştırılır (public zincirler `ARAF_ESCROW_ADDRESS` ister; boşsa local linkli bir escrow deploy eder):
-1. `ArafRevenueVault(escrow, finalTreasury, owner)` → `ArafRewards(escrow, vault, owner)`.
+0. Güvenlik kilidi (tx göndermeden): aynı ağın `<network>-rewards.json`'ı varsa, `EXISTING_REVENUE_VAULT_ADDRESS`'in `rewards()`'ı doluysa, `EXISTING_REWARDS_ADDRESS`'te kod varsa ya da `escrow.treasury()` rewards'ı bağlı bir vault ise `CONFIRM_REDEPLOY_REWARDS=YES` olmadan durur.
+1. `ArafRevenueVault(escrow, finalTreasury, deployer)` → `ArafRewards(escrow, vault, deployer)` (constructor owner = deployer, çünkü wiring `onlyOwner`).
 2. `vault.setRewards(rewards)` — **tek seferlik**: ikinci çağrı revert eder (`RewardsAlreadySet`); yanlış adres vault'u yeniden deploy etmek demektir.
 3. `vault.setSupportedToken(usdt|usdc, true)`; `rewardBps` `4000` okunmalı (izinli aralık 4000–7000).
-4. `deployments/<network>-rewards.json` yazılır ve ABI'ler `contracts/abi/`'ya aktarılır. Değişmiş kritik adreslerin ezilmesi `CONFIRM_OVERWRITE_REWARDS_MANIFEST=yes` ister.
+4. Vault ve rewards ownership'i `FINAL_OWNER_ADDRESS`'e devredilir (farklıysa) ve wiring zincirden doğrulanır. `deployments/<network>-rewards.json` yazılır (`owner` = constructor argümanı, `finalOwner` = devir sonrası owner) ve ABI'ler `contracts/abi/`'ya aktarılır. Değişmiş kritik adreslerin ezilmesi `CONFIRM_OVERWRITE_REWARDS_MANIFEST=yes` ister.
 5. npm kısayolları `base-sepolia`'yı hedefler (`deploy:rewards:base-sepolia`); Base Mainnet için `npx hardhat run scripts/deployRewards.js --network base` çalıştırın.
 
 **Rewards operasyonları (`contracts/scripts/rewardsOps.js`)** — `configure:rewards` (yalnız idempotent wiring), `verify:rewards` (salt okunur go-live kontrolleri), `switch:rewards:treasury` (`escrow.setTreasury(vault)`; `CONFIRM_TREASURY_SWITCH=true` ve `EXPECTED_CURRENT_TREASURY_ADDRESS` ister; imzalayıcı escrow owner'ı olmalı). Treasury switch bilinçli olarak deploy'dan ve `configure`'dan ayrıdır.
+
+**GitHub Actions:** `deploy-base-sepolia.yml` `deploy_rewards=true` ile bu script'i escrow'dan hemen sonra çalıştırır; varsayılan kapalıdır, yeniden deploy `confirm_redeploy_rewards=YES` ister ve `escrow.setTreasury(vault)` workflow'da YAPILMAZ (multisig owner'ın ayrı işlemi). İki workflow'un karşılaştırması ve gerekli secret/variable'lar: `DEPLOY_BASE_SEPOLIA.md`.
 
 **Sonrasında backend bağlantısı:** `ARAF_ESCROW_ADDRESS`, `ARAF_REVENUE_VAULT_ADDRESS`, `ARAF_REWARDS_ADDRESS` ve `ARAF_DEPLOYMENT_BLOCK` ayarlanır, sonra backend deploy edilir; frontend: `VITE_ESCROW_ADDRESS`, `VITE_REVENUE_VAULT_ADDRESS`, `VITE_REWARDS_ADDRESS`.
 

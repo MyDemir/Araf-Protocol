@@ -5,7 +5,7 @@
  *      (3) Rewards(escrow, vault, deployer), (4) vault.setRewards(rewards)  ← TEK SEFERLİK (K4, RewardsAlreadySet),
  *      (5) vault.setSupportedToken(USDT/USDC), (6) FINAL_OWNER_ADDRESS farklıysa vault+rewards ownership devri,
  *      (7) zincir üstü doğrulama, (8) manifest deployments/<ağ>-rewards.json.
- *      Escrow'a DOKUNMAZ: escrow.setTreasury(vault) escrow owner'ının (multisig) ayrı ve bilinçli işidir
+ *      Escrow'a DOKUNMAZ: escrow treasury → vault geçişi escrow owner'ının (multisig) ayrı ve bilinçli işidir
  *      (rewardsOps.js switch-treasury).
  * [EN] Order: lock (no tx), Vault, Rewards, one-shot vault.setRewards, supported tokens, ownership handoff,
  *      on-chain verification, manifest. Never touches the escrow; the treasury switch is a separate owner op.

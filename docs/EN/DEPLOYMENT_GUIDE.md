@@ -802,6 +802,9 @@ Production runs a KMS self-test at startup (`runProductionKmsStartupSelfTest`). 
 | `FINAL_TREASURY_ADDRESS` | `deployRewards.js` | Required on public chains; local default = deployer. |
 | `CONFIRM_FRESH_ESCROW_DEPLOY` | `deployRewards.js` | Only changes the error text; a fresh escrow on a public chain is never deployed by this script. |
 | `CONFIRM_OVERWRITE_REWARDS_MANIFEST` | `deployRewards.js` | `yes` is required to overwrite critical addresses of an existing `<network>-rewards.json`. |
+| `CONFIRM_REDEPLOY_REWARDS` | `deployRewards.js` | Exactly `YES` to redeploy when an existing rewards setup is detected. |
+| `EXISTING_REVENUE_VAULT_ADDRESS`, `EXISTING_REWARDS_ADDRESS` | `deployRewards.js` | On-chain pre-check addresses for the lock (the workflow passes the repository variables). |
+| `ARAF_DEPLOYMENTS_DIR`, `SKIP_ABI_EXPORT`, `SKIP_FRONTEND_ENV_WRITE` | `deploy.js`, `deployRewards.js` | Tests/tooling: manifest directory, skip ABI export and the local `frontend/.env` write. |
 | `ARAF_REVENUE_VAULT_ADDRESS`, `ARAF_REWARDS_ADDRESS`, `USDT_ADDRESS`, `USDC_ADDRESS` | `rewardsOps.js` | Env first, then `deployments/<network>-rewards.json`. |
 | `REWARDS_OP` | `rewardsOps.js` | `configure` · `verify` · `switch-treasury` (or implied by the npm script name). |
 | `CONFIRM_TREASURY_SWITCH`, `EXPECTED_CURRENT_TREASURY_ADDRESS` | `rewardsOps.js` | Both required to switch the escrow treasury to the vault. |
@@ -829,13 +832,16 @@ Production runs a KMS self-test at startup (`runProductionKmsStartupSelfTest`). 
 6. Manifest `contracts/deployments/<network>.json` (escrow, `libraries`, `libraryDeployTxHashes`, tokens, fee/cooldown snapshot). Local only: `frontend/.env` is updated.
 
 **Rewards (`contracts/scripts/deployRewards.js`)** — run after the escrow exists (public chains require `ARAF_ESCROW_ADDRESS`; local deploys a linked escrow if it is empty):
-1. `ArafRevenueVault(escrow, finalTreasury, owner)` → `ArafRewards(escrow, vault, owner)`.
+0. Safety lock (no tx sent): stops without `CONFIRM_REDEPLOY_REWARDS=YES` if this network's `<network>-rewards.json` exists, `EXISTING_REVENUE_VAULT_ADDRESS` already has `rewards()` set, `EXISTING_REWARDS_ADDRESS` has code, or `escrow.treasury()` is a vault already wired to rewards.
+1. `ArafRevenueVault(escrow, finalTreasury, deployer)` → `ArafRewards(escrow, vault, deployer)` (constructor owner = deployer because the wiring is `onlyOwner`).
 2. `vault.setRewards(rewards)` — **single use**: a second call reverts (`RewardsAlreadySet`), so a wrong address means redeploying the vault.
 3. `vault.setSupportedToken(usdt|usdc, true)`; `rewardBps` must read `4000` (allowed range 4000–7000).
-4. Writes `deployments/<network>-rewards.json` and exports ABIs to `contracts/abi/`. Overwriting changed critical addresses needs `CONFIRM_OVERWRITE_REWARDS_MANIFEST=yes`.
+4. Vault and rewards ownership is transferred to `FINAL_OWNER_ADDRESS` (if different) and the wiring is verified on chain. Writes `deployments/<network>-rewards.json` (`owner` = constructor arg, `finalOwner` = post-handoff owner) and exports ABIs to `contracts/abi/`. Overwriting changed critical addresses needs `CONFIRM_OVERWRITE_REWARDS_MANIFEST=yes`.
 5. The npm shortcuts target `base-sepolia` (`deploy:rewards:base-sepolia`); for Base Mainnet run `npx hardhat run scripts/deployRewards.js --network base`.
 
 **Rewards operations (`contracts/scripts/rewardsOps.js`)** — `configure:rewards` (idempotent wiring only), `verify:rewards` (read-only go-live checks), `switch:rewards:treasury` (`escrow.setTreasury(vault)`; needs `CONFIRM_TREASURY_SWITCH=true` and `EXPECTED_CURRENT_TREASURY_ADDRESS`; the signer must be the escrow owner). The treasury switch is deliberately separate from deployment and from `configure`.
+
+**GitHub Actions:** `deploy-base-sepolia.yml` runs this script right after the escrow when `deploy_rewards=true`; it is off by default, a redeploy needs `confirm_redeploy_rewards=YES`, and `escrow.setTreasury(vault)` is NOT done by the workflow (separate multisig owner op). Workflow comparison and required secrets/variables: `DEPLOY_BASE_SEPOLIA.md`.
 
 **Backend wiring afterwards:** set `ARAF_ESCROW_ADDRESS`, `ARAF_REVENUE_VAULT_ADDRESS`, `ARAF_REWARDS_ADDRESS` and `ARAF_DEPLOYMENT_BLOCK`, then deploy the backend; frontend: `VITE_ESCROW_ADDRESS`, `VITE_REVENUE_VAULT_ADDRESS`, `VITE_REWARDS_ADDRESS`.
 

@@ -4,7 +4,18 @@ Türkçe: [../TR/DEPLOY_BASE_SEPOLIA.md](../TR/DEPLOY_BASE_SEPOLIA.md)
 
 Two workflows: `deploy-base-sepolia.yml` (contract + Fly backend + optional Vercel frontend) and
 `deploy-runtime-base-sepolia.yml` (redeploys backend/frontend without deploying the contract).
-`deployRewards.js` is NOT included in the workflows; rewards is a separate operation (`npm --prefix contracts run deploy:rewards:base-sepolia`).
+The full deploy can also deploy the revenue vault + rewards with `deploy_rewards=true` (off by default; safety lock below). The manual path still works: `npm --prefix contracts run deploy:rewards:base-sepolia`.
+
+## Which workflow when?
+
+| | `deploy-base-sepolia.yml` (full deploy) | `deploy-runtime-base-sepolia.yml` (runtime) |
+|---|---|---|
+| When | First setup; whenever a new escrow is needed (contract changed); first or deliberate vault/rewards redeploy (`deploy_rewards=true`) | Contracts unchanged; backend/frontend code, secrets or settings changed; wiring vault/rewards addresses manually |
+| Contracts | Deploys the libraries + `ArafEscrow` (+ optional tUSDT, + optional vault/rewards) | Deploys NOTHING |
+| Address source | This run's manifests (`deployments/base-sepolia*.json`); with `deploy_rewards=false` the vault/rewards variables are the fallback | Repository variables (`ARAF_ESCROW_ADDRESS`, `ARAF_DEPLOYMENT_BLOCK`, `BASE_SEPOLIA_USDT/USDC_ADDRESS`, `ARAF_REVENUE_VAULT_ADDRESS`, `ARAF_REWARDS_ADDRESS`); a non-empty input override wins |
+| Fly secrets / Vercel env | Shared script `.github/scripts/stage-runtime-env.sh` (same list) | Same script |
+| Health | `/health` must be 200; `/ready` 503 `degraded:true` is only a warning | Same |
+| Irreversible step | New escrow (the old address is abandoned); with `deploy_rewards=true`, `vault.setRewards` (one-shot) | None |
 
 ## Secrets (`gh secret set`)
 
@@ -20,6 +31,7 @@ Two workflows: `deploy-base-sepolia.yml` (contract + Fly backend + optional Verc
 | `REDIS_URL` | Redis, TLS REQUIRED (`rediss://`) | Upstash > TLS endpoint | `rediss://default:PASS@host.upstash.io:6379` |
 | `JWT_SECRET` | >= 64 characters | `node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"` | 128 hex |
 | `MASTER_ENCRYPTION_KEY` | PII encryption key, exactly 64 hex (testnet KMS exception) | `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` | 64 hex |
+| `BASE_SEPOLIA_RPC_URL_FALLBACKS` | Optional; comma-separated backup HTTPS RPCs (may contain API keys, hence a secret). Written to Fly as `BASE_RPC_URL_FALLBACKS`; when empty the Fly value is kept | 2nd provider | `https://sepolia.base.org` |
 | `RELAYER_PRIVATE_KEY` | Optional; a SEPARATE low-balance wallet for reputation decay / reward recorder. If empty, those jobs stay inactive | New wallet | `0x` + 64 hex |
 | `VERCEL_TOKEN` | Only `deploy_frontend=true` | Vercel > Account > Tokens | string |
 | `VERCEL_ORG_ID` | Frontend only | `.vercel/project.json` > `orgId` | `team_...` |
@@ -38,11 +50,16 @@ Important: `MASTER_ENCRYPTION_KEY` must be generated once and NEVER CHANGED (exi
 | `BASE_SEPOLIA_USDC_ADDRESS` | Test USDC (Circle) | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` |
 | `FLY_APP_NAME` | Optional; default `araf-protocol-backend` | `araf-protocol-backend` |
 | `FLY_ORG` | Optional; Fly org used when the workflow has to create the app; default `personal` | `personal` |
-| `ADMIN_WALLETS` | Optional; admin panel wallets (comma-separated) | `0xabc...,0xdef...` |
+| `ADMIN_WALLETS` | Optional; admin panel wallets (comma-separated, each validated as an address). When empty the Fly value is kept | `0xabc...,0xdef...` |
+| `FINAL_TREASURY_ADDRESS` | Only with `deploy_rewards=true`: the vault's final treasury | `0x...` |
+| `LIVE_POLL_INTERVAL_MS` | Optional backend setting [2000-300000]; when empty the Fly value is kept | `15000` |
+| `WORKER_BLOCK_BATCH_SIZE` | Optional [1-2000] (Alchemy free: 10) | `10` |
+| `WORKER_REPLAY_BATCH_DELAY_MS` | Optional [0-10000] | `250` |
+| `EXPECTED_CHAIN_ID` | Optional; must be empty or `84532` (the workflow always writes 84532) | `84532` |
 | `VITE_RPC_URL` | Optional; frontend primary RPC (becomes PUBLIC, use a restricted/separate key) | `https://...` |
 | `ARAF_ESCROW_ADDRESS` | Written AFTER deploy (for the runtime workflow); if `GH_VARIABLES_TOKEN` exists, the full deploy writes it itself | `0x...` |
 | `ARAF_DEPLOYMENT_BLOCK` | Written AFTER deploy (same way) | `12345678` |
-| `ARAF_REVENUE_VAULT_ADDRESS` | Optional; if rewards was deployed separately. If defined, both workflows pass it as a Fly secret (`ARAF_REVENUE_VAULT_ADDRESS`) and a Vercel build-env (`VITE_REVENUE_VAULT_ADDRESS`); validated with an address regex, and if undefined nothing is written | `0x...` |
+| `ARAF_REVENUE_VAULT_ADDRESS` | Written automatically after `deploy_rewards=true` (with `GH_VARIABLES_TOKEN`); can also be set manually. Both workflows pass it as a Fly secret (`ARAF_REVENUE_VAULT_ADDRESS`) and a Vercel build-env (`VITE_REVENUE_VAULT_ADDRESS`). Validation: 0x+40 hex, non-zero, valid EIP-55 checksum if mixed case; must be set together with `ARAF_REWARDS_ADDRESS`. If undefined nothing is written | `0x...` |
 | `ARAF_REWARDS_ADDRESS` | Optional; same as above (`ARAF_REWARDS_ADDRESS` / `VITE_REWARDS_ADDRESS`) | `0x...` |
 
 ## Web-only (mobile) deploy
@@ -76,7 +93,7 @@ No computer or local CLI needed; everything is done from the browser.
 
 ## Commands
 
-Full-deploy inputs: `deploy_frontend` (Vercel), `deploy_test_usdt` (auto test USDT when the variable is empty; default false), `verify_contracts` (experimental).
+Full-deploy inputs: `deploy_frontend` (Vercel), `deploy_test_usdt` (auto test USDT when the variable is empty; default false), `deploy_rewards` (vault + rewards; default false), `confirm_redeploy_rewards` (`YES` = deliberately replace an existing rewards setup), `verify_contracts` (experimental; also verifies vault and rewards when deployed).
 
 ```bash
 gh secret set DEPLOYER_PRIVATE_KEY < key.txt        # or --body "..."
@@ -117,7 +134,27 @@ gh workflow run deploy-runtime-base-sepolia.yml -f deploy_backend=true -f deploy
 gh run watch
 ```
 
-Input overrides: `araf_escrow_address`, `usdt_address`, `usdc_address`, `deployment_block`.
+Input overrides: `araf_escrow_address`, `usdt_address`, `usdc_address`, `deployment_block`, `revenue_vault_address` + `rewards_address` (together).
+
+Health: the deploy fails if `/health` is not 200. If the backend started without reaching the RPC, `/ready` returns 503 `degraded:true`; the job still succeeds but emits a `::warning::` (check the RPC secrets and Fly logs).
+
+## Revenue vault + rewards (`deploy_rewards`)
+
+Default `false`: rewards is a go-live decision (see `REWARDS_ROLLOUT.md`) and `vault.setRewards` is one-shot; creating a new vault/rewards on every full deploy would silently orphan the old ones. With `true`, `deployRewards.js` runs in the same job after the escrow:
+
+1. `ArafRevenueVault(escrow, FINAL_TREASURY_ADDRESS, deployer)` → `ArafRewards(escrow, vault, deployer)`.
+2. `vault.setRewards(rewards)` (**irreversible**, `RewardsAlreadySet`), `setSupportedToken(USDT/USDC)`, `rewardBps == 4000` check.
+3. Vault and rewards ownership is transferred to `FINAL_OWNER_ADDRESS` and re-read on chain.
+4. Manifest `deployments/base-sepolia-rewards.json`; the addresses are read from it and written to Fly (`ARAF_REVENUE_VAULT_ADDRESS`, `ARAF_REWARDS_ADDRESS`) and Vercel (`VITE_REVENUE_VAULT_ADDRESS`, `VITE_REWARDS_ADDRESS`); with `GH_VARIABLES_TOKEN` they are also saved as repository variables.
+
+**Safety lock** (before any tx):
+- "Validate required config": with `deploy_rewards=true`, if `ARAF_REVENUE_VAULT_ADDRESS`/`ARAF_REWARDS_ADDRESS` is set, the job stops BEFORE the escrow deploy. `FINAL_TREASURY_ADDRESS` is required.
+- `deployRewards.js` stops if this network's rewards manifest exists, the existing vault's `rewards()` is set (staticcall), the existing rewards address has code, or `escrow.treasury()` is a vault already wired to rewards.
+- A deliberate redeploy needs `confirm_redeploy_rewards=YES` (exact, uppercase). The old vault/rewards are orphaned; their balances stay with the old owner.
+- If the manifest and the variables conflict (without confirmation) address resolution fails.
+
+**Manual steps** (NOT done by the workflow): the escrow is owned by `FINAL_OWNER_ADDRESS` (multisig), so only the owner can call `escrow.setTreasury(vault)`. Run `REWARDS_OP=verify`, then `CONFIRM_TREASURY_SWITCH=true EXPECTED_CURRENT_TREASURY_ADDRESS=<treasury> REWARDS_OP=switch-treasury` (see `DEPLOYMENT_GUIDE.md` §7). The owner can bypass the vault with `setTreasury` (K8, documented owner power).
+
 
 ## Farcaster / Base mini app
 
@@ -132,4 +169,5 @@ Input overrides: `araf_escrow_address`, `usdt_address`, `usdc_address`, `deploym
 - The deployment block is not in the `deploy.js` output; the workflow reads it from the `deployTxHash` receipt.
 - Secret values must not contain spaces/quotes/`#` (`flyctl secrets import` dotenv format).
 - Contract verify (Basescan) is **experimental**: in a full deploy, `contracts/scripts/verify.js` runs with `verify_contracts=true` (default false) + `ETHERSCAN_API_KEY` (Etherscan V2, plus Sourcify fallback); it verifies the libraries (`ArafReputationLib`, `ArafSettlementLib`) and the linked `ArafEscrow`, with constructor arguments read from the deploy manifest. The step is `continue-on-error: true`, so if it fails the deploy is unaffected; in that case verify manually: `npm --prefix contracts run verify:base-sepolia` (needs `BASE_SEPOLIA_RPC_URL` and `ETHERSCAN_API_KEY` in `contracts/.env`).
-- Rewards deploy is not part of the workflow (separate operation); if you enter the addresses as the `ARAF_REVENUE_VAULT_ADDRESS`/`ARAF_REWARDS_ADDRESS` variables, the workflows pass them to the backend and frontend.
+- Rewards: use `deploy_rewards=true` in the full deploy (see above) or deploy manually and set the `ARAF_REVENUE_VAULT_ADDRESS`/`ARAF_REWARDS_ADDRESS` variables; the workflows pass them to the backend and frontend. With `deploy_rewards=false` the full deploy creates a new escrow while the variable's vault stays bound to the old escrow (`vault.escrow` is immutable); the workflow emits a warning.
+- `ETHERSCAN_API_KEY` is only used by the verify step and never sent to the backend.

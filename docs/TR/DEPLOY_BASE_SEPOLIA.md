@@ -2,7 +2,18 @@
 
 İki workflow: `deploy-base-sepolia.yml` (kontrat + Fly backend + opsiyonel Vercel frontend) ve
 `deploy-runtime-base-sepolia.yml` (kontrat deploy etmeden backend/frontend yeniden deploy).
-`deployRewards.js` workflow'lara DAHİL DEĞİL; rewards ayrı operasyondur (`npm --prefix contracts run deploy:rewards:base-sepolia`).
+Tam deploy, `deploy_rewards=true` ile revenue vault + rewards'ı da deploy edebilir (varsayılan kapalı; aşağıda güvenlik kilidi). Elle yol hâlâ geçerli: `npm --prefix contracts run deploy:rewards:base-sepolia`.
+
+## Hangi workflow ne zaman?
+
+| | `deploy-base-sepolia.yml` (tam deploy) | `deploy-runtime-base-sepolia.yml` (runtime) |
+|---|---|---|
+| Ne zaman | İlk kurulum; yeni escrow gerektiğinde (kontrat değişti); ilk kez ya da bilinçli olarak yeniden vault/rewards (`deploy_rewards=true`) | Kontrat aynı; backend/frontend kodu, secret ya da ayar değişti; vault/rewards adresini elle bağlamak |
+| Kontrat | Library'ler + `ArafEscrow` (+ opsiyonel tUSDT, + opsiyonel vault/rewards) deploy eder | Deploy ETMEZ |
+| Adres kaynağı | Bu çalıştırmanın manifest'leri (`deployments/base-sepolia*.json`); `deploy_rewards=false` iken vault/rewards için variable yedeği | Repo variable'ları (`ARAF_ESCROW_ADDRESS`, `ARAF_DEPLOYMENT_BLOCK`, `BASE_SEPOLIA_USDT/USDC_ADDRESS`, `ARAF_REVENUE_VAULT_ADDRESS`, `ARAF_REWARDS_ADDRESS`); dolu input override'ı önceliklidir |
+| Fly secret / Vercel env | Ortak betik `.github/scripts/stage-runtime-env.sh` (aynı liste) | Aynı betik |
+| Health | `/health` 200 zorunlu; `/ready` 503 `degraded:true` ise yalnız uyarı | Aynı |
+| Geri alınamaz adım | Yeni escrow (eski adres terk edilir); `deploy_rewards=true` ise `vault.setRewards` (tek sefer) | Yok |
 
 ## Secrets (`gh secret set`)
 
@@ -18,6 +29,7 @@
 | `REDIS_URL` | Redis, TLS ZORUNLU (`rediss://`) | Upstash > TLS endpoint | `rediss://default:PASS@host.upstash.io:6379` |
 | `JWT_SECRET` | >= 64 karakter | `node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"` | 128 hex |
 | `MASTER_ENCRYPTION_KEY` | PII şifreleme anahtarı, tam 64 hex (testnet KMS istisnası) | `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` | 64 hex |
+| `BASE_SEPOLIA_RPC_URL_FALLBACKS` | Opsiyonel; virgüllü yedek HTTPS RPC'ler (API anahtarı içerebilir, bu yüzden secret). Fly'a `BASE_RPC_URL_FALLBACKS` olarak yazılır; boşsa Fly'daki değer korunur | 2. sağlayıcı | `https://sepolia.base.org` |
 | `RELAYER_PRIVATE_KEY` | Opsiyonel; reputation decay / reward recorder için AYRI düşük bakiyeli cüzdan. Boşsa o işler pasif | Yeni cüzdan | `0x` + 64 hex |
 | `VERCEL_TOKEN` | Yalnız `deploy_frontend=true` | Vercel > Account > Tokens | string |
 | `VERCEL_ORG_ID` | Yalnız frontend | `.vercel/project.json` > `orgId` | `team_...` |
@@ -36,11 +48,16 @@
 | `BASE_SEPOLIA_USDC_ADDRESS` | Test USDC (Circle) | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` |
 | `FLY_APP_NAME` | Opsiyonel; varsayılan `araf-protocol-backend` | `araf-protocol-backend` |
 | `FLY_ORG` | Opsiyonel; workflow app'i oluşturmak zorunda kalırsa kullanılan Fly org'u; varsayılan `personal` | `personal` |
-| `ADMIN_WALLETS` | Opsiyonel; admin paneli cüzdanları (virgüllü) | `0xabc...,0xdef...` |
+| `ADMIN_WALLETS` | Opsiyonel; admin paneli cüzdanları (virgüllü, her biri adres olarak doğrulanır). Boşsa Fly'daki değer korunur | `0xabc...,0xdef...` |
+| `FINAL_TREASURY_ADDRESS` | Yalnız `deploy_rewards=true`: vault'un final treasury'si | `0x...` |
+| `LIVE_POLL_INTERVAL_MS` | Opsiyonel backend ayarı [2000-300000]; boşsa Fly'daki değer korunur | `15000` |
+| `WORKER_BLOCK_BATCH_SIZE` | Opsiyonel [1-2000] (Alchemy ücretsiz: 10) | `10` |
+| `WORKER_REPLAY_BATCH_DELAY_MS` | Opsiyonel [0-10000] | `250` |
+| `EXPECTED_CHAIN_ID` | Opsiyonel; boş ya da `84532` olmalı (workflow her zaman 84532 yazar) | `84532` |
 | `VITE_RPC_URL` | Opsiyonel; frontend birincil RPC (PUBLIC olur, kısıtlı/ayrı key kullanın) | `https://...` |
 | `ARAF_ESCROW_ADDRESS` | Deploy SONRASI yazılır (runtime workflow için); `GH_VARIABLES_TOKEN` varsa tam deploy kendisi yazar | `0x...` |
 | `ARAF_DEPLOYMENT_BLOCK` | Deploy SONRASI yazılır (aynı şekilde) | `12345678` |
-| `ARAF_REVENUE_VAULT_ADDRESS` | Opsiyonel; rewards ayrıca deploy edildiyse. Tanımlıysa iki workflow da Fly secret (`ARAF_REVENUE_VAULT_ADDRESS`) ve Vercel build-env (`VITE_REVENUE_VAULT_ADDRESS`) olarak geçirir; adres regex'iyle doğrulanır, tanımsızsa hiçbir şey yazılmaz | `0x...` |
+| `ARAF_REVENUE_VAULT_ADDRESS` | `deploy_rewards=true` sonrası (`GH_VARIABLES_TOKEN` varsa) otomatik yazılır; elle de girilebilir. İki workflow da Fly secret (`ARAF_REVENUE_VAULT_ADDRESS`) ve Vercel build-env (`VITE_REVENUE_VAULT_ADDRESS`) olarak geçirir. Doğrulama: 0x+40 hex, sıfır değil, karışık harfliyse EIP-55 checksum; `ARAF_REWARDS_ADDRESS` ile birlikte verilmeli. Tanımsızsa hiçbir şey yazılmaz | `0x...` |
 | `ARAF_REWARDS_ADDRESS` | Opsiyonel; yukarıdakiyle aynı (`ARAF_REWARDS_ADDRESS` / `VITE_REWARDS_ADDRESS`) | `0x...` |
 
 ## Yalnız web arayüzüyle (mobil) deploy
@@ -74,7 +91,7 @@ Bilgisayar ya da yerel CLI gerekmez; her şey tarayıcıdan yapılır.
 
 ## Komutlar
 
-Tam deploy girdileri: `deploy_frontend` (Vercel), `deploy_test_usdt` (variable boşsa otomatik test USDT; varsayılan false), `verify_contracts` (deneysel).
+Tam deploy girdileri: `deploy_frontend` (Vercel), `deploy_test_usdt` (variable boşsa otomatik test USDT; varsayılan false), `deploy_rewards` (vault + rewards; varsayılan false), `confirm_redeploy_rewards` (`YES` = mevcut rewards kurulumunu bilerek değiştir), `verify_contracts` (deneysel; rewards deploy edildiyse vault ve rewards'ı da doğrular).
 
 ```bash
 gh secret set DEPLOYER_PRIVATE_KEY < key.txt        # veya --body "..."
@@ -115,7 +132,27 @@ gh workflow run deploy-runtime-base-sepolia.yml -f deploy_backend=true -f deploy
 gh run watch
 ```
 
-Girdi override'ları: `araf_escrow_address`, `usdt_address`, `usdc_address`, `deployment_block`.
+Girdi override'ları: `araf_escrow_address`, `usdt_address`, `usdc_address`, `deployment_block`, `revenue_vault_address` + `rewards_address` (ikisi birlikte).
+
+Health: `/health` 200 dönmezse deploy başarısızdır. Backend RPC'ye ulaşamadan açıldıysa `/ready` 503 `degraded:true` döner; bu durumda iş başarılı sayılır ama `::warning::` yazar (RPC secret'larını ve Fly loglarını kontrol edin).
+
+## Revenue vault + rewards (`deploy_rewards`)
+
+Varsayılan `false`: rewards bir go-live kararıdır (bkz. `REWARDS_ROLLOUT.md`) ve `vault.setRewards` tek seferliktir; her tam deploy'da otomatik yeni vault/rewards üretmek eskilerini sessizce terk ederdi. `true` seçilince aynı job'da escrow'dan sonra `deployRewards.js` çalışır:
+
+1. `ArafRevenueVault(escrow, FINAL_TREASURY_ADDRESS, deployer)` → `ArafRewards(escrow, vault, deployer)`.
+2. `vault.setRewards(rewards)` (**geri alınamaz**, `RewardsAlreadySet`), `setSupportedToken(USDT/USDC)`, `rewardBps == 4000` kontrolü.
+3. Vault ve rewards ownership'i `FINAL_OWNER_ADDRESS`'e devredilir; zincirden tekrar okunup doğrulanır.
+4. Manifest `deployments/base-sepolia-rewards.json`; adresler buradan okunur, Fly (`ARAF_REVENUE_VAULT_ADDRESS`, `ARAF_REWARDS_ADDRESS`) ve Vercel (`VITE_REVENUE_VAULT_ADDRESS`, `VITE_REWARDS_ADDRESS`) env'ine yazılır; `GH_VARIABLES_TOKEN` varsa repo variable'larına da kaydedilir.
+
+**Güvenlik kilidi** (hiçbir tx gönderilmeden):
+- "Validate required config": `deploy_rewards=true` iken `ARAF_REVENUE_VAULT_ADDRESS`/`ARAF_REWARDS_ADDRESS` variable'larından biri doluysa iş, escrow deploy'undan ÖNCE durur. `FINAL_TREASURY_ADDRESS` zorunludur.
+- `deployRewards.js`: aynı ağın rewards manifest'i varsa, mevcut vault'un `rewards()`'ı doluysa (staticcall), mevcut rewards adresinde kod varsa ya da `escrow.treasury()` rewards'ı bağlı bir vault ise durur.
+- Bilinçli yeniden deploy yalnız `confirm_redeploy_rewards=YES` (büyük harf, birebir) ile. Eski vault/rewards terk edilir; içlerindeki bakiye eski owner'da kalır.
+- Manifest ile variable'lar çelişirse (onaysız) adres çözümü hata verir.
+
+**Elle yapılması gerekenler** (workflow YAPMAZ): escrow `FINAL_OWNER_ADDRESS`'e (multisig) devredildiği için `escrow.setTreasury(vault)` yalnız owner tarafından yapılabilir. Önce `REWARDS_OP=verify`, sonra `CONFIRM_TREASURY_SWITCH=true EXPECTED_CURRENT_TREASURY_ADDRESS=<treasury> REWARDS_OP=switch-treasury` (bkz. `DEPLOYMENT_GUIDE.md` §7). Owner, `setTreasury` ile vault'u atlayabilir (K8, belgelenmiş owner yetkisi).
+
 
 ## Farcaster / Base mini app
 
@@ -130,4 +167,5 @@ Girdi override'ları: `araf_escrow_address`, `usdt_address`, `usdc_address`, `de
 - Deployment bloğu `deploy.js` çıktısında yoktur; workflow `deployTxHash` receipt'inden okur.
 - Secret değerlerinde boşluk/tırnak/`#` olmasın (`flyctl secrets import` dotenv biçimi).
 - Contract verify (Basescan) **deneysel**: tam deploy'da `verify_contracts=true` (varsayılan false) + `ETHERSCAN_API_KEY` ile `contracts/scripts/verify.js` çalışır (Etherscan V2 + Sourcify yedek); library'leri (`ArafReputationLib`, `ArafSettlementLib`) ve linkli `ArafEscrow`'u doğrular, constructor argümanları deploy manifestinden okunur. Adım `continue-on-error: true`'dur, başarısız olursa deploy etkilenmez; o durumda elle doğrula: `npm --prefix contracts run verify:base-sepolia` (`contracts/.env`'de `BASE_SEPOLIA_RPC_URL` ve `ETHERSCAN_API_KEY` gerekir).
-- Rewards deploy'u workflow'a dahil değildir (ayrı operasyon); adresleri `ARAF_REVENUE_VAULT_ADDRESS`/`ARAF_REWARDS_ADDRESS` variable'ları olarak girersen workflow'lar backend ve frontend'e geçirir.
+- Rewards: tam deploy'da `deploy_rewards=true` (yukarı bakın) ya da elle deploy edip `ARAF_REVENUE_VAULT_ADDRESS`/`ARAF_REWARDS_ADDRESS` variable'larını girin; workflow'lar backend ve frontend'e geçirir. `deploy_rewards=false` iken tam deploy yeni escrow üretir ama variable'daki vault eski escrow'a bağlıdır (`vault.escrow` değişmez); workflow bunu uyarı olarak yazar.
+- `ETHERSCAN_API_KEY` yalnız verify adımında kullanılır, backend'e gönderilmez.
