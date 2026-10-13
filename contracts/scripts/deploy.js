@@ -313,6 +313,33 @@ function updateFrontendEnvIfPresent(values) {
   return envPath;
 }
 
+// [TR] İsteğe bağlı otomatik doğrulama (VERIFY_AFTER_DEPLOY=true). Hata deploy'u başarısız saymaz.
+// [EN] Optional auto-verify. A verification failure never fails the deploy; it warns and prints the manual command.
+async function maybeVerifyAfterDeploy({ manifest, deployTx, libraryDeployTxs, isLocal }) {
+  if (process.env.VERIFY_AFTER_DEPLOY !== "true") return;
+  if (isLocal) {
+    console.log("ℹ️ VERIFY_AFTER_DEPLOY local ağda yok sayıldı.");
+    return;
+  }
+  const manualCmd = `npm --prefix contracts run verify${network.name === "base" ? ":base" : ""}`;
+  try {
+    const { buildVerifyPlan, runVerify } = require("./verify");
+    console.log("\n⏳ Doğrulama öncesi 5 onay bekleniyor...");
+    const hashes = [...Object.values(libraryDeployTxs || {}), deployTx ? deployTx.hash : null].filter(Boolean);
+    for (const hash of hashes) await ethers.provider.waitForTransaction(hash, 5);
+    const plan = buildVerifyPlan({ escrowManifest: manifest });
+    const results = await runVerify(hre, plan);
+    const failed = results.filter((r) => r.status === "failed");
+    if (failed.length) {
+      console.warn(`⚠️ UYARI: Doğrulanamayan kontratlar: ${failed.map((f) => f.label).join(", ")} (deploy başarılı sayıldı).`);
+      console.warn(`   Elle yeniden dene: ${manualCmd}`);
+    }
+  } catch (err) {
+    console.warn(`⚠️ UYARI: Otomatik doğrulama başarısız (deploy başarılı sayıldı): ${err && err.message ? err.message.split("\n")[0] : err}`);
+    console.warn(`   Elle yeniden dene: ${manualCmd}`);
+  }
+}
+
 async function main() {
   const [deployer] = await ethers.getSigners();
   const feeData = await ethers.provider.getFeeData();
@@ -486,6 +513,8 @@ async function main() {
     },
   };
   writeJson(manifestPath, manifest);
+
+  await maybeVerifyAfterDeploy({ manifest, deployTx, libraryDeployTxs, isLocal });
 
   console.log("\n🎉 DEPLOYMENT COMPLETE");
   console.log("--------------------------------------------------");

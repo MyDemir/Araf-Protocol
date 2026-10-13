@@ -260,7 +260,7 @@ tail -f backend/logs/araf.log
 - Upstash Redis account (free; the URL must be `rediss://`)
 - Fly.io account (for backend)
 - Vercel account (for frontend)
-- BaseScan API key (`basescan.org/myapikey`)
+- Etherscan API key (`etherscan.io/myapikey`; optional, one key works for all chains incl. Base; see Testnet Step 2 for the keyless fallback)
 - AWS KMS or HashiCorp Vault (the backend runs with `NODE_ENV=production` per `fly.toml`, and `KMS_PROVIDER=env` is rejected in production; the only exception is the Base Sepolia demo: `NODE_ENV=production` + `EXPECTED_CHAIN_ID=84532` + `ALLOW_ENV_KMS_ON_TESTNET=yes` (the RPC is verified to be chain 84532; never on mainnet). For the workflow-driven path see [DEPLOY_BASE_SEPOLIA.md](./DEPLOY_BASE_SEPOLIA.md))
 
 ### Step 1 — Deploy Contracts (Base Sepolia)
@@ -275,7 +275,7 @@ FINAL_OWNER_ADDRESS=0x<testnet_final_owner>
 BASE_SEPOLIA_RPC_URL=https://base-sepolia.g.alchemy.com/v2/<API_KEY>
 BASE_SEPOLIA_USDT_ADDRESS=0x<sepolia_usdt>
 BASE_SEPOLIA_USDC_ADDRESS=0x<sepolia_usdc>
-BASESCAN_API_KEY=<basescan_api_key>
+ETHERSCAN_API_KEY=<etherscan_api_key>
 CONFIRM_PUBLIC_DEPLOY=yes
 REPORT_GAS=true
 EOF
@@ -301,21 +301,29 @@ Take note from the output (and from `contracts/deployments/base-sepolia.json`):
 
 ### Step 2 — Verify Contracts (BaseScan)
 
+> **Migration (BaseScan V1 shut down):** `BASESCAN_API_KEY` is replaced by `ETHERSCAN_API_KEY`. Create the key in an **etherscan.io** account (one key is valid for all chains, including Base and Base Sepolia); `hardhat.config.js` passes it as a single string so hardhat-verify uses the Etherscan V2 API (`https://api.etherscan.io/v2/api` + `chainid`). `BASESCAN_API_KEY` is still read as a fallback, but a basescan.org V1 key no longer verifies anything.
+>
+> **Free-plan recommendation:** Etherscan's free API plan may not cover Base / Base Sepolia (V2 then answers with a plan/unsupported-chain/invalid-key error). `verify.js` therefore tries, per contract, Etherscan V2, then Sourcify and Blockscout (`base(-sepolia).blockscout.com`), both keyless. A plan/key rejection from Etherscan is reported as a `skipped` warning, not a failure; a contract counts as verified if **any** verifier succeeds, and the final table shows each verifier's result per contract. The exit code is 1 only if a contract could not be verified anywhere. Without an Etherscan key, leave `ETHERSCAN_API_KEY` empty: Sourcify + Blockscout are used.
+
 `ArafEscrow` is linked against two external libraries, so verify the libraries first, then the escrow with the library addresses (they are in the deployment manifest):
 
 ```bash
+# Reads deployments/<network>.json (+ <network>-rewards.json) and verifies, in order:
+# ArafReputationLib, ArafSettlementLib, ArafEscrow (linked), vault, rewards.
+# "Already Verified" counts as success; "no bytecode yet" is retried.
+npm --prefix contracts run verify:base-sepolia     # or: verify:base
+VERIFY_DRY_RUN=true npm --prefix contracts run verify:base-sepolia   # print the plan, no network calls
+
+# Optional: verify automatically right after deploy (waits 5 confirmations; a failure never fails the deploy)
+VERIFY_AFTER_DEPLOY=true npx hardhat run scripts/deploy.js --network base-sepolia
+```
+
+Raw hardhat-verify (manual) for a single contract:
+
+```bash
 cd contracts
-
-# Verify the libraries (no constructor arguments)
-npx hardhat verify --network base-sepolia <ARAF_REPUTATION_LIB_ADDRESS>
-npx hardhat verify --network base-sepolia <ARAF_SETTLEMENT_LIB_ADDRESS>
-
-# Verify ArafEscrow (constructor argument = treasury). Pass the library addresses with
-# hardhat-verify's --libraries option (a small module exporting { ArafReputationLib, ArafSettlementLib }).
-npx hardhat verify --network base-sepolia \
-  --libraries <path/to/libraries.js> \
-  <ARAF_ESCROW_ADDRESS> \
-  <TREASURY_ADDRESS>
+npx hardhat verify --network base-sepolia <LIB_ADDRESS>
+npx hardhat verify --network base-sepolia --libraries <path/to/libraries.js> <ESCROW_ADDRESS> <TREASURY_ADDRESS>
 ```
 
 ### Step 3 — Backend: Deploy to Fly.io
@@ -474,7 +482,7 @@ TREASURY_ADDRESS=0x<gnosis_safe_address>
 # Must differ from TREASURY_ADDRESS on public chains
 FINAL_OWNER_ADDRESS=0x<final_owner_address>
 BASE_RPC_URL=https://base-mainnet.g.alchemy.com/v2/<API_KEY>
-BASESCAN_API_KEY=<basescan_api_key>
+ETHERSCAN_API_KEY=<etherscan_api_key>
 BASE_MAINNET_USDT_ADDRESS=0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2
 BASE_MAINNET_USDC_ADDRESS=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
 CONFIRM_PUBLIC_DEPLOY=yes
@@ -486,10 +494,8 @@ EOF
 # Note: MAINNET_* aliases are legacy for Base Mainnet only and must not be used for Base Sepolia.
 NODE_ENV=production npx hardhat run scripts/deploy.js --network base
 
-# Verify the libraries and the linked escrow (see Testnet Step 2)
-npx hardhat verify --network base <ARAF_REPUTATION_LIB_ADDRESS>
-npx hardhat verify --network base <ARAF_SETTLEMENT_LIB_ADDRESS>
-npx hardhat verify --network base --libraries <path/to/libraries.js> <ESCROW_ADDRESS> <GNOSIS_SAFE_ADDRESS>
+# Verify the libraries and the linked escrow (see the migration / free-plan notes in Testnet Step 2)
+npm --prefix contracts run verify:base
 ```
 
 > Note: In `contracts/hardhat.config.js`, `BASE_RPC_URL` is required for `base` and `BASE_SEPOLIA_RPC_URL` is required for `base-sepolia`; no public RPC default fallback is configured.
@@ -779,7 +785,9 @@ Production runs a KMS self-test at startup (`runProductionKmsStartupSelfTest`). 
 |---|---|---|
 | `BASE_RPC_URL` / `BASE_SEPOLIA_RPC_URL` | `hardhat.config.js` | Required for `--network base` / `base-sepolia` respectively (fail-closed; no public RPC). |
 | `DEPLOYER_PRIVATE_KEY` | `hardhat.config.js` | Signer for public networks. Never commit. |
-| `BASESCAN_API_KEY` | `hardhat.config.js` | `hardhat verify`. |
+| `ETHERSCAN_API_KEY` | `hardhat.config.js` | Etherscan V2 key for `verify.js` / `hardhat verify` (legacy `BASESCAN_API_KEY` is a fallback). |
+| `VERIFY_AFTER_DEPLOY` | `deploy.js` | `true` = verify after 5 confirmations; failure only warns. |
+| `VERIFY_DRY_RUN` | `verify.js` | `true` = print plan, no network calls. |
 | `REPORT_GAS`, `CMC_API_KEY` | `hardhat.config.js` | Gas reporter. |
 | `ARAF_SOLCJS_PATH` | `hardhat.config.js` | Optional: path to the `soljson.js` of `solc@0.8.24` for environments that cannot download the native compiler. No-op when unset. |
 | `TREASURY_ADDRESS` | `deploy.js` | Required for every deploy; also needed by `deployRewards.js` on local when it must deploy a fresh escrow. |

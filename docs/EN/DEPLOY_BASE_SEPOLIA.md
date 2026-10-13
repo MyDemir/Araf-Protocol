@@ -13,7 +13,7 @@ Two workflows: `deploy-base-sepolia.yml` (contract + Fly backend + optional Verc
 | `DEPLOYER_PRIVATE_KEY` | Wallet that deploys the contract (needs Base Sepolia ETH) | New wallet; ETH from a faucet | `0x` + 64 hex |
 | `BASE_SEPOLIA_RPC_URL` | Alchemy HTTP RPC | Alchemy > Base Sepolia | `https://base-sepolia.g.alchemy.com/v2/KEY` |
 | `BASE_SEPOLIA_WS_RPC_URL` | Alchemy WebSocket RPC (event worker) | Same Alchemy app | `wss://base-sepolia.g.alchemy.com/v2/KEY` |
-| `BASESCAN_API_KEY` | Optional; used only in a full deploy with `verify_contracts=true` (experimental) | basescan.org | random string |
+| `ETHERSCAN_API_KEY` | Optional; used only in a full deploy with `verify_contracts=true` (experimental). Replaces `BASESCAN_API_KEY` (still read as a fallback). One key from an etherscan.io account works for all chains | etherscan.io > API Keys | random string |
 | `GH_VARIABLES_TOKEN` | Optional; after a full deploy, automatically writes the `ARAF_ESCROW_ADDRESS`/`ARAF_DEPLOYMENT_BLOCK` variables. Fine-grained PAT, this repo only, permission: Variables: read and write. If missing, the workflow warns and the commands in the summary are run manually | GitHub > Settings > Developer settings > Fine-grained tokens | `github_pat_...` |
 | `FLY_API_TOKEN` | Fly token. Org/personal token (dashboard > Tokens) lets the workflow create a missing app; an app-scoped deploy token only works if the app already exists | `fly tokens create org` / `fly tokens create deploy -a <app>` | `FlyV1 ...` |
 | `MONGODB_URI` | MongoDB Atlas connection | Atlas > Connect (IP allowlist: Fly egress or 0.0.0.0/0) | `mongodb+srv://u:p@cluster.mongodb.net/araf_protocol` |
@@ -63,7 +63,7 @@ No computer or local CLI needed; everything is done from the browser.
 3. **MongoDB Atlas**: free cluster, DB user, network access.
 4. **Upstash Redis**: TLS endpoint (`rediss://`).
 5. **Alchemy**: Base Sepolia app; HTTP and WSS URLs.
-6. **Basescan**: API key (optional; for `verify_contracts`).
+6. **Etherscan**: API key from an etherscan.io account (optional; for `verify_contracts`; valid on Base too).
 7. **Test USDC**: https://faucet.circle.com/ (Base Sepolia, USDC). The address is the example above, verify it.
 8. **Test USDT**: The Circle faucet does not give USDT. `contracts/scripts/deployTestToken.js` deploys a `MockERC20` with 6 decimals (only chainId 84532 and 31337; errors on mainnet). deploy.js does NOT deploy mocks on a public network; this is a separate test tool.
    ```bash
@@ -100,7 +100,7 @@ Deploy:
 
 ```bash
 gh workflow run deploy-base-sepolia.yml -f deploy_frontend=true
-# optional (experimental) Basescan verification: -f verify_contracts=true  (requires the BASESCAN_API_KEY secret)
+# optional (experimental) Basescan verification: -f verify_contracts=true  (ETHERSCAN_API_KEY secret optional; legacy BASESCAN_API_KEY still read; Sourcify + Blockscout work without a key)
 gh run watch
 ```
 
@@ -131,5 +131,5 @@ Input overrides: `araf_escrow_address`, `usdt_address`, `usdc_address`, `deploym
 - The frontend requires the `VITE_TARGET_CHAIN=base-sepolia` flag (exists on the main branch: `frontend/src/app/chainPolicy.js`; the workflow supplies it as a Vercel build-env); without it, a prod build connects only to Base Mainnet.
 - The deployment block is not in the `deploy.js` output; the workflow reads it from the `deployTxHash` receipt.
 - Secret values must not contain spaces/quotes/`#` (`flyctl secrets import` dotenv format).
-- Contract verify (Basescan) is **experimental**: in a full deploy, `hardhat verify` runs with `verify_contracts=true` (default false) + `BASESCAN_API_KEY`; the constructor argument (`treasuryAddress`) and linked libraries (`ArafReputationLib`, `ArafSettlementLib`) are generated from the deploy manifest. The step is `continue-on-error: true`, so if it fails the deploy is unaffected; in that case verify manually. The libraries themselves are not verified.
+- Contract verify (Basescan) is **experimental**: in a full deploy, `contracts/scripts/verify.js` runs with `verify_contracts=true` (default false) + `ETHERSCAN_API_KEY` (Etherscan V2, plus Sourcify fallback); it verifies the libraries (`ArafReputationLib`, `ArafSettlementLib`) and the linked `ArafEscrow`, with constructor arguments read from the deploy manifest. The step is `continue-on-error: true`, so if it fails the deploy is unaffected; in that case verify manually: `npm --prefix contracts run verify:base-sepolia` (needs `BASE_SEPOLIA_RPC_URL` and `ETHERSCAN_API_KEY` in `contracts/.env`).
 - Rewards deploy is not part of the workflow (separate operation); if you enter the addresses as the `ARAF_REVENUE_VAULT_ADDRESS`/`ARAF_REWARDS_ADDRESS` variables, the workflows pass them to the backend and frontend.

@@ -46,7 +46,7 @@ The "Where to set" column in the tables shows the **target location** for Base S
 >
 > **If the frontend is also deployed, 3 extra secrets:** `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`.
 >
-> **Optional:** secrets `RELAYER_PRIVATE_KEY`, `GH_VARIABLES_TOKEN` (fine-grained PAT, this repo only, "Variables: read and write"; makes the full-deploy addresses variables automatically), `BASESCAN_API_KEY` (only for `verify_contracts=true`); variables `FLY_APP_NAME` (default `araf-protocol-backend`), `ADMIN_WALLETS`, `VITE_RPC_URL`, `ARAF_REVENUE_VAULT_ADDRESS`, `ARAF_REWARDS_ADDRESS` (if rewards was deployed separately; when defined they are passed to Fly and Vercel).
+> **Optional:** secrets `RELAYER_PRIVATE_KEY`, `GH_VARIABLES_TOKEN` (fine-grained PAT, this repo only, "Variables: read and write"; makes the full-deploy addresses variables automatically), `ETHERSCAN_API_KEY` (only for `verify_contracts=true`; legacy `BASESCAN_API_KEY` still read); variables `FLY_APP_NAME` (default `araf-protocol-backend`), `ADMIN_WALLETS`, `VITE_RPC_URL`, `ARAF_REVENUE_VAULT_ADDRESS`, `ARAF_REWARDS_ADDRESS` (if rewards was deployed separately; when defined they are passed to Fly and Vercel).
 >
 > **AFTER deploy (2 variables):** `ARAF_ESCROW_ADDRESS`, `ARAF_DEPLOYMENT_BLOCK`; needed only for later runs of `deploy-runtime-base-sepolia.yml`.
 > If the `GH_VARIABLES_TOKEN` secret is defined, the full-deploy workflow writes these itself; if not, it prints a warning and puts the `gh variable set` lines to run manually on the summary page.
@@ -70,7 +70,11 @@ Columns: L = Local, S = Base Sepolia, M = Mainnet. "Required": always / for the 
 | `BASE_SEPOLIA_RPC_URL` | Base Sepolia RPC URL | With `--network base-sepolia`; errors if missing | not needed | `https://…alchemy…/v2/KEY` | not needed | C/.env | `hardhat.config.js:35`, `:96` |
 | `BASE_RPC_URL` | Base Mainnet RPC URL | With `--network base`; errors if missing | not needed | not needed | `https://…/v2/KEY` | C/.env | `hardhat.config.js:32` |
 | 🔒 `DEPLOYER_PRIVATE_KEY` | Private key of the signing wallet on public networks | On public networks (if missing, the account list is empty) | not needed | `0x…64 hex` | `0x…64 hex` | C/.env | `hardhat.config.js:90`, `:98` |
-| 🔒 `BASESCAN_API_KEY` | API key for BaseScan verification | Optional (`""`) | not needed | optional | optional | C/.env | `hardhat.config.js:106` |
+| 🔒 `ETHERSCAN_API_KEY` | Etherscan V2 API key (etherscan.io account; valid for all chains incl. Base). Replaces `BASESCAN_API_KEY` | Optional (`""`) | not needed | optional | optional | C/.env | `hardhat.config.js` (`etherscan.apiKey`) |
+| 🔒 `BASESCAN_API_KEY` | **Legacy**; read only as a fallback when `ETHERSCAN_API_KEY` is empty. A basescan.org V1 key no longer verifies anything | Optional (`""`) | not needed | avoid | avoid | C/.env | `hardhat.config.js` |
+| `VERIFY_AFTER_DEPLOY` | `true` = `deploy.js` waits 5 confirmations then runs `verify.js` logic; failure only warns | Optional (`false`) | ignored | optional | optional | terminal | `deploy.js` |
+| `VERIFY_DRY_RUN` | `true` = `verify.js` prints the plan without network calls | Optional (`false`) | optional | optional | optional | terminal | `verify.js` |
+| `VERIFY_RETRIES` / `VERIFY_RETRY_DELAY_MS` | Retries (default 5) / delay (default 20000 ms) when the explorer has not indexed the bytecode yet | Optional | optional | optional | optional | terminal | `verify.js` |
 | `REPORT_GAS` | Gas report if `true` | Optional (off) | `false` | `false` | `false` | C/.env | `hardhat.config.js:129` |
 | 🔒 `CMC_API_KEY` | CoinMarketCap key for prices in the gas report | Optional | not needed | not needed | not needed | C/.env | `hardhat.config.js:131` |
 | `ARAF_SOLCJS_PATH` | Path to `soljson.js` in environments where the native compiler cannot be downloaded | Optional (no effect) | rarely | rarely | rarely | C/.env | `hardhat.config.js:48` |
@@ -305,7 +309,7 @@ For a local Sepolia build, `npm run build:frontend:testnet` (`package.json:12`) 
 | Private key / token | `DEPLOYER_PRIVATE_KEY`, `RELAYER_PRIVATE_KEY`, `FLY_API_TOKEN`, `VERCEL_TOKEN` | Never in the repo, logs, or frontend. Deployer and relayer should be different, low-balance wallets. |
 | Secret / token | `JWT_SECRET`, `MASTER_ENCRYPTION_KEY` (on Sepolia it sits as a plain Fly secret; testnet only, no real PII), `AWS_ENCRYPTED_DATA_KEY`, `VAULT_TOKEN`, `VAULT_ENCRYPTED_DATA_KEY`, `READY_INTERNAL_TOKEN` | Fly secrets / `.env`; never committed to the repo. |
 | Key/password inside a URL | `MONGODB_URI`, `REDIS_URL`, `BASE_RPC_URL`, `BASE_WS_RPC_URL`, `BASE_SEPOLIA_RPC_URL` | The Alchemy key and DB/Redis password sit in the URL; treat them as secrets. |
-| API key | `BASESCAN_API_KEY`, `CMC_API_KEY` | Low risk, but do not share them. |
+| API key | `ETHERSCAN_API_KEY`, `CMC_API_KEY` | Low risk, but do not share them. |
 
 **None of them may be set as `VITE_*` in the frontend.** `VITE_*` values are **embedded as plain text** in the JavaScript bundle at build time; anyone who opens the site can
 see them (even with source maps disabled, `frontend/vite.config.js:28` only disables source maps; it does not prevent value embedding). So `VITE_*` must contain only public information
@@ -326,7 +330,7 @@ Addresses (`ARAF_ESCROW_ADDRESS`, token addresses) are not secrets.
 | `AWS_KMS_KEY_ARN` (`KMS_KEY_ARN`) | `docs/TR/MAINNET_READINESS_CHECKLIST.md:54`; `backend/.env.example:66` (says it is not read) | Not read; the key ID is inside the `CiphertextBlob`. Do not set it. |
 | `MIN_REWARD_BPS`, `MAX_REWARD_BPS` | `docs/TR/REWARDS_ROLLOUT.md` | Not read as env in code (contract constant; **not verified**, only seen via grep that it is not read as env). |
 | `VITE_ADMIN_WALLETS` | Old docs | Removed (`AppViews.jsx:206`). |
-| `BASESCAN_API_KEY` (as a GitHub secret) | `docs/EN/DEPLOY_BASE_SEPOLIA.md:14` | No workflow reads it; meaningful only in `contracts/.env` for a manual `hardhat verify`. |
+| `BASESCAN_API_KEY` (as a GitHub secret) | `.github/workflows/deploy-base-sepolia.yml` | **Legacy name.** `deploy-base-sepolia.yml` reads it only as a fallback when `ETHERSCAN_API_KEY` is missing and `verify_contracts=true` (`ETHERSCAN_API_KEY \|\| BASESCAN_API_KEY`). Use `ETHERSCAN_API_KEY` for new setups. |
 | `NODE_PATH` | `contracts/hardhat.config.js:9-10` | Not read; the script sets it itself; you do not need to set it. |
 
 ### 6.2 Aliases (which one to prefer)
@@ -391,7 +395,7 @@ Full: `deploy-base-sepolia.yml:211-228` · runtime: `deploy-runtime-base-sepolia
 ### 7.3 Contracts: what is passed as env to the deploy step (`contracts/.env` is not written)
 
 `deploy-base-sepolia.yml:87-100`: `CONFIRM_PUBLIC_DEPLOY=yes` (fixed), `DEPLOYER_PRIVATE_KEY`, `BASE_SEPOLIA_RPC_URL` (secrets), `TREASURY_ADDRESS`, `FINAL_OWNER_ADDRESS`,
-`BASE_SEPOLIA_USDT_ADDRESS`, `BASE_SEPOLIA_USDC_ADDRESS` (variables). `BASESCAN_API_KEY` is passed in a separate step only when `verify_contracts=true` (experimental, `continue-on-error`); it is not passed to the `deploy.js` step.
+`BASE_SEPOLIA_USDT_ADDRESS`, `BASE_SEPOLIA_USDC_ADDRESS` (variables). `ETHERSCAN_API_KEY` (falls back to the legacy `BASESCAN_API_KEY` secret) is passed in a separate step only when `verify_contracts=true` (experimental, `continue-on-error`, runs `npm run verify:base-sepolia`); it is not passed to the `deploy.js` step.
 
 ### 7.4 Names meaningful only in GitHub (not read by code)
 
@@ -405,7 +409,7 @@ Full: `deploy-base-sepolia.yml:211-228` · runtime: `deploy-runtime-base-sepolia
 | `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` | secret | Vercel CLI identity (`:31-32`, `:197-202`) |
 | `GH_VARIABLES_TOKEN` | secret (optional) | Fine-grained PAT (this repo only, Variables: read and write) for `gh variable set ARAF_ESCROW_ADDRESS/ARAF_DEPLOYMENT_BLOCK` after a full deploy. Not printed in logs |
 | `deploy_test_usdt` | workflow input (full deploy) | If true and the `BASE_SEPOLIA_USDT_ADDRESS` variable is empty, deploys tUSDT first; ignored if the variable is set |
-| `BASESCAN_API_KEY` | secret (optional) | Only `verify_contracts=true` (experimental) |
+| `ETHERSCAN_API_KEY` (legacy: `BASESCAN_API_KEY`) | secret (optional) | Only `verify_contracts=true` (experimental) |
 | `ARAF_REVENUE_VAULT_ADDRESS`, `ARAF_REWARDS_ADDRESS` | variable (optional) | If defined, passed as Fly secrets and Vercel `VITE_*` build-env |
 
 ---

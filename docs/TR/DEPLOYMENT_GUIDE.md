@@ -260,7 +260,7 @@ tail -f backend/logs/araf.log
 - Upstash Redis hesabı (ücretsiz; URL `rediss://` olmalı)
 - Fly.io hesabı (backend için)
 - Vercel hesabı (frontend için)
-- BaseScan API anahtarı (`basescan.org/myapikey`)
+- Etherscan API anahtarı (`etherscan.io/myapikey`; opsiyonel, tek anahtar Base dahil tüm zincirlerde geçerlidir; anahtarsız yedek için Testnet Adım 2'ye bakın)
 - AWS KMS veya HashiCorp Vault (backend `fly.toml` gereği `NODE_ENV=production` ile çalışır ve production'da `KMS_PROVIDER=env` reddedilir; tek istisna Base Sepolia demosudur: `NODE_ENV=production` + `EXPECTED_CHAIN_ID=84532` + `ALLOW_ENV_KMS_ON_TESTNET=yes` (RPC'nin 84532 olduğu doğrulanır; mainnet'te asla). Workflow'lu akış için bkz. [DEPLOY_BASE_SEPOLIA.md](./DEPLOY_BASE_SEPOLIA.md))
 
 ### Adım 1 — Kontratları Deploy Et (Base Sepolia)
@@ -275,7 +275,7 @@ FINAL_OWNER_ADDRESS=0x<testnet_final_owner>
 BASE_SEPOLIA_RPC_URL=https://base-sepolia.g.alchemy.com/v2/<API_KEY>
 BASE_SEPOLIA_USDT_ADDRESS=0x<sepolia_usdt>
 BASE_SEPOLIA_USDC_ADDRESS=0x<sepolia_usdc>
-BASESCAN_API_KEY=<basescan_api_key>
+ETHERSCAN_API_KEY=<etherscan_api_key>
 CONFIRM_PUBLIC_DEPLOY=yes
 REPORT_GAS=true
 EOF
@@ -301,21 +301,29 @@ npx hardhat run scripts/deploy.js --network base-sepolia
 
 ### Adım 2 — Kontratları Doğrula (BaseScan)
 
+> **Geçiş (BaseScan V1 kapatıldı):** `BASESCAN_API_KEY` yerine `ETHERSCAN_API_KEY` kullanılır. Anahtar **etherscan.io** hesabından alınır ve tüm zincirlerde (Base ve Base Sepolia dahil) geçerlidir; `hardhat.config.js` onu tek string olarak verir, böylece hardhat-verify Etherscan V2 API'sini (`https://api.etherscan.io/v2/api` + `chainid`) kullanır. `BASESCAN_API_KEY` geriye uyumluluk için yedek okunur, ama basescan.org V1 anahtarı artık hiçbir şeyi doğrulamaz.
+>
+> **Ücretsiz plan önerisi:** Etherscan'in ücretsiz API planı Base / Base Sepolia'yı kapsamayabilir (V2 plan/desteklenmeyen zincir/geçersiz anahtar hatası döner). Bu yüzden `verify.js` her kontrat için sırayla Etherscan V2, ardından anahtarsız Sourcify ve Blockscout'u (`base(-sepolia).blockscout.com`) dener. Etherscan'in plan/anahtar reddi başarısızlık değil, `skipped` uyarısı olarak raporlanır; **herhangi bir** doğrulayıcı başarılıysa kontrat doğrulanmış sayılır ve sonuç tablosu kontrat başına her doğrulayıcıyı gösterir. Çıkış kodu yalnız bir kontrat hiçbir yerde doğrulanamazsa 1 olur. Etherscan anahtarınız yoksa `ETHERSCAN_API_KEY`'i boş bırakın: Sourcify + Blockscout kullanılır.
+
 `ArafEscrow` iki harici library'ye linklidir; önce library'leri, sonra library adresleriyle escrow'u doğrulayın (adresler deployment manifest'inde):
 
 ```bash
+# deployments/<ağ>.json (+ <ağ>-rewards.json) kayıtlarını okur ve sırayla doğrular:
+# ArafReputationLib, ArafSettlementLib, ArafEscrow (linkli), vault, rewards.
+# "Already Verified" başarı sayılır; "bytecode henüz yok" hatası yeniden denenir.
+npm --prefix contracts run verify:base-sepolia     # ya da: verify:base
+VERIFY_DRY_RUN=true npm --prefix contracts run verify:base-sepolia   # planı yazdır, ağ çağrısı yok
+
+# Opsiyonel: deploy'dan hemen sonra otomatik doğrula (5 onay bekler; hata deploy'u başarısız saymaz)
+VERIFY_AFTER_DEPLOY=true npx hardhat run scripts/deploy.js --network base-sepolia
+```
+
+Tek kontrat için ham hardhat-verify (elle):
+
+```bash
 cd contracts
-
-# Library'leri doğrula (constructor argümanı yok)
-npx hardhat verify --network base-sepolia <ARAF_REPUTATION_LIB_ADDRESS>
-npx hardhat verify --network base-sepolia <ARAF_SETTLEMENT_LIB_ADDRESS>
-
-# ArafEscrow'u doğrula (constructor argümanı = treasury). Library adreslerini hardhat-verify'ın
-# --libraries seçeneğiyle verin ({ ArafReputationLib, ArafSettlementLib } export eden küçük bir modül).
-npx hardhat verify --network base-sepolia \
-  --libraries <path/to/libraries.js> \
-  <ARAF_ESCROW_ADDRESS> \
-  <TREASURY_ADDRESS>
+npx hardhat verify --network base-sepolia <LIB_ADDRESS>
+npx hardhat verify --network base-sepolia --libraries <path/to/libraries.js> <ESCROW_ADDRESS> <TREASURY_ADDRESS>
 ```
 
 ### Adım 3 — Backend: Fly.io'ya Deploy Et
@@ -478,7 +486,7 @@ TREASURY_ADDRESS=0x<gnosis_safe_adresi>
 # Public ağlarda TREASURY_ADDRESS'ten farklı olmalı
 FINAL_OWNER_ADDRESS=0x<final_owner_adresi>
 BASE_RPC_URL=https://base-mainnet.g.alchemy.com/v2/<API_KEY>
-BASESCAN_API_KEY=<basescan_api_key>
+ETHERSCAN_API_KEY=<etherscan_api_key>
 BASE_MAINNET_USDT_ADDRESS=0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2
 BASE_MAINNET_USDC_ADDRESS=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
 CONFIRM_PUBLIC_DEPLOY=yes
@@ -490,10 +498,8 @@ EOF
 # Not: MAINNET_* alias'ları yalnız Base Mainnet için legacy'dir; Base Sepolia için kullanılmamalıdır.
 NODE_ENV=production npx hardhat run scripts/deploy.js --network base
 
-# Library'leri ve linkli escrow'u doğrula (bkz. Testnet Adım 2)
-npx hardhat verify --network base <ARAF_REPUTATION_LIB_ADDRESS>
-npx hardhat verify --network base <ARAF_SETTLEMENT_LIB_ADDRESS>
-npx hardhat verify --network base --libraries <path/to/libraries.js> <ESCROW_ADDRESS> <GNOSIS_SAFE_ADDRESS>
+# Library'leri ve linkli escrow'u doğrula (geçiş / ücretsiz plan notları için bkz. Testnet Adım 2)
+npm --prefix contracts run verify:base
 ```
 
 > Not: `contracts/hardhat.config.js` içinde `base` için `BASE_RPC_URL`, `base-sepolia` için `BASE_SEPOLIA_RPC_URL` zorunludur; public RPC default fallback tanımlı değildir.
@@ -783,7 +789,9 @@ Production açılışta KMS self-test çalıştırır (`runProductionKmsStartupS
 |---|---|---|
 | `BASE_RPC_URL` / `BASE_SEPOLIA_RPC_URL` | `hardhat.config.js` | Sırasıyla `--network base` / `base-sepolia` için zorunlu (fail-closed; public RPC yok). |
 | `DEPLOYER_PRIVATE_KEY` | `hardhat.config.js` | Public ağlar için imzalayıcı. Asla commit etmeyin. |
-| `BASESCAN_API_KEY` | `hardhat.config.js` | `hardhat verify`. |
+| `ETHERSCAN_API_KEY` | `hardhat.config.js` | `verify.js` / `hardhat verify` için Etherscan V2 anahtarı (eski `BASESCAN_API_KEY` yedek okunur). |
+| `VERIFY_AFTER_DEPLOY` | `deploy.js` | `true` = 5 onaydan sonra doğrula; hata yalnız uyarır. |
+| `VERIFY_DRY_RUN` | `verify.js` | `true` = planı yazdır, ağ çağrısı yok. |
 | `REPORT_GAS`, `CMC_API_KEY` | `hardhat.config.js` | Gas reporter. |
 | `ARAF_SOLCJS_PATH` | `hardhat.config.js` | Opsiyonel: native derleyicinin indirilemediği ortamlar için `solc@0.8.24` paketinin `soljson.js` yolu. Tanımsızsa etkisizdir. |
 | `TREASURY_ADDRESS` | `deploy.js` | Her deploy için zorunlu; `deployRewards.js` yerelde yeni escrow deploy etmesi gerekiyorsa da ister. |

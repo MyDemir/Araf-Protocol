@@ -11,7 +11,7 @@
 | `DEPLOYER_PRIVATE_KEY` | Kontratı deploy eden cüzdan (Base Sepolia ETH gerekir) | Yeni cüzdan; faucet'ten ETH | `0x` + 64 hex |
 | `BASE_SEPOLIA_RPC_URL` | Alchemy HTTP RPC | Alchemy > Base Sepolia | `https://base-sepolia.g.alchemy.com/v2/KEY` |
 | `BASE_SEPOLIA_WS_RPC_URL` | Alchemy WebSocket RPC (event worker) | Aynı Alchemy app | `wss://base-sepolia.g.alchemy.com/v2/KEY` |
-| `BASESCAN_API_KEY` | Opsiyonel; yalnız tam deploy'da `verify_contracts=true` iken kullanılır (deneysel) | basescan.org | rastgele string |
+| `ETHERSCAN_API_KEY` | Opsiyonel; yalnız tam deploy'da `verify_contracts=true` iken kullanılır (deneysel). `BASESCAN_API_KEY` yerine geçer (yedek olarak hâlâ okunur). etherscan.io hesabından alınan tek anahtar tüm zincirlerde geçerlidir | etherscan.io > API Keys | rastgele string |
 | `GH_VARIABLES_TOKEN` | Opsiyonel; tam deploy sonrası `ARAF_ESCROW_ADDRESS`/`ARAF_DEPLOYMENT_BLOCK` variable'larını otomatik yazar. Fine-grained PAT, yalnız bu repo, izin: Variables: read and write. Yoksa workflow uyarı verir, özetteki komutlar elle çalıştırılır | GitHub > Settings > Developer settings > Fine-grained tokens | `github_pat_...` |
 | `FLY_API_TOKEN` | Fly token. Org/kişisel token (dashboard > Tokens) eksik app'i workflow'un oluşturmasını sağlar; app-scoped deploy token yalnız app zaten varsa çalışır | `fly tokens create org` / `fly tokens create deploy -a <app>` | `FlyV1 ...` |
 | `MONGODB_URI` | MongoDB Atlas bağlantısı | Atlas > Connect (IP allowlist: Fly çıkışı veya 0.0.0.0/0) | `mongodb+srv://u:p@cluster.mongodb.net/araf_protocol` |
@@ -61,7 +61,7 @@ Bilgisayar ya da yerel CLI gerekmez; her şey tarayıcıdan yapılır.
 3. **MongoDB Atlas**: ücretsiz cluster, DB kullanıcısı, network access.
 4. **Upstash Redis**: TLS endpoint'i (`rediss://`).
 5. **Alchemy**: Base Sepolia app; HTTP ve WSS URL.
-6. **Basescan**: API key (opsiyonel; `verify_contracts` için).
+6. **Etherscan**: etherscan.io hesabından API key (opsiyonel; `verify_contracts` için; Base'de de geçerli).
 7. **Test USDC**: https://faucet.circle.com/ (Base Sepolia, USDC). Adres yukarıdaki örnek, doğrula.
 8. **Test USDT**: Circle faucet USDT vermez. `contracts/scripts/deployTestToken.js` 6 decimals'lı `MockERC20` deploy eder (yalnız chainId 84532 ve 31337; mainnet'te hata verir). deploy.js public ağda mock deploy ETMEZ; bu ayrı bir test aracıdır.
    ```bash
@@ -98,7 +98,7 @@ Deploy:
 
 ```bash
 gh workflow run deploy-base-sepolia.yml -f deploy_frontend=true
-# opsiyonel (deneysel) Basescan doğrulama: -f verify_contracts=true  (BASESCAN_API_KEY secret gerekir)
+# opsiyonel (deneysel) Basescan doğrulama: -f verify_contracts=true  (ETHERSCAN_API_KEY secret opsiyonel; eski BASESCAN_API_KEY hâlâ okunur; Sourcify + Blockscout anahtarsız çalışır)
 gh run watch
 ```
 
@@ -129,5 +129,5 @@ Girdi override'ları: `araf_escrow_address`, `usdt_address`, `usdc_address`, `de
 - Frontend `VITE_TARGET_CHAIN=base-sepolia` bayrağını gerektirir (ana dalda mevcut: `frontend/src/app/chainPolicy.js`; workflow bunu Vercel build-env olarak verir); onsuz prod build yalnız Base Mainnet'e bağlıdır.
 - Deployment bloğu `deploy.js` çıktısında yoktur; workflow `deployTxHash` receipt'inden okur.
 - Secret değerlerinde boşluk/tırnak/`#` olmasın (`flyctl secrets import` dotenv biçimi).
-- Contract verify (Basescan) **deneysel**: tam deploy'da `verify_contracts=true` (varsayılan false) + `BASESCAN_API_KEY` ile `hardhat verify` çalışır; constructor argümanı (`treasuryAddress`) ve linkli library'ler (`ArafReputationLib`, `ArafSettlementLib`) deploy manifestinden üretilir. Adım `continue-on-error: true`'dur, başarısız olursa deploy etkilenmez; o durumda elle doğrula. Library'lerin kendisi doğrulanmaz.
+- Contract verify (Basescan) **deneysel**: tam deploy'da `verify_contracts=true` (varsayılan false) + `ETHERSCAN_API_KEY` ile `contracts/scripts/verify.js` çalışır (Etherscan V2 + Sourcify yedek); library'leri (`ArafReputationLib`, `ArafSettlementLib`) ve linkli `ArafEscrow`'u doğrular, constructor argümanları deploy manifestinden okunur. Adım `continue-on-error: true`'dur, başarısız olursa deploy etkilenmez; o durumda elle doğrula: `npm --prefix contracts run verify:base-sepolia` (`contracts/.env`'de `BASE_SEPOLIA_RPC_URL` ve `ETHERSCAN_API_KEY` gerekir).
 - Rewards deploy'u workflow'a dahil değildir (ayrı operasyon); adresleri `ARAF_REVENUE_VAULT_ADDRESS`/`ARAF_REWARDS_ADDRESS` variable'ları olarak girersen workflow'lar backend ve frontend'e geçirir.
