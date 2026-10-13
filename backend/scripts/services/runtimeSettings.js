@@ -22,54 +22,10 @@ const CACHE_TTL_MS = Math.min(Number(process.env.RUNTIME_SETTINGS_CACHE_TTL_MS ?
 const NEGATIVE_CACHE_TTL_MS = 5_000;
 const DB_READ_TIMEOUT_MS = 2_000;
 
-const SETTING_DEFS = {
-  LIVE_POLL_INTERVAL_MS: {
-    unit: "ms", min: 5_000, max: 300_000, default: 15_000,
-    description: {
-      TR: "Canlı izleme turu aralığı (her tur 1 eth_blockNumber + eth_getLogs).",
-      EN: "Live polling interval (each tick = 1 eth_blockNumber + eth_getLogs).",
-    },
-  },
-  WORKER_BLOCK_BATCH_SIZE: {
-    unit: "blocks", min: 1, max: 2_000, default: 1_000,
-    description: {
-      TR: "Tek eth_getLogs çağrısındaki blok sayısı (Alchemy ücretsiz planda 10).",
-      EN: "Blocks per eth_getLogs call (10 on the Alchemy free plan).",
-    },
-  },
-  WORKER_REPLAY_BATCH_DELAY_MS: {
-    unit: "ms", min: 0, max: 10_000, default: 250,
-    description: {
-      TR: "Replay/canlı parçaları arası bekleme (saniyelik CU sınırı için).",
-      EN: "Delay between replay/live chunks (per-second CU limit).",
-    },
-  },
-};
+const defs = require("../config/runtimeSettingDefs");
 
-const SETTING_KEYS = Object.keys(SETTING_DEFS);
-
-function isKnownSetting(key) {
-  return Object.prototype.hasOwnProperty.call(SETTING_DEFS, key);
-}
-
-function isInBounds(key, n) {
-  const d = SETTING_DEFS[key];
-  return Number.isInteger(n) && n >= d.min && n <= d.max;
-}
-
-function _clamp(key, n) {
-  const d = SETTING_DEFS[key];
-  return Math.min(d.max, Math.max(d.min, n));
-}
-
-/** Env değeri: geçerli tam sayıysa sınıra kırpılır; geçersiz/boşsa null. */
-function _envValue(key) {
-  const raw = process.env[key];
-  if (raw === undefined || raw === null || String(raw).trim() === "") return null;
-  const n = Number(raw);
-  if (!Number.isInteger(n)) return null;
-  return _clamp(key, n);
-}
+const { SETTING_DEFS, SETTING_KEYS, isKnownSetting, isInBounds } = defs;
+const _envValue = defs.envValue;
 
 function _err(code, message) {
   const e = new Error(message);
@@ -80,8 +36,11 @@ function _err(code, message) {
 let cache = null; // { at, ttl, result }
 let lastKnown = null; // { overrides, version }
 
+let generation = 0; // invalidateCache() sonrası, uçuştaki eski bir okumanın önbelleği ezmesini engeller
+
 function invalidateCache() {
   cache = null;
+  generation += 1;
 }
 
 function _overridesFromDoc(doc) {
@@ -97,26 +56,24 @@ function _overridesFromDoc(doc) {
 }
 
 function _resolve(overrides) {
+  const { values, sources } = defs.resolveValues(overrides);
   const settings = {};
   for (const key of SETTING_KEYS) {
     const d = SETTING_DEFS[key];
     const ov = overrides[key];
-    const env = _envValue(key);
-    let value = d.default;
-    let source = "default";
-    if (env !== null) { value = env; source = "env"; }
-    if (ov) { value = ov.value; source = "admin"; }
     settings[key] = {
       key,
+      group: d.group,
       unit: d.unit,
       min: d.min,
       max: d.max,
       default: d.default,
-      envValue: env,
+      envValue: _envValue(key),
       adminValue: ov ? ov.value : null,
-      value,
-      source,
+      value: values[key],
+      source: sources[key],
       description: d.description,
+      warning: d.warning || null,
       changedAt: ov ? ov.changed_at : null,
       changedBy: ov ? ov.changed_by : null,
     };
@@ -144,13 +101,16 @@ async function _readDoc() {
 async function getEffectiveSettings() {
   const now = Date.now();
   if (cache && now - cache.at < cache.ttl) return cache.result;
+  const startGen = generation;
   try {
     const doc = await _readDoc();
     const overrides = _overridesFromDoc(doc);
     const version = doc ? Number(doc.version || 0) : 0;
-    lastKnown = { overrides, version };
     const result = { settings: _resolve(overrides), version, degraded: false, source: "db" };
-    cache = { at: now, ttl: CACHE_TTL_MS, result };
+    if (startGen === generation) {
+      lastKnown = { overrides, version };
+      cache = { at: now, ttl: CACHE_TTL_MS, result };
+    }
     return result;
   } catch (err) {
     if (err.message !== "db_not_connected") {
@@ -163,7 +123,7 @@ async function getEffectiveSettings() {
       degraded: true,
       source: lastKnown ? "last_known" : "default",
     };
-    cache = { at: now, ttl: NEGATIVE_CACHE_TTL_MS, result };
+    if (startGen === generation) cache = { at: now, ttl: NEGATIVE_CACHE_TTL_MS, result };
     return result;
   }
 }
@@ -182,9 +142,31 @@ async function getEffectiveValues() {
   }
 }
 
+/** Tek etkin değer (asenkron; 15 sn önbellekli). Asla fırlatmaz: okunamazsa env/varsayılan. */
+async function getEffectiveValue(key) {
+  if (!isKnownSetting(key)) throw _err("SETTING_UNKNOWN", "Bilinmeyen ayar.");
+  return (await getEffectiveValues())[key];
+}
+
+let _bgRefresh = null;
+/**
+ * SENKRON okuma: önbellekteki son değer (süresi dolmuş olsa da), yoksa son bilinen/env/varsayılan.
+ * Önbellek süresi dolmuşsa arka planda TEK bir yenileme tetiklenir; istek başına DB sorgusu yapılmaz.
+ */
+function getCachedValue(key) {
+  if (!isKnownSetting(key)) throw _err("SETTING_UNKNOWN", "Bilinmeyen ayar.");
+  if (!cache || Date.now() - cache.at >= cache.ttl) {
+    if (!_bgRefresh) {
+      _bgRefresh = getEffectiveSettings().catch(() => {}).finally(() => { _bgRefresh = null; });
+    }
+  }
+  if (cache) return cache.result.settings[key].value;
+  return defs.resolveValues(lastKnown ? lastKnown.overrides : {}).values[key];
+}
+
 /**
  * Bir ayarı değiştirir ya da (value === null) admin override'ını siler ("env'e dön").
- * Hatalar: SETTING_UNKNOWN, SETTING_OUT_OF_RANGE, SETTING_CONFLICT, SETTING_AUDIT_FAILED.
+ * Hatalar: SETTING_UNKNOWN, SETTING_OUT_OF_RANGE, SETTING_CONSTRAINT, SETTING_CONFLICT, SETTING_AUDIT_FAILED.
  */
 async function setSetting(rawKey, value, { wallet, reason = "", ipHash = null, expectedVersion = undefined } = {}) {
   const key = String(rawKey || "");
@@ -198,7 +180,15 @@ async function setSetting(rawKey, value, { wallet, reason = "", ipHash = null, e
   if (expectedVersion !== undefined && expectedVersion !== currentVersion) {
     throw _err("SETTING_CONFLICT", "Ayarlar başka bir yönetici tarafından değiştirildi; yenileyin.");
   }
-  const prevEntry = _overridesFromDoc(doc)[key] || null;
+  const currentOverrides = _overridesFromDoc(doc);
+  if (value !== null || currentOverrides[key]) {
+    // Kısıtlar etkin değerler (admin > env > varsayılan) üzerinden, önerilen değişiklik uygulanmış halde değerlendirilir.
+    const proposed = { ...currentOverrides };
+    if (value === null) delete proposed[key]; else proposed[key] = { value };
+    const violation = defs.findConstraintViolation(defs.resolveValues(proposed).values, key);
+    if (violation) throw _err("SETTING_CONSTRAINT", violation);
+  }
+  const prevEntry = currentOverrides[key] || null;
   const previous = prevEntry ? prevEntry.value : null;
   if (previous === value) return { key, previousValue: previous, value, changed: false, version: currentVersion };
 
@@ -219,6 +209,11 @@ async function setSetting(rawKey, value, { wallet, reason = "", ipHash = null, e
     throw err;
   }
   invalidateCache();
+  // Aynı süreçteki senkron okuyucular (getCachedValue) değişikliği hemen görsün.
+  const nextOverrides = { ...currentOverrides };
+  if (value === null) delete nextOverrides[key];
+  else nextOverrides[key] = { value, changed_at: now, changed_by: String(wallet || "").toLowerCase() };
+  lastKnown = { overrides: nextOverrides, version: currentVersion + 1 };
 
   try {
     await RuntimeSettingAudit.create({
@@ -243,6 +238,7 @@ async function setSetting(rawKey, value, { wallet, reason = "", ipHash = null, e
       logger.error(`[RuntimeSettings] geri alma başarısız: ${rollbackErr.message}`);
     }
     invalidateCache();
+    lastKnown = { overrides: currentOverrides, version: currentVersion + 2 };
     if (rollbackRes && rollbackRes.matchedCount === 0) {
       logger.error(`[RuntimeSettings] RUNTIME_SETTING_ROLLBACK_CONFLICT: audit yazılamadı ve araya başka değişiklik girdi (setting=${key}).`);
       throw _err("SETTING_CONFLICT", "Eşzamanlı değişiklik; denetim kaydı yazılamadı, yenileyin.");
@@ -279,6 +275,7 @@ async function listAudit({ page = 1, limit = 20 } = {}) {
 function _resetForTests() {
   cache = null;
   lastKnown = null;
+  _bgRefresh = null;
 }
 
 module.exports = {
@@ -288,8 +285,12 @@ module.exports = {
   isInBounds,
   getEffectiveSettings,
   getEffectiveValues,
+  getEffectiveValue,
+  getCachedValue,
   setSetting,
   listAudit,
   invalidateCache,
   _resetForTests,
+  SETTING_CONSTRAINTS: defs.SETTING_CONSTRAINTS,
+  SETTING_GROUPS: defs.SETTING_GROUPS,
 };

@@ -125,7 +125,7 @@ describe("admin runtime settings API", () => {
     expect(store.setting).toBeNull();
     const ok = await as(request(app).get("/api/admin/runtime-settings"));
     expect(ok.status).toBe(200);
-    expect(ok.body.settings.map((s) => s.key)).toEqual(ENV_KEYS);
+    expect(ok.body.settings.map((s) => s.key).slice(0, 3)).toEqual(ENV_KEYS);
   });
 
   it("write path returns 503 immediately when the DB connection is not ready", async () => {
@@ -261,7 +261,7 @@ describe("runtime settings precedence and fail-open", () => {
     process.env.WORKER_REPLAY_BATCH_DELAY_MS = "abc";
     svc.invalidateCache();
     const v = await svc.getEffectiveValues();
-    expect(v).toEqual({ LIVE_POLL_INTERVAL_MS: 5000, WORKER_BLOCK_BATCH_SIZE: 2000, WORKER_REPLAY_BATCH_DELAY_MS: 250 });
+    expect(v).toMatchObject({ LIVE_POLL_INTERVAL_MS: 5000, WORKER_BLOCK_BATCH_SIZE: 2000, WORKER_REPLAY_BATCH_DELAY_MS: 250 });
   });
 
   it("DB failure: last known admin value, then env/default; out-of-range stored value is ignored", async () => {
@@ -288,5 +288,203 @@ describe("runtime settings precedence and fail-open", () => {
     await svc.getEffectiveSettings();
     await svc.getEffectiveSettings();
     expect(Setting.findOne).toHaveBeenCalledTimes(1);
+  });
+});
+
+const NEW_KEYS = [
+  "WORKER_CHECKPOINT_INTERVAL_BLOCKS", "WORKER_REPLAY_BACKOFF_BASE_MS", "WORKER_REPLAY_BACKOFF_MAX_MS",
+  "WORKER_BLOCK_STALE_MS", "WORKER_WATCHDOG_INTERVAL_MS", "WORKER_LIVENESS_STALE_MS", "WORKER_MAX_LAG_BLOCKS",
+  "READY_CACHE_TTL_MS", "MARKET_CACHE_TTL_MS", "CONFIG_CACHE_TTL_SECONDS", "RATE_LIMIT_TIER_CACHE_TTL_SECONDS",
+  "REFERENCE_TICKER_CRYPTO_TTL_SECONDS", "REFERENCE_TICKER_FIAT_TTL_SECONDS",
+  "REFERENCE_TICKER_LAST_GOOD_TTL_SECONDS", "REFERENCE_TICKER_MAX_STALE_SECONDS",
+  "REPUTATION_DECAY_CANDIDATE_LIMIT", "REPUTATION_DECAY_TX_LIMIT",
+  "REWARD_RECORDER_CANDIDATE_LIMIT", "REWARD_RECORDER_BATCH_LIMIT",
+];
+const CODE = (res) => res.body.code;
+
+describe("extended runtime settings: bounds", () => {
+  it("all candidates are registered; defaults satisfy bounds and every cross-field constraint", () => {
+    const defs = require("../../backend/scripts/config/runtimeSettingDefs");
+    for (const k of NEW_KEYS) expect(defs.isKnownSetting(k)).toBe(true);
+    const { values } = defs.resolveValues({});
+    for (const k of defs.SETTING_KEYS) expect(defs.isInBounds(k, values[k])).toBe(true);
+    for (const c of defs.SETTING_CONSTRAINTS) expect(c.check(values)).toBe(true);
+    expect(defs.SETTING_DEFS.REPUTATION_DECAY_TX_LIMIT.warning).toBeTruthy();
+    expect(defs.SETTING_DEFS.REWARD_RECORDER_BATCH_LIMIT.warning).toBeTruthy();
+  });
+
+  it.each(NEW_KEYS)("%s: below min / above max / non-integer rejected with 400; default accepted", async (key) => {
+    const { app, store } = build();
+    const d = require("../../backend/scripts/config/runtimeSettingDefs").SETTING_DEFS[key];
+    const put = (body) => as(request(app).put(`/api/admin/runtime-settings/${key}`).send(body));
+    const low = await put({ value: d.min - 1 });
+    expect(low.status).toBe(400);
+    expect(CODE(low)).toBe("RUNTIME_SETTING_OUT_OF_RANGE");
+    expect((await put({ value: d.max + 1 })).status).toBe(400);
+    expect((await put({ value: d.min + 0.5 })).status).toBe(400);
+    expect((await put({ value: String(d.default) })).status).toBe(400); // Joi strict
+    expect(store.setting).toBeNull();
+    expect((await put({ value: d.default })).status).toBe(200);
+  });
+
+  it("conservative caps on relayer tx / gas affecting limits", () => {
+    const { SETTING_DEFS } = require("../../backend/scripts/config/runtimeSettingDefs");
+    expect(SETTING_DEFS.REPUTATION_DECAY_TX_LIMIT.max).toBeLessThanOrEqual(100);
+    expect(SETTING_DEFS.REWARD_RECORDER_BATCH_LIMIT.max).toBeLessThanOrEqual(100);
+  });
+});
+
+describe("extended runtime settings: allowlist", () => {
+  it.each([
+    "REDIS_READY_WAIT_MS", "PAYMENT_RAILS_CACHE_TTL_MS", "IDENTITY_MIGRATION_BATCH_SIZE",
+    "USER_BANK_RISK_CLEANUP_CURSOR_BATCH_SIZE", "BASE_RPC_URL", "WORKER_FINALITY_DEPTH", "EXPECTED_CHAIN_ID",
+    "ADMIN_WALLETS", "__proto__", "constructor", "toString", "hasOwnProperty",
+  ])("%s is not settable", async (key) => {
+    const { app, store } = build();
+    const res = await as(request(app).put(`/api/admin/runtime-settings/${key}`).send({ value: 5000 }));
+    expect(res.status).toBe(400);
+    expect(CODE(res)).toBe("RUNTIME_SETTING_UNKNOWN");
+    expect(store.setting).toBeNull();
+  });
+});
+
+describe("extended runtime settings: cross-field constraints (400, effective values admin > env > default)", () => {
+  const put = (app, key, body) => as(request(app).put(`/api/admin/runtime-settings/${key}`).send(body));
+
+  it("liveness must be >= 2 x block stale", async () => {
+    const { app, store } = build();
+    expect((await put(app, "WORKER_LIVENESS_STALE_MS", { value: 100_000 })).status).toBe(400); // 2 x 75000 = 150000
+    expect((await put(app, "WORKER_LIVENESS_STALE_MS", { value: 150_000 })).status).toBe(200);
+    const bad = await put(app, "WORKER_BLOCK_STALE_MS", { value: 80_000 });
+    expect(bad.status).toBe(400);
+    expect(CODE(bad)).toBe("RUNTIME_SETTING_CONSTRAINT");
+    expect(store.setting.values.WORKER_BLOCK_STALE_MS).toBeUndefined();
+    expect((await put(app, "WORKER_LIVENESS_STALE_MS", { value: 300_000 })).status).toBe(200);
+    expect((await put(app, "WORKER_BLOCK_STALE_MS", { value: 120_000 })).status).toBe(200);
+  });
+
+  it("constraints use env values too", async () => {
+    const { app } = build();
+    process.env.WORKER_BLOCK_STALE_MS = "200000";
+    try {
+      const res = await put(app, "WORKER_LIVENESS_STALE_MS", { value: 300_000 });
+      expect(res.status).toBe(400);
+      expect(CODE(res)).toBe("RUNTIME_SETTING_CONSTRAINT");
+      expect((await put(app, "WORKER_LIVENESS_STALE_MS", { value: 400_000 })).status).toBe(200);
+    } finally {
+      delete process.env.WORKER_BLOCK_STALE_MS;
+    }
+  });
+
+  it("liveness default follows block stale (2x + 30s) when not overridden", async () => {
+    const { svc } = build();
+    await svc.setSetting("WORKER_BLOCK_STALE_MS", 300_000, { wallet: ADMIN });
+    // block stale 300000 >= 3 x poll 15000 ok; liveness (default source) = 630000
+    const v = await svc.getEffectiveValues();
+    expect(v.WORKER_LIVENESS_STALE_MS).toBe(630_000);
+  });
+
+  it("replay backoff base must be <= max", async () => {
+    const { app } = build();
+    expect((await put(app, "WORKER_REPLAY_BACKOFF_BASE_MS", { value: 60_000 })).status).toBe(200); // max default 300000
+    const res = await put(app, "WORKER_REPLAY_BACKOFF_MAX_MS", { value: 30_000 });
+    expect(res.status).toBe(400);
+    expect(CODE(res)).toBe("RUNTIME_SETTING_CONSTRAINT");
+    expect((await put(app, "WORKER_REPLAY_BACKOFF_MAX_MS", { value: 60_000 })).status).toBe(200);
+    expect((await put(app, "WORKER_REPLAY_BACKOFF_BASE_MS", { value: 60_001 })).status).toBe(400);
+  });
+
+  it("block stale must be >= 3 x live poll interval", async () => {
+    const { app } = build();
+    expect((await put(app, "LIVE_POLL_INTERVAL_MS", { value: 60_000 })).status).toBe(200); // poll changes stay unblocked
+    const res = await put(app, "WORKER_BLOCK_STALE_MS", { value: 100_000 }); // needs >= 180000
+    expect(res.status).toBe(400);
+    expect(CODE(res)).toBe("RUNTIME_SETTING_CONSTRAINT");
+    expect((await put(app, "WORKER_BLOCK_STALE_MS", { value: 180_000 })).status).toBe(200);
+  });
+
+  it("reset (back to env/default) that would violate a constraint is rejected", async () => {
+    const { app } = build();
+    expect((await put(app, "WORKER_BLOCK_STALE_MS", { value: 45_000 })).status).toBe(200);
+    expect((await put(app, "WORKER_LIVENESS_STALE_MS", { value: 90_000 })).status).toBe(200);
+    const res = await put(app, "WORKER_BLOCK_STALE_MS", { reset: true }); // default 75000 -> liveness 90000 < 150000
+    expect(res.status).toBe(400);
+  });
+
+  it("ticker: last-good TTL >= max stale; fiat TTL <= max stale", async () => {
+    const { app } = build();
+    expect((await put(app, "REFERENCE_TICKER_MAX_STALE_SECONDS", { value: 700_000 })).status).toBe(400); // last-good 604800 < 700000
+    expect((await put(app, "REFERENCE_TICKER_LAST_GOOD_TTL_SECONDS", { value: 3_600 })).status).toBe(400); // < max stale 86400
+    expect((await put(app, "REFERENCE_TICKER_MAX_STALE_SECONDS", { value: 3_600 })).status).toBe(400); // fiat 21600 > 3600
+    expect((await put(app, "REFERENCE_TICKER_FIAT_TTL_SECONDS", { value: 3_600 })).status).toBe(200);
+    expect((await put(app, "REFERENCE_TICKER_MAX_STALE_SECONDS", { value: 3_600 })).status).toBe(200);
+    expect((await put(app, "REFERENCE_TICKER_LAST_GOOD_TTL_SECONDS", { value: 3_600 })).status).toBe(200);
+    expect((await put(app, "REFERENCE_TICKER_FIAT_TTL_SECONDS", { value: 7_200 })).status).toBe(400);
+  });
+
+  it("unrelated edits are not blocked by an unrelated violated constraint", async () => {
+    const { app, store } = build();
+    store.setting = { key: "runtime_settings", version: 1, values: { WORKER_LIVENESS_STALE_MS: { value: 60_000 } } };
+    expect((await put(app, "READY_CACHE_TTL_MS", { value: 6_000 })).status).toBe(200);
+  });
+});
+
+describe("extended runtime settings: applied while running (no restart)", () => {
+  it("GET lists group, source and cost warning for new keys", async () => {
+    const { app, svc } = build();
+    await svc.setSetting("REPUTATION_DECAY_TX_LIMIT", 10, { wallet: ADMIN });
+    const res = await as(request(app).get("/api/admin/runtime-settings"));
+    const item = res.body.settings.find((s) => s.key === "REPUTATION_DECAY_TX_LIMIT");
+    expect(item).toMatchObject({ group: "jobs", source: "admin", value: 10, unit: "tx" });
+    expect(item.warning.TR).toMatch(/gas/);
+  });
+
+  it("sync reader (cache TTL) sees the admin value right after the change and falls back after reset", async () => {
+    const { svc } = build();
+    const { runtimeValueSync } = require("../../backend/scripts/utils/runtimeValue");
+    expect(runtimeValueSync("READY_CACHE_TTL_MS")).toBe(7000);
+    await svc.setSetting("READY_CACHE_TTL_MS", 9_000, { wallet: ADMIN });
+    expect(runtimeValueSync("READY_CACHE_TTL_MS")).toBe(9_000);
+    await svc.setSetting("READY_CACHE_TTL_MS", null, { wallet: ADMIN });
+    expect(runtimeValueSync("READY_CACHE_TTL_MS")).toBe(7_000);
+  });
+
+  it("getCachedValue never queries the DB per call; unknown keys throw", async () => {
+    const { svc, Setting } = build();
+    for (let i = 0; i < 20; i += 1) svc.getCachedValue("MARKET_CACHE_TTL_MS");
+    await svc.getEffectiveSettings();
+    for (let i = 0; i < 20; i += 1) svc.getCachedValue("MARKET_CACHE_TTL_MS");
+    expect(Setting.findOne.mock.calls.length).toBeLessThanOrEqual(2);
+    expect(() => svc.getCachedValue("REDIS_READY_WAIT_MS")).toThrow();
+  });
+
+  it("job limit: reward recorder batch size follows the admin value on the next run", async () => {
+    const { Setting, Audit } = build();
+    const chain = (rows) => { const q = { select: () => q, sort: () => q, limit: jest.fn(() => q), lean: async () => rows }; return q; };
+    const rows = [1, 2, 3, 4, 5].map((n) => ({ onchain_escrow_id: String(n) }));
+    const q = chain(rows);
+    jest.doMock("../../backend/scripts/models/Trade", () => ({ find: () => q, updateMany: jest.fn().mockResolvedValue({}) }));
+    jest.doMock("../../backend/scripts/utils/logger", () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn() }));
+    jest.doMock("../../backend/scripts/models/RuntimeSetting", () => Setting);
+    jest.doMock("../../backend/scripts/models/RuntimeSettingAudit", () => Audit);
+    jest.resetModules();
+    Object.defineProperty(require("mongoose").connection, "readyState", { value: 1, configurable: true });
+    const svc = require("../../backend/scripts/services/runtimeSettings");
+    const { runRewardOutcomeRecorder } = require("../../backend/scripts/jobs/rewardOutcomeRecorder");
+    const contract = () => ({
+      epochDuration: async () => 604800n, claimDelay: async () => 86400n,
+      recordTradeOutcomes: jest.fn().mockResolvedValue({ hash: "0x1", wait: async () => ({ blockNumber: 1 }) }),
+    });
+    const c1 = contract();
+    await runRewardOutcomeRecorder({ contract: c1 });
+    expect(c1.recordTradeOutcomes).toHaveBeenCalledWith([1n, 2n, 3n, 4n, 5n]);
+    expect(q.limit).toHaveBeenLastCalledWith(200);
+
+    await svc.setSetting("REWARD_RECORDER_BATCH_LIMIT", 2, { wallet: ADMIN });
+    await svc.setSetting("REWARD_RECORDER_CANDIDATE_LIMIT", 10, { wallet: ADMIN });
+    const c2 = contract();
+    await runRewardOutcomeRecorder({ contract: c2 });
+    expect(c2.recordTradeOutcomes).toHaveBeenCalledWith([1n, 2n]);
+    expect(q.limit).toHaveBeenLastCalledWith(10);
   });
 });

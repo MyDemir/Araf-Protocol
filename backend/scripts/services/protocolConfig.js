@@ -29,7 +29,10 @@ const { getSharedProvider } = require("./rpcProvider");
 const { resolveTrackedTokensOrThrow } = require("./tokenEnv");
 
 const CONFIG_CACHE_KEY = "cache:protocol_config:v3";
-const CONFIG_CACHE_TTL = Number(process.env.CONFIG_CACHE_TTL_SECONDS || 3600);
+const { runtimeValueSync } = require("../utils/runtimeValue");
+
+// [TR] TTL her yazımda çalışma ayarından okunur (admin > env > varsayılan).
+const configCacheTtl = () => runtimeValueSync("CONFIG_CACHE_TTL_SECONDS");
 
 const CONFIG_ABI = [
   "function MAKER_BOND_TIER0_BPS() view returns (uint256)",
@@ -71,7 +74,7 @@ function _bondEntry(makerBps, takerBps) {
 
 async function _writeCache(redis, value) {
   try {
-    await redis.setEx(CONFIG_CACHE_KEY, CONFIG_CACHE_TTL, JSON.stringify(value));
+    await redis.setEx(CONFIG_CACHE_KEY, configCacheTtl(), JSON.stringify(value));
   } catch (err) {
     logger.warn(`[Config] Redis yazma hatası: ${err.message}`);
   }
@@ -203,7 +206,7 @@ async function _buildConfigFromChain({ strictTokens }) {
   };
 
   await _writeCache(redis, built);
-  logger.info(`[Config] V3 on-chain parametreler yüklendi ve cache'lendi (TTL=${CONFIG_CACHE_TTL}s).`);
+  logger.info(`[Config] V3 on-chain parametreler yüklendi ve cache'lendi (TTL=${configCacheTtl()}s).`);
   return built;
 }
 

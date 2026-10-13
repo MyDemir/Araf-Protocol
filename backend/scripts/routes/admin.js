@@ -817,6 +817,9 @@ router.put("/runtime-settings/:key", adminWriteLimiter, async (req, res, next) =
     if (err.code === "SETTING_CONFLICT") {
       return res.status(409).json({ error: err.message, code: "RUNTIME_SETTING_CONFLICT" });
     }
+    if (err.code === "SETTING_CONSTRAINT") {
+      return res.status(400).json({ error: err.message, code: "RUNTIME_SETTING_CONSTRAINT" });
+    }
     if (err.code === "SETTING_OUT_OF_RANGE" || err.code === "SETTING_UNKNOWN") {
       return res.status(400).json({ error: err.message, code: `RUNTIME_${err.code}` });
     }

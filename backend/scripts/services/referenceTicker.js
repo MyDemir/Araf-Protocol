@@ -17,15 +17,19 @@ const CACHE_KEYS = {
   lastGood: "reference:ticker:last-good:v1",
 };
 
-const CRYPTO_TTL_SECONDS = Number(process.env.REFERENCE_TICKER_CRYPTO_TTL_SECONDS || 120);
-const FIAT_TTL_SECONDS = Number(process.env.REFERENCE_TICKER_FIAT_TTL_SECONDS || 21600);
-const LAST_GOOD_TTL_SECONDS = Number(process.env.REFERENCE_TICKER_LAST_GOOD_TTL_SECONDS || 604800);
+const { runtimeValueSync } = require("../utils/runtimeValue");
+
+// [TR] TTL'ler her kullanımda çalışma ayarlarından okunur (admin > env > varsayılan).
+const cryptoTtlSeconds = () => runtimeValueSync("REFERENCE_TICKER_CRYPTO_TTL_SECONDS");
+const fiatTtlSeconds = () => runtimeValueSync("REFERENCE_TICKER_FIAT_TTL_SECONDS");
+const lastGoodTtlSeconds = () => runtimeValueSync("REFERENCE_TICKER_LAST_GOOD_TTL_SECONDS");
+const maxStaleSeconds = () => runtimeValueSync("REFERENCE_TICKER_MAX_STALE_SECONDS");
 
 // [TR] Bayat satır üst sınırı: son taze güncellemesinden bu kadar zaman geçen satır last-good'dan da düşer.
 //      Aksi halde her başarılı yenileme last-good TTL'ini yenileyip bayat satırı sonsuza dek taşırdı.
 // [EN] Staleness cap: a row older than this (by its original updatedAt) is dropped instead of being carried
 //      forward; otherwise each refresh would renew the last-good TTL and keep stale rows forever.
-const MAX_STALE_SECONDS = Number(process.env.REFERENCE_TICKER_MAX_STALE_SECONDS || 86400);
+const MAX_STALE_SECONDS = Number(process.env.REFERENCE_TICKER_MAX_STALE_SECONDS || 86400); // env/varsayılan (dışa aktarım)
 
 const PAIRS = Object.freeze([
   "BTC/USDT",
@@ -402,7 +406,7 @@ function mergeWithLastGood(freshItems, lastGood, nowMs = Date.now()) {
   const have = new Set(fresh.map((item) => item.symbol));
   const isWithinCap = (item) => {
     const at = Date.parse(item.updatedAt || lastGood?.generatedAt || "");
-    return Number.isFinite(at) && nowMs - at <= MAX_STALE_SECONDS * 1000;
+    return Number.isFinite(at) && nowMs - at <= maxStaleSeconds() * 1000;
   };
   const fallback = (lastGood?.items || [])
     .filter((item) => item && PAIRS.includes(item.symbol) && !have.has(item.symbol) && isWithinCap(item))
@@ -433,7 +437,7 @@ async function _refreshReferenceTicker() {
     try {
       fiatRates = await fetchFiatRates();
       cachedFiat = { fiatRates, generatedAt };
-      await cacheSet(CACHE_KEYS.fiat, cachedFiat, FIAT_TTL_SECONDS);
+      await cacheSet(CACHE_KEYS.fiat, cachedFiat, fiatTtlSeconds());
     } catch (err) {
       logger.warn(`[ReferenceTicker] Fiat refresh failed: ${err.message}`);
     }
@@ -442,7 +446,7 @@ async function _refreshReferenceTicker() {
   let coinbaseRates = {};
   try {
     coinbaseRates = await fetchCoinbaseRates();
-    await cacheSet(CACHE_KEYS.crypto, { coinbaseRates, generatedAt }, CRYPTO_TTL_SECONDS);
+    await cacheSet(CACHE_KEYS.crypto, { coinbaseRates, generatedAt }, cryptoTtlSeconds());
   } catch (err) {
     logger.warn(`[ReferenceTicker] Crypto refresh failed: ${err.message}`);
   }
@@ -463,7 +467,7 @@ async function _refreshReferenceTicker() {
 
   // Yalnız en az bir taze satır varsa last-good güncellenir (tamamen bayat veri "taze" sayılmasın).
   if (merged.freshCount > 0) {
-    await cacheSet(CACHE_KEYS.lastGood, payload, LAST_GOOD_TTL_SECONDS);
+    await cacheSet(CACHE_KEYS.lastGood, payload, lastGoodTtlSeconds());
   }
 
   return payload;

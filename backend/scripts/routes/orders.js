@@ -310,7 +310,12 @@ router.get("/payment-risk-config", marketReadLimiter, async (_req, res, next) =>
 //      TTL başına bir kez çalışır. Testlerde varsayılan kapalıdır.
 // [EN] The market response is public and identical for every visitor; clients poll every 30 s, so the
 //      same query is kept in memory briefly (10 s default): 4 Mongo queries once per TTL instead of per request.
-const MARKET_CACHE_TTL_MS = Number(process.env.MARKET_CACHE_TTL_MS ?? (process.env.NODE_ENV === "test" ? 0 : 10_000));
+const { runtimeValueSync } = require("../utils/runtimeValue");
+// [TR] Test ortamında env verilmedikçe kapalı; aksi halde her kullanımda çalışma ayarından okunur.
+function _marketCacheTtlMs() {
+  if (process.env.NODE_ENV === "test" && process.env.MARKET_CACHE_TTL_MS === undefined) return 0;
+  return runtimeValueSync("MARKET_CACHE_TTL_MS");
+}
 const MARKET_CACHE_MAX_ENTRIES = 200;
 const marketCache = new Map();
 
@@ -325,9 +330,10 @@ function _marketCacheGet(key) {
 }
 
 function _marketCacheSet(key, body) {
-  if (!(MARKET_CACHE_TTL_MS > 0)) return;
+  const ttlMs = _marketCacheTtlMs();
+  if (!(ttlMs > 0)) return;
   if (marketCache.size >= MARKET_CACHE_MAX_ENTRIES) marketCache.delete(marketCache.keys().next().value);
-  marketCache.set(key, { body, expiresAt: Date.now() + MARKET_CACHE_TTL_MS });
+  marketCache.set(key, { body, expiresAt: Date.now() + ttlMs });
 }
 
 router.get("/", marketReadLimiter, async (req, res, next) => {
