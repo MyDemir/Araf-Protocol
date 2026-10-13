@@ -472,3 +472,18 @@ Extreme combinations (e.g. `WORKER_BLOCK_BATCH_SIZE=1` with `WORKER_REPLAY_BATCH
 Recommendation: enforce append-only at the DB role level for the audit collections (`runtimesettingaudits`, `paymentrailaudits`): grant the application role only `insert` and `find`, no `update`/`remove`. Schema-level immutability is enforced in code only; the DB role is the second layer.
 
 RPC URLs (`BASE_RPC_URL`, `BASE_RPC_URL_FALLBACKS`) are intentionally not in the panel and stay env-only: a hijacked admin session could supply an RPC that reports the right chain ID but returns forged logs, and the worker trusts those logs. Secrets, contract addresses, `EXPECTED_CHAIN_ID`, finality, CORS, `ADMIN_WALLETS`, KMS and SEC-01 settings are also env-only.
+
+
+### Admin "Runtime settings"
+
+Precedence: admin (DB) > env > default; bounds apply to every source; no restart needed (cache up to ~15 s). Groups and bounds live in `backend/scripts/config/runtimeSettingDefs.js`.
+
+- Worker: `LIVE_POLL_INTERVAL_MS`, `WORKER_BLOCK_BATCH_SIZE`, `WORKER_REPLAY_BATCH_DELAY_MS`, `WORKER_CHECKPOINT_INTERVAL_BLOCKS` (1-1000), `WORKER_REPLAY_BACKOFF_BASE_MS` (500-60000), `WORKER_REPLAY_BACKOFF_MAX_MS` (5000-1800000)
+- Watchdog/Health: `WORKER_BLOCK_STALE_MS` (30000-900000), `WORKER_WATCHDOG_INTERVAL_MS` (5000-120000), `WORKER_LIVENESS_STALE_MS` (60000-1800000; default 2x block stale + 30 s), `WORKER_MAX_LAG_BLOCKS` (1-1000)
+- Caches: `READY_CACHE_TTL_MS` (5000-10000), `MARKET_CACHE_TTL_MS` (0-60000), `CONFIG_CACHE_TTL_SECONDS` (60-86400), `RATE_LIMIT_TIER_CACHE_TTL_SECONDS` (10-600; tier cache only, not limit counts)
+- Rate reference: `REFERENCE_TICKER_CRYPTO_TTL_SECONDS`, `..._FIAT_TTL_SECONDS`, `..._LAST_GOOD_TTL_SECONDS`, `..._MAX_STALE_SECONDS`
+- Background jobs: `REPUTATION_DECAY_CANDIDATE_LIMIT`, `REPUTATION_DECAY_TX_LIMIT` (1-100, relayer gas), `REWARD_RECORDER_CANDIDATE_LIMIT`, `REWARD_RECORDER_BATCH_LIMIT` (1-100, relayer gas)
+
+Cross-field constraints (on effective values, `400` on violation): liveness >= 2 x block stale; replay backoff base <= max; block stale >= 3 x `LIVE_POLL_INTERVAL_MS`; ticker last-good TTL >= max stale; ticker fiat TTL <= max stale.
+
+Intentionally not added: `PAYMENT_RAILS_CACHE_TTL_MS` (payment-rail disable propagation), `USER_BANK_RISK_CLEANUP_CURSOR_BATCH_SIZE` (PII path), `IDENTITY_MIGRATION_BATCH_SIZE` (one-off CLI), `REDIS_READY_WAIT_MS` (read at startup only; needs restart).
