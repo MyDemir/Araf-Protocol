@@ -8,6 +8,9 @@ const readFront = (p) => fs.readFileSync(path.resolve(process.cwd(), p), 'utf8')
 describe('frontend ↔ backend API path alignment', () => {
   it('backend mounts expected /api route prefixes', () => {
     const app = readRepo('backend/scripts/app.js');
+    const mounts = readRepo('backend/scripts/routes/mounts.js');
+    // app.js bağlamayı ROUTE_MOUNTS döngüsüyle yapar; prefix'ler mounts.js'te tanımlıdır.
+    expect(app).toContain('ROUTE_MOUNTS');
     [
       '/api/logs',
       '/api/auth',
@@ -16,7 +19,7 @@ describe('frontend ↔ backend API path alignment', () => {
       '/api/pii',
       '/api/stats',
       '/api/receipts',
-    ].forEach((prefix) => expect(app).toContain(`app.use("${prefix}"`));
+    ].forEach((prefix) => expect(mounts).toContain(`path: "${prefix}"`));
   });
 
   it('frontend fetches canonical endpoints used by UX flow', () => {
