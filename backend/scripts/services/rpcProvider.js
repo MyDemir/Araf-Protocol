@@ -141,7 +141,7 @@ function createRpcPool({ urls, surface = "RpcPool", probeFor = createChainProbe,
       entry.verifying = (async () => {
         const { actualChainId } = await assertProviderExpectedChainOrThrow(probeFor(entry.url), {
           rpcUrl: entry.url,
-          rpcEnvName: entry.index === 0 ? "BASE_RPC_URL" : "BASE_RPC_URL_FALLBACKS",
+          rpcEnvName: entry.index === 0 ? "BASE_RPC_URL" : `BASE_RPC_URL_FALLBACKS[${entry.index - 1}]`,
           surface,
         });
         entry.chainId = actualChainId;

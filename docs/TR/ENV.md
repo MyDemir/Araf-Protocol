@@ -220,6 +220,7 @@ Prod'da `KMS_PROVIDER=env` **reddedilir**; tek istisna dar testnet kuralıdır: 
 - 429 / "compute units" / "capacity" / blok aralığı hatalarında worker geri çekilir (aralık x2 + jitter, en çok 5 dk; aylık kapasite mesajında 30 dk), okunmamış aralığı atlamaz, geri çekilme penceresi başına tek uyarı ve iyileşince tek info yazar. `/ready` `degradedReasons` içinde `rpc_rate_limited` bildirir.
 - Ücretsiz planda `eth_getLogs` **10 blok aralığıyla** sınırlıdır -> `WORKER_BLOCK_BATCH_SIZE=10`. Aralık hatası "WORKER_BLOCK_BATCH_SIZE'ı düşür" mesajıyla loglanır.
 - Ücretsiz kota (~30M CU/ay) **aynı Alchemy hesabındaki tüm uygulamalar** arasında paylaşılır. Testnet ve mainnet aynı hesabı kullanırsa kota ikiye bölünür.
+- Failover notu: birincilin gerisinde kalan bir yedek RPC yalnız gecikme yaratır (olaylar daha geç okunur); fork/reorg farkı `WORKER_FINALITY_DEPTH` ile korunur (safe checkpoint yalnız finalize bloklara ilerler).
 - Sırlar: RPC URL'leri (API anahtarı) her log/hata mesajında maskelenir (`/v2/[REDACTED]`).
 
 Aylık CU tahmini (`eth_getLogs` ~75 CU + `eth_blockNumber` ~10 CU = tur başına ~85 CU, 30 gün):

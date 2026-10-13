@@ -124,13 +124,24 @@ describe("SEC-01 testnet env-KMS exception", () => {
       await expect(encryption.runProductionKmsStartupSelfTest()).resolves.toEqual({ ok: true, provider: "env" });
     });
 
-    test("wrong chain on every URL fails closed immediately (no retry, no bypass)", async () => {
+    test("primary says wrong chain -> fail-closed WITHOUT consulting fallbacks (no retry, no bypass)", async () => {
       process.env.BASE_RPC_URL_FALLBACKS = "http://fallback.invalid";
-      const probe = jest.fn().mockResolvedValue({ chainId: 8453n });
+      const probe = jest.fn((url) => Promise.resolve({ chainId: url === "http://rpc.invalid" ? 8453n : 84532n }));
       mockRpc(probe);
       load2();
       await expect(encryption.runProductionKmsStartupSelfTest()).rejects.toThrow("SEC-01 BLOCKER");
-      expect(probe).toHaveBeenCalledTimes(2);
+      expect(probe).toHaveBeenCalledTimes(1);
+      expect(probe).not.toHaveBeenCalledWith("http://fallback.invalid");
+    });
+
+    test("fallback is consulted only after a TRANSIENT primary error", async () => {
+      process.env.BASE_RPC_URL_FALLBACKS = "http://fallback.invalid";
+      const probe = jest.fn((url) =>
+        url === "http://rpc.invalid" ? Promise.reject(new Error("429 compute units")) : Promise.resolve({ chainId: 84532n }));
+      mockRpc(probe);
+      load2();
+      await expect(encryption.runProductionKmsStartupSelfTest()).resolves.toEqual({ ok: true, provider: "env" });
+      expect(probe.mock.calls.map((c) => c[0])).toEqual(["http://rpc.invalid", "http://fallback.invalid"]);
     });
 
     test("secret RPC key never appears in the SEC-01 error", async () => {

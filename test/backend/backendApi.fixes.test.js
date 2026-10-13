@@ -170,13 +170,16 @@ describe("trades route (B38, B33, B36)", () => {
           ...real,
           ethers: {
             ...real.ethers,
-            JsonRpcProvider: jest.fn().mockImplementation(() => { const p = { destroy: jest.fn() }; ctorCalls.push(p); return p; }),
+            JsonRpcProvider: jest.fn(),
             Contract: jest.fn().mockImplementation(() => ({
               getCurrentAmounts: jest.fn().mockResolvedValue([1n, 1n, 1n, 0n]),
             })),
           },
         };
       });
+      jest.doMock("../../backend/scripts/services/rpcProvider", () => ({
+        getSharedProvider: jest.fn(() => { const p = { destroy: jest.fn() }; ctorCalls.push(p); return p; }),
+      }));
       jest.doMock("../../backend/scripts/services/expectedChain", () => ({ assertProviderExpectedChainOrThrow: assertChain }));
       jest.doMock("../../backend/scripts/services/encryption", () => ({ hmacDigest }));
       jest.doMock("../../backend/scripts/middleware/auth", () => ({
@@ -214,7 +217,7 @@ describe("trades route (B38, B33, B36)", () => {
     expect(Trade.findOneAndUpdate.mock.calls[0][1].$set["chargeback_ack.ip_hash"]).toBe("hmac-result");
   });
 
-  test("B38: failed chain validation does not cache the provider, but destroys it; success is cached", async () => {
+  test("B38: failed chain validation does not cache the contract and never destroys the shared provider; success is cached", async () => {
     process.env.BASE_RPC_URL = "http://rpc.local";
     process.env.ARAF_ESCROW_ADDRESS = "0x" + "d".repeat(40);
     const TradeDoc = { maker_address: OWNER, taker_address: "0x" + "e".repeat(40), onchain_escrow_id: "9", status: "PAID",
@@ -229,7 +232,7 @@ describe("trades route (B38, B33, B36)", () => {
     await expect(router.__getPreviewReadContract()).rejects.toThrow("rpc down");
     await expect(router.__getPreviewReadContract()).rejects.toThrow("rpc down");
     expect(ctorCalls).toHaveLength(2);
-    ctorCalls.forEach((p) => expect(p.destroy).toHaveBeenCalled());
+    ctorCalls.forEach((p) => expect(p.destroy).not.toHaveBeenCalled()); // paylaşılan provider yok edilmez
 
     const ok1 = await router.__getPreviewReadContract();
     const ok2 = await router.__getPreviewReadContract();

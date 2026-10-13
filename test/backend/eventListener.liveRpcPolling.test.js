@@ -127,18 +127,85 @@ describe("eventListener timer-driven live polling", () => {
     expect(worker._rpcRateLimited).toBe(true);
   });
 
-  it("watchdog does not reconnect/exit while a deliberate rate-limit backoff is active", async () => {
-    worker.isRunning = true;
-    worker._state = "live";
-    worker._reconnectPromise = null;
-    worker._exitProcess = jest.fn();
-    worker._reconnect = jest.fn().mockResolvedValue(undefined);
-    worker._lastBlockSeenAt = Date.now() - 10 * 60_000;
+  describe("bounded backoff suppression of watchdog / liveness", () => {
+    let nowSpy;
+    beforeEach(() => {
+      nowSpy = jest.spyOn(Date, "now").mockReturnValue(50_000_000);
+      worker.isRunning = true;
+      worker._state = "live";
+      worker._reconnectPromise = null;
+      worker._staleReconnects = 0;
+      worker._exitProcess = jest.fn();
+      worker._reconnect = jest.fn().mockResolvedValue(undefined);
+      worker._lastBlockSeenAt = 50_000_000 - 10 * 60_000; // 10 dk'dır blok yok
+      worker._rpcRateLimited = true;
+      worker._rpcRateLimitedUntil = 50_000_000 + 60_000; // geri çekilme 1 dk sonra biter
+    });
+    afterEach(() => { nowSpy.mockRestore(); worker.isRunning = false; });
+
+    it("is suppressed while inside the backoff window (+ one interval + 60s)", async () => {
+      await worker._watchdogTick();
+      expect(worker._reconnect).not.toHaveBeenCalled();
+      expect(worker.getLivenessSnapshot().stale).toBe(false);
+      expect(worker.getLivenessSnapshot().rpcRateLimited).toBe(true);
+    });
+
+    it("(a) past the upper bound the watchdog reconnects and liveness reports stale", async () => {
+      nowSpy.mockReturnValue(50_000_000 + 60_000 + 15_000 + 60_000 + 1); // pay geçildi
+      expect(worker.getLivenessSnapshot().stale).toBe(true);
+      await worker._watchdogTick();
+      expect(worker._reconnect).toHaveBeenCalledTimes(1);
+    });
+
+    it("(b) a non-429 error after a 429 lifts the suppression immediately", async () => {
+      worker._noteLivePollFailure(new Error("ECONNRESET socket hang up"));
+      expect(worker._rpcRateLimited).toBe(false);
+      expect(worker.getLivenessSnapshot().stale).toBe(true);
+      await worker._watchdogTick();
+      expect(worker._reconnect).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("(b2) a tick failing with a network error after a 429 clears the rate-limited flag", async () => {
     worker._rpcRateLimited = true;
-    await worker._watchdogTick();
-    expect(worker._reconnect).not.toHaveBeenCalled();
-    expect(worker._exitProcess).not.toHaveBeenCalled();
-    worker.isRunning = false;
+    worker.provider.getBlockNumber = jest.fn().mockRejectedValue(new Error("ECONNRESET"));
+    await worker._liveTick();
+    expect(worker._rpcRateLimited).toBe(false);
+  });
+
+  it("a successful getBlockNumber resets _staleReconnects and refreshes _lastBlockSeenAt", async () => {
+    worker._staleReconnects = 1;
+    worker._lastBlockSeenAt = 1;
+    worker.provider.getBlockNumber = jest.fn().mockResolvedValue(100); // yeni iş yok
+    await worker._liveTick();
+    expect(worker._staleReconnects).toBe(0);
+    expect(worker._lastBlockSeenAt).toBeGreaterThan(1);
+  });
+
+  it("epoch: a tick that returns after a reconnect does not move the cursor or flip state", async () => {
+    let release;
+    worker._pollLiveRange = jest.fn(() => new Promise((resolve) => { release = resolve; }));
+    const tick = worker._liveTick();
+    await Promise.resolve();
+    await Promise.resolve();
+    // reconnect başladı: epoch ilerler, imleç yeni bağlantı tarafından sıfırlanır
+    worker._liveEpoch += 1;
+    worker._livePollInProgress = false;
+    worker._lastLivePolledBlock = 7;
+    release();
+    await tick;
+    expect(worker._lastLivePolledBlock).toBe(7);
+    expect(worker._livePollInProgress).toBe(false);
+    expect(worker._liveTimer).toBeNull(); // eski tur yeniden zamanlamaz
+  });
+
+  it("epoch: a stale tick failing with 429 does not flip the rate-limited state", async () => {
+    worker._pollLiveRange = jest.fn(async () => {
+      worker._liveEpoch += 1;
+      throw RATE_429();
+    });
+    await worker._liveTick();
+    expect(worker._rpcRateLimited).toBe(false);
   });
 
   it("non-rate-limit errors keep the normal interval and are logged as errors (redacted)", () => {

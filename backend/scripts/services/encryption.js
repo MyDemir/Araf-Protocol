@@ -255,21 +255,30 @@ async function _assertTestnetRpcChainOrThrow() {
   //      fail-closed (fırlatır). Kesin yanıt (farklı zincir) yeniden denenmez. Atlatma bayrağı yoktur.
   // [EN] Bounded retry on TRANSIENT errors only (1/3/9s). If no URL returns 84532 it still throws (fail-closed).
   const retryDelaysMs = [1000, 3000, 9000];
+  const definitiveFailure = (message) => new Error(
+    "SEC-01 BLOCKER: ALLOW_ENV_KMS_ON_TESTNET için RPC'nin Base Sepolia (84532) olduğu doğrulanamadı: " + message
+  );
   let lastMessage = "";
   for (let attempt = 0; attempt <= retryDelaysMs.length; attempt += 1) {
     let transient = false;
-    for (const url of urls) {
+    for (let i = 0; i < urls.length; i += 1) {
+      const url = urls[i];
       try {
         const { actualChainId } = await assertProviderExpectedChainOrThrow(createChainProbe(url), {
           rpcUrl: url,
-          rpcEnvName: "BASE_RPC_URL",
+          rpcEnvName: i === 0 ? "BASE_RPC_URL" : `BASE_RPC_URL_FALLBACKS[${i - 1}]`,
           surface: "EnvKmsTestnetException",
         });
         if (actualChainId === 84532) return;
         lastMessage = `actual chain=${actualChainId}`;
+        // [TR] Birincil URL kesin olarak başka zincir diyorsa yedeklere bakmadan fail-closed.
+        if (i === 0) throw definitiveFailure(lastMessage);
       } catch (err) {
+        if (err.message.startsWith("SEC-01 BLOCKER")) throw err;
         lastMessage = redactRpcSecrets(err.message);
-        if (!/\[ChainGuard\]/.test(err.message)) transient = true; // ChainGuard = kesin yanıt/yapılandırma
+        const definitive = /\[ChainGuard\]/.test(err.message); // ChainGuard = kesin yanıt/yapılandırma
+        if (definitive && i === 0) throw definitiveFailure(lastMessage);
+        if (!definitive) transient = true;
       }
     }
     if (!transient || attempt === retryDelaysMs.length) break;

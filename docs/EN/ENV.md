@@ -222,6 +222,7 @@ In prod `KMS_PROVIDER=env` is **rejected**; the only exception is a narrow testn
 - On 429 / "compute units" / "capacity" / block-range errors the worker backs off (interval x2 + jitter, max 5 min; monthly-capacity message: 30 min), never advances past the unread range, logs one warning per backoff window and one info on recovery. `/ready` reports `rpc_rate_limited` in `degradedReasons`.
 - Free plan: `eth_getLogs` is limited to a **10-block range** -> set `WORKER_BLOCK_BATCH_SIZE=10`. A range error is logged with "WORKER_BLOCK_BATCH_SIZE'ı düşür".
 - The free quota (~30M CU/month) is shared by **all apps in the same Alchemy account**. If testnet and mainnet use the same account the quota is split in two.
+- Failover note: a backup RPC that lags behind the primary only adds latency (events are read later); fork/reorg differences are covered by `WORKER_FINALITY_DEPTH` (the safe checkpoint only advances past finalized blocks).
 - Secrets: RPC URLs (API keys) are masked in every log/error (`/v2/[REDACTED]`).
 
 Monthly CU estimate (`eth_getLogs` ~75 CU + `eth_blockNumber` ~10 CU = ~85 CU per tick, 30 days):

@@ -64,11 +64,12 @@ async function runBackfillLastBanEndsAt({ apply = false, UserModel, contract, li
 async function main() {
   const mongoose = require("mongoose");
   const { ethers } = require("ethers");
+  const { getSharedProvider } = require("../services/rpcProvider");
   const { apply } = parseArgs();
   const rpc = process.env.BASE_RPC_URL;
   const addr = process.env.ARAF_ESCROW_ADDRESS;
   if (!rpc || !addr) throw new Error("BASE_RPC_URL ve ARAF_ESCROW_ADDRESS gerekli.");
-  const contract = new ethers.Contract(addr, READ_ABI, new ethers.JsonRpcProvider(rpc));
+  const contract = new ethers.Contract(addr, READ_ABI, getSharedProvider());
   await mongoose.connect(require("./_mongoUri").resolveMongoUri());
   try {
     const result = await runBackfillLastBanEndsAt({ apply, contract });
