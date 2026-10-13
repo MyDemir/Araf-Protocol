@@ -142,14 +142,19 @@ Varsayılan `false`: rewards bir go-live kararıdır (bkz. `REWARDS_ROLLOUT.md`)
 
 1. `ArafRevenueVault(escrow, FINAL_TREASURY_ADDRESS, deployer)` → `ArafRewards(escrow, vault, deployer)`.
 2. `vault.setRewards(rewards)` (**geri alınamaz**, `RewardsAlreadySet`), `setSupportedToken(USDT/USDC)`, `rewardBps == 4000` kontrolü.
-3. Vault ve rewards ownership'i `FINAL_OWNER_ADDRESS`'e devredilir; zincirden tekrar okunup doğrulanır.
+3. Vault ve rewards ownership'i `FINAL_OWNER_ADDRESS`'e devredilir; zincirden tekrar okunup doğrulanır. Ownable **tek adımlıdır** (Ownable2Step değil): yanlış adrese devir geri alınamaz. Log, final owner'da kod olup olmadığını (multisig mi EOA mı) yazar. Wiring yarıda kalırsa manifest `status: "pending"` kalır ve hata çıktısı adresleri ve "deployer hâlâ owner" bilgisini basar.
 4. Manifest `deployments/base-sepolia-rewards.json`; adresler buradan okunur, Fly (`ARAF_REVENUE_VAULT_ADDRESS`, `ARAF_REWARDS_ADDRESS`) ve Vercel (`VITE_REVENUE_VAULT_ADDRESS`, `VITE_REWARDS_ADDRESS`) env'ine yazılır; `GH_VARIABLES_TOKEN` varsa repo variable'larına da kaydedilir.
 
-**Güvenlik kilidi** (hiçbir tx gönderilmeden):
+**Güvenlik kilidi** (hiçbir tx gönderilmeden). CI runner her çalışmada temiz checkout'tur, manifest taşınmaz; bu yüzden CI'da **asıl dayanak repo variable'larıdır** (`ARAF_REVENUE_VAULT_ADDRESS`/`ARAF_REWARDS_ADDRESS`). `GH_VARIABLES_TOKEN` tanımlı değilse workflow bu variable'ları yazamaz ve bir sonraki çalıştırmadaki kilit önceki rewards deploy'unu GÖREMEZ: ya token'ı tanımlayın ya da özetteki `gh variable set` satırlarını hemen elle çalıştırın. Zincir üstü kontroller yalnız variable'larda (ya da yerel manifest'te) adres varsa ek güvence sağlar.
 - "Validate required config": `deploy_rewards=true` iken `ARAF_REVENUE_VAULT_ADDRESS`/`ARAF_REWARDS_ADDRESS` variable'larından biri doluysa iş, escrow deploy'undan ÖNCE durur. `FINAL_TREASURY_ADDRESS` zorunludur.
-- `deployRewards.js`: aynı ağın rewards manifest'i varsa, mevcut vault'un `rewards()`'ı doluysa (staticcall), mevcut rewards adresinde kod varsa ya da `escrow.treasury()` rewards'ı bağlı bir vault ise durur.
+- `deployRewards.js`: aynı ağın rewards manifest'i varsa (`pending` dahil; yerelde), variable'daki vault'un `rewards()`'ı doluysa (staticcall), variable'daki rewards adresinde kod varsa ya da `escrow.treasury()` rewards'ı bağlı bir vault ise durur.
 - Bilinçli yeniden deploy yalnız `confirm_redeploy_rewards=YES` (büyük harf, birebir) ile. Eski vault/rewards terk edilir; içlerindeki bakiye eski owner'da kalır.
 - Manifest ile variable'lar çelişirse (onaysız) adres çözümü hata verir.
+
+**Bağlılık kontrolü** (`.github/scripts/check-rewards-binding.js`, `eth_call`): `vault.escrow() == ESCROW`, `rewards.escrow() == ESCROW`, `rewards.revenueVault() == vault`. Okuma hatası da uyumsuzluk sayılır.
+- Tam deploy, `deploy_rewards=true`: uyumsuzluk `::error::`.
+- Tam deploy, `deploy_rewards=false`: her çalıştırma YENİ escrow ürettiği için variable'daki vault/rewards neredeyse her zaman eski escrow'a bağlıdır. Uyumsuzlukta iş DURMAZ (escrow deploy'u tamamlandı, yarım kalmasın); vault/rewards Fly'a ve Vercel'e verilmez, Fly'daki `ARAF_REVENUE_VAULT_ADDRESS`/`ARAF_REWARDS_ADDRESS` silinir (unset), Vercel build'ine boş `VITE_REVENUE_VAULT_ADDRESS`/`VITE_REWARDS_ADDRESS` verilir ve özet "vault/rewards bu escrow'a bağlı değil, runtime'a verilmedi; deploy_rewards=true ile yeniden çalıştırın" yazar.
+- Runtime workflow: uyumsuzluk `::error::` (kontrat deploy'u yok, durmak güvenli); `araf_escrow_address` override'ı ile variable'daki vault'un karışması da burada yakalanır.
 
 **Elle yapılması gerekenler** (workflow YAPMAZ): escrow `FINAL_OWNER_ADDRESS`'e (multisig) devredildiği için `escrow.setTreasury(vault)` yalnız owner tarafından yapılabilir. Önce `REWARDS_OP=verify`, sonra `CONFIRM_TREASURY_SWITCH=true EXPECTED_CURRENT_TREASURY_ADDRESS=<treasury> REWARDS_OP=switch-treasury` (bkz. `DEPLOYMENT_GUIDE.md` §7). Owner, `setTreasury` ile vault'u atlayabilir (K8, belgelenmiş owner yetkisi).
 
@@ -167,5 +172,5 @@ Varsayılan `false`: rewards bir go-live kararıdır (bkz. `REWARDS_ROLLOUT.md`)
 - Deployment bloğu `deploy.js` çıktısında yoktur; workflow `deployTxHash` receipt'inden okur.
 - Secret değerlerinde boşluk/tırnak/`#` olmasın (`flyctl secrets import` dotenv biçimi).
 - Contract verify (Basescan) **deneysel**: tam deploy'da `verify_contracts=true` (varsayılan false) + `ETHERSCAN_API_KEY` ile `contracts/scripts/verify.js` çalışır (Etherscan V2 + Sourcify yedek); library'leri (`ArafReputationLib`, `ArafSettlementLib`) ve linkli `ArafEscrow`'u doğrular, constructor argümanları deploy manifestinden okunur. Adım `continue-on-error: true`'dur, başarısız olursa deploy etkilenmez; o durumda elle doğrula: `npm --prefix contracts run verify:base-sepolia` (`contracts/.env`'de `BASE_SEPOLIA_RPC_URL` ve `ETHERSCAN_API_KEY` gerekir).
-- Rewards: tam deploy'da `deploy_rewards=true` (yukarı bakın) ya da elle deploy edip `ARAF_REVENUE_VAULT_ADDRESS`/`ARAF_REWARDS_ADDRESS` variable'larını girin; workflow'lar backend ve frontend'e geçirir. `deploy_rewards=false` iken tam deploy yeni escrow üretir ama variable'daki vault eski escrow'a bağlıdır (`vault.escrow` değişmez); workflow bunu uyarı olarak yazar.
+- Rewards: tam deploy'da `deploy_rewards=true` (yukarı bakın) ya da elle deploy edip `ARAF_REVENUE_VAULT_ADDRESS`/`ARAF_REWARDS_ADDRESS` variable'larını girin; workflow'lar backend ve frontend'e geçirir. `deploy_rewards=false` iken tam deploy yeni escrow üretir ama variable'daki vault eski escrow'a bağlıdır (`vault.escrow` değişmez); bağlılık kontrolü bunu yakalar ve runtime değerlerini boşaltır (yukarıya bakın).
 - `ETHERSCAN_API_KEY` yalnız verify adımında kullanılır, backend'e gönderilmez.

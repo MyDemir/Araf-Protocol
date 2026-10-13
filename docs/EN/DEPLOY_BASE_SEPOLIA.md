@@ -144,14 +144,19 @@ Default `false`: rewards is a go-live decision (see `REWARDS_ROLLOUT.md`) and `v
 
 1. `ArafRevenueVault(escrow, FINAL_TREASURY_ADDRESS, deployer)` → `ArafRewards(escrow, vault, deployer)`.
 2. `vault.setRewards(rewards)` (**irreversible**, `RewardsAlreadySet`), `setSupportedToken(USDT/USDC)`, `rewardBps == 4000` check.
-3. Vault and rewards ownership is transferred to `FINAL_OWNER_ADDRESS` and re-read on chain.
+3. Vault and rewards ownership is transferred to `FINAL_OWNER_ADDRESS` and re-read on chain. Ownable is **single-step** (not Ownable2Step): a transfer to a wrong address cannot be undone. The log states whether the final owner has code (multisig or EOA). If the wiring fails midway the manifest stays `status: "pending"` and the error output prints the addresses and "deployer still owner".
 4. Manifest `deployments/base-sepolia-rewards.json`; the addresses are read from it and written to Fly (`ARAF_REVENUE_VAULT_ADDRESS`, `ARAF_REWARDS_ADDRESS`) and Vercel (`VITE_REVENUE_VAULT_ADDRESS`, `VITE_REWARDS_ADDRESS`); with `GH_VARIABLES_TOKEN` they are also saved as repository variables.
 
-**Safety lock** (before any tx):
+**Safety lock** (before any tx). The CI runner is a fresh checkout every run and manifests are not carried over, so in CI **the real anchor is the repository variables** (`ARAF_REVENUE_VAULT_ADDRESS`/`ARAF_REWARDS_ADDRESS`). Without `GH_VARIABLES_TOKEN` the workflow cannot write them and the next run's lock CANNOT see the previous rewards deploy: define the token or run the `gh variable set` lines from the summary right away. The on-chain checks only add assurance when an address exists in the variables (or a local manifest).
 - "Validate required config": with `deploy_rewards=true`, if `ARAF_REVENUE_VAULT_ADDRESS`/`ARAF_REWARDS_ADDRESS` is set, the job stops BEFORE the escrow deploy. `FINAL_TREASURY_ADDRESS` is required.
-- `deployRewards.js` stops if this network's rewards manifest exists, the existing vault's `rewards()` is set (staticcall), the existing rewards address has code, or `escrow.treasury()` is a vault already wired to rewards.
+- `deployRewards.js` stops if this network's rewards manifest exists (including `pending`; local), the variable's vault has `rewards()` set (staticcall), the variable's rewards address has code, or `escrow.treasury()` is a vault already wired to rewards.
 - A deliberate redeploy needs `confirm_redeploy_rewards=YES` (exact, uppercase). The old vault/rewards are orphaned; their balances stay with the old owner.
 - If the manifest and the variables conflict (without confirmation) address resolution fails.
+
+**Binding check** (`.github/scripts/check-rewards-binding.js`, `eth_call`): `vault.escrow() == ESCROW`, `rewards.escrow() == ESCROW`, `rewards.revenueVault() == vault`. A read error counts as a mismatch.
+- Full deploy, `deploy_rewards=true`: mismatch is `::error::`.
+- Full deploy, `deploy_rewards=false`: every run creates a NEW escrow, so the variables' vault/rewards are almost always bound to the old escrow. On mismatch the job does NOT stop (the escrow deploy already happened; no half-finished run); vault/rewards are not given to Fly or Vercel, the Fly `ARAF_REVENUE_VAULT_ADDRESS`/`ARAF_REWARDS_ADDRESS` secrets are unset, the Vercel build gets empty `VITE_REVENUE_VAULT_ADDRESS`/`VITE_REWARDS_ADDRESS`, and the summary says the vault/rewards are not bound to this escrow and to re-run with `deploy_rewards=true`.
+- Runtime workflow: mismatch is `::error::` (no contract deploy, stopping is safe); this also catches an `araf_escrow_address` override mixed with the variable's vault.
 
 **Manual steps** (NOT done by the workflow): the escrow is owned by `FINAL_OWNER_ADDRESS` (multisig), so only the owner can call `escrow.setTreasury(vault)`. Run `REWARDS_OP=verify`, then `CONFIRM_TREASURY_SWITCH=true EXPECTED_CURRENT_TREASURY_ADDRESS=<treasury> REWARDS_OP=switch-treasury` (see `DEPLOYMENT_GUIDE.md` §7). The owner can bypass the vault with `setTreasury` (K8, documented owner power).
 
@@ -169,5 +174,5 @@ Default `false`: rewards is a go-live decision (see `REWARDS_ROLLOUT.md`) and `v
 - The deployment block is not in the `deploy.js` output; the workflow reads it from the `deployTxHash` receipt.
 - Secret values must not contain spaces/quotes/`#` (`flyctl secrets import` dotenv format).
 - Contract verify (Basescan) is **experimental**: in a full deploy, `contracts/scripts/verify.js` runs with `verify_contracts=true` (default false) + `ETHERSCAN_API_KEY` (Etherscan V2, plus Sourcify fallback); it verifies the libraries (`ArafReputationLib`, `ArafSettlementLib`) and the linked `ArafEscrow`, with constructor arguments read from the deploy manifest. The step is `continue-on-error: true`, so if it fails the deploy is unaffected; in that case verify manually: `npm --prefix contracts run verify:base-sepolia` (needs `BASE_SEPOLIA_RPC_URL` and `ETHERSCAN_API_KEY` in `contracts/.env`).
-- Rewards: use `deploy_rewards=true` in the full deploy (see above) or deploy manually and set the `ARAF_REVENUE_VAULT_ADDRESS`/`ARAF_REWARDS_ADDRESS` variables; the workflows pass them to the backend and frontend. With `deploy_rewards=false` the full deploy creates a new escrow while the variable's vault stays bound to the old escrow (`vault.escrow` is immutable); the workflow emits a warning.
+- Rewards: use `deploy_rewards=true` in the full deploy (see above) or deploy manually and set the `ARAF_REVENUE_VAULT_ADDRESS`/`ARAF_REWARDS_ADDRESS` variables; the workflows pass them to the backend and frontend. With `deploy_rewards=false` the full deploy creates a new escrow while the variable's vault stays bound to the old escrow (`vault.escrow` is immutable); the binding check catches this and clears the runtime values (see above).
 - `ETHERSCAN_API_KEY` is only used by the verify step and never sent to the backend.

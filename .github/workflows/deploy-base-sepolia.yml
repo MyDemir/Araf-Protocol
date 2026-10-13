@@ -238,7 +238,8 @@ jobs:
 
       # deployRewards.js: Vault(escrow, FINAL_TREASURY, deployer) -> Rewards(escrow, vault, deployer) ->
       # vault.setRewards (TEK SEFER) -> setSupportedToken(USDT/USDC) -> vault+rewards ownership -> FINAL_OWNER.
-      # Script tx göndermeden önce manifest + zincir üstü (EXISTING_* için staticcall rewards()) kilidini çalıştırır.
+      # Script tx göndermeden önce kilidi çalıştırır. Runner'da manifest yok: asıl dayanak repo variable'larıdır
+      # (EXISTING_*; GH_VARIABLES_TOKEN ile yazılır). Zincir kontrolü yalnız bu adresler biliniyorsa ek güvencedir.
       - name: Deploy revenue vault + rewards (optional)
         if: ${{ inputs.deploy_rewards }}
         working-directory: contracts

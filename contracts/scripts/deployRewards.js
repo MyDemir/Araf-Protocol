@@ -12,7 +12,9 @@
  *
  * Kilit / lock: aynı ağda rewards manifest'i varsa, EXISTING_REVENUE_VAULT_ADDRESS'in rewards()'ı doluysa,
  * EXISTING_REWARDS_ADDRESS'te kod varsa ya da escrow.treasury() rewards'ı bağlı bir vault ise
- * CONFIRM_REDEPLOY_REWARDS=YES olmadan hiçbir tx gönderilmez.
+ * CONFIRM_REDEPLOY_REWARDS=YES olmadan hiçbir tx gönderilmez. Not: CI runner'da manifest yoktur; orada kilidin
+ * asıl dayanağı repo variable'larından gelen EXISTING_* adresleridir (GH_VARIABLES_TOKEN ile yazılır). Zincir
+ * kontrolü yalnız bu adresler biliniyorsa işe yarar; bilinmeyen bir eski deploy'u kendi başına bulamaz.
  */
 const hre = require('hardhat');
 const { ethers, artifacts, network } = hre;
