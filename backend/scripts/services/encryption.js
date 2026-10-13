@@ -244,26 +244,41 @@ function _assertMasterKeyLengthOrThrow(masterKey, providerLabel) {
  * [EN] Verifies the RPC really is chain 84532 when the exception is active; fail-closed on mismatch/unreachable.
  */
 async function _assertTestnetRpcChainOrThrow() {
-  const rpcUrl = process.env.BASE_RPC_URL;
-  if (!rpcUrl) {
+  const { getRpcUrls, createChainProbe, redactRpcSecrets } = require("./rpcProvider");
+  const { assertProviderExpectedChainOrThrow } = require("./expectedChain");
+  const urls = getRpcUrls();
+  if (urls.length === 0) {
     throw new Error("SEC-01 BLOCKER: Testnet env-KMS istisnası için BASE_RPC_URL zorunlu (chain 84532 doğrulanamadı).");
   }
-  try {
-    const { ethers } = require("ethers");
-    const { assertProviderExpectedChainOrThrow } = require("./expectedChain");
-    const provider = new ethers.JsonRpcProvider(rpcUrl);
-    const { actualChainId } = await assertProviderExpectedChainOrThrow(provider, {
-      rpcUrl,
-      rpcEnvName: "BASE_RPC_URL",
-      surface: "EnvKmsTestnetException",
-    });
-    if (actualChainId !== 84532) throw new Error(`actual chain=${actualChainId}`);
-  } catch (err) {
-    throw new Error(
-      "SEC-01 BLOCKER: ALLOW_ENV_KMS_ON_TESTNET için RPC'nin Base Sepolia (84532) olduğu doğrulanamadı: " +
-      err.message
-    );
+
+  // [TR] 429/ağ hatası gibi GEÇİCİ hatalarda sınırlı yeniden deneme (1/3/9 sn). Hiçbir URL 84532 döndürmezse
+  //      fail-closed (fırlatır). Kesin yanıt (farklı zincir) yeniden denenmez. Atlatma bayrağı yoktur.
+  // [EN] Bounded retry on TRANSIENT errors only (1/3/9s). If no URL returns 84532 it still throws (fail-closed).
+  const retryDelaysMs = [1000, 3000, 9000];
+  let lastMessage = "";
+  for (let attempt = 0; attempt <= retryDelaysMs.length; attempt += 1) {
+    let transient = false;
+    for (const url of urls) {
+      try {
+        const { actualChainId } = await assertProviderExpectedChainOrThrow(createChainProbe(url), {
+          rpcUrl: url,
+          rpcEnvName: "BASE_RPC_URL",
+          surface: "EnvKmsTestnetException",
+        });
+        if (actualChainId === 84532) return;
+        lastMessage = `actual chain=${actualChainId}`;
+      } catch (err) {
+        lastMessage = redactRpcSecrets(err.message);
+        if (!/\[ChainGuard\]/.test(err.message)) transient = true; // ChainGuard = kesin yanıt/yapılandırma
+      }
+    }
+    if (!transient || attempt === retryDelaysMs.length) break;
+    await new Promise((resolve) => setTimeout(resolve, retryDelaysMs[attempt]));
   }
+  throw new Error(
+    "SEC-01 BLOCKER: ALLOW_ENV_KMS_ON_TESTNET için RPC'nin Base Sepolia (84532) olduğu doğrulanamadı: " +
+    lastMessage
+  );
 }
 
 async function runProductionKmsStartupSelfTest() {

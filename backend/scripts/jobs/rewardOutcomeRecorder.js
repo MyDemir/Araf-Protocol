@@ -23,6 +23,7 @@ const { ethers } = require("ethers");
 const { isConfiguredAddress: _isConfiguredAddress } = require("../utils/onchain");
 const Trade = require("../models/Trade");
 const logger = require("../utils/logger");
+const { getSharedProvider } = require("../services/rpcProvider");
 
 const REWARDS_RECORDER_ABI = [
   "function recordTradeOutcomes(uint256[] tradeIds)",
@@ -58,7 +59,7 @@ function getRewardsContract() {
     return null;
   }
 
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const provider = getSharedProvider();
   const relayer = new ethers.Wallet(privateKey, provider);
   rewardsContract = new ethers.Contract(rewardsAddress, REWARDS_RECORDER_ABI, relayer);
   return rewardsContract;
