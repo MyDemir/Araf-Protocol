@@ -471,7 +471,7 @@ async function main() {
 
   const artifact = await artifacts.readArtifact("ArafEscrow");
   let frontendEnvPath = null;
-  if (isLocal) {
+  if (isLocal && process.env.SKIP_FRONTEND_ENV_WRITE !== "true") {
     frontendEnvPath = updateFrontendEnvIfPresent({
       escrowAddress,
       usdtAddress,
@@ -481,7 +481,9 @@ async function main() {
     console.log("ℹ️ Public/custom modda frontend .env auto-write yapılmadı.");
   }
 
-  const manifestDir = path.resolve(__dirname, "../deployments");
+  const manifestDir = process.env.ARAF_DEPLOYMENTS_DIR
+    ? path.resolve(process.env.ARAF_DEPLOYMENTS_DIR)
+    : path.resolve(__dirname, "../deployments");
   ensureDir(manifestDir);
   const manifestPath = path.join(manifestDir, `${network.name}.json`);
   const manifest = {
@@ -525,6 +527,7 @@ async function main() {
   console.log(`Final Owner   : ${finalOwnerAddress}`);
   console.log(`Manifest      : ${manifestPath}`);
   console.log("--------------------------------------------------");
+  return { manifest, manifestPath };
 }
 
 if (require.main === module) {

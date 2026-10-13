@@ -46,7 +46,7 @@ The "Where to set" column in the tables shows the **target location** for Base S
 >
 > **If the frontend is also deployed, 3 extra secrets:** `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`.
 >
-> **Optional:** secrets `RELAYER_PRIVATE_KEY`, `GH_VARIABLES_TOKEN` (fine-grained PAT, this repo only, "Variables: read and write"; makes the full-deploy addresses variables automatically), `ETHERSCAN_API_KEY` (only for `verify_contracts=true`; legacy `BASESCAN_API_KEY` still read); variables `FLY_APP_NAME` (default `araf-protocol-backend`), `ADMIN_WALLETS`, `VITE_RPC_URL`, `ARAF_REVENUE_VAULT_ADDRESS`, `ARAF_REWARDS_ADDRESS` (if rewards was deployed separately; when defined they are passed to Fly and Vercel).
+> **Optional:** secrets `RELAYER_PRIVATE_KEY`, `GH_VARIABLES_TOKEN` (fine-grained PAT, this repo only, "Variables: read and write"; makes the full-deploy addresses variables automatically), `ETHERSCAN_API_KEY` (only for `verify_contracts=true`; legacy `BASESCAN_API_KEY` still read); variables `FLY_APP_NAME` (default `araf-protocol-backend`), `ADMIN_WALLETS`, `VITE_RPC_URL`, `ARAF_REVENUE_VAULT_ADDRESS`, `ARAF_REWARDS_ADDRESS` (together; written automatically after `deploy_rewards=true` or set manually; when defined they are passed to Fly and Vercel), `FINAL_TREASURY_ADDRESS` (required only with `deploy_rewards=true`), `LIVE_POLL_INTERVAL_MS`, `WORKER_BLOCK_BATCH_SIZE`, `WORKER_REPLAY_BATCH_DELAY_MS`, `EXPECTED_CHAIN_ID` (empty or 84532); secret `BASE_SEPOLIA_RPC_URL_FALLBACKS` (written to Fly as `BASE_RPC_URL_FALLBACKS`). Empty optional values keep the current Fly value.
 >
 > **AFTER deploy (2 variables):** `ARAF_ESCROW_ADDRESS`, `ARAF_DEPLOYMENT_BLOCK`; needed only for later runs of `deploy-runtime-base-sepolia.yml`.
 > If the `GH_VARIABLES_TOKEN` secret is defined, the full-deploy workflow writes these itself; if not, it prints a warning and puts the `gh variable set` lines to run manually on the summary page.
@@ -373,7 +373,7 @@ Addresses (`ARAF_ESCROW_ADDRESS`, token addresses) are not secrets.
 ## 7. What the workflow sets automatically
 
 There are two workflows: `deploy-base-sepolia.yml` (contract + Fly + optional Vercel) and `deploy-runtime-base-sepolia.yml` (Fly and/or Vercel without redeploying the contract).
-`deployRewards.js` is not part of the workflows (deliberately). The user does **not** enter the values below manually. Line numbers in this section are approximate; the workflow files have been updated, so check the file for current lines.
+`deployRewards.js` runs only in the full deploy with `deploy_rewards=true` (off by default; lock and confirmation: `DEPLOY_BASE_SEPOLIA.md`). The Fly secret and Vercel build-env lists come from one shared script in both workflows: `.github/scripts/stage-runtime-env.sh`. The user does **not** enter the values below manually. Line numbers in this section are approximate; the workflow files have been updated, so check the file for current lines.
 
 ### 7.1 Fly secrets: what the workflow writes (`flyctl secrets import --stage`, then `flyctl deploy`)
 
@@ -396,10 +396,12 @@ Full deploy: `deploy-base-sepolia.yml:141-178` · runtime: `deploy-runtime-base-
 | `MONGODB_URI`, `REDIS_URL`, `JWT_SECRET`, `MASTER_ENCRYPTION_KEY` | GitHub secret of the same name | 158-160, 165 / 146-148, 153 |
 | `RELAYER_PRIVATE_KEY`, `ADMIN_WALLETS` | GitHub secret / variable; **not written if empty** | 176-177 / 164-165 |
 
-Conditional (in both workflows): if the repo variable `ARAF_REVENUE_VAULT_ADDRESS` / `ARAF_REWARDS_ADDRESS` is defined (validated with an address regex), it is written to Fly secrets under the same names; if not defined, nothing is written and the reward mirror/recorder stay inactive.
+Conditional (both workflows, resolved by `.github/scripts/resolve-rewards-addresses.js`): `ARAF_REVENUE_VAULT_ADDRESS` / `ARAF_REWARDS_ADDRESS` (full deploy with `deploy_rewards=true`: the rewards manifest; otherwise the repo variables, with a non-empty runtime input first) are written to Fly under the same names. Validation: 0x+40 hex, non-zero, valid EIP-55 checksum if mixed case, both together; a manifest/variable conflict fails. If not defined, nothing is written and the reward mirror/recorder stay inactive.
+
+Conditional, not written when empty (the Fly value is kept): `BASE_RPC_URL_FALLBACKS` (GitHub secret `BASE_SEPOLIA_RPC_URL_FALLBACKS`; RPC URLs carry keys), `LIVE_POLL_INTERVAL_MS` [2000-300000], `WORKER_BLOCK_BATCH_SIZE` [1-2000], `WORKER_REPLAY_BATCH_DELAY_MS` [0-10000] (GitHub variables). `EXPECTED_CHAIN_ID` is always written as 84532; if the variable is set it must be 84532. `ETHERSCAN_API_KEY` is never sent to the backend.
 
 Backend variables the workflow does not write (all optional/with defaults):
-`ARAF_TRACKED_TOKENS`, `WORKER_*`, `JOB_*`, `READY_INTERNAL_TOKEN`, `AWS_*`, `VAULT_*` and other tuning variables.
+`ARAF_TRACKED_TOKENS`, `WORKER_*` other than the above, `JOB_*`, `READY_INTERNAL_TOKEN`, `AWS_*`, `VAULT_*` and other tuning variables.
 
 ### 7.2 Vercel build-env: what the workflow supplies (`vercel deploy --prod --build-env ...`)
 

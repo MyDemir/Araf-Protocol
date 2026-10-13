@@ -1,8 +1,12 @@
 name: Deploy Runtime Base Sepolia
 
 # Kontratı yeniden deploy ETMEDEN backend (Fly.io) ve/veya frontend (Vercel) deploy eder.
-# Adresler repo variables'tan (ARAF_ESCROW_ADDRESS, BASE_SEPOLIA_USDT/USDC_ADDRESS, ARAF_DEPLOYMENT_BLOCK)
-# ya da girdi override'larından gelir.
+# Adresler, deploy-base-sepolia.yml'nin "Persist deployment variables" adımının yazdığı repo variable'larından
+# (ARAF_ESCROW_ADDRESS, ARAF_DEPLOYMENT_BLOCK, BASE_SEPOLIA_USDT/USDC_ADDRESS, ARAF_REVENUE_VAULT_ADDRESS,
+# ARAF_REWARDS_ADDRESS) gelir; dolu input override'ı önceliklidir. Vault/rewards çözümü ve doğrulaması
+# (checksum, sıfır adres, birlikte verilme, manifest çelişkisi) ana workflow ile aynı betiktir:
+# .github/scripts/resolve-rewards-addresses.js. Fly secret / Vercel env listesi ve health kontrolü ortak:
+# .github/scripts/stage-runtime-env.sh.
 
 on:
   workflow_dispatch:
@@ -29,6 +33,16 @@ on:
         type: string
       usdc_address:
         description: "Optional override for USDC address. Empty = repository variable BASE_SEPOLIA_USDC_ADDRESS."
+        required: false
+        default: ""
+        type: string
+      revenue_vault_address:
+        description: "Optional override for ARAF_REVENUE_VAULT_ADDRESS (set together with rewards_address). Empty = repository variable."
+        required: false
+        default: ""
+        type: string
+      rewards_address:
+        description: "Optional override for ARAF_REWARDS_ADDRESS (set together with revenue_vault_address). Empty = repository variable."
         required: false
         default: ""
         type: string
@@ -61,6 +75,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
       - name: Resolve fixed Base Sepolia deployment values
         shell: bash
         env:
@@ -72,6 +91,17 @@ jobs:
           INPUT_USDT_ADDRESS: ${{ inputs.usdt_address }}
           INPUT_USDC_ADDRESS: ${{ inputs.usdc_address }}
           INPUT_DEPLOYMENT_BLOCK: ${{ inputs.deployment_block }}
+          # Vault/rewards: ana workflow ile aynı kural (MODE=fallback: input > variable).
+          MODE: fallback
+          MANIFEST_PATH: contracts/deployments/base-sepolia-rewards.json
+          EXPECTED_CHAIN_ID: "84532"
+          VAR_REVENUE_VAULT: ${{ vars.ARAF_REVENUE_VAULT_ADDRESS }}
+          VAR_REWARDS: ${{ vars.ARAF_REWARDS_ADDRESS }}
+          INPUT_REVENUE_VAULT: ${{ inputs.revenue_vault_address }}
+          INPUT_REWARDS: ${{ inputs.rewards_address }}
+          # Kontrat deploy'u yok: vault/rewards bu escrow'a bağlı değilse durmak güvenli.
+          ON_MISMATCH: error
+          BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
         run: |
           set -euo pipefail
 
@@ -79,14 +109,17 @@ jobs:
           USDT="${INPUT_USDT_ADDRESS:-$VAR_BASE_SEPOLIA_USDT_ADDRESS}"
           USDC="${INPUT_USDC_ADDRESS:-$VAR_BASE_SEPOLIA_USDC_ADDRESS}"
           DEPLOY_BLOCK="${INPUT_DEPLOYMENT_BLOCK:-$VAR_ARAF_DEPLOYMENT_BLOCK}"
+          export ESCROW USDT USDC DEPLOY_BLOCK
 
-          ADDRESS_RE='^0x[a-fA-F0-9]{40}$'
-          ZERO='0x0000000000000000000000000000000000000000'
-          [[ "$ESCROW" =~ $ADDRESS_RE && "$ESCROW" != "$ZERO" ]] || { echo "::error::ARAF_ESCROW_ADDRESS is missing or invalid."; exit 1; }
-          [[ "$USDT" =~ $ADDRESS_RE && "$USDT" != "$ZERO" ]] || { echo "::error::BASE_SEPOLIA_USDT_ADDRESS is missing or invalid."; exit 1; }
-          [[ "$USDC" =~ $ADDRESS_RE && "$USDC" != "$ZERO" ]] || { echo "::error::BASE_SEPOLIA_USDC_ADDRESS is missing or invalid."; exit 1; }
-          [[ "$DEPLOY_BLOCK" =~ ^[0-9]+$ ]] || { echo "::error::ARAF_DEPLOYMENT_BLOCK is missing or invalid."; exit 1; }
-          [[ "$DEPLOY_BLOCK" != "0" ]] || { echo "::error::ARAF_DEPLOYMENT_BLOCK cannot be 0 for a production runtime deploy."; exit 1; }
+          out="$(node .github/scripts/resolve-rewards-addresses.js)"
+          echo "$out"
+          REVENUE_VAULT="$(printf '%s\n' "$out" | sed -n 's/^REVENUE_VAULT=//p')"
+          REWARDS="$(printf '%s\n' "$out" | sed -n 's/^REWARDS=//p')"
+          export REVENUE_VAULT REWARDS
+          bash .github/scripts/stage-runtime-env.sh validate
+          # vault.escrow()==ESCROW, rewards.escrow()==ESCROW, rewards.revenueVault()==vault (eth_call);
+          # araf_escrow_address override'ı ile variable'daki vault karışırsa da burada durur.
+          bash .github/scripts/stage-runtime-env.sh rewards-binding
 
           {
             echo "ESCROW=$ESCROW"
@@ -156,9 +189,9 @@ jobs:
             fi
           fi
 
+      # Liste ortak: .github/scripts/stage-runtime-env.sh (ana workflow ile aynı). Log'a yalnız ADLAR basılır.
       - name: Stage backend secrets on Fly
         if: ${{ inputs.deploy_backend }}
-        working-directory: backend
         shell: bash
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
@@ -168,41 +201,17 @@ jobs:
           MASTER_ENCRYPTION_KEY: ${{ secrets.MASTER_ENCRYPTION_KEY }}
           BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
           BASE_SEPOLIA_WS_RPC_URL: ${{ secrets.BASE_SEPOLIA_WS_RPC_URL }}
+          BASE_SEPOLIA_RPC_URL_FALLBACKS: ${{ secrets.BASE_SEPOLIA_RPC_URL_FALLBACKS }}
           RELAYER_PRIVATE_KEY: ${{ secrets.RELAYER_PRIVATE_KEY }}
           ADMIN_WALLETS: ${{ vars.ADMIN_WALLETS }}
-          REVENUE_VAULT_ADDRESS: ${{ vars.ARAF_REVENUE_VAULT_ADDRESS }}
-          REWARDS_ADDRESS: ${{ vars.ARAF_REWARDS_ADDRESS }}
+          LIVE_POLL_INTERVAL_MS: ${{ vars.LIVE_POLL_INTERVAL_MS }}
+          WORKER_BLOCK_BATCH_SIZE: ${{ vars.WORKER_BLOCK_BATCH_SIZE }}
+          WORKER_REPLAY_BATCH_DELAY_MS: ${{ vars.WORKER_REPLAY_BATCH_DELAY_MS }}
+          EXPECTED_CHAIN_ID: ${{ vars.EXPECTED_CHAIN_ID }}
         run: |
           set -euo pipefail
-          ADDRESS_RE='^0x[a-fA-F0-9]{40}$'
-          for n in REVENUE_VAULT_ADDRESS REWARDS_ADDRESS; do
-            if [ -n "${!n}" ] && ! [[ "${!n}" =~ $ADDRESS_RE ]]; then echo "::error::$n variable must be a 0x + 40 hex address."; exit 1; fi
-          done
-          {
-            printf '%s=%s\n' NODE_ENV production
-            printf '%s=%s\n' MONGODB_URI "$MONGODB_URI"
-            printf '%s=%s\n' REDIS_URL "$REDIS_URL"
-            printf '%s=%s\n' JWT_SECRET "$JWT_SECRET"
-            printf '%s=%s\n' JWT_EXPIRES_IN 15m
-            printf '%s=%s\n' PII_TOKEN_EXPIRES_IN 15m
-            printf '%s=%s\n' KMS_PROVIDER env
-            printf '%s=%s\n' ALLOW_ENV_KMS_ON_TESTNET yes
-            printf '%s=%s\n' MASTER_ENCRYPTION_KEY "$MASTER_ENCRYPTION_KEY"
-            printf '%s=%s\n' EXPECTED_CHAIN_ID 84532
-            printf '%s=%s\n' BASE_RPC_URL "$BASE_SEPOLIA_RPC_URL"
-            printf '%s=%s\n' BASE_WS_RPC_URL "$BASE_SEPOLIA_WS_RPC_URL"
-            printf '%s=%s\n' ARAF_ESCROW_ADDRESS "$ESCROW"
-            printf '%s=%s\n' BASE_SEPOLIA_USDT_ADDRESS "$USDT"
-            printf '%s=%s\n' BASE_SEPOLIA_USDC_ADDRESS "$USDC"
-            printf '%s=%s\n' ARAF_DEPLOYMENT_BLOCK "$DEPLOY_BLOCK"
-            printf '%s=%s\n' SIWE_DOMAIN "$FRONTEND_DOMAIN"
-            printf '%s=%s\n' SIWE_URI "https://$FRONTEND_DOMAIN"
-            printf '%s=%s\n' ALLOWED_ORIGINS "https://$FRONTEND_DOMAIN"
-            if [ -n "$RELAYER_PRIVATE_KEY" ]; then printf '%s=%s\n' RELAYER_PRIVATE_KEY "$RELAYER_PRIVATE_KEY"; fi
-            if [ -n "$ADMIN_WALLETS" ]; then printf '%s=%s\n' ADMIN_WALLETS "$ADMIN_WALLETS"; fi
-            if [ -n "$REVENUE_VAULT_ADDRESS" ]; then printf '%s=%s\n' ARAF_REVENUE_VAULT_ADDRESS "$REVENUE_VAULT_ADDRESS"; fi
-            if [ -n "$REWARDS_ADDRESS" ]; then printf '%s=%s\n' ARAF_REWARDS_ADDRESS "$REWARDS_ADDRESS"; fi
-          } | flyctl secrets import --stage -a "$FLY_APP_NAME"
+          bash .github/scripts/stage-runtime-env.sh validate
+          bash .github/scripts/stage-runtime-env.sh fly-secrets
 
       - name: Deploy backend to Fly
         if: ${{ inputs.deploy_backend }}
@@ -211,13 +220,11 @@ jobs:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: flyctl deploy --remote-only -a "$FLY_APP_NAME"
 
+      # /health 200 zorunlu; /ready 503 degraded:true ise yalnız ::warning:: (ana workflow ile aynı).
       - name: Check backend health
         if: ${{ inputs.deploy_backend }}
         shell: bash
-        run: |
-          set -euo pipefail
-          sleep 15
-          curl --fail --show-error --silent --retry 12 --retry-delay 10 --retry-all-errors "https://$FLY_APP_NAME.fly.dev/health"
+        run: bash .github/scripts/stage-runtime-env.sh health
 
       - name: Validate Vercel config
         if: ${{ inputs.deploy_frontend }}
@@ -229,12 +236,6 @@ jobs:
           test -n "$VERCEL_TOKEN" || { echo "::error::VERCEL_TOKEN secret is required when deploy_frontend is true."; exit 1; }
           test -n "$VERCEL_ORG_ID" || { echo "::error::VERCEL_ORG_ID secret is required when deploy_frontend is true."; exit 1; }
           test -n "$VERCEL_PROJECT_ID" || { echo "::error::VERCEL_PROJECT_ID secret is required when deploy_frontend is true."; exit 1; }
-
-      - name: Setup Node
-        if: ${{ inputs.deploy_frontend }}
-        uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
 
       # Repo dosyası değişmez; yalnız runner üzerindeki kopyada /api rewrite hedefi FLY_APP_NAME'e çevrilir.
       - name: Point vercel.json /api rewrite at Fly app
@@ -270,33 +271,7 @@ jobs:
           FARCASTER_ACCOUNT_ASSOCIATION_HEADER: ${{ vars.FARCASTER_ACCOUNT_ASSOCIATION_HEADER }}
           FARCASTER_ACCOUNT_ASSOCIATION_PAYLOAD: ${{ vars.FARCASTER_ACCOUNT_ASSOCIATION_PAYLOAD }}
           FARCASTER_ACCOUNT_ASSOCIATION_SIGNATURE: ${{ vars.FARCASTER_ACCOUNT_ASSOCIATION_SIGNATURE }}
-          REVENUE_VAULT_ADDRESS: ${{ vars.ARAF_REVENUE_VAULT_ADDRESS }}
-          REWARDS_ADDRESS: ${{ vars.ARAF_REWARDS_ADDRESS }}
-        run: |
-          set -euo pipefail
-          vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
-          args=(
-            --build-env VITE_TARGET_CHAIN=base-sepolia
-            --build-env VITE_ESCROW_ADDRESS="$ESCROW"
-            --build-env VITE_USDT_ADDRESS="$USDT"
-            --build-env VITE_USDC_ADDRESS="$USDC"
-            --build-env VITE_PUBLIC_URL="https://$FRONTEND_DOMAIN"
-          )
-          if [ -n "$VITE_RPC_URL" ]; then args+=(--build-env VITE_RPC_URL="$VITE_RPC_URL"); fi
-          # Farcaster / Base mini app (opsiyonel; imza FRONTEND_DOMAIN'e bağlıdır, docs/*/DEPLOY_BASE_SEPOLIA.md)
-          if [ -n "$VITE_BASE_APP_ID" ]; then args+=(--build-env VITE_BASE_APP_ID="$VITE_BASE_APP_ID"); fi
-          if [ -n "$FARCASTER_ACCOUNT_ASSOCIATION_HEADER" ] && [ -n "$FARCASTER_ACCOUNT_ASSOCIATION_PAYLOAD" ] && [ -n "$FARCASTER_ACCOUNT_ASSOCIATION_SIGNATURE" ]; then
-            args+=(--build-env FARCASTER_ACCOUNT_ASSOCIATION_HEADER="$FARCASTER_ACCOUNT_ASSOCIATION_HEADER")
-            args+=(--build-env FARCASTER_ACCOUNT_ASSOCIATION_PAYLOAD="$FARCASTER_ACCOUNT_ASSOCIATION_PAYLOAD")
-            args+=(--build-env FARCASTER_ACCOUNT_ASSOCIATION_SIGNATURE="$FARCASTER_ACCOUNT_ASSOCIATION_SIGNATURE")
-          fi
-          ADDRESS_RE='^0x[a-fA-F0-9]{40}$'
-          for n in REVENUE_VAULT_ADDRESS REWARDS_ADDRESS; do
-            if [ -n "${!n}" ] && ! [[ "${!n}" =~ $ADDRESS_RE ]]; then echo "::error::$n variable must be a 0x + 40 hex address."; exit 1; fi
-          done
-          if [ -n "$REVENUE_VAULT_ADDRESS" ]; then args+=(--build-env VITE_REVENUE_VAULT_ADDRESS="$REVENUE_VAULT_ADDRESS"); fi
-          if [ -n "$REWARDS_ADDRESS" ]; then args+=(--build-env VITE_REWARDS_ADDRESS="$REWARDS_ADDRESS"); fi
-          vercel deploy --prod --yes --token="$VERCEL_TOKEN" "${args[@]}"
+        run: bash ../.github/scripts/stage-runtime-env.sh vercel-deploy
 
       - name: Deployment summary
         if: ${{ always() }}
@@ -305,6 +280,7 @@ jobs:
           DEPLOY_BACKEND: ${{ inputs.deploy_backend }}
           DEPLOY_FRONTEND: ${{ inputs.deploy_frontend }}
         run: |
+          set -euo pipefail
           {
             echo "### Runtime Base Sepolia deployment"
             echo "- Backend deployed: $DEPLOY_BACKEND (https://$FLY_APP_NAME.fly.dev)"
@@ -313,4 +289,6 @@ jobs:
             echo "- BASE_SEPOLIA_USDT_ADDRESS: ${USDT:-n/a}"
             echo "- BASE_SEPOLIA_USDC_ADDRESS: ${USDC:-n/a}"
             echo "- ARAF_DEPLOYMENT_BLOCK: ${DEPLOY_BLOCK:-n/a}"
+            echo "- ARAF_REVENUE_VAULT_ADDRESS: ${REVENUE_VAULT:-n/a} (source: ${REWARDS_SOURCE:-n/a})"
+            echo "- ARAF_REWARDS_ADDRESS: ${REWARDS:-n/a}"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -44,7 +44,7 @@ Tablolardaki "Nereye girilir" sütunu Base Sepolia/Mainnet için **hedef yeri** 
 >
 > **Frontend de deploy edilecekse ek 3 secret:** `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`.
 >
-> **Opsiyonel:** secret `RELAYER_PRIVATE_KEY`, `GH_VARIABLES_TOKEN` (fine-grained PAT, yalnız bu repo, "Variables: read and write"; tam deploy adresleri otomatik variable yapar), `ETHERSCAN_API_KEY` (yalnız `verify_contracts=true`; eski `BASESCAN_API_KEY` hâlâ okunur); variable `FLY_APP_NAME` (varsayılan `araf-protocol-backend`), `ADMIN_WALLETS`, `VITE_RPC_URL`, `ARAF_REVENUE_VAULT_ADDRESS`, `ARAF_REWARDS_ADDRESS` (rewards ayrı deploy edildiyse; tanımlıysa Fly ve Vercel'e geçer).
+> **Opsiyonel:** secret `RELAYER_PRIVATE_KEY`, `GH_VARIABLES_TOKEN` (fine-grained PAT, yalnız bu repo, "Variables: read and write"; tam deploy adresleri otomatik variable yapar), `ETHERSCAN_API_KEY` (yalnız `verify_contracts=true`; eski `BASESCAN_API_KEY` hâlâ okunur); variable `FLY_APP_NAME` (varsayılan `araf-protocol-backend`), `ADMIN_WALLETS`, `VITE_RPC_URL`, `ARAF_REVENUE_VAULT_ADDRESS`, `ARAF_REWARDS_ADDRESS` (birlikte; `deploy_rewards=true` sonrası otomatik yazılır ya da elle; tanımlıysa Fly ve Vercel'e geçer), `FINAL_TREASURY_ADDRESS` (yalnız `deploy_rewards=true` iken zorunlu), `LIVE_POLL_INTERVAL_MS`, `WORKER_BLOCK_BATCH_SIZE`, `WORKER_REPLAY_BATCH_DELAY_MS`, `EXPECTED_CHAIN_ID` (boş ya da 84532); secret `BASE_SEPOLIA_RPC_URL_FALLBACKS` (Fly'a `BASE_RPC_URL_FALLBACKS` olarak). Opsiyoneller boşsa Fly'daki mevcut değer korunur.
 >
 > **Deploy SONRASI (2 variable):** `ARAF_ESCROW_ADDRESS`, `ARAF_DEPLOYMENT_BLOCK`; yalnız sonraki `deploy-runtime-base-sepolia.yml` çalıştırmaları için gerekir.
 > `GH_VARIABLES_TOKEN` secret'ı tanımlıysa tam deploy workflow'u bunları kendisi yazar; tanımlı değilse uyarı verir ve özet sayfasına elle çalıştırılacak `gh variable set` satırlarını basar.
@@ -371,7 +371,7 @@ Adresler (`ARAF_ESCROW_ADDRESS`, token adresleri) sır değildir.
 ## 7. Workflow'un otomatik ayarladıkları
 
 İki workflow var: `deploy-base-sepolia.yml` (kontrat + Fly + opsiyonel Vercel) ve `deploy-runtime-base-sepolia.yml` (kontratı yeniden deploy etmeden Fly ve/veya Vercel).
-`deployRewards.js` workflow'lara dahil değildir (bilinçli). Kullanıcı aşağıdaki değerleri **elle girmez**. Satır numaraları bu bölümde yaklaşıktır; workflow dosyaları güncellendi, güncel satır için dosyaya bakın.
+`deployRewards.js` yalnız tam deploy'da `deploy_rewards=true` iken çalışır (varsayılan kapalı; kilit ve onay: `DEPLOY_BASE_SEPOLIA.md`). Fly secret ve Vercel build-env listesi iki workflow'da da ortak betikten gelir: `.github/scripts/stage-runtime-env.sh`. Kullanıcı aşağıdaki değerleri **elle girmez**. Satır numaraları bu bölümde yaklaşıktır; workflow dosyaları güncellendi, güncel satır için dosyaya bakın.
 
 ### 7.1 Fly secrets: workflow'un yazdıkları (`flyctl secrets import --stage`, sonra `flyctl deploy`)
 
@@ -394,10 +394,12 @@ Tam deploy: `deploy-base-sepolia.yml:141-178` · runtime: `deploy-runtime-base-s
 | `MONGODB_URI`, `REDIS_URL`, `JWT_SECRET`, `MASTER_ENCRYPTION_KEY` | aynı adlı GitHub secret | 158-160, 165 / 146-148, 153 |
 | `RELAYER_PRIVATE_KEY`, `ADMIN_WALLETS` | GitHub secret / variable; **boşsa yazılmaz** | 176-177 / 164-165 |
 
-Koşullu (iki workflow'da da): repo variable `ARAF_REVENUE_VAULT_ADDRESS` / `ARAF_REWARDS_ADDRESS` tanımlıysa (adres regex'iyle doğrulanır) aynı adlarla Fly secret'a yazılır; tanımlı değilse hiçbir şey yazılmaz ve reward mirror/recorder pasif kalır.
+Koşullu (iki workflow'da da, `.github/scripts/resolve-rewards-addresses.js` ile çözülür): `ARAF_REVENUE_VAULT_ADDRESS` / `ARAF_REWARDS_ADDRESS` (tam deploy `deploy_rewards=true`: rewards manifest'i; aksi halde repo variable, runtime'da dolu input önce) aynı adlarla Fly secret'a yazılır. Doğrulama: 0x+40 hex, sıfır değil, karışık harfliyse EIP-55 checksum, ikisi birlikte; manifest ile variable çelişirse hata. Tanımlı değilse hiçbir şey yazılmaz ve reward mirror/recorder pasif kalır.
+
+Koşullu, boşsa yazılmaz (Fly'daki değer korunur): `BASE_RPC_URL_FALLBACKS` (GitHub secret `BASE_SEPOLIA_RPC_URL_FALLBACKS`; RPC URL'leri anahtar içerir), `LIVE_POLL_INTERVAL_MS` [2000-300000], `WORKER_BLOCK_BATCH_SIZE` [1-2000], `WORKER_REPLAY_BATCH_DELAY_MS` [0-10000] (GitHub variable). `EXPECTED_CHAIN_ID` her zaman 84532 yazılır; variable tanımlıysa 84532 olmalı. `ETHERSCAN_API_KEY` backend'e hiç gönderilmez.
 
 Workflow'un yazmadığı backend değişkenleri (hepsi opsiyonel/varsayılanlı):
-`ARAF_TRACKED_TOKENS`, `WORKER_*`, `JOB_*`, `READY_INTERNAL_TOKEN`, `AWS_*`, `VAULT_*` ve diğer ayar değişkenleri.
+`ARAF_TRACKED_TOKENS`, yukarıdakiler dışındaki `WORKER_*`, `JOB_*`, `READY_INTERNAL_TOKEN`, `AWS_*`, `VAULT_*` ve diğer ayar değişkenleri.
 
 ### 7.2 Vercel build-env: workflow'un verdikleri (`vercel deploy --prod --build-env ...`)
 
