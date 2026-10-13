@@ -14,6 +14,9 @@ const listeners = new Set();
 const probes = {};
 const timers = {};
 const attempts = { backend: 0, rpc: 0 };
+// [TR] Histerezis: sıradan çağrılar bayrağı tek başarıyla kaldırmaz; art arda bu kadar başarı ya da yoklama başarısı gerekir.
+export const INFRA_RECOVERY_SUCCESSES = 2;
+const successes = { backend: 0, rpc: 0 };
 
 const emit = (patch) => {
   state = { ...state, ...patch };
@@ -33,6 +36,7 @@ export const markInfraOk = (kind) => {
   if (!state[kind]) return;
   clearTimer(kind);
   attempts[kind] = 0;
+  successes[kind] = 0;
   emit({ [kind]: false, epoch: state.epoch + 1 });
 };
 
@@ -52,10 +56,18 @@ const schedule = (kind) => {
 };
 
 export const markInfraFailure = (kind) => {
+  successes[kind] = 0;
   if (state[kind]) return;
   attempts[kind] = 0;
   emit({ [kind]: true });
   schedule(kind);
+};
+
+// [TR] Sıradan bir çağrı başarılı oldu: bayrak yalnız art arda INFRA_RECOVERY_SUCCESSES başarıda kalkar (titreme önleme).
+export const reportInfraSuccess = (kind) => {
+  if (!state[kind]) { successes[kind] = 0; return; }
+  successes[kind] += 1;
+  if (successes[kind] >= INFRA_RECOVERY_SUCCESSES) markInfraOk(kind);
 };
 
 // [TR] Yoklama kaydı: true dönerse altyapı geri gelmiştir. Kayıt silme fonksiyonu döner.
@@ -76,6 +88,8 @@ export const __resetInfraForTest = () => {
   Object.keys(probes).forEach((k) => delete probes[k]);
   attempts.backend = 0;
   attempts.rpc = 0;
+  successes.backend = 0;
+  successes.rpc = 0;
   state = { backend: false, rpc: false, epoch: 0 };
   listeners.forEach((l) => l());
 };

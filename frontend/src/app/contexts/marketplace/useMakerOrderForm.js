@@ -1,5 +1,6 @@
 import React from 'react';
 import { isPayoutProfileSaved } from '../../payoutProfileGate';
+import { enforceTxGate } from '../../txGate';
 import {
   buildCreateOrderAction,
   getMakerOrderValidationError,
@@ -10,6 +11,8 @@ import {
 
 export const useMakerOrderForm = ({
   isPaused,
+  // [TR] Fail-closed kapı (getter): paused / kontrol ediliyor / altyapı arızası. Yoksa yalnız isPaused kullanılır.
+  txGate = null,
   requireSignedSessionForActiveWallet,
   setShowMakerModal,
   showToast,
@@ -125,6 +128,7 @@ export const useMakerOrderForm = ({
     getReputation,
     hasPayoutProfile,
     openProfilePage,
+    txGate,
   }), [
     getFormState,
     resetMakerOrderForm,
@@ -156,16 +160,19 @@ export const useMakerOrderForm = ({
     getReputation,
     hasPayoutProfile,
     openProfilePage,
+    txGate,
   ]);
 
   const handleOpenMakerModal = React.useCallback(() => {
-    if (isPaused) {
+    if (txGate) {
+      if (!enforceTxGate(txGate, showToast)) return;
+    } else if (isPaused) {
       showToast(lang === 'TR' ? 'Sistem şu an bakım modundadır. Yeni order açılamaz.' : 'System is paused. Cannot create orders.', 'error');
       return;
     }
     if (!requireSignedSessionForActiveWallet()) return;
     setShowMakerModal(true);
-  }, [isPaused, lang, requireSignedSessionForActiveWallet, setShowMakerModal, showToast]);
+  }, [isPaused, txGate, lang, requireSignedSessionForActiveWallet, setShowMakerModal, showToast]);
 
   return {
     ...formState,

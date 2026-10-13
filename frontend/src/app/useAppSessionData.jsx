@@ -6,7 +6,7 @@ import { toUnixSeconds } from './contexts/settlement/settlementActionModel';
 import { buildMarketOrdersQuery, MARKET_FILTER_DEFAULTS, matchesMarketFilters } from './contexts/marketplace/marketFilters';
 import { mapApiOrderToUi, formatTokenAmount as formatTokenAmountFromRaw, tokenToNumber as rawTokenToDisplayNumber } from './orderUiModel';
 import { buildApiUrl } from './apiConfig';
-import { fetchWithTimeout } from './fetchWithTimeout';
+import { fetchWithTimeout, isTimeoutError, DEFAULT_FETCH_TIMEOUT_MS, WRITE_FETCH_TIMEOUT_MS } from './fetchWithTimeout';
 import { markInfraFailure, markInfraOk, registerInfraProbe, useInfraHealth } from './infraHealth';
 import { WALLET_AGE_MIN_SEC } from './walletAge';
 import { applyStatePin, createStatePin, isTerminalTradeState } from './tradeStateSync';
@@ -302,6 +302,8 @@ export function useAppSessionData({
   const [walletAgeRemainingDays, setWalletAgeRemainingDays] = useState(null);
   const [takerNameState, setTakerNameState] = useState({ onchainId: null, name: '' });
   const [isPaused, setIsPaused] = useState(false);
+  // [TR] İlk başarılı paused() okumasına kadar false: yeni işlem yolları "kontrol ediliyor" ile kapalı (fail-closed).
+  const [rpcChecked, setRpcChecked] = useState(false);
   // [TR] Altyapı toparlanma sayacı: değişince açılış verisi yeniden çekilir. [EN] Recovery counter: refetch boot data.
   const infraEpoch = useInfraHealth().epoch;
 
@@ -417,7 +419,28 @@ export function useAppSessionData({
       ...requestOptions.headers,
       ...walletHeader,
     });
-    const res = await fetchWithTimeout(url, {
+    // [TR] Yazma isteği ve dosya yükleme 60 sn; okuma 10 sn. Yazma zaman aşımında sunucu işlemi tamamlamış olabilir:
+    //      kullanıcı uyarılır, istek OTOMATİK TEKRAR GÖNDERİLMEZ (çift işlem riski).
+    const method = String(requestOptions.method || 'GET').toUpperCase();
+    const isWrite = (method !== 'GET' && method !== 'HEAD') || isFormData;
+    const timeoutMs = requestOptions.timeoutMs ?? (isWrite ? WRITE_FETCH_TIMEOUT_MS : DEFAULT_FETCH_TIMEOUT_MS);
+    const timedFetch = async (u, init) => {
+      try {
+        return await fetchWithTimeout(u, { ...init, timeoutMs });
+      } catch (err) {
+        if (isWrite && isTimeoutError(err)) {
+          err.writeMayHaveCompleted = true;
+          showToast(
+            langRef.current === 'TR'
+              ? 'İstek zaman aşımına uğradı; işlem sunucuda tamamlanmış olabilir. Sayfayı yenileyip kontrol edin.'
+              : 'The request timed out; the action may have completed on the server. Refresh and check before retrying.',
+            'error'
+          );
+        }
+        throw err;
+      }
+    };
+    const res = await timedFetch(url, {
       ...requestOptions,
       headers: buildHeaders(),
       credentials: 'include',
@@ -473,7 +496,7 @@ export function useAppSessionData({
       // [EN] Reset auth-toast wave only after successful session refresh.
       sessionToastShownRef.current = false;
 
-      return fetchWithTimeout(url, {
+      return timedFetch(url, {
         ...requestOptions,
         headers: buildHeaders(),
         credentials: 'include',
@@ -761,6 +784,7 @@ export function useAppSessionData({
     fetchWithTimeout(() => buildApiUrl('auth/me'), {
       credentials: 'include',
       headers: { 'x-wallet-address': connectedWallet },
+      infra: 'backend',
     })
       .then(async (res) => {
         if (cancelled) return;
@@ -778,6 +802,9 @@ export function useAppSessionData({
           return;
         }
 
+        // [TR] 5xx = sunucu arızası: oturum durumu BİLİNMİYOR, yerel oturum silinmez (infra bayrağı toparlanınca
+        //      efekt yeniden çalışır). Gerçek 401/403 aşağıda eskisi gibi oturumu temizler.
+        if (res.status >= 500) return;
         if (!res.ok) {
           clearLocalSessionState({ navigateHome: false, closeModals: true });
           setAuthChecked(true);
@@ -819,14 +846,14 @@ export function useAppSessionData({
         setAuthChecked(true);
       })
       .catch(() => {
-        if (cancelled) return;
-        clearLocalSessionState({ navigateHome: false, closeModals: true });
-        setAuthChecked(true);
+        // [TR] Ağ hatası / zaman aşımı: oturum "bilinmiyor" kalır (silinmez, authChecked false). Backend bayrağı
+        //      fetchWithTimeout içinde işaretlendi; toparlanınca (infraEpoch) bu doğrulama yeniden yapılır.
+        // [EN] Network error / timeout: session stays "unknown" — never wiped; re-validated on backend recovery.
       });
     return () => {
       cancelled = true;
     };
-  }, [isConnected, connectedWallet, clearLocalSessionState, bestEffortBackendLogout]);
+  }, [isConnected, connectedWallet, clearLocalSessionState, bestEffortBackendLogout, infraEpoch]);
 
   // [TR] Giriş (imza) /auth/me doğrulamasından bağımsız yapılır; isAdmin bu durumda henüz bilinmez. Oturum açılınca
   //      yönetici bayrağı bir kez /auth/me'den okunur (doğrulama zaten okuduysa tekrar istenmez).
@@ -1080,6 +1107,7 @@ export function useAppSessionData({
           throw new Error('paused() unreadable');
         }
         setIsPaused(paused);
+        setRpcChecked(true);
         markInfraOk('rpc');
         return true;
       } catch (err) {
@@ -1459,6 +1487,7 @@ export function useAppSessionData({
     walletAgeRemainingDays,
     takerName,
     isPaused,
+    rpcChecked,
     protocolStats,
     statsLoading,
     statsError,

@@ -5,9 +5,11 @@
 //      options.infra = 'backend' verilirse sonuç altyapı sağlığına bildirilir (ağ hatası/zaman aşımı/5xx = arıza).
 // [EN] No boot request may wait forever. The URL may be a thunk so a buildApiUrl policy throw becomes a rejection.
 //      Timeouts are named 'TimeoutError', never 'AbortError' (callers swallow AbortError as a cancellation).
-import { markInfraFailure, markInfraOk } from './infraHealth';
+import { markInfraFailure, reportInfraSuccess } from './infraHealth';
 
 export const DEFAULT_FETCH_TIMEOUT_MS = 10000;
+// [TR] Yazma (POST/PUT/PATCH/DELETE) ve dosya yüklemeleri için daha uzun süre.
+export const WRITE_FETCH_TIMEOUT_MS = 60000;
 
 export const isTimeoutError = (err) => err?.name === 'TimeoutError';
 
@@ -26,7 +28,7 @@ export const fetchWithTimeout = async (urlOrThunk, options = {}) => {
     const res = await fetch(url, { ...init, signal: controller.signal });
     if (infra) {
       if (res.status >= 500) markInfraFailure(infra);
-      else markInfraOk(infra);
+      else reportInfraSuccess(infra);
     }
     return res;
   } catch (err) {

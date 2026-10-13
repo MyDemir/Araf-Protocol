@@ -124,6 +124,7 @@ export const buildAppModals = (ctx) => {
     makerPayoutRiskEntry,
     isCreateTemporarilyDisabledByRisk,
     isPayoutProfileGateBlocked = false,
+    txGate = null,
     openProfilePage,
     isContractLoading,
     loadingText,
@@ -286,7 +287,7 @@ export const buildAppModals = (ctx) => {
     const modalCopy = getMakerModalCopy(makerSide, lang);
     const payoutRiskEntry = makerPayoutRiskEntry;
     const validationError = makerValidationError || null;
-    const isSubmitDisabled = isContractLoading || validationError !== null || isCreateTemporarilyDisabledByRisk || isPayoutProfileGateBlocked;
+    const isSubmitDisabled = isContractLoading || validationError !== null || isCreateTemporarilyDisabledByRisk || isPayoutProfileGateBlocked || Boolean(txGate?.blocked);
     const seg = (active) => `flex-1 h-9 rounded-lg text-sm font-semibold transition ${active ? 'bg-surface text-textPrimary shadow-sm' : 'text-textMuted hover:text-textPrimary'} disabled:opacity-40 disabled:cursor-not-allowed`;
 
     return (
@@ -410,6 +411,11 @@ export const buildAppModals = (ctx) => {
             {isCreateTemporarilyDisabledByRisk && (
               <p className="text-sm text-danger bg-danger/10 border border-danger/30 rounded-lg p-3 leading-relaxed">
                 {tr ? 'Bu ödeme yöntemi şu an kısıtlı. Bu bir kontrat hükmü değildir.' : 'This payment method is currently restricted. This is not a contract authority rule.'}
+              </p>
+            )}
+            {txGate?.blocked && (
+              <p data-testid="create-tx-gate" role="status" className="text-sm text-textSecondary bg-elevated border border-borderSubtle rounded-lg p-3 leading-relaxed">
+                {txGate.message}
               </p>
             )}
             {isPayoutProfileGateBlocked && (

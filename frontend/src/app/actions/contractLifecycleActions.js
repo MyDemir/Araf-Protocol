@@ -1,3 +1,4 @@
+import { enforceTxGate } from '../txGate';
 import { keccak256, stringToHex } from 'viem';
 import { buildApiUrl } from '../apiConfig';
 import { resolveValidatedFillAmountRaw } from '../fillAmountPolicy';
@@ -128,8 +129,11 @@ export const buildStartTradeAction = ({
   hasPayoutProfile = null,
   openProfilePage = null,
   confirmFn = null,
+  // [TR] Fail-closed kapı (getter ya da nesne): approve'dan ÖNCE değerlendirilir.
+  txGate = null,
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 }) => async (order) => {
+  if (txGate && !enforceTxGate(txGate, showToast)) return;
   // [TR] Ödeme profili kapısı (arayüz düzeyi): kayıtlı profili olmayan ya da durumu bilinmeyen kullanıcı doldurmaz;
   //      emir sahibinin kayıtlı profili yoksa da doldurma kapalıdır.
   if (!isPayoutProfileSaved(hasPayoutProfile)) {
