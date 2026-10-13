@@ -54,7 +54,8 @@ cmd_validate() {
 # Adres gerektirmeyen opsiyonel backend değişkenleri (deploy öncesi "Validate required config" adımında da çalışır).
 cmd_validate_optional() {
   local v
-  int_in_range LIVE_POLL_INTERVAL_MS 5000 300000
+  # Sınırlar backend env okumasıyla uyumlu (eventListener.js alt sınır 2000; admin paneli ayrıca 5000-300000).
+  int_in_range LIVE_POLL_INTERVAL_MS 2000 300000
   int_in_range WORKER_BLOCK_BATCH_SIZE 1 2000
   int_in_range WORKER_REPLAY_BATCH_DELAY_MS 0 10000
   v="$(val EXPECTED_CHAIN_ID)"

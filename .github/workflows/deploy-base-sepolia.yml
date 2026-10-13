@@ -439,6 +439,7 @@ jobs:
         if: ${{ always() }}
         shell: bash
         run: |
+          set -euo pipefail
           {
             echo "### Base Sepolia deployment"
             echo "- Backend: https://$FLY_APP_NAME.fly.dev"

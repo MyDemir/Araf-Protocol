@@ -274,6 +274,7 @@ jobs:
           DEPLOY_BACKEND: ${{ inputs.deploy_backend }}
           DEPLOY_FRONTEND: ${{ inputs.deploy_frontend }}
         run: |
+          set -euo pipefail
           {
             echo "### Runtime Base Sepolia deployment"
             echo "- Backend deployed: $DEPLOY_BACKEND (https://$FLY_APP_NAME.fly.dev)"
