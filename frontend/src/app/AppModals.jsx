@@ -4,10 +4,67 @@ import { buildMakerPreview, getMakerModalCopy, getOrderSideCopy, resolveEffectiv
 import { resolveTierMaxAmounts } from './actions/orderCreationActions';
 import { TERMS_ACKNOWLEDGEMENTS, TERMS_SECTIONS, TERMS_VERSION } from './legal/terms';
 import PaymentRiskBadge from '../components/PaymentRiskBadge';
-import MobileWalletPicker from '../components/MobileWalletPicker';
+import MobileWalletPicker, { WalletOption } from '../components/MobileWalletPicker';
+import { ConnectorIcon } from '../components/wallet-icons';
 import { describeConnectError, shouldShowMobileWalletPicker } from './mobileWallet';
 import { fmtBps, isKnownNumber, fmtNum } from './copy';
 import { profileRequiredMessage } from './payoutProfileGate';
+
+// [TR] Cüzdan modalı kabuğu: mobilde alttan açılan sheet (tutamak, yuvarlak üst köşe, safe-area payı), masaüstünde
+//      ortalanmış kart. Esc ve arka plana tıklama kapatır; giriş geçişi prefers-reduced-motion'da kapalı.
+// [EN] Wallet modal shell: bottom sheet on mobile (grab handle, rounded top, safe-area padding), centred card on
+//      desktop. Esc and backdrop click close it; entrance transition is off under prefers-reduced-motion.
+function WalletSheet({ title, closeLabel, note, onClose, children }) {
+  const [shown, setShown] = React.useState(false);
+  const panelRef = React.useRef(null);
+  const onCloseRef = React.useRef(onClose);
+  React.useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+  // [TR] Yalnız açılışta: giriş geçişi, odak ve Esc dinleyicisi (üst bileşen her çizimde yeni onClose verir).
+  // [EN] Mount-only: entrance, focus and Esc listener (the parent passes a fresh onClose on every render).
+  React.useEffect(() => {
+    const id = requestAnimationFrame(() => setShown(true));
+    panelRef.current?.focus({ preventScroll: true });
+    const onKey = (e) => { if (e.key === 'Escape') onCloseRef.current(); };
+    window.addEventListener('keydown', onKey);
+    return () => { cancelAnimationFrame(id); window.removeEventListener('keydown', onKey); };
+  }, []);
+  return (
+    <div
+      className={`fixed inset-0 z-[100] flex max-w-full items-end justify-center overflow-x-hidden bg-black/60 backdrop-blur-sm transition-opacity duration-200 motion-reduce:transition-none sm:items-center sm:p-4 ${shown ? 'opacity-100' : 'opacity-0'}`}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="wallet-modal-title"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div
+        ref={panelRef}
+        tabIndex={-1}
+        data-testid="wallet-sheet"
+        className={`w-full overflow-y-auto overflow-x-hidden overscroll-contain rounded-t-[1.75rem] border border-b-0 border-borderSubtle bg-surface pb-[calc(1.25rem_+_env(safe-area-inset-bottom))] pl-[max(1.25rem,env(safe-area-inset-left))] pr-[max(1.25rem,env(safe-area-inset-right))] shadow-2xl outline-none transition duration-300 ease-out max-h-[calc(100dvh_-_0.75rem_-_env(safe-area-inset-top))] motion-reduce:transition-none sm:max-h-[calc(100dvh_-_2rem)] sm:max-w-[400px] sm:rounded-3xl sm:border-b sm:p-6 ${
+          shown ? 'translate-y-0 sm:scale-100 sm:opacity-100' : 'translate-y-full sm:translate-y-0 sm:scale-95 sm:opacity-0'
+        }`}
+      >
+        <div className="mx-auto mt-2.5 h-1.5 w-10 rounded-full bg-textMuted/40 sm:hidden" aria-hidden="true" />
+        <div className="flex items-center justify-between gap-3 pb-4 pt-2 sm:pt-0">
+          <h2 id="wallet-modal-title" className="text-lg font-bold tracking-tight text-textPrimary">{title}</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={closeLabel}
+            className="-mr-2.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-textSecondary transition hover:bg-elevated hover:text-textPrimary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand motion-reduce:transition-none"
+          >
+            <X className="h-5 w-5" strokeWidth={2} aria-hidden="true" />
+          </button>
+        </div>
+        {children}
+        <p className="mt-4 flex items-center gap-2.5 rounded-2xl bg-success/10 px-3.5 py-3 text-xs leading-snug text-textSecondary">
+          <ShieldCheck className="h-5 w-5 shrink-0 text-success" strokeWidth={2} aria-hidden="true" />
+          <span>{note}</span>
+        </p>
+      </div>
+    </div>
+  );
+}
 
 function TermsModal({ lang = 'EN', onAcceptTerms, onDeclineTerms }) {
   const isTR = lang === 'TR';
@@ -159,43 +216,37 @@ export const buildAppModals = (ctx) => {
   const renderWalletModal = () => {
     if (!showWalletModal) return null;
     const mobilePicker = typeof window !== 'undefined' && shouldShowMobileWalletPicker(window.navigator, window);
+    const tr = lang === 'TR';
+    // [TR] Genel "Injected" bağlayıcı adı teknik jargon; kullanıcıya "Tarayıcı cüzdanı" olarak gösterilir.
+    // [EN] The generic "Injected" connector name is jargon; shown to users as "Browser wallet".
+    const connectorLabel = (c) => (c.id === 'injected' && c.name === 'Injected' ? (tr ? 'Tarayıcı cüzdanı' : 'Browser wallet') : c.name);
     return (
-      <div className="fixed inset-0 max-w-full overflow-x-hidden bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center sm:p-4 safe-area-x z-[100]" role="dialog" aria-modal="true" aria-labelledby="wallet-modal-title">
-        <div className="bg-surface border border-borderSubtle rounded-t-2xl sm:rounded-2xl p-5 sm:p-6 w-full sm:max-w-sm shadow-2xl max-h-[calc(100dvh_-_2rem_-_env(safe-area-inset-top)_-_env(safe-area-inset-bottom))] overflow-x-hidden overflow-y-auto overscroll-contain pb-[calc(1.25rem_+_env(safe-area-inset-bottom))] sm:pb-6">
-          <div className="flex justify-between items-center mb-1">
-            <h2 id="wallet-modal-title" className="text-lg font-bold text-textPrimary">{lang === 'TR' ? 'Cüzdan bağla' : 'Connect wallet'}</h2>
-            {closeBtn(() => setShowWalletModal(false), lang === 'TR' ? 'Kapat' : 'Close')}
-          </div>
-          <p className="text-xs text-textMuted mb-4">{lang === 'TR' ? 'Bağlandıktan sonra oturumu cüzdan imzasıyla açarsınız.' : 'After connecting, you sign in with a wallet signature.'}</p>
-          {mobilePicker ? (
-            <MobileWalletPicker lang={lang} location={window.location} connectors={connectors} onConnect={connectWith} />
-          ) : (
-          <div className="space-y-2">
+      <WalletSheet
+        title={tr ? 'Cüzdan bağla' : 'Connect wallet'}
+        closeLabel={tr ? 'Kapat' : 'Close'}
+        note={tr ? 'Araf hiçbir zaman özel anahtar veya kurtarma ifadesi istemez.' : 'Araf never asks for private keys or seed phrases.'}
+        onClose={() => setShowWalletModal(false)}
+      >
+        {mobilePicker ? (
+          <MobileWalletPicker lang={lang} location={window.location} connectors={connectors} onConnect={connectWith} />
+        ) : (
+          <div className="space-y-2.5">
             {connectors.length === 0 && (
-              <p className="text-sm text-textSecondary bg-elevated border border-borderSubtle rounded-xl p-4">{lang === 'TR' ? 'Tarayıcıda cüzdan bulunamadı. MetaMask, Coinbase Wallet veya Rabby kurun.' : 'No wallet found in this browser. Install MetaMask, Coinbase Wallet or Rabby.'}</p>
+              <p className="rounded-2xl border border-borderSubtle bg-elevated p-4 text-sm text-textSecondary">{tr ? 'Tarayıcıda cüzdan bulunamadı. MetaMask, Coinbase Wallet veya Rabby kurun.' : 'No wallet found in this browser. Install MetaMask, Coinbase Wallet or Rabby.'}</p>
             )}
             {connectors.map((connector) => (
-              <button
+              <WalletOption
                 key={connector.uid}
-                type="button"
                 onClick={() => connectWith(connector)}
-                className="w-full flex items-center justify-between bg-elevated hover:border-brand/50 border border-borderSubtle px-4 py-3 rounded-xl transition group"
-              >
-                <span className="flex items-center gap-3">
-                  <span className="w-8 h-8 flex items-center justify-center">{getWalletIcon(connector)}</span>
-                  <span className="font-semibold text-textPrimary">{connector.name}</span>
-                </span>
-                <ChevronRight className="w-4 h-4 text-textMuted group-hover:text-brand" strokeWidth={1.8} aria-hidden="true" />
-              </button>
+                icon={connector.icon
+                  ? <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-[28%]">{getWalletIcon(connector)}</span>
+                  : <ConnectorIcon connector={connector} />}
+                label={connectorLabel(connector)}
+              />
             ))}
           </div>
-          )}
-          <p className="mt-4 text-xs text-textMuted flex items-center justify-center gap-1.5">
-            <ShieldCheck className="w-3.5 h-3.5 text-success" strokeWidth={1.8} aria-hidden="true" />
-            {lang === 'TR' ? 'Araf hiçbir zaman özel anahtar veya kurtarma ifadesi istemez.' : 'Araf never asks for private keys or seed phrases.'}
-          </p>
-        </div>
-      </div>
+        )}
+      </WalletSheet>
     );
   };
 
