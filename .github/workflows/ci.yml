@@ -46,6 +46,8 @@ jobs:
         run: npm run lint
       - name: Run frontend tests
         run: npm test
+      - name: Build frontend
+        run: npm run build
 
   contracts-abi-drift:
     name: Contracts ABI drift gate
