@@ -191,6 +191,120 @@ describe('workflow scripts: stage-runtime-env.sh', function () {
   });
 });
 
+describe('workflow scripts: check-rewards-binding.js (eth_call over fetch)', function () {
+  const binding = require('../../.github/scripts/check-rewards-binding.js');
+  const CLI = path.join(ROOT, '.github/scripts/check-rewards-binding.js');
+  let server; let url; let state;
+  const word = (addr) => '0x' + addr.slice(2).toLowerCase().padStart(64, '0');
+
+  before(async function () {
+    server = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (d) => { body += d; });
+      req.on('end', () => {
+        const { id, params } = JSON.parse(body);
+        const { to, data } = params[0];
+        const key = `${to.toLowerCase()}:${data}`;
+        res.writeHead(200, { 'content-type': 'application/json' });
+        if (state.rpcError) return res.end(JSON.stringify({ jsonrpc: '2.0', id, error: { code: -32000, message: 'boom' } }));
+        const v = state.answers[key];
+        if (!v) return res.end(JSON.stringify({ jsonrpc: '2.0', id, result: '0x' }));
+        return res.end(JSON.stringify({ jsonrpc: '2.0', id, result: word(v) }));
+      });
+    });
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    url = `http://127.0.0.1:${server.address().port}`;
+  });
+  after(() => new Promise((r) => server.close(r)));
+
+  const bound = () => ({
+    [`${VAULT.toLowerCase()}:${binding.SEL.escrow}`]: ESCROW,
+    [`${REWARDS.toLowerCase()}:${binding.SEL.escrow}`]: ESCROW,
+    [`${REWARDS.toLowerCase()}:${binding.SEL.revenueVault}`]: VAULT,
+  });
+
+  function runCli(env) {
+    return new Promise((resolve) => {
+      const p = spawn('node', [CLI], { env: { PATH: process.env.PATH, BASE_SEPOLIA_RPC_URL: url, ESCROW, REVENUE_VAULT: VAULT, REWARDS, ...env } });
+      let stdout = ''; let stderr = '';
+      p.stdout.on('data', (d) => { stdout += d; });
+      p.stderr.on('data', (d) => { stderr += d; });
+      p.on('close', (status) => resolve({ status, stdout, stderr }));
+    });
+  }
+
+  it('selectors are computed from keccak256 and match ethers', function () {
+    expect(binding.SEL.escrow).to.equal(ethers.id('escrow()').slice(0, 10));
+    expect(binding.SEL.revenueVault).to.equal(ethers.id('revenueVault()').slice(0, 10));
+  });
+
+  it('bound -> ok; mismatch -> problems; read error -> problems', async function () {
+    state = { answers: bound() };
+    expect((await binding.checkRewardsBinding({ rpcUrl: url, escrow: ESCROW, vault: VAULT, rewards: REWARDS })).ok).to.equal(true);
+
+    state = { answers: { ...bound(), [`${VAULT.toLowerCase()}:${binding.SEL.escrow}`]: OTHER } };
+    let r = await binding.checkRewardsBinding({ rpcUrl: url, escrow: ESCROW, vault: VAULT, rewards: REWARDS });
+    expect(r.ok).to.equal(false);
+    expect(r.problems.join()).to.match(/vault\.escrow\(\)=.* expected/);
+
+    state = { answers: { ...bound(), [`${REWARDS.toLowerCase()}:${binding.SEL.revenueVault}`]: OTHER } };
+    r = await binding.checkRewardsBinding({ rpcUrl: url, escrow: ESCROW, vault: VAULT, rewards: REWARDS });
+    expect(r.problems.join()).to.match(/rewards\.revenueVault\(\)/);
+
+    state = { answers: {}, rpcError: true };
+    r = await binding.checkRewardsBinding({ rpcUrl: url, escrow: ESCROW, vault: VAULT, rewards: REWARDS });
+    expect(r.ok).to.equal(false);
+    expect(r.problems.join()).to.match(/read failed/);
+
+    state = { answers: {} }; // kod yok: '0x' sonucu
+    r = await binding.checkRewardsBinding({ rpcUrl: url, escrow: ESCROW, vault: VAULT, rewards: REWARDS });
+    expect(r.ok).to.equal(false);
+  });
+
+  it('CLI: error mode exits 1 on mismatch/read error, 0 when bound; clear mode empties vault/rewards in GITHUB_ENV', async function () {
+    state = { answers: bound() };
+    expect((await runCli({ ON_MISMATCH: 'error' })).status).to.equal(0);
+
+    state = { answers: {}, rpcError: true };
+    const bad = await runCli({ ON_MISMATCH: 'error' });
+    expect(bad.status).to.equal(1);
+    expect(bad.stderr).to.match(/::error::vault\/rewards are NOT bound/);
+    expect(bad.stderr).to.not.include(url);
+
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'araf-bind-'));
+    const ghEnv = path.join(dir, 'env');
+    state = { answers: { ...bound(), [`${REWARDS.toLowerCase()}:${binding.SEL.escrow}`]: OTHER } };
+    const cleared = await runCli({ ON_MISMATCH: 'clear', GITHUB_ENV: ghEnv });
+    expect(cleared.status).to.equal(0);
+    expect(cleared.stdout).to.match(/::warning::.*deploy_rewards=true/);
+    expect(fs.readFileSync(ghEnv, 'utf8')).to.equal('REVENUE_VAULT=\nREWARDS=\nREWARDS_UNBOUND=1\n');
+
+    expect((await runCli({ ON_MISMATCH: 'error', REVENUE_VAULT: '', REWARDS: '' })).status).to.equal(0);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('unbound: Vercel build-env blanks vault/rewards and fly-secrets unsets stale Fly values (fake flyctl)', function () {
+    const v = runStage('vercel-build-env', { ...BASE_ENV, REWARDS_UNBOUND: '1' });
+    expect(v.status, v.stderr).to.equal(0);
+    expect(v.stdout.split('\n')).to.include.members(['VITE_REVENUE_VAULT_ADDRESS=', 'VITE_REWARDS_ADDRESS=']);
+
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'araf-fly-'));
+    const log = path.join(dir, 'calls.log');
+    fs.writeFileSync(path.join(dir, 'flyctl'), `#!/usr/bin/env bash
+echo "$*" >> "${log}"
+if [ "$1 $2" = "secrets list" ]; then printf 'NAME\\tDIGEST\\nARAF_REWARDS_ADDRESS\\tabc\\nMONGODB_URI\\tdef\\n'; fi
+if [ "$1 $2" = "secrets import" ]; then cat >/dev/null; fi
+`, { mode: 0o755 });
+    const r = spawnSync('bash', [STAGE, 'fly-secrets'], { env: { PATH: `${dir}:${process.env.PATH}`, ...BASE_ENV, FLY_APP_NAME: 'app', REWARDS_UNBOUND: '1' }, encoding: 'utf8' });
+    expect(r.status, r.stderr).to.equal(0);
+    const calls = fs.readFileSync(log, 'utf8');
+    expect(calls).to.include('secrets unset --stage -a app ARAF_REWARDS_ADDRESS');
+    expect(calls).to.not.include('unset --stage -a app ARAF_REVENUE_VAULT_ADDRESS'); // listede yok
+    expect(r.stdout).to.not.match(/mongodb\+srv|rediss:/);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
+
 describe('deploy workflows (YAML structure)', function () {
   const load = (f) => yaml.load(fs.readFileSync(path.join(ROOT, '.github/workflows', f), 'utf8'));
 
@@ -238,5 +352,18 @@ describe('deploy workflows (YAML structure)', function () {
     const fly1 = load('deploy-base-sepolia.yml').jobs.deploy.steps.find((s) => s.name === 'Stage backend secrets on Fly').env;
     const fly2 = load('deploy-runtime-base-sepolia.yml').jobs['runtime-deploy'].steps.find((s) => s.name === 'Stage backend secrets on Fly').env;
     expect(fly2).to.deep.equal(fly1);
+  });
+
+  it('rewards binding check: main workflow error in manifest mode / clear in fallback; runtime always error', function () {
+    const main = load('deploy-base-sepolia.yml').jobs.deploy.steps.find((s) => s.name === 'Resolve revenue vault + rewards addresses');
+    expect(main.run).to.include('stage-runtime-env.sh rewards-binding');
+    expect(main.env.ON_MISMATCH).to.equal("${{ inputs.deploy_rewards && 'error' || 'clear' }}");
+    expect(main.env.BASE_SEPOLIA_RPC_URL).to.match(/secrets\.BASE_SEPOLIA_RPC_URL/);
+    const rt = load('deploy-runtime-base-sepolia.yml').jobs['runtime-deploy'].steps.find((s) => s.name === 'Resolve fixed Base Sepolia deployment values');
+    expect(rt.run).to.include('stage-runtime-env.sh rewards-binding');
+    expect(rt.env.ON_MISMATCH).to.equal('error');
+    const summary = load('deploy-base-sepolia.yml').jobs.deploy.steps.find((s) => s.name === 'Print deployment summary').run;
+    expect(summary).to.include('REWARDS_UNBOUND');
+    expect(summary).to.include('deploy_rewards=true ile yeniden çalıştırın');
   });
 });

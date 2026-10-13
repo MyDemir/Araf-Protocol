@@ -259,12 +259,17 @@ jobs:
             npx hardhat run scripts/deployRewards.js --network base-sepolia 2>&1 | tee "$RUNNER_TEMP/deploy-rewards.log"
 
       # deploy_rewards=true: adresler manifest'ten (repo variable'larıyla çelişirse hata).
-      # deploy_rewards=false: repo variable'ları geriye uyumlu yedek olarak kullanılır.
+      # deploy_rewards=false: repo variable'ları yedektir. Her iki modda zincir kontrolü (eth_call):
+      # vault.escrow()==ESCROW, rewards.escrow()==ESCROW, rewards.revenueVault()==vault.
+      #   manifest modu: uyumsuzluk ::error::.
+      #   fallback modu: uyumsuzluk/okuma hatası -> vault/rewards runtime'a VERİLMEZ, Fly/Vercel'deki eski değerler
+      #   boşaltılır (REWARDS_UNBOUND=1). Escrow deploy'u tamamlandığı için iş durdurulmaz (yarım kalmasın).
       - name: Resolve revenue vault + rewards addresses
         if: ${{ env.ESCROW != '' }}
         shell: bash
         env:
           MODE: ${{ inputs.deploy_rewards && 'manifest' || 'fallback' }}
+          ON_MISMATCH: ${{ inputs.deploy_rewards && 'error' || 'clear' }}
           MANIFEST_PATH: contracts/deployments/base-sepolia-rewards.json
           EXPECTED_CHAIN_ID: "84532"
           VAR_REVENUE_VAULT: ${{ vars.ARAF_REVENUE_VAULT_ADDRESS }}
@@ -275,18 +280,10 @@ jobs:
           set -euo pipefail
           out="$(node .github/scripts/resolve-rewards-addresses.js)"
           echo "$out"
-          vault="$(printf '%s\n' "$out" | sed -n 's/^REVENUE_VAULT=//p')"
-          # Yedek variable eski bir escrow'a bağlı vault olabilir (vault.escrow immutable): uyar.
-          if [ "$MODE" = "fallback" ] && [ -n "$vault" ]; then
-            ( cd contracts && VAULT="$vault" node -e '
-              const { ethers } = require("ethers");
-              const p = new ethers.JsonRpcProvider(process.env.BASE_SEPOLIA_RPC_URL);
-              const v = new ethers.Contract(process.env.VAULT, ["function escrow() view returns (address)"], p);
-              v.escrow().then((e) => {
-                if (e.toLowerCase() !== process.env.ESCROW.toLowerCase()) console.log("::warning::ARAF_REVENUE_VAULT_ADDRESS variable is bound to escrow " + e + ", not the newly deployed " + process.env.ESCROW + ". Run with deploy_rewards=true or clear the variables.");
-              }).catch(() => console.log("::warning::Could not read vault.escrow() for the ARAF_REVENUE_VAULT_ADDRESS variable."));
-            ' )
-          fi
+          REVENUE_VAULT="$(printf '%s\n' "$out" | sed -n 's/^REVENUE_VAULT=//p')"
+          REWARDS="$(printf '%s\n' "$out" | sed -n 's/^REWARDS=//p')"
+          export REVENUE_VAULT REWARDS
+          bash .github/scripts/stage-runtime-env.sh rewards-binding
 
       # Deneysel: scripts/verify.js (Etherscan V2 + Sourcify). Library'ler, escrow ve (varsa) vault/rewards,
       # constructor argümanları deployments/*.json manifestlerinden okunur. Başarısızlık deploy'u durdurmaz.
@@ -438,10 +435,13 @@ jobs:
       - name: Print deployment summary
         if: ${{ always() }}
         shell: bash
+        env:
+          FINAL_OWNER_ADDRESS: ${{ vars.FINAL_OWNER_ADDRESS }}
         run: |
           set -euo pipefail
           {
             echo "### Base Sepolia deployment"
+            echo "- Final owner (escrow; vault/rewards when deployed): ${FINAL_OWNER_ADDRESS:-n/a}"
             echo "- Backend: https://$FLY_APP_NAME.fly.dev"
             echo "- Frontend domain (SIWE/CORS): https://$FRONTEND_DOMAIN"
             echo "- ARAF_ESCROW_ADDRESS: ${ESCROW:-n/a}"
@@ -450,6 +450,10 @@ jobs:
             echo "- ARAF_DEPLOYMENT_BLOCK: ${DEPLOY_BLOCK:-n/a}"
             echo "- ARAF_REVENUE_VAULT_ADDRESS: ${REVENUE_VAULT:-n/a} (source: ${REWARDS_SOURCE:-n/a})"
             echo "- ARAF_REWARDS_ADDRESS: ${REWARDS:-n/a}"
+            if [ "${REWARDS_UNBOUND:-}" = "1" ]; then
+              echo ""
+              echo "**vault/rewards bu escrow'a bağlı değil, runtime'a verilmedi (Fly/Vercel değerleri boşaltıldı); deploy_rewards=true ile yeniden çalıştırın.** (vault/rewards are not bound to this escrow; not given to the runtime.)"
+            fi
             if [ "${REWARDS_SOURCE:-}" = "manifest" ]; then
               echo ""
               echo "Manual (escrow owner / multisig, NOT done by this workflow): run REWARDS_OP=verify, then switch the escrow treasury to the vault with REWARDS_OP=switch-treasury (docs/EN/DEPLOYMENT_GUIDE.md)."

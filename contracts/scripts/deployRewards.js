@@ -96,7 +96,7 @@ async function hasCode(provider, address) {
 async function assertRewardsRedeploySafety({ provider, existingManifest, escrowAddress, env = process.env }) {
   const reasons = [];
   if (existingManifest && (existingManifest.rewards || existingManifest.vault)) {
-    reasons.push(`manifest already has rewards=${existingManifest.rewards || 'n/a'} vault=${existingManifest.vault || 'n/a'}`);
+    reasons.push(`manifest (status=${existingManifest.status || 'complete'}) already has rewards=${existingManifest.rewards || 'n/a'} vault=${existingManifest.vault || 'n/a'}`);
   }
   const existingVault = optEnv('EXISTING_REVENUE_VAULT_ADDRESS', env) || (existingManifest && existingManifest.vault && isAddress(existingManifest.vault) ? ethers.getAddress(existingManifest.vault) : null);
   const existingRewards = optEnv('EXISTING_REWARDS_ADDRESS', env);
@@ -119,12 +119,24 @@ async function assertRewardsRedeploySafety({ provider, existingManifest, escrowA
   return reasons;
 }
 
+// [TR] Ownable TEK ADIMLIDIR (Ownable2Step değil): yanlış adrese devir geri alınamaz; finalOwner önceden doğrulanır.
+// [EN] Ownable is single-step: a transfer to a wrong address cannot be undone.
 async function transferIfNeeded(contract, label, finalOwner) {
+  const address = await contract.getAddress();
   const current = ethers.getAddress(await contract.owner());
   if (current === finalOwner) return;
-  await (await contract.transferOwnership(finalOwner)).wait();
+  try {
+    await (await contract.transferOwnership(finalOwner)).wait();
+  } catch (err) {
+    throw new Error(`${label} ownership transfer failed; deployer still owner of ${address} (${err && err.message ? err.message.split('\n')[0] : err})`);
+  }
   const after = ethers.getAddress(await contract.owner());
-  if (after !== finalOwner) throw new Error(`${label} ownership transfer failed: expected=${finalOwner} got=${after}`);
+  if (after !== finalOwner) throw new Error(`${label} ownership transfer failed; deployer still owner of ${address} (owner()=${after}, expected ${finalOwner})`);
+}
+
+async function describeOwners(vault, rewards) {
+  const read = async (c) => { try { return ethers.getAddress(await c.owner()); } catch { return 'unreadable'; } };
+  return { vaultOwner: await read(vault), rewardsOwner: await read(rewards) };
 }
 
 async function verifyWiring({ vault, rewards, escrowAddress, vaultAddress, rewardsAddress, finalTreasury, finalOwner, usdt, usdc }) {
@@ -143,7 +155,7 @@ async function verifyWiring({ vault, rewards, escrowAddress, vaultAddress, rewar
   if (failed.length) throw new Error(`Rewards wiring verification failed: ${failed.join(', ')}`);
 }
 
-async function main(env = process.env) {
+async function main(env = process.env, opts = {}) {
   const [deployer] = await ethers.getSigners();
   const net = await ethers.provider.getNetwork();
   const local = isLocalNetwork(network.name, net.chainId);
@@ -191,6 +203,9 @@ async function main(env = process.env) {
   // [TR] Constructor owner = deployer: setRewards/setSupportedToken onlyOwner'dır. Wiring sonrası devredilir.
   // [EN] Constructor owner = deployer so the onlyOwner wiring can run; handed off to FINAL_OWNER afterwards.
   const constructorOwner = deployer.address;
+  const finalOwnerKind = (await hasCode(ethers.provider, finalOwner)) ? 'contract (multisig?)' : 'EOA (no code)';
+  console.log(`Final owner: ${finalOwner} [${finalOwnerKind}]`);
+
   const Vault = await ethers.getContractFactory('ArafRevenueVault');
   const vault = await Vault.deploy(escrowAddress, finalTreasury, constructorOwner);
   await vault.waitForDeployment();
@@ -201,18 +216,8 @@ async function main(env = process.env) {
   await rewards.waitForDeployment();
   const rewardsAddress = await rewards.getAddress();
 
-  // GERİ ALINAMAZ / IRREVERSIBLE: one-shot (RewardsAlreadySet).
-  await (await vault.setRewards(rewardsAddress)).wait();
-  await (await vault.setSupportedToken(usdt, true)).wait();
-  await (await vault.setSupportedToken(usdc, true)).wait();
-  const rewardBps = await vault.rewardBps();
-  if (rewardBps !== 4000n) throw new Error(`rewardBps mismatch: ${rewardBps}`);
-
-  await transferIfNeeded(vault, 'vault', finalOwner);
-  await transferIfNeeded(rewards, 'rewards', finalOwner);
-  await verifyWiring({ vault, rewards, escrowAddress, vaultAddress, rewardsAddress, finalTreasury, finalOwner, usdt, usdc });
-
   const manifest = {
+    status: 'pending',
     network: network.name,
     chainId: Number(net.chainId),
     escrow: escrowAddress,
@@ -224,14 +229,17 @@ async function main(env = process.env) {
     // [EN] owner = constructor arg (used by verify.js); finalOwner = post-handoff owner.
     owner: constructorOwner,
     finalOwner,
+    finalOwnerKind,
     finalTreasury,
     deployer: deployer.address,
     vaultDeployTxHash: vault.deploymentTransaction()?.hash ?? null,
     rewardsDeployTxHash: rewards.deploymentTransaction()?.hash ?? null,
-    rewardBps: rewardBps.toString(),
+    rewardBps: null,
     deployedAt: new Date().toISOString()
   };
 
+  // [TR] Kısmi (pending) manifest: wiring yarıda kalırsa adresler kaybolmaz ve kilit sonraki çalıştırmada görür.
+  // [EN] Partial manifest so addresses survive a failed wiring and the lock sees them next time.
   ensureDir(depDir);
   if (existing) {
     // [TR] Kritik deployment adreslerinin sessizce ezilmesini engeller.
@@ -239,8 +247,34 @@ async function main(env = process.env) {
     assertManifestOverwriteSafety(existing, manifest, env);
   }
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+
+  try {
+    if (opts.afterDeploy) await opts.afterDeploy({ vault, rewards });
+    // GERİ ALINAMAZ / IRREVERSIBLE: one-shot (RewardsAlreadySet).
+    await (await vault.setRewards(rewardsAddress)).wait();
+    await (await vault.setSupportedToken(usdt, true)).wait();
+    await (await vault.setSupportedToken(usdc, true)).wait();
+    const rewardBps = await vault.rewardBps();
+    if (rewardBps !== 4000n) throw new Error(`rewardBps mismatch: ${rewardBps}`);
+    manifest.rewardBps = rewardBps.toString();
+
+    await transferIfNeeded(vault, 'vault', finalOwner);
+    await transferIfNeeded(rewards, 'rewards', finalOwner);
+    await verifyWiring({ vault, rewards, escrowAddress, vaultAddress, rewardsAddress, finalTreasury, finalOwner, usdt, usdc });
+  } catch (err) {
+    const owners = await describeOwners(vault, rewards);
+    console.error('REWARDS DEPLOY INCOMPLETE (manifest status=pending):');
+    console.error(`  vault   : ${vaultAddress} owner=${owners.vaultOwner}${owners.vaultOwner === deployer.address ? ' (deployer still owner)' : ''}`);
+    console.error(`  rewards : ${rewardsAddress} owner=${owners.rewardsOwner}${owners.rewardsOwner === deployer.address ? ' (deployer still owner)' : ''}`);
+    console.error(`  manifest: ${manifestPath}`);
+    throw err;
+  }
+
+  manifest.status = 'complete';
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
   if (env.SKIP_ABI_EXPORT !== 'true') await exportAbi(['ArafEscrow', 'ArafRevenueVault', 'ArafRewards']);
-  console.log('Rewards deployment complete', manifest);
+  console.log(`Rewards deployment complete. Final owner: ${finalOwner} [${finalOwnerKind}]`);
+  console.log(manifest);
   return { manifest, manifestPath };
 }
 
@@ -255,4 +289,5 @@ module.exports = {
   assertManifestOverwriteSafety,
   assertRewardsRedeploySafety,
   readRewardsOf,
+  transferIfNeeded,
 };

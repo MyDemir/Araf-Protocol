@@ -138,6 +138,41 @@ describe('deploy.js + deployRewards.js end-to-end (hardhat)', function () {
     expect(err && err.message).to.match(/escrow treasury .* already a vault wired to rewards/);
   });
 
+  it('writes status=complete on success; a failed wiring leaves a pending manifest that the lock sees', async function () {
+    const escrowManifest = await deployEscrow();
+    const env = rewardsEnv(escrowManifest);
+    const { manifest: ok } = await rewardsScript.main(env);
+    expect(ok.status).to.equal('complete');
+    expect(JSON.parse(fs.readFileSync(path.join(dir, 'hardhat-rewards.json'), 'utf8')).status).to.equal('complete');
+    fs.rmSync(path.join(dir, 'hardhat-rewards.json'));
+
+    let err;
+    try {
+      await rewardsScript.main(env, { afterDeploy: async () => { throw new Error('simulated wiring failure'); } });
+    } catch (e) { err = e; }
+    expect(err && err.message).to.equal('simulated wiring failure');
+    const pending = JSON.parse(fs.readFileSync(path.join(dir, 'hardhat-rewards.json'), 'utf8'));
+    expect(pending.status).to.equal('pending');
+    expect(pending.vault).to.match(/^0x[0-9a-fA-F]{40}$/);
+    const vault = await ethers.getContractAt('ArafRevenueVault', pending.vault);
+    expect(await vault.owner()).to.equal(signers[0].address); // deployer still owner
+
+    let err2;
+    try { await rewardsScript.main(env); } catch (e) { err2 = e; }
+    expect(err2 && err2.message).to.match(/status=pending/);
+  });
+
+  it('transferIfNeeded wraps a failed transfer as "deployer still owner of <addr>"', async function () {
+    const [deployer, , multisig, other] = signers;
+    const escrowManifest = await deployEscrow();
+    const Vault = await ethers.getContractFactory('ArafRevenueVault');
+    const vault = await Vault.deploy(escrowManifest.escrowAddress, other.address, other.address);
+    await vault.waitForDeployment();
+    let err;
+    try { await rewardsScript.transferIfNeeded(vault.connect(deployer), 'vault', multisig.address); } catch (e) { err = e; }
+    expect(err && err.message).to.include(`vault ownership transfer failed; deployer still owner of ${await vault.getAddress()}`);
+  });
+
   it('fresh network with unused addresses passes the lock and returns no reasons', async function () {
     const escrowManifest = await deployEscrow();
     const reasons = await rewardsScript.assertRewardsRedeploySafety({

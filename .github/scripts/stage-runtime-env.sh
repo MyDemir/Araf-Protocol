@@ -10,6 +10,8 @@
 #   stage-runtime-env.sh fly-secrets     # NAME=VALUE satırlarını flyctl secrets import --stage'e verir
 #   stage-runtime-env.sh vercel-deploy   # vercel deploy --prod (build-env listesiyle)
 #   stage-runtime-env.sh health          # /health zorunlu (200), /ready degraded ise ::warning::
+#   stage-runtime-env.sh rewards-binding # vault/rewards ESCROW'a bağlı mı (eth_call); ON_MISMATCH=error|clear
+#                                        # clear: REVENUE_VAULT/REWARDS boşaltılır, REWARDS_UNBOUND=1 (Fly/Vercel'de silinir)
 #   stage-runtime-env.sh fly-secret-lines | vercel-build-env   # yalnız test içindir; workflow'da kullanılmaz
 #
 # Girdi env (GitHub tarafı adlar):
@@ -114,6 +116,20 @@ cmd_fly_secrets() {
   lines="$(cmd_fly_secret_lines)"
   printf '%s\n' "$lines" | flyctl secrets import --stage -a "$FLY_APP_NAME" >/dev/null
   echo "Staged Fly secrets: $(printf '%s\n' "$lines" | cut -d= -f1 | paste -sd' ' -)"
+  # Bu escrow'a bağlı olmayan eski vault/rewards canlıda kalmasın.
+  if [ "$(val REWARDS_UNBOUND)" = "1" ]; then
+    local k
+    for k in ARAF_REVENUE_VAULT_ADDRESS ARAF_REWARDS_ADDRESS; do
+      if flyctl secrets list -a "$FLY_APP_NAME" 2>/dev/null | grep -Eq "(^|[[:space:]])$k([[:space:]]|$)"; then
+        flyctl secrets unset --stage -a "$FLY_APP_NAME" "$k" >/dev/null
+        echo "Unset stale Fly secret $k (not bound to this escrow)."
+      fi
+    done
+  fi
+}
+
+cmd_rewards_binding() {
+  node "$(dirname "${BASH_SOURCE[0]}")/check-rewards-binding.js"
 }
 
 # Bir satır = bir --build-env değeri (NAME=VALUE). VERCEL_TOKEN burada yoktur.
@@ -136,6 +152,8 @@ cmd_vercel_build_env() {
   # Frontend adları: frontend/src/app/envConfig.js (VITE_REVENUE_VAULT_ADDRESS), hooks/useRewardsContract.js (VITE_REWARDS_ADDRESS).
   if [ -n "$(val REVENUE_VAULT)" ]; then echo "VITE_REVENUE_VAULT_ADDRESS=$REVENUE_VAULT"; fi
   if [ -n "$(val REWARDS)" ]; then echo "VITE_REWARDS_ADDRESS=$REWARDS"; fi
+  # Bağlı olmayan vault/rewards: proje env'inde eski değer varsa boş build-env ile ezilir.
+  if [ "$(val REWARDS_UNBOUND)" = "1" ]; then echo "VITE_REVENUE_VAULT_ADDRESS="; echo "VITE_REWARDS_ADDRESS="; fi
 }
 
 cmd_vercel_deploy() {
@@ -176,5 +194,6 @@ case "${1:-}" in
   vercel-build-env) cmd_vercel_build_env ;;
   vercel-deploy) cmd_vercel_deploy ;;
   health) cmd_health ;;
+  rewards-binding) cmd_rewards_binding ;;
   *) die "usage: $0 validate|fly-secrets|vercel-deploy|health" ;;
 esac
