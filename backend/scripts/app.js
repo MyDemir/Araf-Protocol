@@ -24,11 +24,13 @@ const {
   loadProtocolConfig,
   refreshProtocolConfig,
   loadStaleProtocolConfig,
+  isProtocolConfigStale,
 } = require("./services/protocolConfig");
 
 // [TR] Kısıtlı (degraded) mod: RPC'ye bağlı açılış adımları geçici hatada süreci öldürmez.
 // [EN] Degraded mode: RPC-bound boot steps do not kill the process on transient errors.
 const serviceMode = require("./services/serviceMode");
+const { ROUTE_MOUNTS } = require("./routes/mounts");
 
 // [TR] Çalışma ayarları açılışta yüklenir; modül yüklenirken auditEnvAtStartup() tam bir kez çalışır (tekrar çağrı
 //      aynı uyarıları çiftler). Worker da bu süreçte çalıştığı için audit açılışta kesin yapılmış olur.
@@ -441,7 +443,23 @@ async function bootstrap() {
     // [EN] Recovery steps (order matters): SEC-01 + KMS key -> protocol config -> worker.
     const recoverySteps = [
       { name: "sec01_kms", run: () => runProductionKmsStartupSelfTest() },
-      { name: "protocol_config", run: () => refreshProtocolConfig() },
+      {
+        name: "protocol_config",
+        // [TR] BİLİNÇLİ FARK: açılışta strictTokens=false (loadProtocolConfig; eksik token "desteklenmiyor" olarak
+        //      yüklenir, servis ayağa kalkar). Toparlanmada strictTokens=true (refreshProtocolConfig): tek token
+        //      okuması bile başarısızsa adım başarısız sayılır; böylece kısmi/bozuk bir config "tam hizmet"e
+        //      çıkarılmaz. Null/bayat sonuç da başarısızdır: configStale temizlenmez, döngü yeniden dener.
+        run: async () => {
+          const cfg = await refreshProtocolConfig();
+          const addr = process.env.ARAF_ESCROW_ADDRESS;
+          const expectsConfig = Boolean(addr) && addr !== "0x0000000000000000000000000000000000000000";
+          if (expectsConfig && (!cfg || isProtocolConfigStale())) {
+            const err = new Error("[Degraded] Protocol config zincirden tazelenemedi (null/bayat); yeniden denenecek.");
+            err.code = "CONFIG_STALE_RETRY";
+            throw err;
+          }
+        },
+      },
       {
         name: "worker",
         // [TR] Yalnız toparlanma döngüsü başlatır (açılış yolu worker.start()'ı beklemez, B19).
@@ -593,36 +611,13 @@ async function bootstrap() {
     // [TR] Rotalar DB ve Redis hazır olduktan sonra yüklenir
     // [EN] Routes loaded after DB and Redis are ready
 
-    // [TR] Frontend senkronize log rotası (yük bindirmeyen yapı)
-    const logRoutes = require("./routes/logs");
-
-    const authRoutes = require("./routes/auth");
-    const orderRoutes = require("./routes/orders");
-    const tradeRoutes = require("./routes/trades");
-    const piiRoutes = require("./routes/pii");
-    const feedbackRoutes = require("./routes/feedback");
-    const statsRoutes = require("./routes/stats");
-    const receiptRoutes = require("./routes/receipts");
-    const adminRoutes = require("./routes/admin");
-    const referenceRatesRoutes = require("./routes/referenceRates");
-    const rewardsRoutes = require("./routes/rewards");
-
-    // [TR] Log rotası en üstte tanımlanır
     // [TR] Kısıtlı modda varsayılan-kapalı kapı: izin listesi dışındaki her /api ucu 503 SERVICE_DEGRADED.
     app.use("/api", requireFullService);
 
-    app.use("/api/logs", logRoutes);
-
-    app.use("/api/auth", authRoutes);
-    app.use("/api/orders", orderRoutes);
-    app.use("/api/trades", tradeRoutes);
-    app.use("/api/pii", piiRoutes);
-    app.use("/api/feedback", feedbackRoutes);
-    app.use("/api/stats", statsRoutes);
-    app.use("/api/receipts", receiptRoutes);
-    app.use("/api/admin", adminRoutes);
-    app.use("/api/reference-rates", referenceRatesRoutes);
-    app.use("/api/rewards", rewardsRoutes);
+    // [TR] Router'lar tek kaynaktan (routes/mounts.js) bağlanır; log rotası listenin başındadır.
+    for (const { path: mountPath, file } of ROUTE_MOUNTS) {
+      app.use(mountPath, require(`./routes/${file}`));
+    }
 
     // [TR] /health: worker "son blok görülme" eşiğine bağlı liveness (B6). /ready: önbellekli, kimliksiz
     //      görünüm redakte; ayrıntı yalnız READY_INTERNAL_TOKEN ile (B27).

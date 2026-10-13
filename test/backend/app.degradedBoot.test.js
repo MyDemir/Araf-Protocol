@@ -27,6 +27,7 @@ async function boot({ selfTest, connectDB, loadConfig } = {}) {
     loadStale: jest.fn(async () => ({ stale: true })),
     workerStart: jest.fn(async () => { calls.push("worker"); }),
     startInBackground: jest.fn(() => Promise.resolve()),
+    isStale: jest.fn(() => false),
     connectDB: jest.fn(connectDB || (async () => {})),
   };
 
@@ -41,7 +42,7 @@ async function boot({ selfTest, connectDB, loadConfig } = {}) {
     runReconciliationReport: jest.fn(), getDiagnostics: () => null,
   }));
   jest.doMock("../../backend/scripts/services/protocolConfig", () => ({
-    loadProtocolConfig: mocks.loadConfig, refreshProtocolConfig: mocks.refreshConfig, loadStaleProtocolConfig: mocks.loadStale,
+    loadProtocolConfig: mocks.loadConfig, refreshProtocolConfig: mocks.refreshConfig, loadStaleProtocolConfig: mocks.loadStale, isProtocolConfigStale: mocks.isStale,
   }));
   jest.doMock("../../backend/scripts/services/encryption", () => ({
     clearMasterKeyCache: jest.fn(), runProductionKmsStartupSelfTest: mocks.selfTest, blockKeyLoadingUntilSelfTest: mocks.block,
@@ -181,5 +182,55 @@ describe("app bootstrap: degraded mode on transient RPC failure", () => {
     await jest.advanceTimersByTimeAsync(600_000);
     expect(attempts).toBe(2);
     expect(mocks.workerStart).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("recovery: stale/null config and fatal worker errors", () => {
+  const savedEnv = { ...process.env };
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+    process.env = { ...savedEnv };
+  });
+
+  async function degradedBoot() {
+    process.env.ARAF_ESCROW_ADDRESS = "0x" + "1".repeat(40);
+    let n = 0;
+    const ctx = await boot({ selfTest: async () => { n += 1; if (n === 1) throw sec01Transient(); } });
+    ctx.serviceMode.setConfigStale(true);
+    return ctx;
+  }
+
+  it("refresh returns null => step fails, still degraded and configStale NOT cleared, worker not started", async () => {
+    const { mocks, serviceMode, exitSpy } = await degradedBoot();
+    mocks.refreshConfig.mockResolvedValue(null);
+    await jest.advanceTimersByTimeAsync(6_500);
+    expect(serviceMode.isDegraded()).toBe(true);
+    expect(serviceMode.isConfigStale()).toBe(true);
+    expect(mocks.workerStart).not.toHaveBeenCalled();
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  it("refresh returns a stale config => same; recovers once fresh", async () => {
+    const { mocks, serviceMode } = await degradedBoot();
+    mocks.refreshConfig.mockResolvedValue({ stale: true });
+    mocks.isStale.mockReturnValue(true);
+    await jest.advanceTimersByTimeAsync(6_500);
+    expect(serviceMode.isDegraded()).toBe(true);
+    expect(serviceMode.isConfigStale()).toBe(true);
+    mocks.isStale.mockReturnValue(false);
+    await jest.advanceTimersByTimeAsync(300_000);
+    expect(serviceMode.isDegraded()).toBe(false);
+    expect(serviceMode.isConfigStale()).toBe(false);
+    expect(mocks.workerStart).toHaveBeenCalledTimes(1);
+  });
+
+  it("worker step hits a Mongo error during recovery => exit(1)", async () => {
+    const { mocks, exitSpy } = await degradedBoot();
+    mocks.refreshConfig.mockResolvedValue({ ok: true });
+    mocks.workerStart.mockRejectedValue(Object.assign(new Error("connect ECONNREFUSED"), { name: "MongoNetworkError" }));
+    await jest.advanceTimersByTimeAsync(6_500);
+    await jest.advanceTimersByTimeAsync(10);
+    expect(exitSpy).toHaveBeenCalledWith(1);
   });
 });

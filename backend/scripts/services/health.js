@@ -308,8 +308,12 @@ function _readyCacheTtlMs() {
 
 let _readyCache = { at: 0, value: null, promise: null };
 
-function _resetReadinessCacheForTests() {
+function invalidateReadinessCache() {
   _readyCache = { at: 0, value: null, promise: null };
+}
+
+function _resetReadinessCacheForTests() {
+  invalidateReadinessCache();
 }
 
 /**
@@ -395,5 +399,5 @@ module.exports = {
   createReadyHandler,
   createHealthHandler,
   _resetReadinessCacheForTests,
-  invalidateReadinessCache: _resetReadinessCacheForTests,
+  invalidateReadinessCache,
 };

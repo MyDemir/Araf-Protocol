@@ -6,19 +6,7 @@ const cookieParser = require("cookie-parser");
 
 const WALLET = "0x1111111111111111111111111111111111111111";
 
-const ROUTE_MOUNTS = [
-  ["/api/auth", "auth"],
-  ["/api/orders", "orders"],
-  ["/api/trades", "trades"],
-  ["/api/pii", "pii"],
-  ["/api/receipts", "receipts"],
-  ["/api/admin", "admin"],
-  ["/api/logs", "logs"],
-  ["/api/stats", "stats"],
-  ["/api/reference-rates", "referenceRates"],
-  ["/api/rewards", "rewards"],
-  ["/api/feedback", "feedback"],
-];
+const { ROUTE_MOUNTS } = require("../../backend/scripts/routes/mounts");
 
 // Degraded modda AÇIK olması beklenen uçların TAM listesi. Yeni uç eklenirse burası ve izin listesi bilinçli
 // güncellenmeden test kırılır (varsayılan kapalı).
@@ -90,7 +78,7 @@ function setup() {
   app.use(express.json());
   app.use(cookieParser());
   app.use("/api", requireFullService);
-  for (const [mount, file] of ROUTE_MOUNTS) {
+  for (const { path: mount, file } of ROUTE_MOUNTS) {
     routers[mount] = require(`../../backend/scripts/routes/${file}`);
     app.use(mount, routers[mount]);
   }

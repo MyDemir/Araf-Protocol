@@ -14,7 +14,6 @@ const { redactRpcSecrets } = require("../utils/logRedaction");
 const {
   isRateLimitError,
   isMonthlyCapacityError,
-  isNetworkError,
 } = require("./rpcProvider");
 
 const SEC01_PREFIX = "SEC-01 BLOCKER";
@@ -63,21 +62,69 @@ function _resetForTests() {
   exitDegraded();
 }
 
-function _isTransientText(text) {
-  const probe = { message: text };
-  return isRateLimitError(probe) || isMonthlyCapacityError(probe) || isNetworkError(probe);
+// [TR] Hata zincirini (err, cause, error, info.error) düz listeye açar (döngüye karşı sınırlı).
+function _chain(err) {
+  const out = [];
+  let cur = err;
+  for (let i = 0; cur && typeof cur === "object" && i < 5; i += 1) {
+    out.push(cur);
+    cur = cur.cause || cur.error || cur.info?.error || null;
+  }
+  return out;
+}
+
+const NON_RPC_NAME_RE = /^(Mongo|Mongoose)|Redis|^(ClientClosed|SocketClosed|SocketTimeout|ConnectionTimeout|Disconnects|Reconnect)/i;
+const NON_RPC_TEXT_RE = /\b(mongo(db)?|mongoose|redis)\b/i;
+
+function _httpStatusOf(e) {
+  const raw = e?.info?.responseStatus ?? e?.info?.response?.statusCode ?? e?.status ?? e?.statusCode;
+  let n = Number.parseInt(String(raw ?? ""), 10);
+  if (!Number.isInteger(n)) {
+    const m = /server response (\d{3})/i.exec(String(e?.message || ""));
+    n = m ? Number(m[1]) : NaN;
+  }
+  return Number.isInteger(n) ? n : null;
+}
+
+/** [TR] Zincirde Mongo/Redis, 4xx (429 hariç) veya ENOTFOUND varsa KESİN hata (RPC kaynaklı değil/yanlış yapılandırma). */
+function _isDefinitiveNonTransient(err) {
+  for (const e of _chain(err)) {
+    if (NON_RPC_NAME_RE.test(String(e.name || ""))) return true;
+    if (NON_RPC_TEXT_RE.test(String(e.message || ""))) return true;
+    if (e.code === "ENOTFOUND" || /\bENOTFOUND\b/.test(String(e.message || ""))) return true;
+    const st = _httpStatusOf(e);
+    if (st !== null && st >= 400 && st < 500 && st !== 429) return true;
+  }
+  return false;
+}
+
+const TRANSIENT_CODES = new Set(["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EAI_AGAIN", "TIMEOUT", "NETWORK_ERROR", "EPIPE"]);
+const TRANSIENT_TEXT_RE = /ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|socket hang up|timed? ?out|\b50[234]\b/i;
+
+/** [TR] Geçici RPC hatası: 429, aylık kapasite, ağ kopması/timeout, 502/503/504. */
+function _isTransientRpc(err) {
+  if (isRateLimitError(err) || isMonthlyCapacityError(err)) return true;
+  for (const e of _chain(err)) {
+    if (TRANSIENT_CODES.has(e.code)) return true;
+    const st = _httpStatusOf(e);
+    if (st === 429 || st === 502 || st === 503 || st === 504) return true;
+    if (TRANSIENT_TEXT_RE.test(String(e.message || ""))) return true;
+  }
+  return false;
 }
 
 /**
- * [TR] "transient" yalnız geçici RPC hatasıdır (429, ağ, zaman aşımı, 5xx). Diğer her şey "fatal".
+ * [TR] "transient" yalnız geçici RPC hatasıdır (429, kapasite, ağ/timeout, 502/503/504). Mongo/Redis hataları,
+ *      4xx (401/403...), ENOTFOUND, ChainGuard, yanlış zincir ve bilinmeyen her şey "fatal" (fail-closed).
  * @returns {"transient"|"fatal"}
  */
 function classifyStartupError(err) {
   if (!err) return "fatal";
   const message = String(err.message || err);
 
+  if (err.code === "CONFIG_STALE_RETRY") return "transient";
   if (/\[ChainGuard\]/.test(message)) return "fatal";
-  if (/actual chain=/.test(message)) return "fatal";
+  if (/actual chain=|definitive-wrong-chain-seen/.test(message)) return "fatal";
 
   if (message.includes(SEC01_PREFIX)) {
     // SEC-01 hataları yalnız "hiçbir RPC doğrulanamadı + son neden geçici" biçiminde geçicidir.
@@ -85,10 +132,12 @@ function classifyStartupError(err) {
     if (idx === -1) return "fatal";
     const reason = message.slice(idx + SEC01_UNVERIFIED_MARKER.length);
     if (!reason.trim()) return "fatal";
-    return _isTransientText(reason) ? "transient" : "fatal";
+    const probe = { message: reason };
+    return !_isDefinitiveNonTransient(probe) && _isTransientRpc(probe) ? "transient" : "fatal";
   }
 
-  return (isRateLimitError(err) || isMonthlyCapacityError(err) || isNetworkError(err)) ? "transient" : "fatal";
+  if (_isDefinitiveNonTransient(err)) return "fatal";
+  return _isTransientRpc(err) ? "transient" : "fatal";
 }
 
 const BACKOFF_MIN_MS = 5_000;

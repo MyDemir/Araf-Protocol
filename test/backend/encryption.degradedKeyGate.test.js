@@ -78,6 +78,16 @@ describe("degraded boot: KMS key gate + real SEC-01 error classification", () =>
     expect(serviceMode.classifyStartupError(err)).toBe("fatal");
   });
 
+  test("wrong chain on fallback in an early round, later rounds only transient => still fatal", async () => {
+    process.env.BASE_RPC_URL_FALLBACKS = "http://fallback.invalid";
+    probe.mockRejectedValueOnce(Object.assign(new Error("server response 429"), { code: "SERVER_ERROR" })); // primary r1
+    probe.mockResolvedValueOnce({ chainId: 1n }); // fallback r1: definitive wrong chain
+    probe.mockRejectedValue(Object.assign(new Error("server response 429"), { code: "SERVER_ERROR" })); // all later
+    const err = await runSelfTestExpectingReject();
+    expect(err.message).toContain("429");
+    expect(serviceMode.classifyStartupError(err)).toBe("fatal");
+  });
+
   test("other SEC-01 blockers (env KMS in prod without exception) => fatal", async () => {
     delete process.env.ALLOW_ENV_KMS_ON_TESTNET;
     const err = await runSelfTestExpectingReject();

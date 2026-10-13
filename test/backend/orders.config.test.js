@@ -107,6 +107,7 @@ describe("GET /api/orders/config", () => {
           },
         },
       },
+      configStale: false,
       enabledPaymentRails: ["TR_IBAN", "US_ACH", "SEPA_IBAN"],
       selectedOrderRiskLevel: {
         source: "onchain_order_snapshot",

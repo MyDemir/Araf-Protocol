@@ -275,6 +275,7 @@ async function _assertTestnetRpcChainOrThrow() {
     "SEC-01 BLOCKER: ALLOW_ENV_KMS_ON_TESTNET için RPC'nin Base Sepolia (84532) olduğu doğrulanamadı: " + message
   );
   let lastMessage = "";
+  let sawDefinitiveWrongChain = false; // herhangi bir URL kesin yanlış zincir döndürdü mü (yeniden deneme sınıflandırması)
   for (let attempt = 0; attempt <= retryDelaysMs.length; attempt += 1) {
     let transient = false;
     for (let i = 0; i < urls.length; i += 1) {
@@ -287,12 +288,14 @@ async function _assertTestnetRpcChainOrThrow() {
         });
         if (actualChainId === 84532) return;
         lastMessage = `actual chain=${actualChainId}`;
+        sawDefinitiveWrongChain = true;
         // [TR] Birincil URL kesin olarak başka zincir diyorsa yedeklere bakmadan fail-closed.
         if (i === 0) throw definitiveFailure(lastMessage);
       } catch (err) {
         if (err.message.startsWith("SEC-01 BLOCKER")) throw err;
         lastMessage = redactRpcSecrets(err.message);
         const definitive = /\[ChainGuard\]/.test(err.message); // ChainGuard = kesin yanıt/yapılandırma
+        if (definitive) sawDefinitiveWrongChain = true;
         if (definitive && i === 0) throw definitiveFailure(lastMessage);
         if (!definitive) transient = true;
       }
@@ -302,7 +305,7 @@ async function _assertTestnetRpcChainOrThrow() {
   }
   throw new Error(
     "SEC-01 BLOCKER: ALLOW_ENV_KMS_ON_TESTNET için RPC'nin Base Sepolia (84532) olduğu doğrulanamadı: " +
-    lastMessage
+    lastMessage + (sawDefinitiveWrongChain ? " [definitive-wrong-chain-seen]" : "")
   );
 }
 

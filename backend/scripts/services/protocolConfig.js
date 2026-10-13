@@ -53,6 +53,8 @@ const CONFIG_ABI = [
 ];
 
 let protocolConfig = null;
+// [TR] true: bellekteki config Redis son-bilinen kopyasından geldi (zincirden doğrulanmadı).
+let configIsStale = false;
 const PAYMENT_RISK_CONFIG = getPaymentRailRiskConfig();
 
 function _isConfigLoaded(cfg) {
@@ -99,6 +101,7 @@ async function loadStaleProtocolConfig() {
     const parsed = JSON.parse(raw);
     if (!_isConfigLoaded(parsed)) return null;
     protocolConfig = parsed;
+    configIsStale = true;
     return protocolConfig;
   } catch (err) {
     logger.warn(`[Config] Son bilinen config okunamadı: ${err.message}`);
@@ -113,6 +116,7 @@ async function loadProtocolConfig() {
     const cached = await redis.get(CONFIG_CACHE_KEY);
     if (cached) {
       protocolConfig = JSON.parse(cached);
+      configIsStale = false;
       logger.info("[Config] V3 protokol parametreleri Redis önbelleğinden yüklendi.");
       return protocolConfig;
     }
@@ -122,6 +126,7 @@ async function loadProtocolConfig() {
 
   const next = await _buildConfigFromChain({ strictTokens: false });
   protocolConfig = next;
+  configIsStale = false;
   return protocolConfig;
 }
 
@@ -247,6 +252,7 @@ async function refreshProtocolConfig() {
   const next = await _buildConfigFromChain({ strictTokens: true });
   if (!next) return protocolConfig;
   protocolConfig = next;
+  configIsStale = false;
   return protocolConfig;
 }
 
@@ -319,6 +325,10 @@ async function updateCachedReputationPolicy(patch) {
   });
 }
 
+function isProtocolConfigStale() {
+  return configIsStale;
+}
+
 function getConfig() {
   if (!_isConfigLoaded(protocolConfig)) {
     const err = new Error(
@@ -336,6 +346,7 @@ function getConfig() {
 module.exports = {
   loadProtocolConfig,
   loadStaleProtocolConfig,
+  isProtocolConfigStale,
   refreshProtocolConfig,
   getConfig,
   updateCachedFeeConfig,

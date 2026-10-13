@@ -7,18 +7,15 @@ describe("backend route mount consistency", () => {
   it("app.js mounts all UX-critical routes under /api", () => {
     const appSource = fs.readFileSync(path.join(__dirname, "../../backend/scripts/app.js"), "utf8");
 
+    // Mounts now come from the single-source list (routes/mounts.js), iterated by app.js.
+    expect(appSource).toContain("for (const { path: mountPath, file } of ROUTE_MOUNTS)");
+    const { ROUTE_MOUNTS } = require("../../backend/scripts/routes/mounts");
+    const mounted = ROUTE_MOUNTS.map((m) => m.path);
+    expect(mounted[0]).toBe("/api/logs");
     [
-      'app.use("/api/logs", logRoutes);',
-      'app.use("/api/auth", authRoutes);',
-      'app.use("/api/orders", orderRoutes);',
-      'app.use("/api/trades", tradeRoutes);',
-      'app.use("/api/pii", piiRoutes);',
-      'app.use("/api/stats", statsRoutes);',
-      'app.use("/api/receipts", receiptRoutes);',
-      'app.use("/api/reference-rates", referenceRatesRoutes);',
-    ].forEach((line) => {
-      expect(appSource).toContain(line);
-    });
+      "/api/logs", "/api/auth", "/api/orders", "/api/trades", "/api/pii", "/api/stats",
+      "/api/receipts", "/api/reference-rates",
+    ].forEach((mount) => expect(mounted).toContain(mount));
 
     // /api/listings is a deprecated compatibility alias when imported directly,
     // not part of the canonical V3 app.js mount surface.
