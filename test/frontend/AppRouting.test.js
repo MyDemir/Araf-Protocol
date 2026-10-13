@@ -50,9 +50,9 @@ describe('App routing side-aware contract selection', () => {
     expect(source).toContain('...checkDeploymentAlignment({ frontendEscrowAddress: import.meta.env.VITE_ESCROW_ADDRESS, backendDeployment })');
     expect(source).toContain('supportedChains');
     expect(source).toContain('onRegisterWallet: handleRegisterWallet');
-    expect(appShellBlock).toContain('navigation={renderSlimRail()}');
-    expect(appShellBlock).toContain('panel={renderContextSidebar()}');
-    expect(appShellBlock).toContain('mobileBottom={renderMobileNav()}');
+    expect(appShellBlock).toContain('<ViewSlot render={renderSlimRail} />');
+    expect(appShellBlock).toContain('<ViewSlot render={renderContextSidebar} />');
+    expect(appShellBlock).toContain('<ViewSlot render={renderMobileNav} />');
     expect(appShellBlock).toContain('outlet={(');
     expect(appShellBlock).toContain("currentView === 'home'");
     expect(appShellBlock).toContain("currentView === 'market'");

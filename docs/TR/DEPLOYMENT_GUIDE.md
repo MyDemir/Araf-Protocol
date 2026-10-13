@@ -909,6 +909,7 @@ HKDF değişikliği sonrası PII'ın yeniden şifrelenmesi için repoda bir ara�
 ### Frontend hosting güvenlik header'ları
 Frontend hosting için önerilen asgari response header'ları (Nginx/Cloudflare/Vercel eşdeğerleri; `frontend/vercel.json` bunları içerir):
 - `Content-Security-Policy` (sıkı allowlist; nonce/hash kontrollü değilse unsafe-inline yok)
+- Mobil cüzdan: `connect-src` yalnız `wss://www.walletlink.org` ekler (Coinbase WalletLink). Mobil tarayıcıda injected cüzdan yoksa bağlama modali, siteyi cüzdan uygulamasının tarayıcısında açan deeplink'ler sunar (`frontend/src/app/mobileWallet.js`; biçimler resmi dokümanlarla doğrulanmalı).
 - `Strict-Transport-Security: max-age=31536000; includeSubDomains; preload`
 - `X-Content-Type-Options: nosniff`
 - `Referrer-Policy: strict-origin-when-cross-origin`

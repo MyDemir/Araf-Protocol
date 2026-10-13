@@ -3,6 +3,7 @@ import { afterEach, describe, it, expect, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { buildAppViews } from '../../frontend/src/app/AppViews';
+import { resolveNewTxGate } from '../../frontend/src/app/txGate';
 
 afterEach(() => cleanup());
 
@@ -687,5 +688,39 @@ describe('item 9: trade room fee is unknown, not 0', () => {
     render(<div>{buildAppViews(roomCtx({ takerFeeBps: 10 })).renderTradeRoom()}</div>);
     expect(screen.queryByText(/Fee unknown/)).not.toBeInTheDocument();
     expect(screen.getByText(/Fee 0\.01/)).toBeInTheDocument();
+  });
+});
+
+describe('trade room under infra failure (fail-closed gate scope)', () => {
+  const lockedTrade = { id: 'trade-1', onchainId: 1, max: 100, fiat: 'TRY', crypto: 'USDT', rate: 10, maker: '0xmaker' };
+
+  it('shows the calm notice but does NOT claim maintenance mode: exit actions are not gated by infra', () => {
+    const views = buildAppViews({
+      ...baseCtx, currentView: 'tradeRoom', activeTrade: lockedTrade,
+      txGate: resolveNewTxGate({ rpcChecked: true, rpcUnreachable: true }), infraDegraded: true,
+    });
+    render(<div>{views.renderTradeRoom()}</div>);
+    expect(screen.getByTestId('trade-room-infra-notice')).toHaveTextContent(/verified on-chain by the contract rules/);
+    expect(screen.queryByText('System is in maintenance mode.')).toBeNull();
+  });
+
+  it('real contract pause keeps the old behaviour (maintenance reason, no infra notice)', () => {
+    const views = buildAppViews({
+      ...baseCtx, currentView: 'tradeRoom', activeTrade: lockedTrade, isPaused: true,
+      txGate: resolveNewTxGate({ isPaused: true, rpcChecked: true }),
+    });
+    render(<div>{views.renderTradeRoom()}</div>);
+    expect(screen.getAllByText('System is in maintenance mode.').length).toBeGreaterThan(0);
+    expect(screen.queryByTestId('trade-room-infra-notice')).toBeNull();
+  });
+
+  it('market take button is unavailable while the gate is closed', () => {
+    const order = { id: 'o1', onchainId: 1, side: 'SELL_CRYPTO', crypto: 'USDT', fiat: 'TRY', rate: 10, max: 100, min: 10, tier: 1, maker: '0xmaker', makerAddress: '0xmaker', ctaLabel: 'Buy' };
+    const views = buildAppViews({
+      ...baseCtx, currentView: 'market', orders: [order], filteredOrders: [order],
+      txGate: resolveNewTxGate({ rpcChecked: false }),
+    });
+    render(<div>{views.renderMarket()}</div>);
+    expect(screen.queryAllByText(/Checking…/).length).toBeGreaterThan(0);
   });
 });

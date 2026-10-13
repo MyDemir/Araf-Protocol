@@ -3,7 +3,7 @@ name: gelistirici
 description: Kod değişikliği, hata düzeltme, test ekleme. Tasarım/mimari karar almaz.
 model: sonnet
 tools: Read, Write, Edit, Grep, Glob, Bash
-maxTurns: 40
+maxTurns: 100
 effort: medium
 isolation: worktree
 ---

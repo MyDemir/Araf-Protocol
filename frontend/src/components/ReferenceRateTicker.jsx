@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { fetchWithTimeout } from '../app/fetchWithTimeout';
 import { buildApiUrl } from '../app/apiConfig';
 
 const POLL_MS = 60_000;
@@ -29,7 +30,7 @@ export default function ReferenceRateTicker({ lang = 'TR' }) {
   const fetchTicker = useCallback(async () => {
     if (typeof document !== 'undefined' && document.hidden) return;
     try {
-      const res = await fetch(buildApiUrl('reference-rates/ticker'), {
+      const res = await fetchWithTimeout(() => buildApiUrl('reference-rates/ticker'), {
         method: 'GET',
         headers: { Accept: 'application/json' },
       });
