@@ -57,8 +57,8 @@ function WalletSheet({ title, closeLabel, note, onClose, children }) {
           </button>
         </div>
         {children}
-        <p className="mt-5 flex items-center justify-center gap-1.5 border-t border-borderSubtle pt-4 text-center text-xs text-textSecondary">
-          <ShieldCheck className="h-4 w-4 shrink-0 text-success" strokeWidth={2} aria-hidden="true" />
+        <p className="mt-4 flex items-center gap-2.5 rounded-2xl bg-success/10 px-3.5 py-3 text-xs leading-snug text-textSecondary">
+          <ShieldCheck className="h-5 w-5 shrink-0 text-success" strokeWidth={2} aria-hidden="true" />
           <span>{note}</span>
         </p>
       </div>

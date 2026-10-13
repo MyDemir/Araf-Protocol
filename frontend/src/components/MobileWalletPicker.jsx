@@ -59,11 +59,13 @@ export default function MobileWalletPicker({ lang = 'TR', location, connectors =
         >
           <BrowserWalletBadge />
           <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-textPrimary">{tr ? 'Cüzdan' : 'Browser wallet'}</span>
-          <span className="flex shrink-0 items-center -space-x-1.5" aria-hidden="true">
-            {[MetaMaskBadge, OkxBadge, TrustBadge].map((Badge, i) => (
-              <span key={i} className="rounded-[30%] ring-2 ring-elevated"><Badge className="h-5 w-5" /></span>
-            ))}
-          </span>
+          {!open && (
+            <span className="flex shrink-0 items-center -space-x-1" aria-hidden="true">
+              {[MetaMaskBadge, OkxBadge, TrustBadge].map((Badge, i) => (
+                <span key={i} className="flex rounded-[30%] bg-elevated p-[2px]"><Badge className="h-[22px] w-[22px]" /></span>
+              ))}
+            </span>
+          )}
           <ChevronDown
             className={`h-5 w-5 shrink-0 text-textSecondary transition-transform duration-200 group-hover:text-textPrimary motion-reduce:transition-none ${open ? 'rotate-180' : ''}`}
             strokeWidth={2}
@@ -93,7 +95,8 @@ export default function MobileWalletPicker({ lang = 'TR', location, connectors =
                         className="group/tile relative flex min-h-[56px] items-center gap-2.5 rounded-xl border border-borderSubtle bg-surface py-2 pl-2.5 pr-6 transition duration-150 hover:border-brand/40 hover:bg-brand/[0.06] active:bg-brand/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand motion-reduce:transition-none"
                       >
                         <WalletLinkIcon id={l.id} className="h-8 w-8" />
-                        <span className="min-w-0 text-[13px] font-semibold leading-tight text-textPrimary">{l.name}</span>
+                        {/* [TR] Kutucukta kısa ad (simge zaten tanıtır); tam ad aria-label'da. [EN] Short name; full name in aria-label. */}
+                        <span className="min-w-0 truncate text-sm font-semibold text-textPrimary">{l.name.replace(/\s+Wallet$/, '')}</span>
                         <ArrowUpRight className="absolute right-1.5 top-1.5 h-3.5 w-3.5 text-textSecondary group-hover/tile:text-textPrimary" strokeWidth={2} aria-hidden="true" />
                       </a>
                     </li>
