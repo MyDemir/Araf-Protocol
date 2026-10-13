@@ -1073,6 +1073,12 @@ export function useAppSessionData({
     const fetchPausedStatus = async () => {
       try {
         const paused = await getPaused();
+        // [TR] useArafContract okuma hatasını yutup null döndürür: boolean değilse = okunamadı (bilinmiyor).
+        //      Escrow adresi hiç yoksa sorun RPC değil yapılandırmadır (kritik bant zaten var); RPC arızası sayılmaz.
+        if (typeof paused !== 'boolean') {
+          if (!import.meta.env.VITE_ESCROW_ADDRESS) return false;
+          throw new Error('paused() unreadable');
+        }
         setIsPaused(paused);
         markInfraOk('rpc');
         return true;
