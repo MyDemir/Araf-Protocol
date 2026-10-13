@@ -129,4 +129,17 @@ describe('AdminRuntimeSettingsPanel', () => {
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Confirm' }));
     await waitFor(() => expect(showToast).toHaveBeenCalledWith('WORKER_LIVENESS_STALE_MS too low', 'error'));
   });
+
+  it('shows constraint hints and a calm violation warning per setting', async () => {
+    const base = { unit: 'ms', min: 1, max: 100, default: 5, envValue: null, adminValue: null, value: 5, source: 'default', description: { TR: 'tr', EN: 'desc' }, changedAt: null, changedBy: null, group: 'watchdog' };
+    const settings = [
+      { ...base, key: 'WORKER_LIVENESS_STALE_MS', constraints: [{ TR: 'tr', EN: '≥ 2 × Block stale threshold' }], constraintViolations: ['liveness too low'] },
+      { ...base, key: 'READY_CACHE_TTL_MS', constraints: [], constraintViolations: [] },
+    ];
+    render(<AdminRuntimeSettingsPanel lang="EN" authenticatedFetch={makeFetch({ settings })} showToast={vi.fn()} />);
+    await waitFor(() => screen.getByText('WORKER_LIVENESS_STALE_MS'));
+    expect(screen.getByText(/≥ 2 × Block stale threshold/)).toBeInTheDocument();
+    expect(screen.getByText(/violate this constraint: liveness too low/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Current values violate/)).toHaveLength(1);
+  });
 });

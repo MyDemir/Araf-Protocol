@@ -195,6 +195,16 @@ export default function AdminRuntimeSettingsPanel({ lang = 'EN', authenticatedFe
                 </span>
               </div>
               <p className="text-xs text-textSecondary">{s.description?.[lang === 'TR' ? 'TR' : 'EN']}</p>
+              {Array.isArray(s.constraints) && s.constraints.length > 0 && (
+                <p className="text-xs text-textMuted">
+                  {t(lang, 'Kısıt', 'Constraint')}: {s.constraints.map((c) => c?.[lang === 'TR' ? 'TR' : 'EN']).filter(Boolean).join(' · ')}
+                </p>
+              )}
+              {Array.isArray(s.constraintViolations) && s.constraintViolations.length > 0 && (
+                <p className="text-xs text-warning" role="status">
+                  {t(lang, 'Mevcut değerler bu kısıtı ihlal ediyor', 'Current values violate this constraint')}: {s.constraintViolations.join(' ')}
+                </p>
+              )}
               {s.warning && (
                 <p className="text-xs text-warning border border-warning/40 bg-warning/10 rounded-lg px-2 py-1" role="note">
                   {s.warning?.[lang === 'TR' ? 'TR' : 'EN']}
