@@ -17,7 +17,13 @@ function _parseMaxWorkerLag(rawValue) {
   return 25;
 }
 
+const { runtimeValueSync } = require("../utils/runtimeValue");
+
+// [TR] Env/varsayılan değer (geriye dönük dışa aktarım); gerçek eşik her kullanımda çalışma ayarından okunur.
 const MAX_WORKER_LAG_BLOCKS = _parseMaxWorkerLag(process.env.WORKER_MAX_LAG_BLOCKS);
+function _maxWorkerLagBlocks() {
+  return runtimeValueSync("WORKER_MAX_LAG_BLOCKS");
+}
 
 function _collectProductionCorsConfigDiagnostics(rawAllowedOrigins) {
   const diagnostics = [];
@@ -202,7 +208,7 @@ async function getReadiness({ worker, provider } = {}) {
   //      Geliştirmede biraz daha toleranslı olabilir, ama kural aynıdır.
   // [EN] If lag is too high, readiness becomes false.
   const workerLagHealthy =
-    workerLagBlocks === null ? workerStateHealthy : workerLagBlocks <= MAX_WORKER_LAG_BLOCKS;
+    workerLagBlocks === null ? workerStateHealthy : workerLagBlocks <= _maxWorkerLagBlocks();
 
   // [TR] Replay sırasında sistem canlı olabilir ama tam "ready" kabul edilmez.
   //      Çünkü state mirror henüz geriden geliyor olabilir.
@@ -257,7 +263,7 @@ async function getReadiness({ worker, provider } = {}) {
       lastSeenBlock,
       lastSafeBlock,
       lagBlocks: workerLagBlocks,
-      maxAllowedLagBlocks: MAX_WORKER_LAG_BLOCKS,
+      maxAllowedLagBlocks: _maxWorkerLagBlocks(),
       livePollInProgress,
       finalityDepth: workerFinalityDepth,
       diagnostics: workerDiagnostics,
@@ -290,9 +296,7 @@ function getLiveness({ worker } = {}) {
 // ── /ready: cache + public redaction (B27) ──────────────────────────────────
 
 function _readyCacheTtlMs() {
-  const parsed = Number.parseInt(String(process.env.READY_CACHE_TTL_MS ?? ""), 10);
-  const ttl = Number.isInteger(parsed) ? parsed : 7_000;
-  return Math.min(10_000, Math.max(5_000, ttl));
+  return runtimeValueSync("READY_CACHE_TTL_MS");
 }
 
 let _readyCache = { at: 0, value: null, promise: null };

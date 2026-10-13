@@ -15,6 +15,14 @@ const SOURCE_CLASS = {
   default: 'bg-elevated text-textMuted border border-borderSubtle',
 };
 
+const GROUPS = [
+  { id: 'worker', TR: 'Worker', EN: 'Worker' },
+  { id: 'watchdog', TR: 'Watchdog / Sağlık', EN: 'Watchdog / Health' },
+  { id: 'cache', TR: 'Önbellekler', EN: 'Caches' },
+  { id: 'ticker', TR: 'Kur referansı', EN: 'Rate reference' },
+  { id: 'jobs', TR: 'Arka plan işleri', EN: 'Background jobs' },
+];
+
 const fmtDate = (v) => {
   if (!v) return '—';
   const d = new Date(v);
@@ -165,8 +173,14 @@ export default function AdminRuntimeSettingsPanel({ lang = 'EN', authenticatedFe
         </div>
       )}
 
+      {GROUPS.map((g) => {
+        const items = state.settings.filter((s) => (s.group || 'worker') === g.id);
+        if (items.length === 0) return null;
+        return (
+      <div key={g.id} className="space-y-3" role="group" aria-labelledby={`rs-group-${g.id}`}>
+      <h3 id={`rs-group-${g.id}`} className="text-sm font-semibold text-textPrimary px-1">{lang === 'TR' ? g.TR : g.EN}</h3>
       <ul className="space-y-3">
-        {state.settings.map((s) => {
+        {items.map((s) => {
           const inputId = `rs-input-${s.key}`;
           const hintId = `rs-hint-${s.key}`;
           const errId = `rs-err-${s.key}`;
@@ -181,6 +195,21 @@ export default function AdminRuntimeSettingsPanel({ lang = 'EN', authenticatedFe
                 </span>
               </div>
               <p className="text-xs text-textSecondary">{s.description?.[lang === 'TR' ? 'TR' : 'EN']}</p>
+              {Array.isArray(s.constraints) && s.constraints.length > 0 && (
+                <p className="text-xs text-textMuted">
+                  {t(lang, 'Kısıt', 'Constraint')}: {s.constraints.map((c) => c?.[lang === 'TR' ? 'TR' : 'EN']).filter(Boolean).join(' · ')}
+                </p>
+              )}
+              {Array.isArray(s.constraintViolations) && s.constraintViolations.length > 0 && (
+                <p className="text-xs text-warning" role="status">
+                  {t(lang, 'Mevcut değerler bu kısıtı ihlal ediyor', 'Current values violate this constraint')}: {s.constraintViolations.join(' ')}
+                </p>
+              )}
+              {s.warning && (
+                <p className="text-xs text-warning border border-warning/40 bg-warning/10 rounded-lg px-2 py-1" role="note">
+                  {s.warning?.[lang === 'TR' ? 'TR' : 'EN']}
+                </p>
+              )}
               <dl className="grid grid-cols-3 gap-2 text-xs">
                 <div><dt className="text-textMuted">{t(lang, 'Etkin', 'Effective')}</dt><dd className="font-semibold text-textPrimary tabular-nums">{s.value} {s.unit}</dd></div>
                 <div><dt className="text-textMuted">Env</dt><dd className="text-textSecondary tabular-nums">{fmtVal(s.envValue)}</dd></div>
@@ -239,6 +268,9 @@ export default function AdminRuntimeSettingsPanel({ lang = 'EN', authenticatedFe
           );
         })}
       </ul>
+      </div>
+        );
+      })}
 
       <div className="bg-surface border border-borderSubtle rounded-xl p-4">
         <h3 className="text-sm font-semibold text-textPrimary mb-2">{t(lang, 'Denetim kaydı', 'Audit log')}</h3>
