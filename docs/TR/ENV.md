@@ -478,10 +478,14 @@ RPC URL'leri (`BASE_RPC_URL`, `BASE_RPC_URL_FALLBACKS`) bilerek panelde yoktur v
 
 - Worker: `LIVE_POLL_INTERVAL_MS`, `WORKER_BLOCK_BATCH_SIZE`, `WORKER_REPLAY_BATCH_DELAY_MS`, `WORKER_CHECKPOINT_INTERVAL_BLOCKS` (1-1000), `WORKER_REPLAY_BACKOFF_BASE_MS` (500-60000), `WORKER_REPLAY_BACKOFF_MAX_MS` (5000-1800000)
 - Watchdog/Sağlık: `WORKER_BLOCK_STALE_MS` (30000-900000), `WORKER_WATCHDOG_INTERVAL_MS` (5000-120000), `WORKER_LIVENESS_STALE_MS` (60000-1800000; varsayılan 2x blok bayatlık + 30 sn), `WORKER_MAX_LAG_BLOCKS` (1-1000)
-- Önbellekler: `READY_CACHE_TTL_MS` (5000-10000), `MARKET_CACHE_TTL_MS` (0-60000), `CONFIG_CACHE_TTL_SECONDS` (60-86400), `RATE_LIMIT_TIER_CACHE_TTL_SECONDS` (10-600; yalnız tier önbelleği, limit sayıları değil)
+- Önbellekler: `READY_CACHE_TTL_MS` (5000-10000), `MARKET_CACHE_TTL_MS` (0-60000), `CONFIG_CACHE_TTL_SECONDS` (60-21600), `RATE_LIMIT_TIER_CACHE_TTL_SECONDS` (10-600; yalnız tier önbelleği, limit sayıları değil)
 - Kur referansı: `REFERENCE_TICKER_CRYPTO_TTL_SECONDS`, `..._FIAT_TTL_SECONDS`, `..._LAST_GOOD_TTL_SECONDS`, `..._MAX_STALE_SECONDS`
-- Arka plan işleri: `REPUTATION_DECAY_CANDIDATE_LIMIT`, `REPUTATION_DECAY_TX_LIMIT` (1-100, relayer gas'ı), `REWARD_RECORDER_CANDIDATE_LIMIT`, `REWARD_RECORDER_BATCH_LIMIT` (1-100, relayer gas'ı)
+- Arka plan işleri: `REPUTATION_DECAY_CANDIDATE_LIMIT`, `REPUTATION_DECAY_TX_LIMIT` (1-100, relayer gas'ı), `REWARD_RECORDER_CANDIDATE_LIMIT`, `REWARD_RECORDER_BATCH_LIMIT` (1-50, relayer gas'ı; id başına ~100k gas tahmini, revert olursa aynı id'ler yeniden denenir)
 
 Alanlar arası kısıtlar (etkin değerler üzerinden, ihlalde `400`): liveness >= 2 x blok bayatlık; replay backoff base <= max; blok bayatlık >= 3 x `LIVE_POLL_INTERVAL_MS`; kur last-good TTL >= max stale; kur fiat TTL <= max stale.
 
 Bilerek eklenmeyenler: `PAYMENT_RAILS_CACHE_TTL_MS` (ödeme yöntemi kapatma yayılımı), `USER_BANK_RISK_CLEANUP_CURSOR_BATCH_SIZE` (PII yolu), `IDENTITY_MIGRATION_BATCH_SIZE` (tek seferlik CLI), `REDIS_READY_WAIT_MS` (yalnız açılışta okunur; yeniden başlatma gerektirir).
+
+Açılış denetimi: süreç başlarken bir kez, her anahtar için env ham değeri kontrol edilir. Tam sayı değilse (yok sayılır) ya da sınıra kırpılıyorsa `logger.warn` yazılır (anahtar, ham değer, uygulanan değer); env/varsayılan değerler kısıtları ihlal ediyorsa ayrıca uyarı yazılır. Okuma başına log yoktur. Admin GET yanıtı aynı ihlalleri `constraintViolations` ile gösterir.
+
+Not: `WORKER_BLOCK_STALE_MS >= 3 x LIVE_POLL_INTERVAL_MS` kısıtı yalnız `WORKER_BLOCK_STALE_MS` değiştirilirken zorlanır; poll yükseltmesi engellenmez. Watchdog zaten `max(WORKER_BLOCK_STALE_MS, 3 x LIVE_POLL_INTERVAL_MS)` eşiğini kullanır, yanlış alarm riski yoktur.
