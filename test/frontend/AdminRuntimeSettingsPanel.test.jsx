@@ -106,4 +106,27 @@ describe('AdminRuntimeSettingsPanel', () => {
     render(<AdminRuntimeSettingsPanel lang="EN" authenticatedFetch={fetchFn} showToast={vi.fn()} />);
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Admin access denied.'));
   });
+
+  it('groups settings, shows cost warning, and surfaces a server constraint error (400)', async () => {
+    const base = { unit: 'ms', min: 1, max: 100, default: 5, envValue: null, adminValue: null, value: 5, source: 'default', description: { TR: 'tr', EN: 'desc' }, changedAt: null, changedBy: null };
+    const settings = [
+      { ...base, key: 'LIVE_POLL_INTERVAL_MS', group: 'worker' },
+      { ...base, key: 'WORKER_BLOCK_STALE_MS', group: 'watchdog' },
+      { ...base, key: 'READY_CACHE_TTL_MS', group: 'cache' },
+      { ...base, key: 'REFERENCE_TICKER_MAX_STALE_SECONDS', group: 'ticker' },
+      { ...base, key: 'REPUTATION_DECAY_TX_LIMIT', group: 'jobs', unit: 'tx', warning: { TR: 'maliyet', EN: 'Cost warning: relayer gas' } },
+    ];
+    const fetchFn = makeFetch({ settings, putStatus: 400, putBody: { error: 'WORKER_LIVENESS_STALE_MS too low', code: 'RUNTIME_SETTING_CONSTRAINT' } });
+    const showToast = vi.fn();
+    render(<AdminRuntimeSettingsPanel lang="EN" authenticatedFetch={fetchFn} showToast={showToast} />);
+    await waitFor(() => screen.getByText('REPUTATION_DECAY_TX_LIMIT'));
+    for (const name of ['Worker', 'Watchdog / Health', 'Caches', 'Rate reference', 'Background jobs']) {
+      expect(screen.getByRole('heading', { name })).toBeInTheDocument();
+    }
+    expect(screen.getByText(/Cost warning: relayer gas/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/New value/, { selector: '#rs-input-WORKER_BLOCK_STALE_MS' }), { target: { value: '50' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save: WORKER_BLOCK_STALE_MS' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Confirm' }));
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith('WORKER_LIVENESS_STALE_MS too low', 'error'));
+  });
 });
