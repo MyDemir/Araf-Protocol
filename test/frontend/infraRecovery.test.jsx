@@ -9,8 +9,8 @@ import {
 } from '../../frontend/src/app/infraHealth';
 import { importWithRetry } from '../../frontend/src/app/lazyWithRetry';
 
-beforeEach(() => { vi.useFakeTimers(); __resetInfraForTest(); window.sessionStorage.clear(); __resetStatusDismissalsForTest(); });
-afterEach(() => { cleanup(); vi.useRealTimers(); __resetInfraForTest(); });
+beforeEach(() => { vi.useFakeTimers(); vi.spyOn(Math, 'random').mockReturnValue(0.5); __resetInfraForTest(); window.sessionStorage.clear(); __resetStatusDismissalsForTest(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); __resetInfraForTest(); });
 
 describe('infra recovery', () => {
   it('backoff grows exponentially, is capped and jittered within 20 percent', () => {
@@ -77,11 +77,11 @@ describe('flag hysteresis', () => {
     markInfraFailure('backend');
     await vi.advanceTimersByTimeAsync(1000);
     expect(getInfraHealth().backend).toBe(true);
-    await vi.advanceTimersByTimeAsync(6000); // probe #1 (5s +-20%) succeeds
+    await vi.advanceTimersByTimeAsync(6000); // probe #1 (5s, random pinned to 0.5) succeeds
     expect(getInfraHealth()).toMatchObject({ backend: false, epoch: 1 });
     markInfraFailure('backend'); // flapping endpoint: re-fails right after recovery
     await vi.advanceTimersByTimeAsync(6000);
-    expect(calls).toBe(1); // second probe waits >= 8s (10s +-20%), not 5s again
+    expect(calls).toBe(1); // second probe waits 10s (random pinned), not 5s again
     await vi.advanceTimersByTimeAsync(5000);
     expect(calls).toBe(2);
   });
