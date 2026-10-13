@@ -55,8 +55,9 @@ describe("SEC-01 testnet env-KMS exception", () => {
 
   describe("startup self-test RPC chain check", () => {
     function mockRpc(getNetwork) {
-      jest.doMock("ethers", () => ({
-        ethers: { JsonRpcProvider: jest.fn().mockImplementation(() => ({ getNetwork })) },
+      jest.doMock("../../backend/scripts/services/rpcProvider", () => ({
+        ...jest.requireActual("../../backend/scripts/services/rpcProvider"),
+        createChainProbe: (url) => ({ getNetwork: () => getNetwork(url) }),
       }));
     }
     beforeEach(() => {
@@ -64,6 +65,7 @@ describe("SEC-01 testnet env-KMS exception", () => {
       process.env.EXPECTED_CHAIN_ID = "84532";
       process.env.ALLOW_ENV_KMS_ON_TESTNET = "yes";
       process.env.BASE_RPC_URL = "http://rpc.invalid";
+      delete process.env.BASE_RPC_URL_FALLBACKS;
     });
 
     test("chainId 84532 -> ok", async () => {
@@ -81,9 +83,63 @@ describe("SEC-01 testnet env-KMS exception", () => {
     });
 
     test("RPC unreachable -> startup error", async () => {
-      mockRpc(jest.fn().mockRejectedValue(new Error("ECONNREFUSED")));
+      jest.useFakeTimers();
+      try {
+        const probe = jest.fn().mockRejectedValue(new Error("ECONNREFUSED"));
+        mockRpc(probe);
+        load2();
+        const result = encryption.runProductionKmsStartupSelfTest().catch((e) => e);
+        await jest.advanceTimersByTimeAsync(13_000);
+        const err = await result;
+        expect(err.message).toContain("SEC-01 BLOCKER");
+        expect(probe).toHaveBeenCalledTimes(4); // 1 ilk deneme + 3 yeniden deneme (1/3/9 sn)
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    test("429 on primary then success on retry -> ok (bounded retry)", async () => {
+      jest.useFakeTimers();
+      try {
+        const probe = jest.fn()
+          .mockRejectedValueOnce(new Error("exceeded maximum retry limit 429 Monthly capacity limit exceeded"))
+          .mockResolvedValue({ chainId: 84532n });
+        mockRpc(probe);
+        load2();
+        const result = encryption.runProductionKmsStartupSelfTest();
+        await jest.advanceTimersByTimeAsync(1_000);
+        await expect(result).resolves.toEqual({ ok: true, provider: "env" });
+        expect(probe).toHaveBeenCalledTimes(2);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    test("primary 429 + verified fallback returns 84532 -> ok without waiting", async () => {
+      process.env.BASE_RPC_URL_FALLBACKS = "http://fallback.invalid";
+      const probe = jest.fn((url) =>
+        url === "http://rpc.invalid" ? Promise.reject(new Error("429 compute units")) : Promise.resolve({ chainId: 84532n }));
+      mockRpc(probe);
+      load2();
+      await expect(encryption.runProductionKmsStartupSelfTest()).resolves.toEqual({ ok: true, provider: "env" });
+    });
+
+    test("wrong chain on every URL fails closed immediately (no retry, no bypass)", async () => {
+      process.env.BASE_RPC_URL_FALLBACKS = "http://fallback.invalid";
+      const probe = jest.fn().mockResolvedValue({ chainId: 8453n });
+      mockRpc(probe);
       load2();
       await expect(encryption.runProductionKmsStartupSelfTest()).rejects.toThrow("SEC-01 BLOCKER");
+      expect(probe).toHaveBeenCalledTimes(2);
+    });
+
+    test("secret RPC key never appears in the SEC-01 error", async () => {
+      process.env.BASE_RPC_URL = "https://base-sepolia.g.alchemy.com/v2/SUPERSECRETKEY1234567890";
+      mockRpc(jest.fn().mockResolvedValue({ chainId: 8453n }));
+      load2();
+      const err = await encryption.runProductionKmsStartupSelfTest().catch((e) => e);
+      expect(err.message).toContain("SEC-01 BLOCKER");
+      expect(err.message).not.toContain("SUPERSECRETKEY");
     });
 
     test("missing BASE_RPC_URL -> startup error", async () => {

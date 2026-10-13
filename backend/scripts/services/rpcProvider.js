@@ -198,9 +198,10 @@ function createRpcPool({ urls, surface = "RpcPool", probeFor = createChainProbe,
           if (entry.index === 0) throw err;
           entry.rejected = true;
           log.error(`[RpcPool] Yedek RPC zincir doğrulamasından geçemedi, kullanılmayacak: ${entry.label} | ${_safeError(err)}`);
-        } else {
-          markCooldown(entry, err);
+          lastErr = lastErr || err; // asıl (birincil) hata öncelikli
+          continue;
         }
+        markCooldown(entry, err);
         lastErr = err;
         continue;
       }
