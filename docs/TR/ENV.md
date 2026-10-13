@@ -44,7 +44,7 @@ Tablolardaki "Nereye girilir" sütunu Base Sepolia/Mainnet için **hedef yeri** 
 >
 > **Frontend de deploy edilecekse ek 3 secret:** `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`.
 >
-> **Opsiyonel:** secret `RELAYER_PRIVATE_KEY`, `GH_VARIABLES_TOKEN` (fine-grained PAT, yalnız bu repo, "Variables: read and write"; tam deploy adresleri otomatik variable yapar), `BASESCAN_API_KEY` (yalnız `verify_contracts=true`); variable `FLY_APP_NAME` (varsayılan `araf-protocol-backend`), `ADMIN_WALLETS`, `VITE_RPC_URL`, `ARAF_REVENUE_VAULT_ADDRESS`, `ARAF_REWARDS_ADDRESS` (rewards ayrı deploy edildiyse; tanımlıysa Fly ve Vercel'e geçer).
+> **Opsiyonel:** secret `RELAYER_PRIVATE_KEY`, `GH_VARIABLES_TOKEN` (fine-grained PAT, yalnız bu repo, "Variables: read and write"; tam deploy adresleri otomatik variable yapar), `ETHERSCAN_API_KEY` (yalnız `verify_contracts=true`; eski `BASESCAN_API_KEY` hâlâ okunur); variable `FLY_APP_NAME` (varsayılan `araf-protocol-backend`), `ADMIN_WALLETS`, `VITE_RPC_URL`, `ARAF_REVENUE_VAULT_ADDRESS`, `ARAF_REWARDS_ADDRESS` (rewards ayrı deploy edildiyse; tanımlıysa Fly ve Vercel'e geçer).
 >
 > **Deploy SONRASI (2 variable):** `ARAF_ESCROW_ADDRESS`, `ARAF_DEPLOYMENT_BLOCK`; yalnız sonraki `deploy-runtime-base-sepolia.yml` çalıştırmaları için gerekir.
 > `GH_VARIABLES_TOKEN` secret'ı tanımlıysa tam deploy workflow'u bunları kendisi yazar; tanımlı değilse uyarı verir ve özet sayfasına elle çalıştırılacak `gh variable set` satırlarını basar.
@@ -68,7 +68,11 @@ Sütunlar: Y = Yerel, S = Base Sepolia, M = Mainnet. "Zorunlu": her zaman / ilgi
 | `BASE_SEPOLIA_RPC_URL` | Base Sepolia RPC adresi | `--network base-sepolia` iken; yoksa hata | gerekmez | `https://…alchemy…/v2/KEY` | gerekmez | C/.env | `hardhat.config.js:35`, `:96` |
 | `BASE_RPC_URL` | Base Mainnet RPC adresi | `--network base` iken; yoksa hata | gerekmez | gerekmez | `https://…/v2/KEY` | C/.env | `hardhat.config.js:32` |
 | 🔒 `DEPLOYER_PRIVATE_KEY` | Public ağlarda imzalayan cüzdanın özel anahtarı | Public ağlarda (yoksa hesap listesi boş kalır) | gerekmez | `0x…64 hex` | `0x…64 hex` | C/.env | `hardhat.config.js:90`, `:98` |
-| 🔒 `BASESCAN_API_KEY` | BaseScan doğrulaması için API anahtarı | Opsiyonel (`""`) | gerekmez | opsiyonel | opsiyonel | C/.env | `hardhat.config.js:106` |
+| 🔒 `ETHERSCAN_API_KEY` | Etherscan V2 API anahtarı (etherscan.io hesabı; Base dahil tüm zincirlerde geçerli). `BASESCAN_API_KEY` yerine geçer | Opsiyonel (`""`) | gerekmez | opsiyonel | opsiyonel | C/.env | `hardhat.config.js` (`etherscan.apiKey`) |
+| 🔒 `BASESCAN_API_KEY` | **Eski**; yalnız `ETHERSCAN_API_KEY` boşsa yedek okunur. basescan.org V1 anahtarı artık hiçbir şeyi doğrulamaz | Opsiyonel (`""`) | gerekmez | kaçının | kaçının | C/.env | `hardhat.config.js` |
+| `VERIFY_AFTER_DEPLOY` | `true` = `deploy.js` 5 onay bekler, sonra `verify.js` mantığını çalıştırır; hata yalnız uyarır | Opsiyonel (`false`) | yok sayılır | opsiyonel | opsiyonel | terminal | `deploy.js` |
+| `VERIFY_DRY_RUN` | `true` = `verify.js` ağ çağrısı yapmadan planı yazdırır | Opsiyonel (`false`) | opsiyonel | opsiyonel | opsiyonel | terminal | `verify.js` |
+| `VERIFY_RETRIES` / `VERIFY_RETRY_DELAY_MS` | Explorer bytecode'u henüz indekslemediyse deneme sayısı (varsayılan 5) / bekleme (varsayılan 20000 ms) | Opsiyonel | opsiyonel | opsiyonel | opsiyonel | terminal | `verify.js` |
 | `REPORT_GAS` | `true` ise gas raporu | Opsiyonel (kapalı) | `false` | `false` | `false` | C/.env | `hardhat.config.js:129` |
 | 🔒 `CMC_API_KEY` | Gas raporunda fiyat için CoinMarketCap anahtarı | Opsiyonel | gerekmez | gerekmez | gerekmez | C/.env | `hardhat.config.js:131` |
 | `ARAF_SOLCJS_PATH` | Native derleyici indirilemeyen ortamda `soljson.js` yolu | Opsiyonel (etkisiz) | nadiren | nadiren | nadiren | C/.env | `hardhat.config.js:48` |
@@ -303,7 +307,7 @@ Yerelde Sepolia build'i için `npm run build:frontend:testnet` (`package.json:12
 | Özel anahtar / token | `DEPLOYER_PRIVATE_KEY`, `RELAYER_PRIVATE_KEY`, `FLY_API_TOKEN`, `VERCEL_TOKEN` | Asla repoya, log'a ya da frontend'e. Deployer ve relayer farklı, düşük bakiyeli cüzdan olsun. |
 | Sır / token | `JWT_SECRET`, `MASTER_ENCRYPTION_KEY` (Sepolia'da düz Fly secret olarak durur; yalnız testnet, gerçek PII yok), `AWS_ENCRYPTED_DATA_KEY`, `VAULT_TOKEN`, `VAULT_ENCRYPTED_DATA_KEY`, `READY_INTERNAL_TOKEN` | Fly secrets / `.env`; repoya girmez. |
 | URL içinde anahtar/şifre | `MONGODB_URI`, `REDIS_URL`, `BASE_RPC_URL`, `BASE_WS_RPC_URL`, `BASE_SEPOLIA_RPC_URL` | Alchemy anahtarı ve DB/Redis şifresi URL'de durur; sır gibi davranın. |
-| API anahtarı | `BASESCAN_API_KEY`, `CMC_API_KEY` | Düşük risk ama paylaşmayın. |
+| API anahtarı | `ETHERSCAN_API_KEY`, `CMC_API_KEY` | Düşük risk ama paylaşmayın. |
 
 **Hiçbiri `VITE_*` olarak frontend'e konmamalıdır.** `VITE_*` değerleri build sırasında JavaScript paketine **düz metin olarak gömülür**; siteyi açan herkes
 görebilir (kaynak haritası kapalı olsa da `frontend/vite.config.js:28` yalnız kaynak haritasını kapatır, değer gömülmesini engellemez). Bu yüzden `VITE_*` içinde yalnız herkese açık bilgi
@@ -389,7 +393,7 @@ Tam: `deploy-base-sepolia.yml:211-228` · runtime: `deploy-runtime-base-sepolia.
 ### 7.3 Contracts: deploy adımına env olarak verilenler (`contracts/.env` yazılmaz)
 
 `deploy-base-sepolia.yml:87-100`: `CONFIRM_PUBLIC_DEPLOY=yes` (sabit), `DEPLOYER_PRIVATE_KEY`, `BASE_SEPOLIA_RPC_URL` (secret), `TREASURY_ADDRESS`, `FINAL_OWNER_ADDRESS`,
-`BASE_SEPOLIA_USDT_ADDRESS`, `BASE_SEPOLIA_USDC_ADDRESS` (variable). `BASESCAN_API_KEY` yalnız `verify_contracts=true` iken (deneysel, `continue-on-error`) ayrı adımda verilir; `deploy.js` adımına verilmez.
+`BASE_SEPOLIA_USDT_ADDRESS`, `BASE_SEPOLIA_USDC_ADDRESS` (variable). `ETHERSCAN_API_KEY` (yoksa eski `BASESCAN_API_KEY` secret'ı) yalnız `verify_contracts=true` iken (deneysel, `continue-on-error`, `npm run verify:base-sepolia` çalıştırır) ayrı adımda verilir; `deploy.js` adımına verilmez.
 
 ### 7.4 Yalnız GitHub'da anlamı olan adlar (kodda okunmaz)
 
@@ -403,7 +407,7 @@ Tam: `deploy-base-sepolia.yml:211-228` · runtime: `deploy-runtime-base-sepolia.
 | `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` | secret | Vercel CLI kimliği (`:31-32`, `:197-202`) |
 | `GH_VARIABLES_TOKEN` | secret (opsiyonel) | Tam deploy sonrası `gh variable set ARAF_ESCROW_ADDRESS/ARAF_DEPLOYMENT_BLOCK` için fine-grained PAT (yalnız bu repo, Variables: read and write). Log'a basılmaz |
 | `deploy_test_usdt` | workflow girdisi (tam deploy) | true ve `BASE_SEPOLIA_USDT_ADDRESS` variable'ı boşsa önce tUSDT deploy eder; variable doluysa yok sayılır |
-| `BASESCAN_API_KEY` | secret (opsiyonel) | Yalnız `verify_contracts=true` (deneysel) |
+| `ETHERSCAN_API_KEY` (eski: `BASESCAN_API_KEY`) | secret (opsiyonel) | Yalnız `verify_contracts=true` (deneysel) |
 | `ARAF_REVENUE_VAULT_ADDRESS`, `ARAF_REWARDS_ADDRESS` | variable (opsiyonel) | Tanımlıysa Fly secret ve Vercel `VITE_*` build-env olarak geçer |
 
 ---
