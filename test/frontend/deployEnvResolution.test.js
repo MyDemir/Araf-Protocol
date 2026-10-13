@@ -20,7 +20,7 @@ describe('frontend production env/api resolution guards', () => {
   it('useAppSessionData uses canonical buildApiUrl instead of raw API_URL', () => {
     const sessionSrc = read('src/app/useAppSessionData.jsx');
     expect(sessionSrc).toContain("import { buildApiUrl } from './apiConfig';");
-    expect(sessionSrc).toContain("fetch(buildApiUrl('orders/config')");
+    expect(sessionSrc).toContain("fetchWithTimeout(() => buildApiUrl('orders/config')");
     expect(sessionSrc).not.toContain('const API_URL');
   });
 

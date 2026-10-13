@@ -120,6 +120,10 @@ export const buildAppViews = (ctx) => {
     isContractLoading,
     loadingText,
     isPaused,
+    // [TR] txGate: YENİ pozisyon açan işlemlerin kapısı (paused / kontrol ediliyor / altyapı arızası). Trade room'a
+    //      yalnız gerçek isPaused gider; altyapı arızası çıkış eylemlerini kapatmaz, yalnız uyarı gösterir.
+    txGate = null,
+    infraDegraded = false,
     authChecked,
     currentView,
     setCurrentView,
@@ -199,6 +203,7 @@ export const buildAppViews = (ctx) => {
     showToast,
     settlementContractFns,
   } = ctx;
+  const newTxBlocked = Boolean(isPaused || txGate?.blocked);
 
   // [TR] Admin menü görünürlüğü yalnız UX katmanıdır; nihai yetki backend ADMIN_WALLETS + auth zincirindedir.
   //      Tek doğru kaynak sunucudur: /api/auth/me yanıtındaki `isAdmin` (boolean) → ctx.isAdmin. Yanıt yoksa (null)
@@ -415,7 +420,7 @@ export const buildAppViews = (ctx) => {
             </div>
             {/* [TR] Oturum yokken emir oluşturma düğmesi işlevsizdir; yerine üstteki "Cüzdan bağla" kartı var. */}
             {navUnlocked && (
-              <button onClick={handleOpenMakerModal} disabled={isPaused} className={`w-full h-11 rounded-lg text-sm font-semibold transition flex items-center justify-center gap-2 ${isPaused ? 'bg-elevated text-textMuted cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm'}`}>
+              <button onClick={handleOpenMakerModal} disabled={newTxBlocked} className={`w-full h-11 rounded-lg text-sm font-semibold transition flex items-center justify-center gap-2 ${newTxBlocked ? 'bg-elevated text-textMuted cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm'}`}>
                 <Plus className="w-4 h-4" strokeWidth={2} aria-hidden="true" /> {tr ? 'Yeni emir oluştur' : 'Create order'}
               </button>
             )}
@@ -447,7 +452,7 @@ export const buildAppViews = (ctx) => {
           <button onClick={() => setCurrentView('market')} className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-brand text-black text-sm font-bold hover:opacity-90 transition">
             <Store className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />{lang === 'TR' ? 'Pazara git' : 'Open market'}
           </button>
-          <button onClick={openCreateOrder} disabled={isPaused} className="px-6 py-3 rounded-xl bg-surface border border-borderStrong text-textPrimary text-sm font-bold hover:bg-elevated transition disabled:opacity-50 disabled:cursor-not-allowed">
+          <button onClick={openCreateOrder} disabled={newTxBlocked} className="px-6 py-3 rounded-xl bg-surface border border-borderStrong text-textPrimary text-sm font-bold hover:bg-elevated transition disabled:opacity-50 disabled:cursor-not-allowed">
             {lang === 'TR' ? '+ Emir oluştur' : '+ Create order'}
           </button>
         </div>
@@ -583,7 +588,7 @@ export const buildAppViews = (ctx) => {
       <div className="w-full max-w-[1200px] min-w-0 p-4 md:p-8">
         <div className="mb-4 flex items-center justify-between gap-3">
           <h2 className="text-xl font-bold text-textPrimary">{tr ? 'Pazar' : 'Market'}</h2>
-          <button onClick={openCreateOrder} disabled={isPaused} className="inline-flex items-center gap-1.5 h-9 px-3 md:px-4 rounded-lg bg-brand text-black text-sm font-semibold hover:opacity-90 disabled:opacity-50">
+          <button onClick={openCreateOrder} disabled={newTxBlocked} className="inline-flex items-center gap-1.5 h-9 px-3 md:px-4 rounded-lg bg-brand text-black text-sm font-semibold hover:opacity-90 disabled:opacity-50">
             <Plus className="w-4 h-4" strokeWidth={2} aria-hidden="true" />{tr ? 'Emir oluştur' : 'Create order'}
           </button>
         </div>
@@ -701,7 +706,7 @@ export const buildAppViews = (ctx) => {
               const effectiveUserTier = userReputation?.effectiveTier ?? 0;
               const isMyOwnAd    = address && order.makerFull?.toLowerCase() === address.toLowerCase();
               const isTierLocked = isConnected && isAuthenticated && order.tier > effectiveUserTier;
-              const canTakeOrder = isConnected && isAuthenticated && !isMyOwnAd && !isTierLocked && !isPaused;
+              const canTakeOrder = isConnected && isAuthenticated && !isMyOwnAd && !isTierLocked && !newTxBlocked;
               const tokenAddr    = SUPPORTED_TOKEN_ADDRESSES[order.crypto || 'USDT'];
               const isTokenConfigured = Boolean(tokenAddr);
               const isCorrectChain    = isSupportedChainId(chainId);
@@ -723,7 +728,7 @@ export const buildAppViews = (ctx) => {
               const ownerProfileMissing = isOwnerPayoutProfileMissing(order);
               // [TR] Emir sahibinin profil rail'i admin tarafından kapatıldıysa yeni doldurma kapalı (aktif işlemler etkilenmez).
               const ownerRailDisabled = isOwnerRailDisabled(order);
-              const finalCanTakeOrder = canTakeOrder && !needsOwnProfile && !ownerProfileMissing && !ownerRailDisabled && !isOwnerBanned && isCooldownOk && isFunded && isAged && !isPaused && isTokenConfigured && isCorrectChain;
+              const finalCanTakeOrder = canTakeOrder && !needsOwnProfile && !ownerProfileMissing && !ownerRailDisabled && !isOwnerBanned && isCooldownOk && isFunded && isAged && !newTxBlocked && isTokenConfigured && isCorrectChain;
               // [TR] Renk kullanıcının yapacağı işi anlatır: "Satın Al" yeşil, "Sat" kırmızı. Emir yönü rozeti nötrdür;
               //      renkli rozet (ör. yeşil "Satış emri") yanındaki butonla çelişiyordu.
               // [EN] Colour follows the viewer's action (buy green, sell red); the order-side badge stays neutral.
@@ -737,6 +742,7 @@ export const buildAppViews = (ctx) => {
                 // Signed out: keep the action label and colour; the click starts sign-in.
                 needsSignIn         ? <>{order.ctaLabel || (tr ? 'İşlem yap' : 'Trade')}</> :
                 isPaused            ? <>{icon(CirclePause)} {tr ? 'Bakımda' : 'Paused'}</> :
+                newTxBlocked        ? <>{icon(LoaderCircle, txGate?.reason === 'checking')} {txGate?.reason === 'checking' ? (tr ? 'Kontrol ediliyor…' : 'Checking…') : (tr ? 'Doğrulanamıyor' : 'Unverified')}</> :
                 !isCorrectChain     ? <>{icon(Unplug)} {tr ? 'Yanlış ağ' : 'Wrong network'}</> :
                 !isTokenConfigured  ? <>{icon(Settings)} {tr ? 'Token ayarlanmadı' : 'Token not set'}</> :
                 isMyOwnAd           ? <>{tr ? 'Sizin emriniz' : 'Your order'}</> :
@@ -824,7 +830,7 @@ export const buildAppViews = (ctx) => {
                       </div>
                     </details>
                   </div>
-                  {!isFunded && isConnected && canTakeOrder && !isPaused && (
+                  {!isFunded && isConnected && canTakeOrder && !newTxBlocked && (
                     <p className="mt-2 text-xs text-danger">{tr ? 'En az 0.001 ETH gerekli.' : 'Needs at least 0.001 ETH.'}</p>
                   )}
                 </article>
@@ -844,7 +850,7 @@ export const buildAppViews = (ctx) => {
                   <RotateCcw className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />{tr ? 'Filtreleri temizle' : 'Clear filters'}
                 </button>
               )}
-              {!isPaused && !ordersFeedError && (
+              {!newTxBlocked && !ordersFeedError && (
                 <button onClick={openCreateOrder} className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-brand text-black text-sm font-semibold hover:opacity-90">
                   <Plus className="w-4 h-4" strokeWidth={2} aria-hidden="true" />{tr ? 'İlk emri oluştur' : 'Create the first order'}
                 </button>
@@ -1191,7 +1197,16 @@ export const buildAppViews = (ctx) => {
   // [TR] P1: işlem odası saat sınırı içinde render edilir; yalnız bu alt ağaç saniyede bir güncellenir.
   // [EN] P1: the trade room renders inside a clock boundary; only this subtree updates each second.
   const renderTradeRoom = () => (
-    <NowBoundary fixedNowMs={chainNowMs} render={renderTradeRoomAt} />
+    <>
+      {infraDegraded && (
+        <p data-testid="trade-room-infra-notice" role="status" className="w-full max-w-[900px] mx-4 mb-3 px-4 py-2 rounded-lg border border-borderSubtle bg-elevated text-xs md:text-sm text-textSecondary">
+          {lang === 'TR'
+            ? 'Zincir/sunucu durumu şu an doğrulanamıyor; gösterilen süreler yaklaşık olabilir. İşlemleriniz kontrat kurallarına göre zincirde doğrulanır.'
+            : 'Chain/server status cannot be verified right now; displayed timers may be approximate. Your transactions are verified on-chain by the contract rules.'}
+        </p>
+      )}
+      <NowBoundary fixedNowMs={chainNowMs} render={renderTradeRoomAt} />
+    </>
   );
 
   const renderMobileNav = () => {

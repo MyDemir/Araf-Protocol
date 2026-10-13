@@ -1,4 +1,5 @@
 import { SystemStatusBar } from './SystemStatusBar';
+import ErrorBoundary from '../../components/ErrorBoundary';
 
 export const AppShell = ({
   children,
@@ -12,7 +13,8 @@ export const AppShell = ({
 }) => {
   return (
     <>
-      {status ? <SystemStatusBar {...status} /> : null}
+      {/* [TR] Bant çökerse sessizce düşer; site açık kalır. */}
+      {status ? <ErrorBoundary scope="section" fallback={null}><SystemStatusBar {...status} /></ErrorBoundary> : null}
       {mobileTop}
       <div className="flex min-w-0 flex-col md:flex-row min-h-0 flex-1">
         {navigation}

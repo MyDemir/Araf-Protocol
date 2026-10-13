@@ -21,6 +21,7 @@
 import { TriangleAlert } from 'lucide-react';
 import React from 'react';
 import { resolveClientErrorLogUrl } from '../app/apiConfig';
+import { isChunkLoadError } from '../app/lazyWithRetry';
 
 // [TR] Hassas veri pattern'ları — log göndermeden önce temizlenir
 // [EN] Sensitive data patterns — scrubbed before sending logs
@@ -77,13 +78,18 @@ export default class ErrorBoundary extends React.Component {
 
     // FRONT-11 Fix: Log endpoint çözümlemesi canonical /api üzerinden tek helper'da.
     // Üretimde VITE_API_URL boş olsa bile same-origin /api rewrite ile log denemesi yapılır.
-    const logUrl = resolveClientErrorLogUrl();
+    // [TR] Politika ihlalinde (prod + mutlak VITE_API_URL) bu çağrı fırlatır; boundary'nin kendisi çökerse tüm ağaç
+    //      sökülüp beyaz ekran kalıyordu. Log atılamıyorsa yalnız konsola yazılır.
+    // [EN] On an API policy violation this throws; a throwing boundary unmounts the whole tree (white screen).
+    let logUrl;
+    try { logUrl = resolveClientErrorLogUrl(); } catch { logUrl = null; }
 
     // YÜKS-10 Fix: PII içerebilecek alanlar gönderilmeden önce scrub ediliyor
-    const scrubbedMessage    = scrubPII(error.message || 'Bilinmeyen Render Hatası');
-    const scrubbedStack      = scrubPII(error.stack || '');
+    if (!logUrl) return;
+    const scrubbedMessage    = scrubPII(error?.message || 'Bilinmeyen Render Hatası');
+    const scrubbedStack      = scrubPII(error?.stack || '');
     // PIIDisplay kaynaklı hatalar için componentStack'ten yalnızca bileşen adları alınır
-    const componentStackLines = (errorInfo.componentStack || '')
+    const componentStackLines = (errorInfo?.componentStack || '')
       .split('\n')
       .filter(Boolean)
       .map(line => line.trim())
@@ -91,6 +97,7 @@ export default class ErrorBoundary extends React.Component {
 
     try {
       fetch(logUrl, {
+        signal: typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(5000) : undefined,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -112,7 +119,42 @@ export default class ErrorBoundary extends React.Component {
   }
 
 
+  componentDidUpdate(prevProps) {
+    // [TR] Görünüm değişince (resetKeys) bölüm yedek UI'si kapanır; kullanıcı başka sekmeye geçince yeniden dener.
+    if (this.state.hasError && Array.isArray(this.props.resetKeys)) {
+      const prev = prevProps.resetKeys || [];
+      if (this.props.resetKeys.length !== prev.length || this.props.resetKeys.some((k, i) => !Object.is(k, prev[i]))) {
+        this.setState({ hasError: false, error: null });
+      }
+    }
+  }
+
   render() {
+    if (this.state.hasError && this.props.scope === 'section') {
+      if (this.props.fallback !== undefined) return this.props.fallback;
+      const chunk = isChunkLoadError(this.state.error);
+      return (
+        <div role="alert" data-testid="section-error-fallback" className="w-full max-w-xl mx-auto my-8 p-6 rounded-xl border border-red-500/30 bg-surface text-center">
+          <TriangleAlert className="w-8 h-8 mx-auto mb-3 text-red-400" strokeWidth={1.8} aria-hidden="true" />
+          <h2 className="font-bold text-lg mb-2">{chunk ? 'Bu bölüm yüklenemedi / This section failed to load' : 'Bu bölüm görüntülenemedi / This section could not be displayed'}</h2>
+          <p className="text-sm text-textMuted mb-4">
+            {chunk
+              ? 'Bağlantı kesilmiş ya da yeni sürüm yayınlanmış olabilir. Yenileyin. / Connection dropped or a new version was deployed. Please reload.'
+              : 'Diğer bölümler çalışmaya devam ediyor. / The rest of the app keeps working.'}
+          </p>
+          <div className="flex gap-2 justify-center">
+            {!chunk && (
+              <button type="button" onClick={() => this.setState({ hasError: false, error: null })} className="px-4 py-2 rounded-lg border border-borderStrong text-sm font-semibold">
+                Tekrar dene / Retry
+              </button>
+            )}
+            <button type="button" onClick={() => window.location.reload()} className="px-4 py-2 rounded-lg bg-brand text-black text-sm font-semibold">
+              Sayfayı yenile / Reload
+            </button>
+          </div>
+        </div>
+      );
+    }
     if (this.state.hasError) {
       return (
         <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4 font-sans">

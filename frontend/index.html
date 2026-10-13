@@ -18,6 +18,10 @@
   </head>
   <body class="bg-slate-900 text-white">
     <div id="root"></div>
+    <noscript>Araf Protocol JavaScript gerektirir. / Araf Protocol requires JavaScript.</noscript>
+    <!-- [TR] Açılış bekçisi harici dosyada: CSP 'unsafe-inline' olmadan da çalışır. Ana paket yüklenemezse "yenile" gösterir.
+         [EN] Boot watchdog in an external file so it works without CSP 'unsafe-inline'. -->
+    <script src="/boot-guard.js"></script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
