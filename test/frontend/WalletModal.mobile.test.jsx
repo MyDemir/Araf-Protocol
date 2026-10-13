@@ -31,15 +31,41 @@ const renderModal = (over = {}) => {
 };
 
 describe('wallet modal on mobile', () => {
-  it('shows deeplink picker, hides generic Injected, keeps Coinbase Smart Wallet', () => {
+  it('shows two buttons, hidden deeplinks, toggles four links', async () => {
     setUa(IPHONE);
-    renderModal();
+    const ctx = renderModal();
     expect(screen.getByTestId('mobile-wallet-picker')).toBeTruthy();
-    for (const id of ['metamask', 'okx', 'trust', 'coinbase']) {
-      expect(document.querySelector(`a[data-wallet-link="${id}"]`)).toBeTruthy();
-    }
     expect(screen.queryByText('Injected')).toBeNull();
-    expect(screen.getByText('Connect with Coinbase Smart Wallet')).toBeTruthy();
+    const toggle = screen.getByTestId('browser-wallet-toggle');
+    expect(screen.getByText('Coinbase Wallet')).toBeTruthy();
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(document.querySelectorAll('a[data-wallet-link]').length).toBe(0);
+    await userEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(document.getElementById(toggle.getAttribute('aria-controls'))).toBeTruthy();
+    for (const id of ['metamask', 'okx', 'trust', 'coinbase']) {
+      const a = document.querySelector(`a[data-wallet-link="${id}"]`);
+      expect(a).toBeTruthy();
+      expect(a.getAttribute('rel')).toBe('noopener noreferrer');
+    }
+    expect(ctx.connect).not.toHaveBeenCalled();
+    await userEvent.click(toggle);
+    expect(document.querySelectorAll('a[data-wallet-link]').length).toBe(0);
+  });
+
+  it('coinbase button always connects', async () => {
+    setUa(IPHONE);
+    const ctx = renderModal();
+    await userEvent.click(screen.getByText('Coinbase Wallet'));
+    expect(ctx.connect).toHaveBeenCalledWith({ connector: connectors[1] }, expect.anything());
+  });
+
+  it('injected button connects when a provider exists', async () => {
+    setUa(IPHONE);
+    window.ethereum = {};
+    const ctx = renderModal();
+    await userEvent.click(screen.getByText('Injected'));
+    expect(ctx.connect).toHaveBeenCalledWith({ connector: connectors[0] }, expect.anything());
   });
 
   it('keeps the normal list on mobile when a wallet is injected', () => {
