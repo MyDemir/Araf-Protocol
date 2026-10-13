@@ -81,7 +81,7 @@ export default class ErrorBoundary extends React.Component {
     // [TR] Politika ihlalinde (prod + mutlak VITE_API_URL) bu çağrı fırlatır; boundary'nin kendisi çökerse tüm ağaç
     //      sökülüp beyaz ekran kalıyordu. Log atılamıyorsa yalnız konsola yazılır.
     // [EN] On an API policy violation this throws; a throwing boundary unmounts the whole tree (white screen).
-    let logUrl = null;
+    let logUrl;
     try { logUrl = resolveClientErrorLogUrl(); } catch { logUrl = null; }
 
     // YÜKS-10 Fix: PII içerebilecek alanlar gönderilmeden önce scrub ediliyor

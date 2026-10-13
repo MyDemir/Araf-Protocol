@@ -44,7 +44,7 @@ const schedule = (kind) => {
     // [TR] Sekme gizliyken yoklama atlanır (gereksiz istek yok). [EN] Skip while the tab is hidden.
     if (typeof document !== 'undefined' && document.hidden) { schedule(kind); return; }
     attempts[kind] += 1;
-    let ok = false;
+    let ok;
     try { ok = Boolean(await probes[kind]()); } catch { ok = false; }
     if (ok) markInfraOk(kind);
     else schedule(kind);

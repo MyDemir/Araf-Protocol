@@ -328,9 +328,9 @@ describe('frontend migration scaffold baseline', () => {
 
     expect(appSource).toContain("import AppShell from './app/shell/AppShell';");
     expect(appSource).toContain('<AppShell');
-    expect(appSource).toContain('navigation={renderSlimRail()}');
-    expect(appSource).toContain('panel={renderContextSidebar()}');
-    expect(appSource).toContain('mobileBottom={renderMobileNav()}');
+    expect(appSource).toContain('<ViewSlot render={renderSlimRail} />');
+    expect(appSource).toContain('<ViewSlot render={renderContextSidebar} />');
+    expect(appSource).toContain('<ViewSlot render={renderMobileNav} />');
     expect(appSource).toContain('status={systemStatus}');
     expect(appSource).toContain('const systemStatus = React.useMemo(() => ({');
     expect(appSource).toContain('...ENV_ERRORS,');
