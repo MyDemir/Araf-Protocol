@@ -210,6 +210,14 @@ export const buildAppViews = (ctx) => {
   const connectedWalletLower = typeof address === "string" ? address.toLowerCase() : null;
   const isLikelyAdminWallet = ctx.isAdmin === true;
   const canSeeAdminEntry = Boolean(isConnected && isAuthenticated && connectedWalletLower && isLikelyAdminWallet);
+  // [TR] Yalnız UX ipucu: hangi cüzdanların admin olduğu ASLA gösterilmez. Bağlı ama imzasız → oturum aç;
+  //      oturum açık ve sunucu isAdmin=false dediyse → bu cüzdan yönetici değil (ya da sunucuda yönetici listesi tanımsız).
+  // [EN] UX hint only; never reveals which wallets are admins.
+  const adminHintTitle = isConnected && !isAuthenticated && authChecked
+    ? (lang === 'TR' ? 'Cüzdan bağlı ama oturum açılmadı: yönetim paneli için imzalayın' : 'Wallet connected but not signed in: sign in to access the admin panel')
+    : (isConnected && isAuthenticated && ctx.isAdmin === false
+      ? (lang === 'TR' ? 'Profil Merkezi · Bu cüzdan yönetici değil (yönetici ise sunucu ADMIN_WALLETS ayarını kontrol edin)' : 'Profile Center · This wallet is not an admin (if it should be, check the server ADMIN_WALLETS setting)')
+      : null);
   // [TR] İşlem Odası, Takip, Profil ve Geçmiş yalnız imzalı oturumla anlamlıdır; oturum yokken gezinmede
   //      gösterilmez (App.jsx de bu görünümlerden ana sayfaya yönlendirir). UI Lab senaryoları istisnadır.
   // [EN] Trade room, tracking, profile and history need a signed session; hidden from navigation otherwise.
@@ -250,7 +258,7 @@ export const buildAppViews = (ctx) => {
           <ThemeToggle lang={lang} />
         </div>
         <button onClick={() => setLang(lang === 'TR' ? 'EN' : 'TR')} title={lang === 'TR' ? 'Dili Değiştir' : 'Change Language'} className="text-xs font-bold text-textMuted hover:text-textPrimary mb-1">{lang}</button>
-        <button onClick={handleAuthAction} title={isConnected && isAuthenticated ? (lang === 'TR' ? 'Profil Merkezi' : 'Profile Center') : (lang === 'TR' ? 'Cüzdan Bağla' : 'Connect Wallet')} className={`w-10 h-10 rounded-full border-2 flex items-center justify-center transition-all shadow-lg mx-auto ${isConnected && isAuthenticated ? 'border-emerald-500 bg-emerald-900/20 text-emerald-400 hover:bg-emerald-900/40 shadow-[0_0_10px_rgba(16,185,129,0.2)]' : 'border-borderStrong bg-surface text-textMuted hover:text-textPrimary hover:border-brand/50 hover:bg-elevated'}`}>
+        <button onClick={handleAuthAction} title={adminHintTitle || (isConnected && isAuthenticated ? (lang === 'TR' ? 'Profil Merkezi' : 'Profile Center') : (lang === 'TR' ? 'Cüzdan Bağla' : 'Connect Wallet'))} className={`w-10 h-10 rounded-full border-2 flex items-center justify-center transition-all shadow-lg mx-auto ${isConnected && isAuthenticated ? 'border-emerald-500 bg-emerald-900/20 text-emerald-400 hover:bg-emerald-900/40 shadow-[0_0_10px_rgba(16,185,129,0.2)]' : 'border-borderStrong bg-surface text-textMuted hover:text-textPrimary hover:border-brand/50 hover:bg-elevated'}`}>
           {isLoggingIn || !authChecked ? <LoaderCircle className="w-4 h-4 animate-spin" strokeWidth={1.8} aria-hidden="true" /> : <Wallet className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" />}
         </button>
       </div>

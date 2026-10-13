@@ -253,7 +253,7 @@ Aylık CU tahmini (`eth_getLogs` ~75 CU + `eth_blockNumber` ~10 CU = tur başın
 
 | Değişken | Ne işe yarar | Zorunlu mu? | Y | S | M | Nereye | Kullanıldığı yer |
 |---|---|---|---|---|---|---|---|
-| `ADMIN_WALLETS` | `/api/admin/*` ve `isAdmin` için cüzdanlar (virgüllü) | Opsiyonel (boşsa kimse admin değil) | kendi cüzdanın | `0x…40 hex` | `0x…40 hex` | B/.env, Fly | `utils/adminWallets.js:6` |
+| `ADMIN_WALLETS` | `/api/admin/*` ve `isAdmin` için cüzdanlar (virgüllü) | Opsiyonel ama **üretimde fiilen gerekli**: boşsa kimse admin değil, admin menüsü hiç görünmez ve açılışta tek uyarı loglanır. Fly: `fly secrets set ADMIN_WALLETS=0x…,0x…` (deploy workflow'u yalnız GitHub variable doluysa yazar); değişince yeniden başlat | kendi cüzdanın | `0x…40 hex` | `0x…40 hex` | B/.env, Fly | `utils/adminWallets.js:6` |
 | `IDENTITY_NORMALIZATION_GUARD` | `off` / `warn` / `enforce` (karışık numeric id guard'ı) | Opsiyonel (prod `enforce`, diğer `warn`) | boş | boş | boş | B/.env, Fly | `app.js:88-94` |
 | `PII_IDENTITY_NORMALIZATION_GUARD` | PII route'ları için ayrı mod | Opsiyonel (önceki değişken, o da yoksa `enforce`) | boş | boş | boş | B/.env, Fly | `routes/pii.js:80` |
 | `IDENTITY_MIGRATION_BATCH_SIZE` | `migrate:identity` batch boyutu | Opsiyonel (`1000`) | boş | boş | boş | B/.env | `migrations/normalizeIdentityFields.js:170` |
@@ -453,3 +453,16 @@ Düzeltilenler "düzeltildi" ile işaretlidir; diğerleri açıktır. (Önceki t
 11. **[düzeltildi: `scripts/init-env.js` / `npm run init:env` sırları üretir; `.env.example`'a yerel `EXPECTED_CHAIN_ID=31337` notu eklendi, örnek değer 8453 kaldı]** **`backend/.env.example` düz `cp` ile kopyalanınca olduğu gibi çalışmaz (bilinçli):** `JWT_SECRET` örneği 60 karakter (`:30`), kod en az 64 ister (`siwe.js:95`); `MASTER_ENCRYPTION_KEY` örneği (`:75`) 64 hex değil (`encryption.js:114`); `EXPECTED_CHAIN_ID=8453` örneği (`:83`) yerelde RPC farklıysa uyuşmazlık hatası verir (`expectedChain.js:55-58`).
 12. **[düzeltildi: backend/.env.example yorumları netleştirildi]** **Prod'da fail-fast olup örnekte az vurgulananlar:** `JWT_SECRET` prod'a özel değil, **her ortamda** zorunlu (`siwe.js:94`, modül yüklenirken; `/ready` de `health.js:96-99` ile ister). Yalnız-localhost `ALLOWED_ORIGINS` açılışta süreci durdurur (`app.js:161-163`). `ARAF_DEPLOYMENT_BLOCK`/`WORKER_START_BLOCK` ve Redis checkpoint yoksa prod'da worker `throw` eder (`eventListener.js:1098-1100`).
 13. **[düzeltildi: rewards deploy'u bilinçli olarak workflow dışı kalır; ancak repo variable `ARAF_REVENUE_VAULT_ADDRESS`/`ARAF_REWARDS_ADDRESS` tanımlıysa (adres regex'iyle doğrulanır) her iki workflow bunları Fly secret (aynı adlar) ve Vercel build-env (`VITE_REVENUE_VAULT_ADDRESS`, `VITE_REWARDS_ADDRESS`) olarak geçirir; tanımlı değilse hiçbir şey yazılmaz]** **Rewards workflow dışı.** Rewards ayrı operasyondur (`DEPLOY_BASE_SEPOLIA.md`); adresler variable olarak girilene kadar Sepolia demosunda reward mirror ve recorder pasif kalır.
+
+
+### Çalışma ayarları (admin panelinden)
+
+Öncelik: **admin değeri > env > koddaki varsayılan**; sınırlar her kaynak için sunucuda uygulanır. Değişiklik yeniden başlatma gerekmeden sonraki turdan itibaren geçerlidir (önbellek 15 sn; DB okunamazsa son bilinen değer, o da yoksa env/varsayılan).
+
+| Ayar | Sınır | Varsayılan |
+|---|---|---|
+| `LIVE_POLL_INTERVAL_MS` | 5000–300000 | 15000 |
+| `WORKER_BLOCK_BATCH_SIZE` | 1–2000 | 1000 |
+| `WORKER_REPLAY_BATCH_DELAY_MS` | 0–10000 | 250 |
+
+RPC URL'leri (`BASE_RPC_URL`, `BASE_RPC_URL_FALLBACKS`) bilerek panelde yoktur ve yalnız env'de kalır: ele geçirilmiş bir admin oturumu doğru zincir ID'siyle sahte log döndüren bir RPC verebilir ve worker o log'lara güvenir. Gizli anahtarlar, kontrat adresleri, `EXPECTED_CHAIN_ID`, finality, CORS, `ADMIN_WALLETS`, KMS ve SEC-01 ayarları da yalnız env'dir.
