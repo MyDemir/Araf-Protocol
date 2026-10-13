@@ -553,7 +553,7 @@ async function bootstrap() {
     }
 
     const PORT = process.env.PORT || 4000;
-    server =app.listen(PORT, () => {
+    server = app.listen(PORT, () => {
       logger.info("===========================================================");
       logger.info(`🚀 Araf Protocol Backend Dinleniyor: Port ${PORT}`);
       logger.info(`🌍 Ortam: ${process.env.NODE_ENV || "development"}`);

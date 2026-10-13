@@ -467,4 +467,8 @@ Precedence: **admin value > env > code default**; bounds are enforced server-sid
 | `WORKER_BLOCK_BATCH_SIZE` | 1–2000 | 1000 |
 | `WORKER_REPLAY_BATCH_DELAY_MS` | 0–10000 | 250 |
 
+Extreme combinations (e.g. `WORKER_BLOCK_BATCH_SIZE=1` with `WORKER_REPLAY_BATCH_DELAY_MS=0`) make the worker hammer the RPC and can exhaust the quota or trigger 429s.
+
+Recommendation: enforce append-only at the DB role level for the audit collections (`runtimesettingaudits`, `paymentrailaudits`): grant the application role only `insert` and `find`, no `update`/`remove`. Schema-level immutability is enforced in code only; the DB role is the second layer.
+
 RPC URLs (`BASE_RPC_URL`, `BASE_RPC_URL_FALLBACKS`) are intentionally not in the panel and stay env-only: a hijacked admin session could supply an RPC that reports the right chain ID but returns forged logs, and the worker trusts those logs. Secrets, contract addresses, `EXPECTED_CHAIN_ID`, finality, CORS, `ADMIN_WALLETS`, KMS and SEC-01 settings are also env-only.

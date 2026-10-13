@@ -59,13 +59,13 @@ function makeFakes() {
   return { store, Setting, Audit };
 }
 
-function build() {
+function build({ ready = true } = {}) {
   jest.resetModules();
   process.env.ADMIN_WALLETS = ADMIN;
   ENV_KEYS.forEach((k) => delete process.env[k]);
   const fakes = makeFakes();
   // Bağlantı "hazır" varsay (servis bağlantı yokken DB'ye hiç gitmez).
-  Object.defineProperty(require("mongoose").connection, "readyState", { value: 1, configurable: true });
+  Object.defineProperty(require("mongoose").connection, "readyState", { value: ready ? 1 : 0, configurable: true });
 
   jest.doMock("../../backend/scripts/services/siwe", () => ({
     verifyJWT: jest.fn((token) => {
@@ -126,6 +126,18 @@ describe("admin runtime settings API", () => {
     const ok = await as(request(app).get("/api/admin/runtime-settings"));
     expect(ok.status).toBe(200);
     expect(ok.body.settings.map((s) => s.key)).toEqual(ENV_KEYS);
+  });
+
+  it("write path returns 503 immediately when the DB connection is not ready", async () => {
+    const { app, Setting, Audit } = build({ ready: false });
+    const res = await as(request(app).put("/api/admin/runtime-settings/WORKER_BLOCK_BATCH_SIZE").send({ value: 10 }));
+    expect(res.status).toBe(503);
+    expect(res.body.code).toBe("DB_UNAVAILABLE");
+    expect(Setting.findOne).not.toHaveBeenCalled();
+    expect(Setting.updateOne).not.toHaveBeenCalled();
+    expect(Audit.create).not.toHaveBeenCalled();
+    // sınır dışı değer bağlantıdan bağımsız 400 kalır
+    expect((await as(request(app).put("/api/admin/runtime-settings/WORKER_BLOCK_BATCH_SIZE").send({ value: 0 }))).status).toBe(400);
   });
 
   it("rejects out-of-range, non-integer, unknown, malformed bodies with 400", async () => {

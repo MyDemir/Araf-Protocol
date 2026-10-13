@@ -190,6 +190,8 @@ async function setSetting(rawKey, value, { wallet, reason = "", ipHash = null, e
   const key = String(rawKey || "");
   if (!isKnownSetting(key)) throw _err("SETTING_UNKNOWN", "Bilinmeyen ayar.");
   if (value !== null && !isInBounds(key, value)) throw _err("SETTING_OUT_OF_RANGE", "Değer sınırlar dışında.");
+  // Bağlantı yoksa Mongoose işlemi tamponda bekletir: hemen 503.
+  if (mongoose.connection.readyState !== 1) throw _err("DB_UNAVAILABLE", "Veritabanı şu an kullanılamıyor.");
 
   const doc = await RuntimeSetting.findOne({ key: SETTING_KEY }).lean();
   const currentVersion = doc ? Number(doc.version || 0) : 0;

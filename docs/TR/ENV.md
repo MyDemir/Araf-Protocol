@@ -465,4 +465,8 @@ Düzeltilenler "düzeltildi" ile işaretlidir; diğerleri açıktır. (Önceki t
 | `WORKER_BLOCK_BATCH_SIZE` | 1–2000 | 1000 |
 | `WORKER_REPLAY_BATCH_DELAY_MS` | 0–10000 | 250 |
 
+Uç kombinasyonlar (ör. `WORKER_BLOCK_BATCH_SIZE=1` ile `WORKER_REPLAY_BATCH_DELAY_MS=0`) RPC'yi çok yoğun sorgulatır ve 429/kota tükenmesine yol açabilir.
+
+Öneri: `runtimesettings`/`runtimesettingaudits` ve `paymentrailaudits` koleksiyonlarında uygulama DB rolüne DB rolü düzeyinde append-only izin verin (audit koleksiyonlarında yalnız `insert` ve `find`; `update`/`remove` yok). Şema düzeyindeki değiştirilemezlik kodla sınırlıdır; DB rolü ikinci katmandır.
+
 RPC URL'leri (`BASE_RPC_URL`, `BASE_RPC_URL_FALLBACKS`) bilerek panelde yoktur ve yalnız env'de kalır: ele geçirilmiş bir admin oturumu doğru zincir ID'siyle sahte log döndüren bir RPC verebilir ve worker o log'lara güvenir. Gizli anahtarlar, kontrat adresleri, `EXPECTED_CHAIN_ID`, finality, CORS, `ADMIN_WALLETS`, KMS ve SEC-01 ayarları da yalnız env'dir.

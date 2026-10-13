@@ -742,6 +742,9 @@ router.put("/payment-rails/:rail", adminWriteLimiter, async (req, res, next) => 
     });
     return res.json({ success: true, ...result });
   } catch (err) {
+    if (err.code === "DB_UNAVAILABLE") {
+      return res.status(503).json({ error: err.message, code: "DB_UNAVAILABLE" });
+    }
     if (err.code === "LAST_ENABLED_RAIL") {
       return res.status(409).json({ error: err.message, code: "LAST_ENABLED_RAIL" });
     }
@@ -808,6 +811,9 @@ router.put("/runtime-settings/:key", adminWriteLimiter, async (req, res, next) =
     });
     return res.json({ success: true, ...result });
   } catch (err) {
+    if (err.code === "DB_UNAVAILABLE") {
+      return res.status(503).json({ error: err.message, code: "DB_UNAVAILABLE" });
+    }
     if (err.code === "SETTING_CONFLICT") {
       return res.status(409).json({ error: err.message, code: "RUNTIME_SETTING_CONFLICT" });
     }
