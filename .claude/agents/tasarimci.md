@@ -5,7 +5,7 @@ description: Görsel yargı gerektiren işler - logo, sosyal
   karakter.
 model: opus
 tools: Read, Write, Edit, Glob, Grep, Bash
-maxTurns: 30
+maxTurns: 80
 effort: high
 isolation: worktree
 ---
