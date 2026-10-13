@@ -22,6 +22,7 @@ import { ENV_ERROR_CODES, envError } from './app/envErrorCodes';
 import ErrorBoundary from './components/ErrorBoundary';
 import { lazyWithRetry } from './app/lazyWithRetry';
 import { useInfraHealth } from './app/infraHealth';
+import { resolveNewTxGate } from './app/txGate';
 import { resolveRevenueVaultAddress } from './app/envConfig';
 import { useMakerOrderForm } from './app/contexts/marketplace/useMakerOrderForm';
 import { useMarketFilters } from './app/contexts/marketplace/marketFilters';
@@ -64,11 +65,12 @@ function App() {
   // 1. EKRAN VE UI STATE YÖNETİMİ
   //    View routing + modal open/close flags
   // ═══════════════════════════════════════════
-  // [TR] Fail-closed: backend ya da RPC erişilemezken yeni pozisyon açan işlemler (emir oluştur / emre gir) kapalıdır.
-  //      Mevcut işlemden çıkış eylemleri (serbest bırak, itiraz vb.) kapatılmaz; kullanıcı süre kaybetmesin.
-  // [EN] Fail-closed: new-position txs are disabled while backend or RPC is unreachable; exit actions stay available.
+  // [TR] Fail-closed: YENİ pozisyon açan işlemler (emir oluştur / emre gir) paused, "ilk zincir okuması gelmedi" ya da
+  //      backend/RPC arızasında kapalıdır (bkz. app/txGate.js; eylem fonksiyonları da çağrı anında kontrol eder).
+  //      Mevcut işlemden ÇIKIŞ eylemleri (ödeme bildir, release, itiraz, ping...) altyapı arızasında KAPATILMAZ:
+  //      kontrat zaman kurallarını zincirde kendisi uygular, engellemek süre kaçırtıp fon kaybettirebilir.
+  //      Trade room'a yalnız gerçek kontrat pause'u (isPaused) gider.
   const infra = useInfraHealth();
-  const infraTxBlocked = infra.backend || infra.rpc;
   const uiLabEnabled = isUiLabEnabled();
   // [TR] Lab kodu yalnız etkinse ve ilk ihtiyaçta yüklenir. [EN] Lab code loads only when enabled.
   const [uiLab, setUiLab] = useState(null);
@@ -224,6 +226,7 @@ function App() {
     walletAgeRemainingDays,
     takerName,
     isPaused,
+    rpcChecked,
     protocolStats,
     statsLoading,
     statsError,
@@ -295,6 +298,14 @@ function App() {
     marketFilters,
     devScenarioActive,
   });
+  const txGate = React.useMemo(() => resolveNewTxGate({
+    isPaused, rpcChecked, backendUnreachable: infra.backend, rpcUnreachable: infra.rpc, lang,
+  }), [isPaused, rpcChecked, infra.backend, infra.rpc, lang]);
+  // [TR] Eylem fonksiyonları kapıyı çağrı anında bu ref'ten okur: modal açıkken arıza başlarsa bayat kapanıştan etkilenmez.
+  const txGateRef = React.useRef(txGate);
+  txGateRef.current = txGate;
+  const getTxGate = React.useCallback(() => txGateRef.current, []);
+
 
   // [TR] UI Lab kaplaması: senaryo başına bir kez kurulur; alanlar yalnız ilgili kategoride doludur.
   //      Kategoriye özgü mantık test/ui-lab/appOverlay.js içindedir ve production paketine girmez.
@@ -552,7 +563,8 @@ function App() {
     handleCreateOrder,
     handleOpenMakerModal,
   } = useMakerOrderForm({
-    isPaused: isPaused || infraTxBlocked,
+    isPaused,
+    txGate: getTxGate,
     requireSignedSessionForActiveWallet,
     setShowMakerModal,
     showToast,
@@ -624,6 +636,7 @@ function App() {
   }), [lang, isConnected, isFaucetEnabled, mintToken, showToast]);
 
   const handleStartTrade = React.useMemo(() => buildStartTradeAction({
+    txGate: getTxGate,
     lang,
     address,
     isBanned,
@@ -680,6 +693,7 @@ function App() {
     setCancelStatus,
     setChargebackAccepted,
     labOr,
+    getTxGate,
   ]);
 
   const tradeRoomActions = React.useMemo(() => buildTradeRoomActions({
@@ -938,7 +952,9 @@ function App() {
     isLoggingIn,
     isContractLoading,
     loadingText,
-    isPaused: isPaused || infraTxBlocked,
+    isPaused,
+    txGate,
+    infraDegraded: infra.backend || infra.rpc,
     authChecked: effectiveAuthChecked,
     currentView,
     setCurrentView,
@@ -1103,6 +1119,7 @@ function App() {
     makerPayoutRiskEntry,
     isCreateTemporarilyDisabledByRisk,
     isPayoutProfileGateBlocked: labMaker ? false : isPayoutProfileGateBlocked,
+    txGate: labMaker ? null : txGate,
     openProfilePage,
     isContractLoading,
     loadingText,

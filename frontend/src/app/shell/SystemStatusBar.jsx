@@ -264,14 +264,14 @@ const SystemStatusBarView = ({ statuses, isTestnet, isRegisteringWallet, onRegis
     <section ref={sectionRef} aria-label={lang === 'TR' ? 'Sistem durumu' : 'System status'} className="shrink-0 border-b border-borderSubtle" data-testid="system-status-bar">
       <div className="flex flex-col">
         {isTestnet && (
-          <div role="status" className={`pl-4 pr-16 md:pr-44 py-1 text-xs font-bold text-center border-b bg-info border-info text-black`} data-testid="testnet-banner">
+          <div role="status" className={`pl-4 pr-[4.75rem] md:pr-44 py-1 text-xs font-bold text-center border-b bg-info border-info text-black`} data-testid="testnet-banner">
             {t(lang, 'Base Sepolia Testnet — test tokenları, gerçek para yok', 'Base Sepolia Testnet — test tokens, no real money')}
           </div>
         )}
         {visible.map((status) => {
           const critical = isCriticalStatus(status);
           return (
-            <div key={status.key} className={`pl-4 pr-16 md:pr-52 py-1.5 md:py-2 text-xs md:text-sm border-b last:border-b-0 ${toneClass(status.tone)}`} data-status-key={status.key} data-critical={critical ? 'true' : undefined}>
+            <div key={status.key} className={`pl-4 pr-[4.75rem] md:pr-52 py-1.5 md:py-2 text-xs md:text-sm border-b last:border-b-0 ${toneClass(status.tone)}`} data-status-key={status.key} data-critical={critical ? 'true' : undefined}>
               <div className="max-w-[1200px] mx-auto flex items-center justify-between gap-2 md:gap-3">
                 <div className="min-w-0 flex-1">
                   <p className="font-bold break-words">{status.title}</p>
@@ -321,7 +321,7 @@ const SystemStatusBarView = ({ statuses, isTestnet, isRegisteringWallet, onRegis
           );
         })}
         {hidden.length > 0 && (
-          <div className="pl-4 pr-16 md:pr-52 border-b last:border-b-0 bg-surface border-borderSubtle text-textSecondary text-xs" data-testid="status-hidden-indicator">
+          <div className="pl-4 pr-[4.75rem] md:pr-52 border-b last:border-b-0 bg-surface border-borderSubtle text-textSecondary text-xs" data-testid="status-hidden-indicator">
             <div className="max-w-[1200px] mx-auto flex items-center gap-2">
               <EyeOff className="w-3.5 h-3.5 shrink-0" strokeWidth={1.8} aria-hidden="true" />
               <span className="min-w-0 truncate">{hiddenText}</span>

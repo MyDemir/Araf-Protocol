@@ -70,6 +70,23 @@ describe('infra recovery', () => {
   });
 });
 
+describe('flag hysteresis', () => {
+  it('ordinary successful calls never clear the flag; only the probe does, and a quick re-failure keeps growing the backoff', async () => {
+    let calls = 0;
+    registerInfraProbe('backend', async () => { calls += 1; return true; });
+    markInfraFailure('backend');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(getInfraHealth().backend).toBe(true);
+    await vi.advanceTimersByTimeAsync(6000); // probe #1 (5s +-20%) succeeds
+    expect(getInfraHealth()).toMatchObject({ backend: false, epoch: 1 });
+    markInfraFailure('backend'); // flapping endpoint: re-fails right after recovery
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(calls).toBe(1); // second probe waits >= 8s (10s +-20%), not 5s again
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(calls).toBe(2);
+  });
+});
+
 describe('lazy import retry', () => {
   it('retries a transient failure then succeeds', async () => {
     const importer = vi.fn().mockRejectedValueOnce(new Error('net')).mockResolvedValue({ default: 1 });
