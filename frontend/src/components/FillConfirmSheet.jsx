@@ -4,6 +4,7 @@ import { Lock, TriangleAlert } from 'lucide-react';
 import BottomSheet from './BottomSheet';
 import { fmtNumber } from '../app/format';
 import { fmtBps } from '../app/copy';
+import { railLabel } from '../app/railLabels';
 
 // [TR] Emre girme onayı: fon hareketinden önceki son ekran. Mobilde alt sheet, masaüstünde aynı kabuğun kart hali
 //      (BottomSheet; cüzdan modalıyla aynı dil). Esc, arka plan, X ve "Vazgeç" vazgeçer. Altyapı kapısı (txGate)
@@ -27,6 +28,8 @@ const T = {
     fee: 'Protokol ücreti',
     feeReceived: 'Kapanışta alacağından kesilir',
     feeBond: 'Kapanışta teminatından kesilir',
+    feeNote: 'Kısmi uzlaşmada ücret payına düşen brüt tutardan, karşılıklı iptalde (ödeme bildirildikten sonra) teminattan kesilir; ödeme bildirilmeden iptalde ücret yoktur.',
+    changed: 'Koşullar değişti. Yeni değerleri kontrol edip tekrar onaylayın.',
     window: 'Ödeme süresi',
     bond: 'Kilitleyeceğin teminat',
     bondUpper: 'En fazla',
@@ -55,6 +58,8 @@ const T = {
     fee: 'Protocol fee',
     feeReceived: 'Taken from what you receive at settlement',
     feeBond: 'Taken from your bond at settlement',
+    feeNote: 'In a partial settlement the fee comes from your gross share; on a mutual cancel after payment is reported it comes from your bond; no fee if cancelled before payment is reported.',
+    changed: 'Conditions changed. Review the new values and confirm again.',
     window: 'Payment window',
     bond: 'Bond you will lock',
     bondUpper: 'Up to',
@@ -107,6 +112,11 @@ export default function FillConfirmSheet({ summary, lang = 'EN', txGate = null, 
   const bond = tokenText(summary.bondRaw, decimals, crypto, lang);
   const total = tokenText(summary.lockTotalRaw, decimals, crypto, lang);
   const feeAmount = tokenText(summary.feeRaw, decimals, crypto, lang);
+  // [TR] YALNIZ GÖSTERİM: fiat karşılığı miktar × kur ile tahmin edilir; hiçbir tx parametresi ya da allowance bu
+  //      değerden türemez (tx yalnız fillAmountRaw ve requiredAllowance kullanır). Backend'in kaydettiği fiat tutarı
+  //      kendi yuvarlamasıyla farklı olabilir.
+  // [EN] DISPLAY ONLY: the fiat equivalent is an estimate (amount x rate); no tx parameter or allowance is derived
+  //      from it (the tx only uses fillAmountRaw and requiredAllowance).
   const fiatText = summary.rate !== null
     ? `${fmtNumber(Number(formatUnits(BigInt(summary.fillAmountRaw), decimals)) * summary.rate, lang, { minFractionDigits: 2, maxFractionDigits: 2 })} ${summary.fiat}`
     : null;
@@ -115,6 +125,7 @@ export default function FillConfirmSheet({ summary, lang = 'EN', txGate = null, 
     : null;
   const windowHours = Math.round(summary.paymentWindowMs / 3600000);
   const tierText = summary.counterpartyTier !== null ? `${t.tier} ${summary.counterpartyTier}` : null;
+  const railName = railLabel(summary.rail, lang);
   const upper = summary.bondIsUpperBound ? `${t.bondUpper} ` : '';
 
   const decide = (accepted) => {
@@ -133,6 +144,12 @@ export default function FillConfirmSheet({ summary, lang = 'EN', txGate = null, 
       testId="fill-confirm-sheet"
       panelClassName="sm:max-w-[440px]"
     >
+      {summary.conditionsChanged ? (
+        <p role="status" className="mb-3 flex items-start gap-2.5 rounded-2xl border border-warning/40 bg-warning/10 px-3.5 py-2.5 text-xs font-semibold leading-snug text-textPrimary" data-testid="fill-confirm-changed">
+          <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warning" strokeWidth={2} aria-hidden="true" />
+          <span>{t.changed}</span>
+        </p>
+      ) : null}
       <div className="rounded-2xl border border-borderSubtle bg-elevated px-4 py-3.5">
         <p className="text-xs font-semibold uppercase tracking-wide text-textMuted">{buying ? t.youBuy : t.youSell}</p>
         <p className="mt-1 break-words text-2xl font-bold leading-tight tabular-nums text-textPrimary" data-testid="fill-confirm-amount">{amount ?? t.unknown}</p>
@@ -145,8 +162,17 @@ export default function FillConfirmSheet({ summary, lang = 'EN', txGate = null, 
           <span className="font-mono">{summary.counterparty || t.unknown}</span>
           {tierText ? <span className="ml-2 rounded bg-elevated px-1.5 py-0.5 text-[11px] font-semibold text-textSecondary">{tierText}</span> : null}
         </Row>
-        <Row label={t.rail} testId="fill-confirm-rail">{summary.rail || t.unknown}</Row>
-        <Row label={t.fee} testId="fill-confirm-fee" sub={summary.feeBps !== null ? (summary.feeFrom === 'bond' ? t.feeBond : t.feeReceived) : null}>
+        {railName ? <Row label={t.rail} testId="fill-confirm-rail">{railName}</Row> : null}
+        <Row
+          label={t.fee}
+          testId="fill-confirm-fee"
+          sub={summary.feeBps !== null ? (
+            <>
+              <span className="block">{summary.feeFrom === 'bond' ? t.feeBond : t.feeReceived}</span>
+              <span className="mt-1 block" data-testid="fill-confirm-fee-note">{t.feeNote}</span>
+            </>
+          ) : null}
+        >
           {summary.feeBps !== null ? `${fmtBps(summary.feeBps, lang)}${feeAmount ? ` · ${feeAmount}` : ''}` : t.unknown}
         </Row>
         <Row label={t.window} testId="fill-confirm-window">{windowHours} {t.hours}</Row>

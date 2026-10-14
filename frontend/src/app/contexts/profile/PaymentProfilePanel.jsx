@@ -1,11 +1,7 @@
 import { Lock } from 'lucide-react';
 
 import { SEPA_COUNTRY_CODES } from '../../orderUiModel';
-const RAIL_LABELS = {
-  TR_IBAN: { TR: 'Türkiye (IBAN)', EN: 'Turkey (IBAN)' },
-  SEPA_IBAN: { TR: 'Avrupa (SEPA)', EN: 'Europe (SEPA)' },
-  US_ACH: { TR: 'ABD (ACH)', EN: 'USA (ACH)' },
-};
+import { RAIL_LABELS } from '../../railLabels';
 
 const identity = (draft) => draft;
 

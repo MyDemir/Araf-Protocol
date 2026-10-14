@@ -496,6 +496,7 @@ export const buildAppModals = (ctx) => {
     if (!fillConfirmSummary) return null;
     return (
       <FillConfirmSheet
+        key={fillConfirmSummary.seq}
         summary={fillConfirmSummary}
         lang={lang}
         txGate={txGate}

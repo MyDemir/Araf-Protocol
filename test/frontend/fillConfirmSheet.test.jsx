@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { buildStartTradeAction } from '../../frontend/src/app/actions/contractLifecycleActions';
 import { buildAppModals } from '../../frontend/src/app/AppModals';
-import { useFillConfirm } from '../../frontend/src/app/useFillConfirm';
+import { useFillConfirm, FILL_CONFIRM_TIMEOUT_MS } from '../../frontend/src/app/useFillConfirm';
+import { mapApiOrderToUi } from '../../frontend/src/app/orderUiModel';
 import { resolveNewTxGate } from '../../frontend/src/app/txGate';
 import FillConfirmSheet from '../../frontend/src/components/FillConfirmSheet';
 
@@ -116,14 +117,14 @@ describe('fill confirm sheet: values', () => {
     expect(screen.getByTestId('fill-confirm-fee')).toHaveTextContent('teminatından kesilir');
   });
 
-  it('shows "Bilinmiyor" instead of inventing rail, rate and fee when there is no source', async () => {
+  it('hides the rail row and shows "Bilinmiyor" for rate and fee when there is no source (nothing invented)', async () => {
     await setup({
       lang: 'TR',
       orderArg: uiOrder({ rate: 0, hasPrice: false, fiat: null }),
       depsOver: { getOrder: vi.fn(async () => ({ ...chainOrder(), takerFeeBpsSnapshot: undefined, makerFeeBpsSnapshot: undefined })) },
     });
     await screen.findByTestId('fill-confirm-sheet');
-    expect(screen.getByTestId('fill-confirm-rail')).toHaveTextContent('Bilinmiyor');
+    expect(screen.queryByTestId('fill-confirm-rail')).toBeNull();
     expect(screen.getByTestId('fill-confirm-fee')).toHaveTextContent('Bilinmiyor');
     expect(screen.getByTestId('fill-confirm-fiat')).toHaveTextContent('Kur belirtilmedi');
     expect(screen.queryByTestId('fill-confirm-rate')).toBeNull();
@@ -267,6 +268,191 @@ describe('fill confirm sheet: flow semantics (same as window.confirm)', () => {
     await done();
     expect(deps.approveToken).not.toHaveBeenCalled();
     expect(deps.fillSellOrder).not.toHaveBeenCalled();
+  });
+});
+
+describe('fill confirm sheet: rail and fee note', () => {
+  it('shows the readable rail name from order.paymentRail (TR and EN)', async () => {
+    await setup({ lang: 'TR', orderArg: uiOrder({ paymentRail: 'TR_IBAN' }) });
+    await screen.findByTestId('fill-confirm-sheet');
+    expect(screen.getByTestId('fill-confirm-rail')).toHaveTextContent('Türkiye (IBAN)');
+    cleanup();
+    await setup({ lang: 'EN', orderArg: uiOrder({ paymentRail: 'SEPA_IBAN' }) });
+    await screen.findByTestId('fill-confirm-sheet');
+    expect(screen.getByTestId('fill-confirm-rail')).toHaveTextContent('Europe (SEPA)');
+  });
+
+  it('an unknown rail code hides the row instead of printing the raw code', async () => {
+    await setup({ lang: 'TR', orderArg: uiOrder({ paymentRail: 'WEIRD_RAIL' }) });
+    await screen.findByTestId('fill-confirm-sheet');
+    expect(screen.queryByTestId('fill-confirm-rail')).toBeNull();
+    expect(screen.getByTestId('fill-confirm-sheet')).not.toHaveTextContent('WEIRD_RAIL');
+  });
+
+  it('fee note explains partial settlement (gross payout) and mutual cancel (from the bond)', async () => {
+    await setup({ lang: 'TR' });
+    await screen.findByTestId('fill-confirm-sheet');
+    const note = screen.getByTestId('fill-confirm-fee-note');
+    expect(note).toHaveTextContent('brüt tutardan');
+    expect(note).toHaveTextContent('teminattan kesilir');
+    expect(note).toHaveTextContent('ödeme bildirilmeden iptalde ücret yoktur');
+  });
+
+  it('orderUiModel maps owner_rail to paymentRail (code only) and null when absent', () => {
+    const base = { _id: '507f1f77bcf86cd799439011', onchain_order_id: '1', owner_address: ADDR, side: 'SELL_CRYPTO', status: 'OPEN', tier: 1, token_address: '0x1', market: {}, amounts: {} };
+    expect(mapApiOrderToUi({ order: { ...base, owner_rail: 'US_ACH' } }).paymentRail).toBe('US_ACH');
+    expect(mapApiOrderToUi({ order: { ...base } }).paymentRail).toBeNull();
+    expect(mapApiOrderToUi({ order: { ...base, owner_rail: '' } }).paymentRail).toBeNull();
+  });
+});
+
+describe('fill confirm sheet: re-read after confirmation', () => {
+  it('unchanged state: a single confirmation goes straight to approve/fill (second read confirms nothing changed)', async () => {
+    const { deps, done } = await setup({ depsOver: { getAllowance: vi.fn(async () => 0n) } });
+    await screen.findByTestId('fill-confirm-sheet');
+    fireEvent.click(screen.getByTestId('fill-confirm-accept'));
+    await done();
+    expect(deps.getOrder).toHaveBeenCalledTimes(2);
+    expect(deps.getReputation).toHaveBeenCalledTimes(2);
+    expect(screen.queryByTestId('fill-confirm-changed')).toBeNull();
+    expect(deps.approveToken).toHaveBeenCalledTimes(1);
+    expect(deps.fillSellOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it('reputation worsens after confirm: no approve, sheet re-opens with new bond and a "changed" note, second confirm uses new amounts', async () => {
+    // Yeterli allowance önceden verilmiş olsa bile eski (düşük) teminat gösterilip yüksek teminat çekilmemeli.
+    const getReputation = vi.fn()
+      .mockResolvedValueOnce({ successful: 0, riskPoints: 0 })
+      .mockResolvedValue({ successful: 0, riskPoints: 2 });
+    const { deps, done } = await setup({ depsOver: { getReputation, getAllowance: vi.fn(async () => 0n) } });
+    await screen.findByTestId('fill-confirm-sheet');
+    expect(screen.getByTestId('fill-confirm-bond')).toHaveTextContent('8 USDT');
+    fireEvent.click(screen.getByTestId('fill-confirm-accept'));
+    // Yeni değerlerle yeniden açılır (tier 2 taker %8 + 300 bps ceza = %11)
+    await waitFor(() => expect(screen.getByTestId('fill-confirm-changed')).toBeInTheDocument());
+    expect(screen.getByTestId('fill-confirm-changed')).toHaveTextContent('Koşullar değişti');
+    expect(screen.getByTestId('fill-confirm-bond')).toHaveTextContent('11 USDT');
+    expect(deps.approveToken).not.toHaveBeenCalled();
+    expect(deps.fillSellOrder).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('fill-confirm-accept'));
+    await done();
+    expect(deps.approveToken).toHaveBeenCalledTimes(1);
+    expect(deps.approveToken).toHaveBeenCalledWith('0x0000000000000000000000000000000000000002', 11_000_000n);
+    expect(deps.fillSellOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it('remaining amount shrinks after confirm: re-opens with the new amount, never approves for the stale one', async () => {
+    const getOrder = vi.fn()
+      .mockResolvedValueOnce(chainOrder())
+      .mockResolvedValue(chainOrder({ remainingAmount: 60_000_000n }));
+    const { deps, done } = await setup({ lang: 'EN', depsOver: { getOrder, getAllowance: vi.fn(async () => 0n) } });
+    await screen.findByTestId('fill-confirm-sheet');
+    expect(screen.getByTestId('fill-confirm-amount')).toHaveTextContent('100 USDT');
+    fireEvent.click(screen.getByTestId('fill-confirm-accept'));
+    await waitFor(() => expect(screen.getByTestId('fill-confirm-changed')).toBeInTheDocument());
+    expect(screen.getByTestId('fill-confirm-amount')).toHaveTextContent('60 USDT');
+    expect(deps.approveToken).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('fill-confirm-accept'));
+    await done();
+    expect(deps.fillSellOrder).toHaveBeenCalledWith(12n, 60_000_000n, expect.any(String));
+    expect(deps.approveToken).toHaveBeenCalledWith('0x0000000000000000000000000000000000000002', 4_800_000n);
+  });
+
+  it('order state changes after confirm: re-opens instead of sending', async () => {
+    const getOrder = vi.fn()
+      .mockResolvedValueOnce(chainOrder({ state: 0 }))
+      .mockResolvedValue(chainOrder({ state: 1 }));
+    const { deps, done } = await setup({ depsOver: { getOrder } });
+    await screen.findByTestId('fill-confirm-sheet');
+    fireEvent.click(screen.getByTestId('fill-confirm-accept'));
+    await waitFor(() => expect(screen.getByTestId('fill-confirm-changed')).toBeInTheDocument());
+    expect(deps.fillSellOrder).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Vazgeç' }));
+    await done();
+    expect(deps.approveToken).not.toHaveBeenCalled();
+    expect(deps.fillSellOrder).not.toHaveBeenCalled();
+  });
+
+  it('order fully filled during the confirmation: stops with a toast, no tx', async () => {
+    const getOrder = vi.fn()
+      .mockResolvedValueOnce(chainOrder())
+      .mockResolvedValue(chainOrder({ remainingAmount: 0n }));
+    const { deps, done } = await setup({ depsOver: { getOrder } });
+    await screen.findByTestId('fill-confirm-sheet');
+    fireEvent.click(screen.getByTestId('fill-confirm-accept'));
+    await done();
+    expect(deps.showToast).toHaveBeenCalledWith(expect.stringContaining('Order dolu'), 'error');
+    expect(deps.approveToken).not.toHaveBeenCalled();
+    expect(deps.fillSellOrder).not.toHaveBeenCalled();
+  });
+
+  it('stops after too many consecutive changes', async () => {
+    let n = 0;
+    const getOrder = vi.fn(async () => chainOrder({ remainingAmount: BigInt(100_000_000 - (n++) * 1_000_000) }));
+    const { deps, done } = await setup({ depsOver: { getOrder } });
+    for (let i = 0; i < 5; i += 1) {
+      await waitFor(() => expect(screen.getByTestId('fill-confirm-accept')).toBeInTheDocument());
+      fireEvent.click(screen.getByTestId('fill-confirm-accept'));
+      await waitFor(() => expect(deps.getOrder).toHaveBeenCalledTimes(2 + i));
+    }
+    await done();
+    expect(deps.showToast).toHaveBeenCalledWith(expect.stringContaining('Koşullar tekrar tekrar değişti'), 'error');
+    expect(deps.fillSellOrder).not.toHaveBeenCalled();
+    expect(deps.approveToken).not.toHaveBeenCalled();
+  });
+});
+
+describe('fill confirm sheet: timeout', () => {
+  it('action: a timed-out confirmation sends nothing and tells the user', async () => {
+    const deps = makeDeps({ getAllowance: vi.fn(async () => 0n) });
+    const confirmFill = vi.fn(async () => 'timeout');
+    await buildStartTradeAction({ ...deps, confirmFill, txGate: () => OPEN_GATE })(uiOrder());
+    expect(deps.showToast).toHaveBeenCalledWith(expect.stringContaining('Onay süresi doldu'), 'info');
+    expect(deps.approveToken).not.toHaveBeenCalled();
+    expect(deps.fillSellOrder).not.toHaveBeenCalled();
+    expect(deps.setIsContractLoading).toHaveBeenLastCalledWith(false);
+  });
+
+  it('action: only a strict true confirms (truthy non-true values do not)', async () => {
+    const deps = makeDeps();
+    await buildStartTradeAction({ ...deps, confirmFill: vi.fn(async () => 'yes'), txGate: () => OPEN_GATE })(uiOrder());
+    expect(deps.fillSellOrder).not.toHaveBeenCalled();
+  });
+
+  it('hook: the sheet closes after 2 minutes and the promise resolves "timeout"', async () => {
+    vi.useFakeTimers();
+    try {
+      let api;
+      const Probe = () => { api = useFillConfirm(); return <div data-testid="open">{api.fillConfirmSummary ? 'open' : 'closed'}</div>; };
+      render(<Probe />);
+      let result;
+      act(() => { api.confirmFill({ direction: 'buy' }).then((r) => { result = r; }); });
+      expect(screen.getByTestId('open')).toHaveTextContent('open');
+      await act(async () => { vi.advanceTimersByTime(FILL_CONFIRM_TIMEOUT_MS - 1); });
+      expect(screen.getByTestId('open')).toHaveTextContent('open');
+      await act(async () => { vi.advanceTimersByTime(1); });
+      expect(screen.getByTestId('open')).toHaveTextContent('closed');
+      expect(result).toBe('timeout');
+      expect(FILL_CONFIRM_TIMEOUT_MS).toBe(120000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('hook: confirming before the timeout clears the timer (no late resolution)', async () => {
+    vi.useFakeTimers();
+    try {
+      let api;
+      const Probe = () => { api = useFillConfirm(); return null; };
+      render(<Probe />);
+      const results = [];
+      act(() => { api.confirmFill({ direction: 'buy' }).then((r) => results.push(r)); });
+      await act(async () => { api.settleFillConfirm(true); });
+      await act(async () => { vi.advanceTimersByTime(FILL_CONFIRM_TIMEOUT_MS * 2); });
+      expect(results).toEqual([true]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

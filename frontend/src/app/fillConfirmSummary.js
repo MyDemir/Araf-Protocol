@@ -36,6 +36,7 @@ export const buildFillConfirmSummary = ({
   takerFeeBpsSnapshot = null,
   makerFeeBpsSnapshot = null,
   bondIsUpperBound = false,
+  conditionsChanged = false,
 }) => {
   const fill = BigInt(fillAmountRaw);
   const lockTotal = BigInt(requiredAllowance);
@@ -56,6 +57,7 @@ export const buildFillConfirmSummary = ({
     fillAmountRaw: fill,
     bondRaw: bond,
     bondIsUpperBound: Boolean(bondIsUpperBound),
+    conditionsChanged: Boolean(conditionsChanged),
     lockTotalRaw: lockTotal,
     lockIncludesAmount: !buysCrypto,
     feeBps,
@@ -65,8 +67,8 @@ export const buildFillConfirmSummary = ({
     rate: order?.hasPrice !== false && Number.isFinite(rate) && rate > 0 && order?.fiat ? rate : null,
     counterparty: order?.maker || null,
     counterpartyTier: Number.isInteger(tierNumber) && tierNumber >= 0 ? tierNumber : null,
-    // [TR] Backend emir akışı rail taşımıyor (orderUiModel yalnız paymentRiskSignal üretir); alan varsa gösterilir.
-    rail: order?.paymentRail || order?.rail || null,
+    // [TR] Emir sahibinin ödeme yöntemi kodu (backend owner_rail → orderUiModel paymentRail). Yoksa null; satır gizlenir.
+    rail: order?.paymentRail || null,
     paymentWindowMs: TRADE_TIMING.PAYMENT_WINDOW_MS,
   };
 };

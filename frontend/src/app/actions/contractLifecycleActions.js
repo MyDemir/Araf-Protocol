@@ -49,6 +49,8 @@ const isSameTrade = (trade, onchainId) => {
   return current !== '' && current === String(onchainId ?? '');
 };
 
+// [TR] Onay penceresi en fazla bu kadar kez "koşullar değişti" ile yeniden açılır.
+const MAX_CONFIRM_ROUNDS = 5;
 const fetchAttempts = 6;
 const FETCH_RETRY_MS = 2000;
 
@@ -206,73 +208,120 @@ export const buildStartTradeAction = ({
       return;
     }
 
-    const onchainOrder = await getOrder(BigInt(order.onchainId));
-    const orderRemaining = getOnchainOrderField(onchainOrder, 'remainingAmount', 5) ?? 0n;
-    const tokenFromChain = getOnchainOrderField(onchainOrder, 'tokenAddress', 3) ?? null;
+    // [TR] Zincir okumaları + hesap tek yerde: onay penceresi kapandıktan sonra AYNI fonksiyon yeniden çağrılır, böylece
+    //      gösterilen ile approve/fill'in kullanacağı değer aynı kaynaktan gelir. Dönüş null = işlem durdu (mesaj verildi).
+    // [EN] Chain reads + math in one place: after the sheet closes the SAME function runs again, so what was shown and
+    //      what approve/fill use come from the same source. null = stopped (toast already shown).
+    const readFillState = async () => {
+      const onchainOrder = await getOrder(BigInt(order.onchainId));
+      const orderRemaining = getOnchainOrderField(onchainOrder, 'remainingAmount', 5) ?? 0n;
+      const tokenFromChain = getOnchainOrderField(onchainOrder, 'tokenAddress', 3) ?? null;
 
-    const remainingAmountRaw = BigInt(orderRemaining || 0n);
-    if (remainingAmountRaw <= 0n) {
-      showToast(
-        lang === 'TR'
-          ? 'Order dolu veya geçersiz görünüyor. Lütfen listeyi yenileyin.'
-          : 'Order appears filled/invalid. Please refresh order feed.',
-        'error'
-      );
-      return;
+      const remainingAmountRaw = BigInt(orderRemaining || 0n);
+      if (remainingAmountRaw <= 0n) {
+        showToast(
+          lang === 'TR'
+            ? 'Order dolu veya geçersiz görünüyor. Lütfen listeyi yenileyin.'
+            : 'Order appears filled/invalid. Please refresh order feed.',
+          'error'
+        );
+        return null;
+      }
+      const orderMinFill = getOnchainOrderField(onchainOrder, 'minFillAmount', 6) ?? 0n;
+
+      // [TR] Partial-fill input parse/guard fail-closed:
+      //      geçersiz değerlerde sessiz remaining fallback YOK.
+      // [EN] Partial-fill parse/guard is fail-closed:
+      //      no silent fallback to remaining on invalid input.
+      const fillAmountRaw = resolveValidatedFillAmountRaw({
+        fillAmountRaw: order.fillAmountRaw,
+        remainingAmountRaw,
+        minFillAmountRaw: BigInt(orderMinFill || 0n),
+        lang,
+      });
+
+      const side = normalizeOrderSide(String(order.side || '').toUpperCase());
+      if (side === 'UNKNOWN') {
+        throw new Error(lang === 'TR' ? 'Geçersiz order side. İşlem başlatılamadı.' : 'Invalid order side. Cannot start trade.');
+      }
+
+      // [TR] Approve tutarı kontratın çekeceği tam miktardır (fill + teminat ya da yalnız teminat; tier + itibara
+      //      göre, aşağı yuvarlı). Eski "fill * 2" gereğinden çok büyük izin istiyordu. İtibar okunamazsa
+      //      muhafazakâr üst sınır kullanılır. Başarısızlıkta otomatik approve(0) istenmez.
+      // [EN] Approve the exact amount the contract pulls (fill + bond, or bond only). Not 2x; no auto approve(0).
+      let reputation = null;
+      if (typeof getReputation === 'function') {
+        try { reputation = await getReputation(address); } catch (_) { reputation = null; }
+      }
+      const tier = getOnchainOrderField(onchainOrder, 'tier', 11);
+      const requiredAllowance = computeFillAllowance({ side, fillAmountRaw, tier, bondMap, reputation });
+      const takerFeeBpsSnapshot = getOnchainOrderField(onchainOrder, 'takerFeeBpsSnapshot', 9);
+      const makerFeeBpsSnapshot = getOnchainOrderField(onchainOrder, 'makerFeeBpsSnapshot', 10);
+      const orderState = getOnchainOrderField(onchainOrder, 'state', 13);
+      // [TR] Onaydan önce/sonra karşılaştırılan parmak izi: miktar, allowance, kalan, emir durumu, tier, ücret, token.
+      const fingerprint = [fillAmountRaw, requiredAllowance, remainingAmountRaw, orderState, tier, takerFeeBpsSnapshot, makerFeeBpsSnapshot, tokenFromChain, Boolean(reputation)]
+        .map((v) => String(v ?? ''))
+        .join('|');
+      return { side, tokenFromChain, fillAmountRaw, reputation, requiredAllowance, tier, takerFeeBpsSnapshot, makerFeeBpsSnapshot, fingerprint };
+    };
+
+    let current = await readFillState();
+    if (!current) return;
+
+    if (useSheet) {
+      // [TR] Onaydan sonra approve'dan ÖNCE yeniden okunur. Değer değiştiyse (itibar bozuldu, kalan miktar azaldı, emir
+      //      durumu değişti...) işlem durur ve pencere yeni değerlerle "Koşullar değişti" notuyla tekrar açılır; gösterilenden
+      //      fazla teminat çekilmez, bayat miktar için gereksiz approve yapılmaz. Pencere 2 dk sonra kapanır (tx yok).
+      // [EN] After confirmation and BEFORE approve the state is re-read. If anything changed, stop and re-open the sheet
+      //      with the new values and a "conditions changed" note. The sheet times out after 2 minutes (no tx).
+      let conditionsChanged = false;
+      for (let round = 0; ; round += 1) {
+        if (round >= MAX_CONFIRM_ROUNDS) {
+          showToast(
+            lang === 'TR'
+              ? 'Koşullar tekrar tekrar değişti; işlem durduruldu. Lütfen listeyi yenileyip tekrar deneyin.'
+              : 'Conditions kept changing; the transaction was stopped. Please refresh and try again.',
+            'error'
+          );
+          return;
+        }
+        setLoadingText(lang === 'TR' ? 'Onayınız bekleniyor...' : 'Waiting for your confirmation...');
+        const accepted = await confirmFill(buildFillConfirmSummary({
+          order,
+          side: current.side,
+          tier: current.tier,
+          fillAmountRaw: current.fillAmountRaw,
+          requiredAllowance: current.requiredAllowance,
+          takerFeeBpsSnapshot: current.takerFeeBpsSnapshot,
+          makerFeeBpsSnapshot: current.makerFeeBpsSnapshot,
+          bondIsUpperBound: !current.reputation,
+          conditionsChanged,
+        }));
+        if (accepted === 'timeout') {
+          showToast(
+            lang === 'TR'
+              ? 'Onay süresi doldu; işlem gönderilmedi. İsterseniz tekrar deneyin.'
+              : 'Confirmation timed out; nothing was sent. Try again if you still want to continue.',
+            'info'
+          );
+          return;
+        }
+        if (accepted !== true) return;
+        // [TR] Pencere açıkken altyapı arızası başladıysa approve'a geçilmez (kapı approve'dan önce yeniden değerlendirilir).
+        if (txGate && !enforceTxGate(txGate, showToast)) return;
+        setLoadingText(lang === 'TR' ? 'Koşullar doğrulanıyor...' : 'Verifying conditions...');
+        const fresh = await readFillState();
+        if (!fresh) return;
+        if (fresh.fingerprint === current.fingerprint) break;
+        current = fresh;
+        conditionsChanged = true;
+      }
     }
-    const orderMinFill = getOnchainOrderField(onchainOrder, 'minFillAmount', 6) ?? 0n;
 
-    // [TR] Partial-fill input parse/guard fail-closed:
-    //      geçersiz değerlerde sessiz remaining fallback YOK.
-    // [EN] Partial-fill parse/guard is fail-closed:
-    //      no silent fallback to remaining on invalid input.
-    const fillAmountRaw = resolveValidatedFillAmountRaw({
-      fillAmountRaw: order.fillAmountRaw,
-      remainingAmountRaw,
-      minFillAmountRaw: BigInt(orderMinFill || 0n),
-      lang,
-    });
-
-    const side = normalizeOrderSide(String(order.side || '').toUpperCase());
-    if (side === 'UNKNOWN') {
-      throw new Error(lang === 'TR' ? 'Geçersiz order side. İşlem başlatılamadı.' : 'Invalid order side. Cannot start trade.');
-    }
+    const { side, tokenFromChain, fillAmountRaw, requiredAllowance } = current;
     const { fillFn: fillOrderFn } = resolveOrderActionFns(side, { fillBuyOrder, fillSellOrder, createBuyOrder, createSellOrder, cancelBuyOrder, cancelSellOrder });
     if (isUsableChainTokenAddress(tokenFromChain)) {
       tokenAddress = tokenFromChain;
-    }
-
-    // [TR] Approve tutarı kontratın çekeceği tam miktardır (fill + teminat ya da yalnız teminat; tier + itibara
-    //      göre, aşağı yuvarlı). Eski "fill * 2" gereğinden çok büyük izin istiyordu. İtibar okunamazsa
-    //      muhafazakâr üst sınır kullanılır. Başarısızlıkta otomatik approve(0) istenmez.
-    // [EN] Approve the exact amount the contract pulls (fill + bond, or bond only). Not 2x; no auto approve(0).
-    let reputation = null;
-    if (typeof getReputation === 'function') {
-      try { reputation = await getReputation(address); } catch (_) { reputation = null; }
-    }
-    const requiredAllowance = computeFillAllowance({
-      side,
-      fillAmountRaw,
-      tier: getOnchainOrderField(onchainOrder, 'tier', 11),
-      bondMap,
-      reputation,
-    });
-
-    if (useSheet) {
-      setLoadingText(lang === 'TR' ? 'Onayınız bekleniyor...' : 'Waiting for your confirmation...');
-      const accepted = await confirmFill(buildFillConfirmSummary({
-        order,
-        side,
-        tier: getOnchainOrderField(onchainOrder, 'tier', 11),
-        fillAmountRaw,
-        requiredAllowance,
-        takerFeeBpsSnapshot: getOnchainOrderField(onchainOrder, 'takerFeeBpsSnapshot', 9),
-        makerFeeBpsSnapshot: getOnchainOrderField(onchainOrder, 'makerFeeBpsSnapshot', 10),
-        bondIsUpperBound: !reputation,
-      }));
-      if (!accepted) return;
-      // [TR] Pencere açıkken altyapı arızası başladıysa approve'a geçilmez (kapı approve'dan önce yeniden değerlendirilir).
-      if (txGate && !enforceTxGate(txGate, showToast)) return;
     }
 
     const currentAllowance = await getAllowance(tokenAddress, address);

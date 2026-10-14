@@ -465,6 +465,8 @@ export const mapApiOrderToUi = ({ order, lang = 'TR', bondMap = {}, tokenMap = {
     // [TR] Backend boolean'ı: emir sahibinin KAYITLI ödeme profili var mı. Bilgi yoksa null (engelleme yok).
     ownerHasPayoutProfile: typeof order?.owner_has_payout_profile === 'boolean' ? order.owner_has_payout_profile : null,
     ownerRailEnabled: typeof order?.owner_rail_enabled === 'boolean' ? order.owner_rail_enabled : null,
+    // [TR] Emir sahibinin ödeme yöntemi KODU (backend owner_rail; yalnız kod, PII yok). Yoksa null = bilinmiyor.
+    paymentRail: typeof order?.owner_rail === 'string' && order.owner_rail ? order.owner_rail : null,
     maker: formatAddress(ownerAddress),
     makerFull: ownerAddress,
     side,
