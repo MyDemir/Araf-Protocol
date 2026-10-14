@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
 // [TR] Ortak alt sheet kabuğu (cüzdan modalı ve pazar şartları kullanır): mobilde alttan açılan sheet (tutamak,
@@ -44,7 +45,8 @@ export default function BottomSheet({
     if (e.shiftKey && (active === first || active === panelRef.current)) { e.preventDefault(); last.focus(); }
     else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
   };
-  return (
+  // [TR] body'ye portal: dönüşüm (transform) içeren atalar fixed konumu bozmasın. [EN] Portal to body so transformed ancestors cannot break fixed positioning.
+  const sheet = (
     <div
       className={`fixed inset-0 z-[100] flex max-w-full items-end justify-center overflow-x-hidden bg-black/60 backdrop-blur-sm transition-opacity duration-200 motion-reduce:transition-none sm:items-center sm:p-4 ${shown ? 'opacity-100' : 'opacity-0'}`}
       role="dialog"
@@ -77,4 +79,5 @@ export default function BottomSheet({
       </div>
     </div>
   );
+  return typeof document === 'undefined' ? sheet : createPortal(sheet, document.body);
 }
