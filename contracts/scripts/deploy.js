@@ -27,7 +27,7 @@ const hre = require("hardhat");
 const { ethers, artifacts, network } = hre;
 const fs = require("fs");
 const path = require("path");
-const { retryRead, settleDeployment } = require("./lib/waitForCode");
+const { retryRead, settleDeployment, blockOverrides } = require("./lib/waitForCode");
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const PUBLIC_CHAIN_IDS = new Set([8453, 84532]);
@@ -210,10 +210,10 @@ async function deployEscrowWithLibraries(treasuryAddress, signer) {
   return { escrow, libraries, libraryDeployTxs: deployTxs };
 }
 
-async function getTokenConfigSnapshot(escrow, tokenAddress) {
+async function getTokenConfigSnapshot(escrow, tokenAddress, blockTag) {
   // Authoritative read path: explicit getter.
   // Not: Solidity mapping auto-getter'ı struct içindeki fixed array alanını güvenilir döndürmeyebilir.
-  const cfg = await retryRead(() => escrow.getTokenConfig(tokenAddress), { label: "getTokenConfig" });
+  const cfg = await retryRead(() => escrow.getTokenConfig(tokenAddress, ...blockOverrides(blockTag)), { label: "getTokenConfig" });
   const tierMaxAmountsBaseUnit = Array.from(cfg.tierMaxAmountsBaseUnit ?? cfg[4] ?? []).map((x) => x.toString());
 
   if (tierMaxAmountsBaseUnit.length !== 4) {
@@ -245,7 +245,7 @@ async function setAndVerifyTokenConfig(escrow, tokenAddress, symbol, config) {
   );
   const receipt = await tx.wait();
 
-  const snapshot = await getTokenConfigSnapshot(escrow, tokenAddress);
+  const snapshot = await getTokenConfigSnapshot(escrow, tokenAddress, receipt.blockNumber);
   const tierLimitExactMatch =
     snapshot.tierMaxAmountsBaseUnit.length === 4 &&
     expectedTierLimits.length === 4 &&
@@ -273,6 +273,7 @@ async function setAndVerifyTokenConfig(escrow, tokenAddress, symbol, config) {
     symbol,
     address: tokenAddress,
     txHash: receipt.hash,
+    blockNumber: receipt.blockNumber ?? null,
     config: snapshot,
   };
 }
@@ -444,11 +445,17 @@ async function main() {
     })
   );
 
+  // [TR] Okumalar en son yazmanın (token config) receipt bloğuna sabitlenir; o blok escrow deploy bloğunu da kapsar.
+  // [EN] Reads pinned to the latest write's receipt block (covers the escrow deploy block).
+  const lastWriteBlock = tokenResults.reduce(
+    (max, t) => (t.blockNumber != null && (max == null || t.blockNumber > max) ? t.blockNumber : max),
+    null
+  );
   const [feeConfig, cooldownConfig, ownerAfterDeploy, treasuryAfterDeploy] = await Promise.all([
-    retryRead(() => escrow.getFeeConfig(), { label: "getFeeConfig" }),
-    retryRead(() => escrow.getCooldownConfig(), { label: "getCooldownConfig" }),
-    retryRead(() => escrow.owner(), { label: "owner" }),
-    retryRead(() => escrow.treasury(), { label: "treasury" }),
+    retryRead(() => escrow.getFeeConfig(...blockOverrides(lastWriteBlock)), { label: "getFeeConfig" }),
+    retryRead(() => escrow.getCooldownConfig(...blockOverrides(lastWriteBlock)), { label: "getCooldownConfig" }),
+    retryRead(() => escrow.owner(...blockOverrides(lastWriteBlock)), { label: "owner" }),
+    retryRead(() => escrow.treasury(...blockOverrides(lastWriteBlock)), { label: "treasury" }),
   ]);
 
   console.log(`✅ Fee config snapshot: taker=${feeConfig.currentTakerFeeBps} maker=${feeConfig.currentMakerFeeBps}`);
@@ -459,8 +466,11 @@ async function main() {
   if (finalOwnerAddress !== ownerAfterDeploy) {
     console.log(`\n🔒 Ownership devrediliyor -> ${finalOwnerAddress}`);
     const transferTx = await escrow.transferOwnership(finalOwnerAddress);
-    await transferTx.wait();
-    const ownerAfterTransfer = await retryRead(() => escrow.owner(), { label: "owner" });
+    const transferReceipt = await transferTx.wait();
+    const ownerAfterTransfer = await retryRead(
+      () => escrow.owner(...blockOverrides(transferReceipt && transferReceipt.blockNumber)),
+      { label: "owner" }
+    );
     if (ownerAfterTransfer !== finalOwnerAddress) {
       throw new Error(`❌ Ownership devri doğrulanamadı. Beklenen=${finalOwnerAddress} Gerçek=${ownerAfterTransfer}`);
     }

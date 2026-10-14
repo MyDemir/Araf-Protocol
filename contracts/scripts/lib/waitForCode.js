@@ -19,8 +19,31 @@ function isRevert(err) {
   return false;
 }
 
+// [TR] Node, sabitlenen bloğu henüz bilmiyorsa (stale/yük dengeli RPC) bu mesajlardan biri döner. Geçicidir.
+// [EN] A lagging node that does not know the pinned block yet answers with one of these. Transient.
+const BLOCK_LAG_RE = /header not found|unknown block|block not found|block #?\d+ not found|missing trie node|after last accepted block/i;
+
+function collectMessages(err) {
+  const out = [String((err && err.message) || "")];
+  for (const inner of [err && err.error, err && err.info && err.info.error, err && err.cause]) {
+    if (inner && inner.message) out.push(String(inner.message));
+  }
+  return out;
+}
+
+function isBlockLagError(err) {
+  return collectMessages(err).some((m) => !/revert/i.test(m) && BLOCK_LAG_RE.test(m));
+}
+
+// [TR] Yazma sonrası okumayı receipt bloğuna sabitlemek için ethers v6 call-override listesi (blockNumber yoksa boş).
+// [EN] ethers v6 call overrides pinning a read to a receipt block (empty when no block number).
+function blockOverrides(blockNumber) {
+  return blockNumber === undefined || blockNumber === null ? [] : [{ blockTag: blockNumber }];
+}
+
 function isTransientError(err) {
   if (!err || isRevert(err)) return false;
+  if (isBlockLagError(err)) return true;
   if (["BAD_DATA", "NETWORK_ERROR", "TIMEOUT", "SERVER_ERROR"].includes(err.code)) return true;
   if (["ECONNRESET", "ETIMEDOUT", "EAI_AGAIN"].includes(err.code)) return true;
   const msg = String((err && err.message) || "");
@@ -109,4 +132,4 @@ async function settleDeployment(contract, provider, networkName, opts = {}) {
   return address;
 }
 
-module.exports = { waitForCode, retryRead, isTransientError, isRevert, confirmationsFor, settleDeployment };
+module.exports = { waitForCode, retryRead, blockOverrides, isBlockLagError, isTransientError, isRevert, confirmationsFor, settleDeployment };
