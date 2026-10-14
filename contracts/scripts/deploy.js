@@ -27,6 +27,7 @@ const hre = require("hardhat");
 const { ethers, artifacts, network } = hre;
 const fs = require("fs");
 const path = require("path");
+const { retryRead, settleDeployment } = require("./lib/waitForCode");
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const PUBLIC_CHAIN_IDS = new Set([8453, 84532]);
@@ -174,7 +175,7 @@ async function deployMockToken(name, symbol, decimals) {
 
   const MockERC20 = await ethers.getContractFactory("MockERC20");
   const token = await MockERC20.deploy(name, symbol, decimals);
-  await token.waitForDeployment();
+  await settleDeployment(token, ethers.provider, network.name, { label: symbol });
   return token;
 }
 
@@ -190,8 +191,7 @@ async function deployEscrowLibraries(signer) {
   for (const name of ESCROW_LIBRARIES) {
     const factory = await ethers.getContractFactory(name, signer);
     const lib = await factory.deploy();
-    await lib.waitForDeployment();
-    libraries[name] = await lib.getAddress();
+    libraries[name] = await settleDeployment(lib, ethers.provider, network.name, { label: name });
     deployTxs[name] = lib.deploymentTransaction()?.hash ?? null;
   }
   return { libraries, deployTxs };
@@ -206,14 +206,14 @@ async function getEscrowFactory(signer) {
 async function deployEscrowWithLibraries(treasuryAddress, signer) {
   const { factory, libraries, deployTxs } = await getEscrowFactory(signer);
   const escrow = await factory.deploy(treasuryAddress);
-  await escrow.waitForDeployment();
+  await settleDeployment(escrow, ethers.provider, network.name, { label: "ArafEscrow" });
   return { escrow, libraries, libraryDeployTxs: deployTxs };
 }
 
 async function getTokenConfigSnapshot(escrow, tokenAddress) {
   // Authoritative read path: explicit getter.
   // Not: Solidity mapping auto-getter'ı struct içindeki fixed array alanını güvenilir döndürmeyebilir.
-  const cfg = await escrow.getTokenConfig(tokenAddress);
+  const cfg = await retryRead(() => escrow.getTokenConfig(tokenAddress), { label: "getTokenConfig" });
   const tierMaxAmountsBaseUnit = Array.from(cfg.tierMaxAmountsBaseUnit ?? cfg[4] ?? []).map((x) => x.toString());
 
   if (tierMaxAmountsBaseUnit.length !== 4) {
@@ -445,10 +445,10 @@ async function main() {
   );
 
   const [feeConfig, cooldownConfig, ownerAfterDeploy, treasuryAfterDeploy] = await Promise.all([
-    escrow.getFeeConfig(),
-    escrow.getCooldownConfig(),
-    escrow.owner(),
-    escrow.treasury(),
+    retryRead(() => escrow.getFeeConfig(), { label: "getFeeConfig" }),
+    retryRead(() => escrow.getCooldownConfig(), { label: "getCooldownConfig" }),
+    retryRead(() => escrow.owner(), { label: "owner" }),
+    retryRead(() => escrow.treasury(), { label: "treasury" }),
   ]);
 
   console.log(`✅ Fee config snapshot: taker=${feeConfig.currentTakerFeeBps} maker=${feeConfig.currentMakerFeeBps}`);
@@ -460,7 +460,7 @@ async function main() {
     console.log(`\n🔒 Ownership devrediliyor -> ${finalOwnerAddress}`);
     const transferTx = await escrow.transferOwnership(finalOwnerAddress);
     await transferTx.wait();
-    const ownerAfterTransfer = await escrow.owner();
+    const ownerAfterTransfer = await retryRead(() => escrow.owner(), { label: "owner" });
     if (ownerAfterTransfer !== finalOwnerAddress) {
       throw new Error(`❌ Ownership devri doğrulanamadı. Beklenen=${finalOwnerAddress} Gerçek=${ownerAfterTransfer}`);
     }
