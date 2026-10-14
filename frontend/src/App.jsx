@@ -1,5 +1,6 @@
 import { CircleCheck, Info, MessageSquare, TriangleAlert, Wallet, X } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
+import { isWalletProviderDisconnectedError, walletDisconnectedToast } from './app/walletDisconnect';
 import { useAccount, useConnect, useDisconnect, useSignMessage, useChainId, usePublicClient } from 'wagmi';
 import { canonicalizePayoutProfileDraft, formatTokenAmount as formatTokenAmountFromRaw, tokenToNumber as rawTokenToDisplayNumber } from './app/orderUiModel';
 import { useArafContract } from './hooks/useArafContract';
@@ -117,11 +118,37 @@ function App() {
   // [EN] Shows toast notification — auto-closes after 4s
   // [TR] Her toast kendi id'si ile kapanır; eski zamanlayıcı yeni toast'ı erken silmez.
   // [EN] Each toast closes by its own id so an older timer never clears a newer toast.
-  const showToast = React.useCallback((message, type = 'success') => {
+  // [TR] options.key: aynı anahtarlı toast görünürken tekrar basılmaz. options.action: {label,onClick} butonu;
+  //      eylemli toast kullanıcı kapatana dek kalır (otomatik yenileme yok).
+  const activeToastKeyRef = React.useRef(null);
+  const showToast = React.useCallback((message, type = 'success', options = null) => {
     const id = Date.now() + Math.random();
-    setToast({ id, message, type });
+    const key = options?.key || null;
+    const action = options?.action || null;
+    if (key && activeToastKeyRef.current === key) return;
+    activeToastKeyRef.current = key;
+    setToast({ id, message, type, key, action });
+    if (action) return;
     setTimeout(() => setToast((current) => (current?.id === id ? null : current)), type === 'error' ? 6000 : 4000);
   }, []);
+  const dismissToast = React.useCallback(() => {
+    activeToastKeyRef.current = null;
+    setToast(null);
+  }, []);
+
+  // [TR] Yalnız cüzdan eklentisi bağlantı kopması kalıbına uyan yakalanmamış hatalar işlenir; diğerleri dokunulmadan geçer.
+  const langRef = React.useRef(lang);
+  langRef.current = lang;
+  React.useEffect(() => {
+    const onRejection = (event) => {
+      if (!isWalletProviderDisconnectedError(event?.reason)) return;
+      event.preventDefault?.();
+      const t = walletDisconnectedToast(langRef.current);
+      showToast(t.message, t.type, t.options);
+    };
+    window.addEventListener('unhandledrejection', onRejection);
+    return () => window.removeEventListener('unhandledrejection', onRejection);
+  }, [showToast]);
 
   // ═══════════════════════════════════════════
   // 2. WEB3 BAĞLANTI VE KONTRAT HOOK'LARI
@@ -1238,7 +1265,10 @@ function App() {
               {toast.type === 'error' ? <TriangleAlert className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" /> : toast.type === 'info' ? <Info className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" /> : <CircleCheck className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />}
             </span>
             <span className="flex-1 leading-snug">{toast.message}</span>
-            <button type="button" onClick={() => setToast(null)} aria-label={lang === 'TR' ? 'Kapat' : 'Close'} className="-my-3 -mr-3 w-11 h-11 shrink-0 flex items-center justify-center rounded-xl text-textMuted hover:text-textPrimary"><X className="w-4 h-4" strokeWidth={2} aria-hidden="true" /></button>
+            {toast.action && (
+              <button type="button" onClick={toast.action.onClick} className="shrink-0 rounded-lg border border-borderSubtle bg-elevated px-3 py-1.5 text-xs font-bold text-textPrimary hover:border-brand/60">{toast.action.label}</button>
+            )}
+            <button type="button" onClick={dismissToast} aria-label={lang === 'TR' ? 'Kapat' : 'Close'} className="-my-3 -mr-3 w-11 h-11 shrink-0 flex items-center justify-center rounded-xl text-textMuted hover:text-textPrimary"><X className="w-4 h-4" strokeWidth={2} aria-hidden="true" /></button>
           </div>
         </div>
       )}

@@ -3,6 +3,7 @@ import React from 'react';
 //      Çıktı siwe.prepareMessage ile birebir aynıdır; backend doğrulaması değişmez.
 // [EN] Build the SIWE message with viem; the siwe package pulled ethers + an ABNF parser into the bundle.
 import { createSiweMessage } from 'viem/siwe';
+import { isWalletProviderDisconnectedError, walletDisconnectedToast } from '../walletDisconnect';
 import { buildApiUrl } from '../apiConfig';
 import { buildTermsStatement, isTermsAcceptedLocally, markTermsAcceptedLocally, TERMS_VERSION } from '../legal/terms';
 
@@ -129,7 +130,10 @@ export const createSessionActions = ({
       }
     } catch (error) {
       console.error('SIWE Error:', error);
-      if (error.message?.includes('rejected') || error.message?.includes('User rejected')) {
+      if (isWalletProviderDisconnectedError(error)) {
+        const t = walletDisconnectedToast(lang);
+        showToast(t.message, t.type, t.options);
+      } else if (error.message?.includes('rejected') || error.message?.includes('User rejected')) {
         showToast(lang === 'TR' ? 'İmza işlemi sizin tarafınızdan iptal edildi.' : 'Signature request was cancelled by you.', 'error');
       } else {
         showToast(lang === 'TR' ? 'Giriş başarısız oldu.' : 'Login failed.', 'error');

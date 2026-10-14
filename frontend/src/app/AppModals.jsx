@@ -8,6 +8,7 @@ import BottomSheet from '../components/BottomSheet';
 import FillConfirmSheet from '../components/FillConfirmSheet';
 import MobileWalletPicker, { WalletOption } from '../components/MobileWalletPicker';
 import { ConnectorIcon } from '../components/wallet-icons';
+import { isWalletProviderDisconnectedError, walletDisconnectedToast } from './walletDisconnect';
 import { describeConnectError, shouldShowMobileWalletPicker } from './mobileWallet';
 import { fmtBps, isKnownNumber, fmtNum } from './copy';
 import { profileRequiredMessage } from './payoutProfileGate';
@@ -165,12 +166,20 @@ export const buildAppModals = (ctx) => {
   );
 
   // [TR] Hata sessiz kalmaz: bağlantı başarısızsa toast ile anlaşılır mesaj gösterilir.
+  const reportConnectError = (err) => {
+    if (isWalletProviderDisconnectedError(err)) {
+      const t = walletDisconnectedToast(lang);
+      showToast?.(t.message, t.type, t.options);
+      return;
+    }
+    showToast?.(describeConnectError(err, lang), 'error');
+  };
   const connectWith = (connector) => {
     setShowWalletModal(false);
     try {
-      connect({ connector }, { onError: (err) => showToast?.(describeConnectError(err, lang), 'error') });
+      connect({ connector }, { onError: reportConnectError });
     } catch (err) {
-      showToast?.(describeConnectError(err, lang), 'error');
+      reportConnectError(err);
     }
   };
 
