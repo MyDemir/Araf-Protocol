@@ -11,6 +11,17 @@ export const DEFAULT_FETCH_TIMEOUT_MS = 10000;
 // [TR] Yazma (POST/PUT/PATCH/DELETE) ve dosya yüklemeleri için daha uzun süre.
 export const WRITE_FETCH_TIMEOUT_MS = 60000;
 
+export const isDegradedResponse = async (res) => {
+  try {
+    if (res?.headers?.get?.('x-araf-degraded') === 'true') return true;
+    if (res?.status === 503 && typeof res.clone === 'function') {
+      const body = await res.clone().json();
+      return body?.code === 'SERVICE_DEGRADED';
+    }
+  } catch { /* [TR] Gövde okunamazsa genel 5xx kuralı geçerli. */ }
+  return false;
+};
+
 export const isTimeoutError = (err) => err?.name === 'TimeoutError';
 
 export const fetchWithTimeout = async (urlOrThunk, options = {}) => {
@@ -28,7 +39,9 @@ export const fetchWithTimeout = async (urlOrThunk, options = {}) => {
     const res = await fetch(url, { ...init, signal: controller.signal });
     if (infra) {
       // [TR] Başarı bayrağı kaldırmaz (histerezis): bkz. infraHealth.js — yalnız yoklama kaldırır.
-      if (res.status >= 500) markInfraFailure(infra);
+      // [TR] Kısıtlı mod (503 SERVICE_DEGRADED ya da izinli uçta X-Araf-Degraded) ulaşılamama DEĞİLDİR: ayrı, sakin bant.
+      if (infra === 'backend' && await isDegradedResponse(res)) markInfraFailure('degraded');
+      else if (res.status >= 500) markInfraFailure(infra);
     }
     return res;
   } catch (err) {

@@ -9,16 +9,20 @@ import { useSyncExternalStore } from 'react';
 export const INFRA_BACKOFF_BASE_MS = 5000;
 export const INFRA_BACKOFF_MAX_MS = 60000;
 
-let state = { backend: false, rpc: false, epoch: 0 };
+// [TR] degraded: backend KISITLI modda (503 SERVICE_DEGRADED / X-Araf-Degraded) — ulaşılamıyor DEĞİL, sakin bant.
+//      configStale: /orders/config son bilinen değerlerden geliyor; yeni emir kapısını kapatır. İkisi de yoklamayla kalkar.
+// [EN] degraded = backend in restricted mode (reachable, calm banner); configStale = protocol config served from cache.
+const KINDS = ['backend', 'rpc', 'degraded', 'configStale'];
+let state = { backend: false, rpc: false, degraded: false, configStale: false, epoch: 0 };
 const listeners = new Set();
 const probes = {};
 const timers = {};
-const attempts = { backend: 0, rpc: 0 };
+const attempts = { backend: 0, rpc: 0, degraded: 0, configStale: 0 };
 // [TR] Histerezis: sıradan (başka uç noktalara giden) başarılı çağrılar bayrağı KALDIRMAZ; yalnız yoklama başarısı kaldırır.
 //      Aksi halde bir uç nokta bozukken diğerlerinin başarısı bayrağı sürekli açıp kapatır (titreme + istek seli).
 //      Toparlanmadan hemen sonra yeniden arıza gelirse geri çekilme sıfırlanmaz.
 const RECENT_RECOVERY_MS = 30000;
-const lastRecoveryAt = { backend: 0, rpc: 0 };
+const lastRecoveryAt = { backend: 0, rpc: 0, degraded: 0, configStale: 0 };
 
 const emit = (patch) => {
   state = { ...state, ...patch };
@@ -79,10 +83,7 @@ export const getInfraHealth = getState;
 export const __resetInfraForTest = () => {
   Object.keys(timers).forEach(clearTimer);
   Object.keys(probes).forEach((k) => delete probes[k]);
-  attempts.backend = 0;
-  attempts.rpc = 0;
-  lastRecoveryAt.backend = 0;
-  lastRecoveryAt.rpc = 0;
-  state = { backend: false, rpc: false, epoch: 0 };
+  KINDS.forEach((k) => { attempts[k] = 0; lastRecoveryAt[k] = 0; });
+  state = { backend: false, rpc: false, degraded: false, configStale: false, epoch: 0 };
   listeners.forEach((l) => l());
 };
