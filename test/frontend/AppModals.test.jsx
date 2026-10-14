@@ -139,6 +139,28 @@ describe('AppModals side-aware behaviors', () => {
   });
 
 
+  it('connect failure from a disconnected extension shows the reload notice; other errors keep the generic message', async () => {
+    const user = userEvent.setup();
+    const showToast = vi.fn();
+    const connectors = [{ uid: 'okx', id: 'okx', name: 'OKX Wallet' }];
+    const run = async (err) => {
+      showToast.mockClear();
+      const connect = vi.fn((_args, cbs) => cbs.onError(err));
+      const modals = buildAppModals(makeCtx({ showWalletModal: true, connectors, connect, showToast }));
+      render(<div>{modals.renderWalletModal()}</div>);
+      await user.click(screen.getByText('OKX Wallet'));
+      cleanup();
+    };
+    await run(new Error('Disconnected from OKX Wallet background. Page reload required.'));
+    expect(showToast).toHaveBeenCalledWith(
+      'Your wallet extension lost its connection. Reload the page to continue.',
+      'error',
+      expect.objectContaining({ action: expect.objectContaining({ label: 'Reload page' }) }),
+    );
+    await run(new Error('something else'));
+    expect(showToast).toHaveBeenCalledWith('Could not connect the wallet. Please try again.', 'error');
+  });
+
   it('renders maker modal as a compact form without raw TR order-side wording', () => {
     const modals = buildAppModals(makeCtx({ lang: 'TR', profileTab: 'ayarlar', showProfileModal: false }));
 
