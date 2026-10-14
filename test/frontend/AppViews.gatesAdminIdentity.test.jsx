@@ -184,16 +184,16 @@ describe('F19.5: admin entry follows the server answer', () => {
 });
 
 describe('P2: inline components keep their identity across renders', () => {
-  it('keeps the same DOM node (and focus) for the market side clause when the view re-renders', () => {
+  it('keeps the same DOM node (and focus) for the market side segment when the view re-renders', () => {
     const first = buildAppViews({ ...baseCtx });
     const { rerender } = render(<div>{first.renderMarket()}</div>);
-    const slot = screen.getByTestId('market-clause-side');
+    const slot = screen.getByTestId('market-side-ALL');
     slot.focus();
     expect(document.activeElement).toBe(slot);
 
     rerender(<div>{buildAppViews({ ...baseCtx }).renderMarket()}</div>);
 
-    expect(screen.getByTestId('market-clause-side')).toBe(slot);
+    expect(screen.getByTestId('market-side-ALL')).toBe(slot);
     expect(document.activeElement).toBe(slot);
   });
 

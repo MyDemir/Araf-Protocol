@@ -6,7 +6,7 @@ import { MARKET_FILTER_DEFAULTS } from '../../frontend/src/app/contexts/marketpl
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
-// [TR] Şart Cümlesi: yalnız görünüm; filtre state'i aynı setFilter/onReset çağrılarıyla değişmeli.
+// [TR] Chip çubuğu: yalnız görünüm; filtre state'i aynı setFilter/onReset çağrılarıyla değişmeli.
 const sortOptions = [{ value: 'AUTO', label: 'En yüksek miktar' }, { value: 'NEWEST', label: 'En yeni' }];
 const baseProps = (over = {}) => ({
   lang: 'TR', filters: { ...MARKET_FILTER_DEFAULTS }, setFilter: vi.fn(), onReset: vi.fn(), activeFilterCount: 0,
@@ -23,8 +23,8 @@ describe('amountUnit', () => {
   });
 });
 
-describe('MarketFilters desktop sentence', () => {
-  it('picks a clause option through setFilter and shows closed-rail info', () => {
+describe('MarketFilters chip bar (desktop popover)', () => {
+  it('picks a chip option through setFilter and shows closed-rail info', () => {
     const p = baseProps();
     render(<MarketFilters {...p} />);
     expect(screen.getByText('2 emirde ödeme yöntemi şu an kapalı')).toBeInTheDocument();
@@ -43,106 +43,89 @@ describe('MarketFilters desktop sentence', () => {
     expect(screen.getByRole('radio', { name: /Girebildiklerim/ })).toBeDisabled();
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(screen.queryByRole('dialog')).toBeNull();
-    fireEvent.click(screen.getAllByRole('button', { name: /Sıfırla/ })[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Filtreleri sıfırla (2)' }));
     expect(p.onReset).toHaveBeenCalled();
   });
 
-  it('labels the amount unit USDT/USDC or the chosen token, never a pseudo glyph', () => {
+  it('hides reset when nothing is bound', () => {
+    render(<MarketFilters {...baseProps()} />);
+    expect(screen.queryByTestId('market-filters-reset')).toBeNull();
+  });
+
+  it('idle chips show the dimension, bound chips show the value', () => {
     const { rerender } = render(<MarketFilters {...baseProps()} />);
+    expect(screen.getByTestId('market-clause-fiat')).toHaveTextContent('Döviz');
+    expect(screen.getByTestId('market-clause-token')).toHaveTextContent('Token');
+    expect(screen.getByTestId('market-clause-tier')).toHaveTextContent('Kademe');
+    rerender(<MarketFilters {...baseProps({ filters: { ...MARKET_FILTER_DEFAULTS, fiat: 'EUR', token: 'USDC', tier: 'NO_BOND' }, activeFilterCount: 3 })} />);
+    expect(screen.getByTestId('market-clause-fiat')).toHaveTextContent('EUR');
+    expect(screen.getByTestId('market-clause-token')).toHaveTextContent('USDC');
+    expect(screen.getByTestId('market-clause-tier')).toHaveTextContent('Teminatsız');
+    expect(screen.getByTestId('market-clause-fiat')).toHaveAttribute('aria-label', 'Para birimi: EUR');
+  });
+
+  it('labels the amount unit USDT/USDC or the chosen token, never a pseudo glyph', () => {
+    const { rerender } = render(<MarketFilters {...baseProps({ filters: { ...MARKET_FILTER_DEFAULTS, amount: '20' } })} />);
     const section = screen.getByTestId('market-filters');
     expect(section.textContent).not.toMatch(/₮/);
     expect(within(section).getAllByText('USDT/USDC').length).toBeGreaterThan(0);
     rerender(<MarketFilters {...baseProps({ filters: { ...MARKET_FILTER_DEFAULTS, token: 'USDC', amount: '20' } })} />);
     expect(screen.getByTestId('market-filters').textContent).not.toMatch(/₮/);
+    expect(within(screen.getByTestId('market-filters')).getAllByText('USDC').length).toBeGreaterThan(0);
+  });
+
+  it('switches the side through the segment, with arrow keys too', () => {
+    const p = baseProps({ filters: { ...MARKET_FILTER_DEFAULTS, side: 'BUY' } });
+    render(<MarketFilters {...p} />);
+    const group = screen.getByRole('radiogroup', { name: 'İşlem yönü' });
+    expect(within(group).getByRole('radio', { name: 'Al' })).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(within(group).getByRole('radio', { name: 'Sat' }));
+    expect(p.setFilter).toHaveBeenLastCalledWith('side', 'SELL');
+    fireEvent.keyDown(group, { key: 'ArrowLeft' });
+    expect(p.setFilter).toHaveBeenLastCalledWith('side', 'ALL');
+  });
+
+  it('toggles hide-mine and shows the server total in the result line', () => {
+    const p = baseProps({ result: { loading: false, error: false, shown: 3, total: 120, loaded: 50 } });
+    render(<MarketFilters {...p} />);
+    expect(screen.getByText('3 emir · toplam 120')).toBeInTheDocument();
+    const hide = screen.getByRole('button', { name: 'Emirlerimi gizle' });
+    expect(hide).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(hide);
+    expect(p.setFilter).toHaveBeenCalledWith('hideOwn', true);
   });
 });
 
-describe('MarketFilters phone summary + sheet', () => {
-  it('summarises the terms with a bound count, edit and reset', () => {
-    const p = baseProps({ filters: { ...MARKET_FILTER_DEFAULTS, fiat: 'TRY', amount: '500' }, activeFilterCount: 2 });
-    render(<MarketFilters {...p} />);
-    const summary = screen.getByTestId('market-filters-summary');
-    expect(summary).toHaveTextContent('TRY · 500 USDT/USDC · Al/Sat · Tüm kademeler');
-    expect(within(summary).getByText('2 bağlı')).toBeInTheDocument();
-    const edit = within(summary).getByRole('button', { name: /Şartları düzenle: TRY · 500 USDT\/USDC/ });
-    expect(edit).toHaveAttribute('aria-haspopup', 'dialog');
-    expect(edit).toHaveAttribute('aria-expanded', 'false');
-    fireEvent.click(within(summary).getByRole('button', { name: /Sıfırla/ }));
-    expect(p.onReset).toHaveBeenCalledTimes(1);
-  });
-
-  it('hides reset when nothing is bound', () => {
-    render(<MarketFilters {...baseProps()} />);
-    const summary = screen.getByTestId('market-filters-summary');
-    expect(within(summary).queryByRole('button', { name: /Sıfırla/ })).toBeNull();
-    expect(summary).toHaveTextContent('Her döviz · USDT/USDC · Al/Sat · Tüm kademeler');
-  });
-
-  it('opens the same clause editor in a sheet; options open inline and Esc steps back', () => {
+describe('MarketFilters chip bar (phone sheet)', () => {
+  it('opens a chip in the shared bottom sheet and keeps Tab inside it', () => {
     stubPhone();
-    const p = baseProps({ activeFilterCount: 1, filters: { ...MARKET_FILTER_DEFAULTS, tier: 'NO_BOND' } });
+    const p = baseProps();
     render(<MarketFilters {...p} />);
-    const edit = screen.getByTestId('market-filters-edit');
-    edit.focus();
-    fireEvent.click(edit);
-    const sheet = screen.getByRole('dialog', { name: 'Şartların' });
-    expect(sheet).toHaveAttribute('aria-modal', 'true');
-    expect(edit).toHaveAttribute('aria-expanded', 'true');
-
-    const fiatSlot = within(sheet).getByTestId('market-sheet-clause-fiat');
-    fireEvent.click(fiatSlot);
-    expect(fiatSlot).toHaveAttribute('aria-expanded', 'true');
-    const group = within(sheet).getByRole('radiogroup', { name: 'Para birimi' });
-    expect(fiatSlot.getAttribute('aria-controls')).toBe(group.parentElement.id);
-    fireEvent.click(within(group).getByRole('radio', { name: 'EUR' }));
-    expect(p.setFilter).toHaveBeenCalledWith('fiat', 'EUR');
-    expect(within(sheet).queryByRole('radiogroup')).toBeNull();
-    expect(document.activeElement).toBe(fiatSlot);
-
-    fireEvent.change(within(sheet).getByLabelText('İşlem tutarı'), { target: { value: '250' } });
-    expect(p.setFilter).toHaveBeenCalledWith('amount', '250');
-    fireEvent.click(within(sheet).getByRole('button', { name: 'kendi emirlerim hariç' }));
-    expect(p.setFilter).toHaveBeenCalledWith('hideOwn', true);
-
-    // Esc with an open option list only collapses it; the next Esc closes the sheet and focus returns to "Edit".
-    fireEvent.click(within(sheet).getByTestId('market-sheet-clause-tier'));
-    fireEvent.keyDown(within(sheet).getByRole('radiogroup'), { key: 'Escape' });
-    expect(within(sheet).queryByRole('radiogroup')).toBeNull();
-    expect(screen.getByRole('dialog', { name: 'Şartların' })).toBeInTheDocument();
-    fireEvent.keyDown(window, { key: 'Escape' });
-    expect(screen.queryByRole('dialog', { name: 'Şartların' })).toBeNull();
-    expect(document.activeElement).toBe(edit);
-  });
-
-  it('closes from the result button, the backdrop, and resets from inside the sheet', () => {
-    stubPhone();
-    const p = baseProps({ activeFilterCount: 1, filters: { ...MARKET_FILTER_DEFAULTS, token: 'USDT' } });
-    render(<MarketFilters {...p} />);
-    fireEvent.click(screen.getByTestId('market-filters-edit'));
-    let sheet = screen.getByTestId('market-filters-sheet');
-    fireEvent.click(within(sheet).getByRole('button', { name: 'Sıfırla (1)' }));
-    expect(p.onReset).toHaveBeenCalled();
-    fireEvent.click(within(sheet).getByRole('button', { name: '8 emri göster' }));
-    expect(screen.queryByTestId('market-filters-sheet')).toBeNull();
-
-    fireEvent.click(screen.getByTestId('market-filters-edit'));
-    sheet = screen.getByRole('dialog', { name: 'Şartların' });
-    fireEvent.click(sheet);
-    expect(screen.queryByRole('dialog', { name: 'Şartların' })).toBeNull();
-  });
-
-  it('keeps Tab inside the sheet', () => {
-    stubPhone();
-    render(<MarketFilters {...baseProps()} />);
-    fireEvent.click(screen.getByTestId('market-filters-edit'));
-    const sheet = screen.getByTestId('market-filters-sheet');
+    const fiat = screen.getByTestId('market-clause-fiat');
+    fiat.focus();
+    fireEvent.click(fiat);
+    const sheet = screen.getByTestId('market-clause-fiat-sheet');
+    expect(screen.getByRole('dialog', { name: 'Para birimi' })).toHaveAttribute('aria-modal', 'true');
     const close = within(sheet).getByRole('button', { name: 'Kapat' });
-    const apply = within(sheet).getByTestId('market-filters-apply');
-    apply.focus();
-    fireEvent.keyDown(apply, { key: 'Tab' });
+    const last = within(sheet).getAllByRole('radio').at(-1);
+    last.focus();
+    fireEvent.keyDown(last, { key: 'Tab' });
     expect(document.activeElement).toBe(close);
-    fireEvent.keyDown(close, { key: 'Tab', shiftKey: true });
-    expect(document.activeElement).toBe(apply);
+    fireEvent.click(within(sheet).getByRole('radio', { name: 'EUR' }));
+    expect(p.setFilter).toHaveBeenCalledWith('fiat', 'EUR');
+    expect(screen.queryByTestId('market-clause-fiat-sheet')).toBeNull();
+    expect(document.activeElement).toBe(fiat);
+  });
+
+  it('closes the sheet with Esc without picking', () => {
+    stubPhone();
+    const p = baseProps();
+    render(<MarketFilters {...p} />);
+    fireEvent.click(screen.getByTestId('market-clause-tier'));
+    expect(screen.getByRole('dialog', { name: 'Teminat kademesi' })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Teminat kademesi' })).toBeNull();
+    expect(p.setFilter).not.toHaveBeenCalled();
   });
 
   it('opens sort in the shared bottom sheet on phones', () => {
@@ -159,15 +142,37 @@ describe('MarketFilters phone summary + sheet', () => {
 });
 
 describe('MarketEmpty', () => {
-  it('loosens a single clause', () => {
+  it('loosens a single filter', () => {
     const setFilter = vi.fn();
-    render(<MarketEmpty lang="TR" filters={{ ...MARKET_FILTER_DEFAULTS, fiat: 'EUR' }} setFilter={setFilter} activeFilterCount={1} isNarrowed />);
-    fireEvent.click(screen.getByRole('button', { name: 'EUR şartını kaldır' }));
+    render(<MarketEmpty lang="TR" filters={{ ...MARKET_FILTER_DEFAULTS, fiat: 'EUR' }} setFilter={setFilter} activeFilterCount={1} isNarrowed canCreate />);
+    expect(screen.getByText('Bu filtrelerle emir yok')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'EUR filtresini kaldır' }));
     expect(setFilter).toHaveBeenCalledWith('fiat', 'ALL');
   });
 
   it('shows the amount chip with a readable unit', () => {
     render(<MarketEmpty lang="TR" filters={{ ...MARKET_FILTER_DEFAULTS, amount: '500' }} setFilter={vi.fn()} activeFilterCount={1} isNarrowed />);
-    expect(screen.getByRole('button', { name: '500 USDT/USDC şartını kaldır' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '500 USDT/USDC filtresini kaldır' })).toBeInTheDocument();
+  });
+
+  it('offers "post the first order" when the market is empty and the gate is open', () => {
+    const onCreate = vi.fn();
+    render(<MarketEmpty lang="TR" filters={MARKET_FILTER_DEFAULTS} setFilter={vi.fn()} isNarrowed={false} canCreate onCreate={onCreate} />);
+    expect(screen.getByText('Henüz açık emir yok')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'İlk emri sen aç' }));
+    expect(onCreate).toHaveBeenCalled();
+    expect(screen.queryByTestId('market-empty-closed')).toBeNull();
+  });
+
+  it('replaces the CTA with a calm "temporarily closed" chip when the gate is closed', () => {
+    render(<MarketEmpty lang="TR" filters={MARKET_FILTER_DEFAULTS} setFilter={vi.fn()} isNarrowed={false} canCreate={false} onCreate={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: 'İlk emri sen aç' })).toBeNull();
+    expect(screen.getByTestId('market-empty-closed')).toHaveTextContent('Yeni emirler geçici olarak kapalı');
+  });
+
+  it('shows only the feed error without create or closed chips', () => {
+    render(<MarketEmpty lang="TR" filters={MARKET_FILTER_DEFAULTS} setFilter={vi.fn()} feedError canCreate={false} />);
+    expect(screen.getByText('Pazar verisi alınamadı')).toBeInTheDocument();
+    expect(screen.queryByTestId('market-empty-closed')).toBeNull();
   });
 });
