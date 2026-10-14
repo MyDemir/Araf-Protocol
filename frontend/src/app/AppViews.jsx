@@ -595,6 +595,7 @@ export const buildAppViews = (ctx) => {
           </button>
         </div>
     );
+    const referenceTicker = <ReferenceRateTicker lang={lang} />;
     const faucetRow = isFaucetEnabled && (
           <div className="mb-3 flex items-center gap-2 text-xs text-textMuted">
             <Droplets className="w-3.5 h-3.5" strokeWidth={1.8} aria-hidden="true" />
@@ -803,7 +804,7 @@ export const buildAppViews = (ctx) => {
             closedRailCount={visibleOrders.filter(isOwnerRailDisabled).length}
           >
             {faucetRow}
-            <ReferenceRateTicker lang={lang} />
+            {referenceTicker}
             {orderList}
           </VariantFilters>
         </div>
@@ -903,7 +904,7 @@ export const buildAppViews = (ctx) => {
 
         {faucetRow}
 
-        <ReferenceRateTicker lang={lang} />
+        {referenceTicker}
 
         {orderList}
       </div>
