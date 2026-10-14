@@ -67,6 +67,26 @@ describe('SessionProvider session actions', () => {
     expect(isTermsAcceptedLocally('0xabc0000000000000000000000000000000000000')).toBe(true);
   });
 
+  it('wallet extension disconnect during signing shows the reload notice with a reload action', async () => {
+    const deps = makeDeps({
+      signMessageAsync: vi.fn().mockRejectedValue(new Error('Disconnected from OKX Wallet background. Page reload required.')),
+    });
+    global.fetch.mockResolvedValueOnce(jsonResponse({ nonce: 'abc12345', siweDomain: 'backend.example', siweUri: 'https://backend.example/app' }));
+    await createSessionActions(deps).loginWithSIWE();
+    const [msg, type, options] = deps.showToast.mock.calls[deps.showToast.mock.calls.length - 1];
+    expect(msg).toBe('Your wallet extension lost its connection. Reload the page to continue.');
+    expect(type).toBe('error');
+    expect(options.action.label).toBe('Reload page');
+    expect(deps.showToast).not.toHaveBeenCalledWith('Login failed.', 'error');
+  });
+
+  it('unrelated signing errors keep the existing login-failed toast', async () => {
+    const deps = makeDeps({ signMessageAsync: vi.fn().mockRejectedValue(new Error('boom')) });
+    global.fetch.mockResolvedValueOnce(jsonResponse({ nonce: 'abc12345', siweDomain: 'backend.example', siweUri: 'https://backend.example/app' }));
+    await createSessionActions(deps).loginWithSIWE();
+    expect(deps.showToast).toHaveBeenCalledWith('Login failed.', 'error');
+  });
+
   it('siwe_statement_signs_acceptance_of_the_current_terms_version', async () => {
     const deps = makeDeps();
     global.fetch
