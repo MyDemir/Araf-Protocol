@@ -19,7 +19,7 @@ const motion = 'transition duration-150 motion-reduce:transition-none';
 const Ladder = ({ lit }) => (
   <span className="flex h-7 items-end gap-[3px]" aria-hidden="true">
     {TIERS.map((t) => (
-      <span key={t} style={{ height: `${36 + t * 16}%` }} className={`w-[5px] rounded-[2px] ${lit(t) ? 'bg-brand' : 'bg-borderStrong'}`} />
+      <span key={t} style={{ height: `${36 + t * 16}%` }} className={`w-[5px] rounded-[2px] ${lit(t) ? 'bg-brand' : 'bg-textMuted/40'}`} />
     ))}
   </span>
 );
@@ -289,21 +289,24 @@ export default function MarketFiltersB({
         {/* [TR] Telefon: yapışkan konsol. [EN] Phone: sticky console. */}
         <div role="search" aria-label={tr ? 'Pazar filtreleri' : 'Market filters'} className="sticky top-0 z-20 -mx-4 mb-2 bg-app/90 px-4 pb-2 pt-2 backdrop-blur-md md:-mx-8 md:px-8 lg:hidden">
           <SideSwitch tr={tr} value={f.side} onChange={(v) => setFilter('side', v)} />
-          <div className="relative -mx-4 mt-2 md:-mx-8">
-            <div className="flex snap-x scroll-px-4 gap-2 overflow-x-auto px-4 py-0.5 md:scroll-px-8 [scrollbar-width:none] md:px-8 [&::-webkit-scrollbar]:hidden">
-              <button
-                ref={openerRef}
-                type="button"
-                data-testid="market-filters-open"
-                aria-haspopup="dialog"
-                aria-expanded={sheetOpen}
-                onClick={() => setSheetOpen(true)}
-                className={`${chipCls(activeFilterCount > 0)} pl-3`}
-              >
-                <SlidersHorizontal className="h-4 w-4" strokeWidth={2} aria-hidden="true" />
-                {tr ? 'Filtreler' : 'Filters'}
-                {activeFilterCount > 0 && <span className="rounded-full bg-brand px-1.5 text-[11px] font-bold leading-5 tabular-nums text-black">{activeFilterCount}</span>}
-              </button>
+          {/* [TR] "Filtreler" düğmesi sabit kalır (sayaç hep görünür); yanındaki çipler yatay kayar. */}
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              ref={openerRef}
+              type="button"
+              data-testid="market-filters-open"
+              aria-haspopup="dialog"
+              aria-expanded={sheetOpen}
+              onClick={() => setSheetOpen(true)}
+              className={`${chipCls(activeFilterCount > 0)} pl-3`}
+            >
+              <SlidersHorizontal className="h-4 w-4" strokeWidth={2} aria-hidden="true" />
+              {tr ? 'Filtreler' : 'Filters'}
+              {activeFilterCount > 0 && <span className="rounded-full bg-brand px-1.5 text-[11px] font-bold leading-5 tabular-nums text-black">{activeFilterCount}</span>}
+            </button>
+            <span className="h-6 w-px shrink-0 bg-borderSubtle" aria-hidden="true" />
+            <div className="relative -mr-4 min-w-0 flex-1 md:-mr-8">
+              <div className="flex snap-x gap-2 overflow-x-auto py-0.5 pr-4 [scrollbar-width:none] md:pr-8 [&::-webkit-scrollbar]:hidden">
               {['USDT', 'USDC'].map((sym) => (
                 <button key={sym} type="button" aria-pressed={f.token === sym} onClick={() => setFilter('token', f.token === sym ? 'ALL' : sym)} className={chipCls(f.token === sym)}>
                   <TokenDot sym={sym} />{sym}
@@ -314,7 +317,8 @@ export default function MarketFiltersB({
               ))}
               {chips.map(toChip)}
             </div>
-            <span className="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-app to-transparent" aria-hidden="true" />
+              <span className="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-app to-transparent" aria-hidden="true" />
+            </div>
           </div>
         </div>
 
@@ -359,7 +363,7 @@ export function MarketEmptyB({ lang = 'TR', filters: rawFilters, setFilter, onRe
   return (
     <div data-testid="market-empty-b" className="flex flex-col items-center gap-4 rounded-[1.25rem] border border-borderSubtle bg-surface p-6 text-center md:flex-row md:items-center md:gap-5 md:p-6 md:text-left">
       <span className="flex h-14 w-14 shrink-0 items-end justify-center gap-[3px] rounded-2xl border border-borderSubtle bg-elevated pb-3.5" aria-hidden="true">
-        {TIERS.map((t) => <span key={t} style={{ height: `${8 + t * 5}px` }} className="w-[5px] rounded-[2px] bg-borderStrong" />)}
+        {TIERS.map((t) => <span key={t} style={{ height: `${8 + t * 5}px` }} className="w-[5px] rounded-[2px] bg-textMuted/50" />)}
       </span>
       <div className="min-w-0 flex-1">
         <p className="text-[15px] font-semibold text-textPrimary">{title}</p>
