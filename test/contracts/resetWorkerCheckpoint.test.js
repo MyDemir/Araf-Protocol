@@ -31,7 +31,7 @@ function fakeRedis(onDel = () => {}) {
 }
 
 // Makine başına durum dosyası; "list" çağrı sayacı. autostartOnList: o list çağrısında m1 started olur.
-function setup({ failStopId, states = { m1: 'started', m2: 'started' }, autostartOnList } = {}) {
+function setup({ failStopId, states = { m1: 'started', m2: 'started' }, autostartOnList, listFail } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rwc-'));
   const log = path.join(dir, 'calls.log');
   for (const [id, st] of Object.entries(states)) fs.writeFileSync(path.join(dir, `s_${id}`), st);
@@ -43,6 +43,7 @@ D="${dir}"
 if [ "$1 $2" = "machine list" ]; then
   n=$(( $(cat "$D/listcount") + 1 )); echo $n > "$D/listcount"
   ${autostartOnList ? `[ "$n" = "${autostartOnList}" ] && echo started > "$D/s_m1"` : ':'}
+  ${listFail ? `if [ "$n" = "${listFail.on || 0}" ] || [ "$n" -ge "${listFail.from || 999999}" ]; then ${listFail.mode === 'empty' ? 'exit 0' : 'exit 1'}; fi` : ':'}
   out=""
   ${ids.map((id) => `out="$out{\\"id\\":\\"${id}\\",\\"state\\":\\"$(cat "$D/s_${id}")\\"},"`).join('\n  ')}
   echo "[\${out%,}]"
@@ -146,6 +147,41 @@ describe('reset-worker-checkpoint.sh', function () {
     expect(dels()).to.have.length(3);
     expect(r.out).to.match(/after 3 attempts/);
     expect(fs.readFileSync(log, 'utf8')).to.match(/machine start m1/);
+  });
+
+  for (const mode of ['exit', 'empty']) {
+    it(`list failure (${mode}) at the pre-DEL verification: no DEL that attempt, loop repeats`, async function () {
+      const { dir } = setup({ listFail: { on: 4, mode } });
+      const r = await run(envFor(dir));
+      expect(r.status).to.equal(0, r.out);
+      expect(dels()).to.have.length(1);
+      expect(r.out).to.include('Attempt 1/3');
+    });
+
+    it(`persistent list failure (${mode}): never deletes, dies, still restarts machines`, async function () {
+      const { dir, log } = setup({ listFail: { from: 2, mode } });
+      const r = await run(envFor(dir));
+      expect(r.status).to.not.equal(0);
+      expect(dels()).to.have.length(0);
+      expect(r.out).to.match(/after 3 attempts/);
+      expect(fs.readFileSync(log, 'utf8')).to.match(/machine start m1/);
+    });
+
+    it(`list failure (${mode}) right AFTER the delete counts as unverified and retries`, async function () {
+      // list çağrıları: 1 ilk, 2 stop, 3 wait, 4 DEL-öncesi, 5 DEL-sonrası
+      const { dir } = setup({ listFail: { on: 5, mode } });
+      const r = await run(envFor(dir));
+      expect(r.status).to.equal(0, r.out);
+      expect(dels()).to.have.length(2);
+    });
+  }
+
+  it('dies when the first listing has zero machines', async function () {
+    const { dir, log } = setup({ states: {} });
+    const r = await run(envFor(dir));
+    expect(r.status).to.not.equal(0);
+    expect(redis.cmds).to.have.length(0);
+    expect(fs.readFileSync(log, 'utf8')).to.not.match(/machine (stop|start)/);
   });
 
   it('does not start machines that were already stopped at the beginning', async function () {

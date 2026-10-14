@@ -4,6 +4,7 @@
 #      worker:last_safe_block sil -> tekrar doğrula -> makineleri başlat (hata olsa da).
 #      fly.toml auto_start_machines=true olduğundan proxy bir makineyi durdurmadan sonra yeniden
 #      başlatabilir; bu yüzden DEL'den hemen önce ve hemen sonra doğrulanır, en fazla 3 deneme yapılır.
+#      Makine listesi FAIL-CLOSED okunur: flyctl hatası, boş/geçersiz çıktı ya da 0 makine = hata.
 #      Sonda yalnız başlangıçta started olan makineler başlatılır.
 #      Env: FLY_APP_NAME FLY_API_TOKEN REDIS_URL DEPLOY_BLOCK (+ test için WAIT_TIMEOUT_S, WAIT_INTERVAL_S).
 #      Gizli değerler basılmaz.
@@ -19,22 +20,21 @@ WAIT_TIMEOUT_S="${WAIT_TIMEOUT_S:-180}"
 WAIT_INTERVAL_S="${WAIT_INTERVAL_S:-5}"
 MAX_ATTEMPTS=3
 
-# Çıktı: "<id> <state>" satırları.
+# Çıktı: "<id> <state>" satırları. FAIL-CLOSED: flyctl hatası, geçersiz JSON ya da 0 makine => dönüş kodu 1.
 list_machines() {
   flyctl machine list --json -a "$FLY_APP_NAME" | python3 -c '
 import json,sys
-for m in json.load(sys.stdin):
+d=json.load(sys.stdin)
+if not isinstance(d,list) or len(d)==0: sys.exit(1)
+for m in d:
     print(m.get("id",""), m.get("state",""))'
 }
 
-ALL_COUNT=0
+INITIAL="$(list_machines)" || die "Could not list Fly machines (or none exist) for $FLY_APP_NAME."
 IDS=()   # yalnız başlangıçta started olanlar; sonda yalnız bunlar başlatılır
 while read -r id state; do
-  [ -n "$id" ] || continue
-  ALL_COUNT=$((ALL_COUNT + 1))
-  if [ "$state" = "started" ]; then IDS+=("$id"); fi
-done < <(list_machines)
-[ "$ALL_COUNT" -gt 0 ] || die "No Fly machines found for $FLY_APP_NAME."
+  if [ -n "$id" ] && [ "$state" = "started" ]; then IDS+=("$id"); fi
+done <<<"$INITIAL"
 
 STOP_ATTEMPTED=0
 start_all() {
@@ -54,20 +54,27 @@ on_exit() {
 }
 trap on_exit EXIT
 
-# Stopped olmayan her makineyi durdurur (auto_start proxy'si yeniden başlatmış olabilir).
+# Stopped olmayan her makineyi durdurur (auto_start proxy'si yeniden başlatmış olabilir). Liste hatası => 1.
 stop_running() {
-  local rc=0 id state
+  local rc=0 id state out
+  out="$(list_machines)" || return 1
   while read -r id state; do
     if [ -n "$id" ] && [ "$state" != "stopped" ]; then
       flyctl machine stop "$id" -a "$FLY_APP_NAME" >/dev/null || { echo "::warning::Failed to stop machine $id"; rc=1; }
     fi
-  done < <(list_machines)
+  done <<<"$out"
   return $rc
 }
-count_running() { list_machines | awk '$1 != "" && $2 != "stopped" {c++} END {print c+0}'; }
+# Çalışan sayısını basar; liste hatası => 1 (fail-closed).
+count_running() {
+  local out
+  out="$(list_machines)" || return 1
+  awk '$1 != "" && $2 != "stopped" {c++} END {print c+0}' <<<"$out"
+}
+all_stopped() { local n; n="$(count_running)" || return 1; [ "$n" = "0" ]; }
 wait_stopped() {
   local start=$SECONDS
-  while [ "$(count_running)" != "0" ]; do
+  while ! all_stopped; do
     [ $((SECONDS - start)) -lt "$WAIT_TIMEOUT_S" ] || return 1
     sleep "$WAIT_INTERVAL_S"
   done
@@ -81,14 +88,14 @@ while [ "$attempt" -le "$MAX_ATTEMPTS" ]; do
   stop_running || ok=0
   if [ "$ok" = 1 ]; then wait_stopped || ok=0; fi
   # DEL'den hemen önce doğrula.
-  if [ "$ok" = 1 ] && [ "$(count_running)" != "0" ]; then ok=0; fi
+  if [ "$ok" = 1 ]; then all_stopped || ok=0; fi
   if [ "$ok" = 1 ]; then
     node "$HERE/delete-worker-checkpoint.js" || die "Checkpoint delete failed."
     # DEL'den hemen sonra doğrula: DEL'den önce başlamış süreç checkpoint'i yeniden yazmış olabilir.
-    if [ "$(count_running)" != "0" ]; then ok=0; fi
+    all_stopped || ok=0
   fi
   if [ "$ok" = 1 ]; then break; fi
-  echo "::warning::Attempt $attempt/$MAX_ATTEMPTS: machines were not stopped around the delete; retrying."
+  echo "::warning::Attempt $attempt/$MAX_ATTEMPTS: machines were not verified stopped around the delete; retrying."
   attempt=$((attempt + 1))
 done
 [ "$ok" = 1 ] || die "Could not keep all machines stopped around the checkpoint delete after $MAX_ATTEMPTS attempts."
