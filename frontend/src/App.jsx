@@ -149,6 +149,13 @@ function App() {
     window.localStorage.setItem(APP_LANG_STORAGE_KEY, lang);
   }, [lang]);
 
+  // [TR] <html lang> seçili dille eşlenir: CSS uppercase "i/İ" ve ekran okuyucu doğru çalışır.
+  // [EN] Keep <html lang> in sync with the selected language (correct uppercase "İ" and screen-reader voice).
+  React.useEffect(() => {
+    if (typeof document === 'undefined') return;
+    document.documentElement.lang = lang === 'TR' ? 'tr' : 'en';
+  }, [lang]);
+
   // [TR] Tüm kontrat metodları tek bir hook instance'ından alınır
   // [EN] All contract methods come from a single hook instance
   const {
