@@ -418,43 +418,44 @@ export default function MarketFilters({
       <section role="search" aria-label={tr ? 'Pazar filtreleri' : 'Market filters'} data-testid="market-filters" className="relative mb-4 overflow-visible rounded-[1.25rem] border border-borderSubtle bg-surface p-3 md:p-5">
         <span className="pointer-events-none absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-brand/50 to-transparent" aria-hidden="true" />
 
-        {/* [TR] Telefon: kompakt özet kartı. [EN] Phone: compact summary card. */}
+        {/* [TR] Telefon: kompakt özet kartı. Üst satır: başlık, bağlı şart rozeti, Sıfırla; alt satır: özet + Düzenle.
+             [EN] Phone: compact summary. Top row: label, bound-count badge, Reset; next row: summary + Edit. */}
         <div className="md:hidden" data-testid="market-filters-summary">
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex h-6 items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2">
               <SectionMark />
-              <p className="text-[11px] font-semibold tracking-[0.14em] text-textSecondary">{tr ? 'ŞARTLARIN' : 'YOUR TERMS'}</p>
+              <p className="truncate text-[11px] font-semibold tracking-[0.14em] text-textSecondary">{tr ? 'ŞARTLARIN' : 'YOUR TERMS'}</p>
               {activeFilterCount > 0 && (
                 <span className="shrink-0 rounded-full bg-brand/15 px-2 py-0.5 text-[11px] font-bold tabular-nums text-textPrimary">{boundBadge(tr, activeFilterCount)}</span>
               )}
             </div>
-            <div className="-mr-1 flex shrink-0 items-center gap-1">
-              {activeFilterCount > 0 && (
-                <button type="button" onClick={() => onReset?.()} className={`${resetBtnCls} px-2.5`}>
-                  <RotateCcw className="h-4 w-4" strokeWidth={2} aria-hidden="true" />{tr ? 'Sıfırla' : 'Reset'}
-                </button>
-              )}
-              <button
-                type="button"
-                data-testid="market-filters-edit"
-                aria-haspopup="dialog"
-                aria-expanded={sheetOpen}
-                aria-label={tr ? `Şartları düzenle: ${summaryLabel}` : `Edit terms: ${summaryLabel}`}
-                onClick={() => setSheetOpen(true)}
-                className="inline-flex h-11 items-center gap-1.5 rounded-xl border border-borderSubtle bg-elevated px-3 text-sm font-semibold text-textPrimary transition hover:border-borderStrong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand motion-reduce:transition-none"
-              >
-                <Pencil className="h-4 w-4" strokeWidth={2} aria-hidden="true" />{tr ? 'Düzenle' : 'Edit'}
+            {activeFilterCount > 0 && (
+              <button type="button" onClick={() => onReset?.()} className={`-my-2.5 -mr-1.5 shrink-0 px-2.5 ${resetBtnCls}`}>
+                <RotateCcw className="h-4 w-4" strokeWidth={2} aria-hidden="true" />{tr ? 'Sıfırla' : 'Reset'}
               </button>
-            </div>
+            )}
           </div>
-          <p className="mt-1.5 line-clamp-2 text-sm leading-5" aria-hidden="true">
-            {parts.map((p, i) => (
-              <span key={p.key}>
-                {i > 0 && <span className="text-textMuted"> · </span>}
-                <span className={p.bound ? 'font-semibold text-textPrimary' : 'text-textSecondary'}>{p.text}</span>
-              </span>
-            ))}
-          </p>
+          <div className="mt-2 flex items-center gap-3">
+            <p className="min-w-0 flex-1 line-clamp-2 text-sm leading-5" aria-hidden="true">
+              {parts.map((p, i) => (
+                <span key={p.key}>
+                  {i > 0 && <span className="text-textMuted"> · </span>}
+                  <span className={`whitespace-nowrap ${p.bound ? 'font-semibold text-textPrimary' : 'text-textSecondary'}`}>{p.text}</span>
+                </span>
+              ))}
+            </p>
+            <button
+              type="button"
+              data-testid="market-filters-edit"
+              aria-haspopup="dialog"
+              aria-expanded={sheetOpen}
+              aria-label={tr ? `Şartları düzenle: ${summaryLabel}` : `Edit terms: ${summaryLabel}`}
+              onClick={() => setSheetOpen(true)}
+              className="inline-flex h-11 shrink-0 items-center gap-1.5 rounded-xl border border-borderSubtle bg-elevated px-3 text-sm font-semibold text-textPrimary transition hover:border-borderStrong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand motion-reduce:transition-none"
+            >
+              <Pencil className="h-4 w-4" strokeWidth={2} aria-hidden="true" />{tr ? 'Düzenle' : 'Edit'}
+            </button>
+          </div>
         </div>
 
         {/* [TR] Masaüstü: cümle yerinde düzenlenir. [EN] Desktop: the sentence is edited in place. */}
@@ -483,7 +484,7 @@ export default function MarketFilters({
             <span className="min-w-0 shrink-0"><ClauseSlot clause={c.sort} filterKey="sort" tr={tr} testId="market-clause-sort" onPick={(v) => setFilter('sort', v)} /></span>
           </div>
           {closedRailCount > 0 && (
-            <p className="mt-2 flex items-start gap-1.5 text-xs text-textSecondary">
+            <p className="mt-1.5 flex items-start gap-1.5 text-xs text-textSecondary md:mt-2">
               <Lock className="mt-px h-3.5 w-3.5 shrink-0" strokeWidth={2} aria-hidden="true" />
               <span>{closedRailText(tr, closedRailCount)}</span>
             </p>
