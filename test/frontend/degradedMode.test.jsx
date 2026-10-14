@@ -56,6 +56,18 @@ describe('degraded banner', () => {
   });
 });
 
+describe('degraded gate', () => {
+  it('closes only the new-position gate and banner says so', () => {
+    expect(resolveNewTxGate({ rpcChecked: true, serviceDegraded: true })).toMatchObject({ blocked: true, reason: 'degraded' });
+    expect(resolveNewTxGate({ rpcChecked: true, serviceDegraded: false })).toMatchObject({ blocked: false });
+    render(<SystemStatusBar isTestnet={false} serviceDegraded />);
+    expect(screen.getByText(/Opening new trades is temporarily disabled/)).toBeInTheDocument();
+    cleanup();
+    render(<SystemStatusBar isTestnet={false} serviceDegraded lang="TR" />);
+    expect(screen.getByText(/Yeni işlem açma geçici olarak kapalı/)).toBeInTheDocument();
+  });
+});
+
 describe('configStale', () => {
   it('shows info banner and closes only the NEW-position gate', () => {
     render(<SystemStatusBar isTestnet={false} configStale />);

@@ -299,8 +299,8 @@ function App() {
     devScenarioActive,
   });
   const txGate = React.useMemo(() => resolveNewTxGate({
-    isPaused, rpcChecked, backendUnreachable: infra.backend, rpcUnreachable: infra.rpc, configStale: infra.configStale, lang,
-  }), [isPaused, rpcChecked, infra.backend, infra.rpc, infra.configStale, lang]);
+    isPaused, rpcChecked, backendUnreachable: infra.backend, rpcUnreachable: infra.rpc, configStale: infra.configStale, serviceDegraded: infra.degraded, lang,
+  }), [isPaused, rpcChecked, infra.backend, infra.rpc, infra.configStale, infra.degraded, lang]);
   // [TR] Eylem fonksiyonları kapıyı çağrı anında bu ref'ten okur: modal açıkken arıza başlarsa bayat kapanıştan etkilenmez.
   const txGateRef = React.useRef(txGate);
   txGateRef.current = txGate;

@@ -131,8 +131,8 @@ export const resolveSystemStatuses = ({
       title: t(lang, 'Sistem kısıtlı modda', 'System in restricted mode'),
       message: t(
         lang,
-        'Sistem kısıtlı modda: bazı işlemler (ödeme bilgisi, dekont, işlem odası) geçici olarak kapalı. Mevcut işlemleriniz zincirde güvende.',
-        'System is in restricted mode: some actions (payment details, receipts, trade room) are temporarily unavailable. Your existing trades are safe on-chain.',
+        'Sistem kısıtlı modda: bazı işlemler (ödeme bilgisi, dekont, işlem odası) geçici olarak kapalı. Yeni işlem açma geçici olarak kapalı. Mevcut işlemleriniz zincirde güvende.',
+        'System is in restricted mode: some actions (payment details, receipts, trade room) are temporarily unavailable. Opening new trades is temporarily disabled. Your existing trades are safe on-chain.',
       ),
       details: [envError(ENV_ERROR_CODES.SERVICE_DEGRADED, 'Backend restricted mode (503 SERVICE_DEGRADED)')],
     });

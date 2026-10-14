@@ -8,16 +8,21 @@ export const TX_GATE_REASONS = Object.freeze({
   PAUSED: 'paused',
   CHECKING: 'checking',
   INFRA: 'infra',
+  DEGRADED: 'degraded',
   CONFIG_STALE: 'config_stale',
 });
 
-export const resolveNewTxGate = ({ isPaused = false, rpcChecked = true, backendUnreachable = false, rpcUnreachable = false, configStale = false, lang = 'EN' } = {}) => {
+export const resolveNewTxGate = ({ isPaused = false, rpcChecked = true, backendUnreachable = false, rpcUnreachable = false, configStale = false, serviceDegraded = false, lang = 'EN' } = {}) => {
   const tr = lang === 'TR';
   if (isPaused) {
     return { blocked: true, reason: TX_GATE_REASONS.PAUSED, message: tr ? 'Sistem şu an bakım modundadır. Yeni işlem açılamaz.' : 'System is paused. New trades cannot be opened.' };
   }
   if (backendUnreachable || rpcUnreachable) {
     return { blocked: true, reason: TX_GATE_REASONS.INFRA, message: tr ? 'Zincir/sunucu durumu doğrulanamıyor; yeni işlem şu an başlatılamaz.' : 'Chain/server status cannot be verified; new trades cannot be started right now.' };
+  }
+  // [TR] Kısıtlı mod: PII/market-meta/trades uçları kapalı; taker karşı tarafın ödeme bilgisini göremez. Çıkış eylemleri açık kalır.
+  if (serviceDegraded) {
+    return { blocked: true, reason: TX_GATE_REASONS.DEGRADED, message: tr ? 'Sistem kısıtlı modda; yeni işlem açma geçici olarak kapalı.' : 'System is in restricted mode; opening new trades is temporarily disabled.' };
   }
   // [TR] Bayat ücret/bond değeriyle yanlış allowance verilmesin: yeni emir/emre giriş kapalı. Çıkış eylemleri etkilenmez.
   if (configStale) {
