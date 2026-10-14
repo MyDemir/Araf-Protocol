@@ -982,11 +982,29 @@ export const buildAppViews = (ctx) => {
             // [TR] Önce görülmesi gereken: alıcı için satıcının ödeme bilgileri (nereye ödeyeceği).
             // [EN] Must-see-first: for the taker, the maker's payment details (where to pay).
             const showTakerPii = isTaker && ['LOCKED', 'PAID'].includes(roomState);
+            // [TR] Uzlaşma kartı yalnız itiraz aşamasında anlamlıdır ve itiraz özetinin hemen altında durur
+            //      (eskiden sayaçların altındaydı; "aşağıdaki karta bakın" yönlendirmesi gereksizleşti).
             const beforeActions = showTakerPii ? (
               <div className="mb-4">
                 <PIIDisplay key={activeTrade?.id} tradeId={activeTrade?.id} lang={lang} authenticatedFetch={authenticatedFetch} />
               </div>
-            ) : null;
+            ) : (roomState === 'CHALLENGED' ? (
+              <div className="mb-4">
+                  <SettlementProposalCard
+                    activeTrade={activeTrade}
+                    userRole={userRole}
+                    address={address}
+                    lang={lang}
+                    authenticatedFetch={authenticatedFetch}
+                    settlementContractFns={settlementContractFns}
+                    fetchMyTrades={fetchMyTrades}
+                    showToast={showToast}
+                    isContractLoading={isContractLoading}
+                    setIsContractLoading={setIsContractLoading}
+                    nowOffsetMs={chainOffsetMs}
+                  />
+              </div>
+            ) : null);
 
             // [TR] Birincil aksiyonun girdileri: yalnız o adımda gereken alanlar, butonun hemen üstünde.
             // [EN] Primary action inputs: only what this step needs, right above the button.
@@ -1035,25 +1053,6 @@ export const buildAppViews = (ctx) => {
 
             return (
               <TradeRoomPage decisionInput={tradeDecisionInput} actionCallbacks={tradeActionCallbacks} beforeActions={beforeActions} primaryInput={primaryInput}>
-                {/* [TR] Uzlaşma kartı yalnız itiraz aşamasında anlamlı; diğer durumlarda "kullanılamaz" kutusu gürültüydü. */}
-                {roomState === 'CHALLENGED' && (
-                  <div className="mb-4">
-                    <SettlementProposalCard
-                      activeTrade={activeTrade}
-                      userRole={userRole}
-                      address={address}
-                      lang={lang}
-                      authenticatedFetch={authenticatedFetch}
-                      settlementContractFns={settlementContractFns}
-                      fetchMyTrades={fetchMyTrades}
-                      showToast={showToast}
-                      isContractLoading={isContractLoading}
-                      setIsContractLoading={setIsContractLoading}
-                      nowOffsetMs={chainOffsetMs}
-                    />
-                  </div>
-                )}
-
                 {/* [TR] İptal teklifi durumu: bekleyen teklif veya karşı tarafın teklifine yanıt. Teklif butonu "Diğer seçenekler"de. */}
                 {['LOCKED', 'PAID', 'CHALLENGED'].includes(roomState) && cancelStatus === 'proposed_by_me' && (
                   <div className="mb-4 py-3 px-4 bg-warning/10 border border-warning/30 rounded-xl flex items-center gap-3">
