@@ -141,6 +141,7 @@ vi.mock('../../frontend/src/app/AppModals', () => ({
     renderMakerModal: () => null,
     renderProfileModal: () => null,
     renderTermsModal: () => null,
+    renderFillConfirm: () => null,
   }),
 }));
 

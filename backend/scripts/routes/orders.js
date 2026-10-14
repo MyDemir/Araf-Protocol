@@ -22,7 +22,7 @@ const User = require("../models/User");
 const logger = require("../utils/logger");
 const { getConfig, isProtocolConfigStale } = require("../services/protocolConfig");
 const { isConfigStale } = require("../services/serviceMode");
-const { getRailStates, applyRailStatesToRiskConfig, getEnabledRailCodes, isRailEnabledStrict } = require("../services/paymentRails");
+const { getRailStates, applyRailStatesToRiskConfig, getEnabledRailCodes, isRailEnabledStrict, isKnownRail } = require("../services/paymentRails");
 const { buildTradeHealthSignals } = require("./tradeRisk");
 const { ALLOWED_FIAT, normalizeMarketMeta, storePendingMarketMeta } = require("../services/orderMarketMeta");
 
@@ -229,6 +229,16 @@ async function _attachMarketTrustVisibilitySummary(orders = []) {
     })
   );
 
+  // [TR] owner_rail: yalnız sahibin ödeme yöntemi KODU (TR_IBAN / SEPA_IBAN / US_ACH). IBAN, ad ya da başka PII
+  //      yanıta girmez; bilinmeyen kod null olur.
+  // [EN] owner_rail: the owner's payment method CODE only. No IBAN, name or other PII; unknown codes become null.
+  const railCodeByOwner = new Map(
+    (ownersWithProfile || []).map((u) => {
+      const rail = u.payout_profile?.rail;
+      return [u.wallet_address, typeof rail === "string" && isKnownRail(rail) ? rail.toUpperCase() : null];
+    })
+  );
+
   const userMap = new Map(makerUsers.map((u) => [u.wallet_address, u]));
   const toMap = (rows) => new Map(rows.filter((row) => row?._id && row?.trade).map((row) => [row._id, row.trade]));
   const sellTradeMap = toMap(latestSellRows);
@@ -250,6 +260,7 @@ async function _attachMarketTrustVisibilitySummary(orders = []) {
       trust_visibility_summary: _toCompactTrustSummary(signal),
       owner_has_payout_profile: profileSet.has(maker),
       owner_rail_enabled: railEnabledByOwner.has(maker) ? railEnabledByOwner.get(maker) : true,
+      owner_rail: railCodeByOwner.get(maker) ?? null,
     };
   });
 }

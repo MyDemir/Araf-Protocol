@@ -5,6 +5,7 @@ import { resolveTierMaxAmounts } from './actions/orderCreationActions';
 import { TERMS_ACKNOWLEDGEMENTS, TERMS_SECTIONS, TERMS_VERSION } from './legal/terms';
 import PaymentRiskBadge from '../components/PaymentRiskBadge';
 import BottomSheet from '../components/BottomSheet';
+import FillConfirmSheet from '../components/FillConfirmSheet';
 import MobileWalletPicker, { WalletOption } from '../components/MobileWalletPicker';
 import { ConnectorIcon } from '../components/wallet-icons';
 import { describeConnectError, shouldShowMobileWalletPicker } from './mobileWallet';
@@ -143,6 +144,8 @@ export const buildAppModals = (ctx) => {
     isCreateTemporarilyDisabledByRisk,
     isPayoutProfileGateBlocked = false,
     txGate = null,
+    fillConfirmSummary = null,
+    settleFillConfirm = null,
     openProfilePage,
     isContractLoading,
     loadingText,
@@ -486,10 +489,28 @@ export const buildAppModals = (ctx) => {
     return <TermsModal key={`${address || ''}-${TERMS_VERSION}`} lang={lang} onAcceptTerms={onAcceptTerms} onDeclineTerms={onDeclineTerms} />;
   };
 
+  // [TR] Emre girme onayı: özet yoksa hiç render edilmez (her açılış yeni örnek). txGate canlı geçilir; pencere açıkken
+  //      kapanırsa onay düğmesi pasifleşir.
+  // [EN] Order-entry confirmation: not rendered without a summary (fresh instance per opening); live txGate disables confirm.
+  const renderFillConfirm = () => {
+    if (!fillConfirmSummary) return null;
+    return (
+      <FillConfirmSheet
+        key={fillConfirmSummary.seq}
+        summary={fillConfirmSummary}
+        lang={lang}
+        txGate={txGate}
+        onConfirm={() => settleFillConfirm?.(true)}
+        onCancel={() => settleFillConfirm?.(false)}
+      />
+    );
+  };
+
   return {
     renderWalletModal,
     renderFeedbackModal,
     renderMakerModal,
     renderTermsModal,
+    renderFillConfirm,
   };
 };

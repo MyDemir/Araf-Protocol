@@ -156,25 +156,34 @@ export default class ErrorBoundary extends React.Component {
       );
     }
     if (this.state.hasError) {
+      // [TR] Kök yedek UI: tema token'larıyla (açık ve koyu temada AA kontrast), cüzdan modalı ve BottomSheet ile aynı
+      //      kart dili. Hata ayrıntısı ve kişisel veri GÖSTERİLMEZ. Sağlayıcıların dışında da çalışır: renkler yalnız
+      //      CSS değişkenidir.
+      // [EN] Root fallback: theme tokens (AA contrast in both themes), same card language as the wallet modal and
+      //      BottomSheet. No error detail or personal data is shown. Works outside providers: colours are CSS variables.
       return (
-        <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4 font-sans">
-          <div className="bg-slate-800 border border-red-500/30 rounded-2xl p-8 max-w-md w-full text-center shadow-2xl">
-            <div className="mb-6 flex justify-center text-red-400"><TriangleAlert className="w-12 h-12" strokeWidth={1.8} aria-hidden="true" /></div>
-            <h2 className="text-white font-bold text-2xl mb-3">Sistemde Kesinti Oluştu</h2>
-            <p className="text-slate-400 text-sm mb-8 leading-relaxed">
+        <div className="flex min-h-[100dvh] w-full items-center justify-center bg-app p-4 font-sans text-textPrimary" data-testid="root-error-fallback">
+          <div role="alert" aria-labelledby="root-error-title" className="w-full max-w-md rounded-3xl border border-borderSubtle bg-surface p-6 text-center shadow-2xl sm:p-8">
+            <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-danger/10 text-danger">
+              <TriangleAlert className="h-7 w-7" strokeWidth={1.8} aria-hidden="true" />
+            </div>
+            <h2 id="root-error-title" className="mb-2 text-xl font-bold tracking-tight text-textPrimary">Sistemde Kesinti Oluştu</h2>
+            <p className="mb-6 text-sm leading-relaxed text-textSecondary">
               İşleminiz sırasında teknik bir sorun oluştu.
               Lütfen sayfayı yenileyin; sorun devam ederse tekrar deneyin.
             </p>
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-2.5">
               <button
+                type="button"
                 onClick={() => window.location.reload()}
-                className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-6 rounded-xl transition-all active:scale-95 shadow-lg shadow-blue-900/20"
+                className="h-12 w-full rounded-xl bg-brand px-6 text-sm font-bold text-black transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-surface motion-reduce:transition-none"
               >
                 Sayfayı Yenile
               </button>
               <button
-                onClick={() => window.location.href = '/'}
-                className="w-full bg-transparent border border-slate-600 hover:bg-slate-700 text-slate-300 py-2.5 px-6 rounded-xl transition-all"
+                type="button"
+                onClick={() => { window.location.href = '/'; }}
+                className="h-12 w-full rounded-xl border border-borderStrong px-6 text-sm font-semibold text-textSecondary transition hover:bg-elevated hover:text-textPrimary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand motion-reduce:transition-none"
               >
                 Ana Sayfaya Dön
               </button>
