@@ -74,6 +74,31 @@ export const registerInfraProbe = (kind, fn) => {
   return () => { if (probes[kind] === fn) { delete probes[kind]; clearTimer(kind); } };
 };
 
+// [TR] Sekme görünür olunca / pencere odak alınca TEK kontrol (periyodik yoklama YOK). Uçuşta en fazla bir istek,
+//      olaylar arası en az throttleMs. Sekme gizliyken atılmaz. İlk açılışta istek atılmaz (yalnız olaylarda).
+// [EN] One check on visibilitychange->visible / window focus. Single in-flight, throttled, never while hidden.
+export const INFRA_REVALIDATE_THROTTLE_MS = 15000;
+export const installInfraRevalidation = (check, { throttleMs = INFRA_REVALIDATE_THROTTLE_MS } = {}) => {
+  if (typeof document === 'undefined' || typeof window === 'undefined') return () => {};
+  let inFlight = false;
+  let lastAt = 0;
+  const run = async () => {
+    if (document.hidden || inFlight) return;
+    const now = Date.now();
+    if (lastAt && now - lastAt < throttleMs) return;
+    lastAt = now;
+    inFlight = true;
+    try { await check(); } catch { /* [TR] Hata fetchWithTimeout(infra) yoluyla zaten işaretlendi. */ } finally { inFlight = false; }
+  };
+  const onVisibility = () => { if (document.visibilityState === 'visible') run(); };
+  document.addEventListener('visibilitychange', onVisibility);
+  window.addEventListener('focus', run);
+  return () => {
+    document.removeEventListener('visibilitychange', onVisibility);
+    window.removeEventListener('focus', run);
+  };
+};
+
 const subscribe = (l) => { listeners.add(l); return () => listeners.delete(l); };
 const getState = () => state;
 
