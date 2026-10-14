@@ -21,7 +21,7 @@ export const ActionGuidanceButton = ({ action, actionCallbacks, disabledReasons 
 
   const enabledClass = variant === 'secondary'
     ? 'bg-elevated hover:bg-surface text-textPrimary border border-borderStrong'
-    : 'bg-emerald-600 hover:bg-emerald-500 text-white';
+    : 'bg-brand hover:opacity-90 text-black';
 
   return (
     <div className={compact ? '' : 'mt-3'}>

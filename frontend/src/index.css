@@ -112,6 +112,7 @@ body {
     --color-info: #38bdf8;
     --color-warning: #f59e0b;
     --color-danger: #ef4444;
+    --color-on-danger: #000000;
     --color-success: #22c55e;
 }
 
@@ -130,6 +131,7 @@ body {
     --color-info: #0284c7;
     --color-warning: #d97706;
     --color-danger: #dc2626;
+    --color-on-danger: #ffffff;
     --color-success: #16a34a;
 }
 

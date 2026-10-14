@@ -321,7 +321,7 @@ export default function SettlementProposalCard({
                   <button
                     onClick={onPreviewAccept}
                     disabled={isContractLoading || !hasOnchainTradeId || !hasBackendTradeId || !settlementActions.canAccept}
-                    className="px-3 py-2 text-sm rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 transition disabled:opacity-50"
+                    className="px-3 py-2 text-sm rounded-lg bg-brand text-black hover:opacity-90 transition disabled:opacity-50"
                   >
                     {lang === 'TR' ? 'Kabul Et (Önizleme)' : 'Accept (Preview)'}
                   </button>
@@ -432,7 +432,7 @@ export default function SettlementProposalCard({
           <button
             onClick={onPreviewCreate}
             disabled={isContractLoading || !hasBackendTradeId || !hasOnchainTradeId}
-            className={`w-full py-2.5 rounded-lg text-sm font-bold transition ${isContractLoading ? 'bg-elevated text-textMuted border border-borderStrong cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50'}`}
+            className={`w-full py-2.5 rounded-lg text-sm font-bold transition ${isContractLoading ? 'bg-elevated text-textMuted border border-borderStrong cursor-not-allowed' : 'bg-brand hover:opacity-90 text-black disabled:opacity-50'}`}
           >
             {lang === 'TR' ? 'Teklifi önizle' : 'Preview offer'}
           </button>

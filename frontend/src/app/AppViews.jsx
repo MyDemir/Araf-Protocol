@@ -409,7 +409,7 @@ export const buildAppViews = (ctx) => {
             </div>
             {/* [TR] Oturum yokken emir oluşturma düğmesi işlevsizdir; yerine üstteki "Cüzdan bağla" kartı var. */}
             {navUnlocked && (
-              <button onClick={handleOpenMakerModal} disabled={newTxBlocked} className={`w-full h-11 rounded-lg text-sm font-semibold transition flex items-center justify-center gap-2 ${newTxBlocked ? 'bg-elevated text-textMuted cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm'}`}>
+              <button onClick={handleOpenMakerModal} disabled={newTxBlocked} className={`w-full h-11 rounded-lg text-sm font-semibold transition flex items-center justify-center gap-2 ${newTxBlocked ? 'bg-elevated text-textMuted cursor-not-allowed' : 'bg-brand hover:opacity-90 text-black shadow-sm'}`}>
                 <Plus className="w-4 h-4" strokeWidth={2} aria-hidden="true" /> {tr ? 'Yeni emir oluştur' : 'Create order'}
               </button>
             )}
@@ -661,7 +661,7 @@ export const buildAppViews = (ctx) => {
                 (order.ctaLabel || (tr ? 'İşlem yap' : 'Trade'));
               const ctaTone = isDisabled
                 ? 'bg-elevated text-textMuted border border-borderSubtle cursor-not-allowed'
-                : isSellSide ? 'bg-emerald-600 text-white hover:bg-emerald-500' : 'bg-danger text-white hover:opacity-90';
+                : isSellSide ? 'bg-brand text-black hover:opacity-90' : 'bg-danger text-[color:var(--color-on-danger)] hover:opacity-90';
               const bondText = Number(order.tier) === 0
                 ? (tr ? 'teminatsız' : 'no bond')
                 : (order.bondLabel && order.bondLabel !== '—' ? `${order.bondLabel} ${tr ? 'teminat' : 'bond'}` : null);
@@ -800,7 +800,7 @@ export const buildAppViews = (ctx) => {
               </button>
               <button
                 onClick={() => setCurrentView('market')}
-                className="w-full sm:w-auto px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-sm font-bold transition"
+                className="w-full sm:w-auto px-5 py-2.5 bg-brand hover:opacity-90 text-black rounded-xl text-sm font-bold transition"
               >
                 {lang === 'TR' ? 'Pazar Yerine Dön' : 'Go to Marketplace'}
               </button>
@@ -824,7 +824,7 @@ export const buildAppViews = (ctx) => {
           </p>
           <button
             onClick={fetchMyTrades}
-            className="mt-4 px-6 py-2 bg-emerald-600 text-white rounded-xl text-sm font-bold"
+            className="mt-4 px-6 py-2 bg-brand text-black rounded-xl text-sm font-bold"
           >
             {lang === 'TR' ? 'Yenile' : 'Refresh'}
           </button>
@@ -1026,7 +1026,7 @@ export const buildAppViews = (ctx) => {
             if (['RESOLVED', 'CANCELED', 'BURNED'].includes(roomState)) {
               primaryInput = (
                 <div className="grid grid-cols-2 gap-2">
-                  <button type="button" onClick={() => setCurrentView('market')} className="h-10 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold">{lang === 'TR' ? 'Pazara dön' : 'Back to market'}</button>
+                  <button type="button" onClick={() => setCurrentView('market')} className="h-10 rounded-lg bg-brand hover:opacity-90 text-black text-sm font-semibold">{lang === 'TR' ? 'Pazara dön' : 'Back to market'}</button>
                   <button type="button" onClick={() => { if (!isConnected || !isAuthenticated) { handleAuthAction(); return; } openProfilePage?.('history'); }} className="h-10 rounded-lg border border-borderStrong bg-surface text-textPrimary text-sm font-semibold hover:bg-elevated">{lang === 'TR' ? 'İşlem geçmişi' : 'Trade history'}</button>
                 </div>
               );
