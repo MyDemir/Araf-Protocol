@@ -23,6 +23,13 @@ class FakeRedis {
     if (opts.EX) this.ttls.set(k, opts.EX);
     return "OK";
   }
+  async expire(k, ttl) {
+    this.expireCalls = this.expireCalls || [];
+    this.expireCalls.push([k, ttl]);
+    if (!this.kv.has(k)) return 0;
+    this.ttls.set(k, ttl);
+    return 1;
+  }
   async setEx(k, ttl, v) { this.kv.set(k, v); this.ttls.set(k, ttl); return "OK"; }
   async getDel(k) { const v = this.kv.has(k) ? this.kv.get(k) : null; this.kv.delete(k); return v; }
   async del(k) { const had = this.kv.delete(k) || this.sets.delete(k); return had ? 1 : 0; }
@@ -100,6 +107,39 @@ describe("siwe service (real signatures, fake Redis)", () => {
 
   afterAll(() => {
     process.env = originalEnv;
+  });
+
+  describe("nonce TTL refresh on reuse", () => {
+    const key = () => `nonce:${victim.address.toLowerCase()}`;
+
+    test("new nonce path is unchanged: SET NX EX 300, no expire", async () => {
+      const svc = loadSiwe(redis);
+      const nonce = await svc.generateNonce(victim.address);
+      expect(nonce).toMatch(/^[0-9a-f]{32}$/);
+      expect(redis.ttls.get(key())).toBe(300);
+      expect(redis.expireCalls).toBeUndefined();
+    });
+
+    test("an existing nonce is returned as is and its TTL is refreshed", async () => {
+      const svc = loadSiwe(redis);
+      const first = await svc.generateNonce(victim.address);
+      redis.ttls.set(key(), 20); // ~20s left from the previous attempt
+      const second = await svc.generateNonce(victim.address);
+      expect(second).toBe(first);
+      expect(redis.expireCalls).toEqual([[key(), 300]]);
+      expect(redis.ttls.get(key())).toBe(300);
+      expect(await redis.get(key())).toBe(first);
+    });
+
+    test("race path (NX lost) also refreshes the TTL and returns the live nonce", async () => {
+      redis.kv.set(key(), "racednonce0123456789abcdef012345");
+      const realGet = redis.get.bind(redis);
+      let calls = 0;
+      redis.get = async (k) => (calls++ === 0 ? null : realGet(k)); // first read misses, SET NX then loses
+      const svc = loadSiwe(redis);
+      await expect(svc.generateNonce(victim.address)).resolves.toBe("racednonce0123456789abcdef012345");
+      expect(redis.expireCalls).toEqual([[key(), 300]]);
+    });
   });
 
   describe("nonce consumption order (B12)", () => {
