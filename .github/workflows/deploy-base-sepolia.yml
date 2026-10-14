@@ -287,6 +287,7 @@ jobs:
           VAR_REWARDS: ${{ vars.ARAF_REWARDS_ADDRESS }}
           ALLOW_VARS_REPLACE: ${{ inputs.confirm_redeploy_rewards == 'YES' && 'true' || 'false' }}
           BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+          BASE_SEPOLIA_RPC_URL_FALLBACKS: ${{ secrets.BASE_SEPOLIA_RPC_URL_FALLBACKS }}
         run: |
           set -euo pipefail
           out="$(node .github/scripts/resolve-rewards-addresses.js)"
