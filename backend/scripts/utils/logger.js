@@ -39,6 +39,22 @@ if (!fs.existsSync(logDir)) {
   }
 }
 
+// [TR] Maskeleme, transport formatlarından ÖNCE info nesnesini yerinde değiştirir; böylece
+//      Console transport'un colorize+simple formatı da maskelenmiş veriyi görür.
+// [EN] Redaction mutates the info object before any transport format runs, so the
+//      Console transport's own colorize+simple format only ever sees redacted data.
+const PASSTHROUGH_KEYS = new Set(["level", "timestamp", "message", "stack"]);
+const redactInfo = format((info) => {
+  if (typeof info.message === "string") info.message = redactLogString(info.message);
+  else if (info.message != null && typeof info.message === "object") info.message = redactLogMeta(info.message);
+  if (typeof info.stack === "string") info.stack = redactLogString(info.stack);
+  for (const key of Object.keys(info)) {
+    if (PASSTHROUGH_KEYS.has(key)) continue;
+    info[key] = redactLogMeta(info[key], key);
+  }
+  return info;
+});
+
 const logFilePath = path.join(logDir, "araf.log");
 
 const logger = createLogger({
@@ -48,6 +64,7 @@ const logger = createLogger({
   format: format.combine(
     format.timestamp({ format: "YYYY-MM-DD HH:mm:ss" }),
     format.errors({ stack: true }),
+    redactInfo(),
     format.json(),
     format.printf(({ timestamp, level, message, stack, ...meta }) => {
       const safeMeta = redactLogMeta(meta);
@@ -78,3 +95,4 @@ const logger = createLogger({
 });
 
 module.exports = logger;
+module.exports.redactInfo = redactInfo;
