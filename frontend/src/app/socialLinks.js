@@ -28,7 +28,7 @@ export const validateSocialUrl = (input, allowed = SOCIAL_ALLOWED_HOSTS) => {
   if (u.username || u.password) return { ok: false, code: 'userinfo' };
   if (u.port) return { ok: false, code: 'port' };
   const host = u.hostname.toLowerCase();
-  if (!host || host.endsWith('.') || /[^a-z0-9.-]/.test(host) || host.includes('xn--')) return { ok: false, code: 'host' };
+  if (!host || host.startsWith('.') || host.endsWith('.') || host.includes('..') || /[^a-z0-9.-]/.test(host) || host.includes('xn--')) return { ok: false, code: 'host' };
   if (!isHostAllowed(host, allowed)) return { ok: false, code: 'host' };
   if (u.href.length > SOCIAL_MAX_URL) return { ok: false, code: 'length' };
   return { ok: true, url: u.href, hostname: host };

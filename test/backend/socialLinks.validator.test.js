@@ -21,6 +21,8 @@ describe("social link validator", () => {
     "https://evil.com/?u=https://x.com",
     "https://xn--gthub-bua.com/",
     "https://x.com:8443/a",
+    "https://.x.com/a",
+    "https://x..com/a",
     "https://gıthub.com/a",
     " https://github.com/a",
     "https://github.com/a b",

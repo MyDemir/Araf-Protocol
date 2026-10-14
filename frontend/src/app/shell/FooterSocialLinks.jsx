@@ -10,17 +10,11 @@ import { sanitizeSocialLinks } from '../socialLinks';
 
 const LINK_CLASS = 'px-3 py-2 rounded-lg border border-borderSubtle text-xs font-semibold text-textSecondary hover:text-textPrimary hover:bg-elevated transition';
 
-// [TR] Env yedeği dağıtımı yapan kişinin verisidir; yine de yalnız geçerli https URL'leri geçer.
-const safeEnvLinks = (envLinks) => {
-  const out = [];
-  for (const l of Array.isArray(envLinks) ? envLinks : []) {
-    try {
-      const u = new URL(String(l?.url || ''));
-      if (u.protocol === 'https:' && !u.username && !u.password && l?.label) out.push({ label: String(l.label), url: u.href, host: u.hostname });
-    } catch { /* geçersiz env URL: gösterilmez */ }
-  }
-  return out;
-};
+// [TR] Env yedeği de uçtan gelenle AYNI doğrulayıcıdan geçer (https + allowlist + punycode + etiket kuralları).
+//      NOT: env'de allowlist dışı bir host (ör. özel alan adı) tanımlanırsa gösterilmez; böyle bir host için
+//      frontend/src/app/socialLinks.js içindeki SOCIAL_ALLOWED_HOSTS listesine (ve sunucuda gerekirse
+//      SOCIAL_LINK_ALLOWED_HOSTS env'ine) eklenmesi gerekir.
+const safeEnvLinks = (envLinks) => sanitizeSocialLinks(Array.isArray(envLinks) ? envLinks : []);
 
 export default function FooterSocialLinks({ envLinks = [], timeoutMs = 5000 }) {
   const [remote, setRemote] = React.useState(null);

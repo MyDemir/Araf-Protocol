@@ -71,11 +71,23 @@ describe('FooterSocialLinks', () => {
     expect(screen.queryByRole('link', { name: 'JS' })).toBeNull();
     expect(screen.getByRole('link', { name: 'OK' })).toBeInTheDocument();
   });
+
+  it('does not render env links outside the allowlist or with punycode', () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline'); }));
+    render(<FooterSocialLinks envLinks={[
+      { label: 'Evil', url: 'https://evil.com/a' },
+      { label: 'Puny', url: 'https://xn--gthub-bua.com/' },
+      { label: 'OK', url: 'https://github.com/a' },
+    ]} />);
+    expect(screen.queryByRole('link', { name: 'Evil' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Puny' })).toBeNull();
+    expect(screen.getAllByRole('link')).toHaveLength(1);
+  });
 });
 
 describe('frontend social link validator parity', () => {
   it('rejects the same classes as the server and accepts valid hosts/subdomains', () => {
-    for (const u of ['http://x.com', 'javascript:1', 'data:text/html,1', 'https://u:p@x.com', 'https://evilx.com', 'https://x.com.evil.com', 'https://xn--a.com', 'https://x.com:444', `https://x.com/${'a'.repeat(300)}`, 'https://gıthub.com']) {
+    for (const u of ['http://x.com', 'javascript:1', 'data:text/html,1', 'https://u:p@x.com', 'https://evilx.com', 'https://x.com.evil.com', 'https://xn--a.com', 'https://x.com:444', `https://x.com/${'a'.repeat(300)}`, 'https://gıthub.com', 'https://.x.com', 'https://x..com']) {
       expect(validateSocialUrl(u).ok).toBe(false);
     }
     for (const u of ['https://x.com/a', 'https://www.github.com/a', 'https://t.me/a']) expect(validateSocialUrl(u).ok).toBe(true);

@@ -48,7 +48,7 @@ function validateSocialUrl(input, allowed = getAllowedHosts()) {
   if (u.username || u.password) return { ok: false, error: "Kullanıcı bilgisi içeren URL kabul edilmez." };
   if (u.port) return { ok: false, error: "Port belirtilemez." };
   const host = u.hostname.toLowerCase();
-  if (!host || host.endsWith(".") || /[^a-z0-9.-]/.test(host) || host.includes("xn--")) {
+  if (!host || host.startsWith(".") || host.endsWith(".") || host.includes("..") || /[^a-z0-9.-]/.test(host) || host.includes("xn--")) {
     return { ok: false, error: "Hostname geçersiz (IDN/punycode kabul edilmez)." };
   }
   if (!isHostAllowed(host, allowed)) return { ok: false, error: "Bu alan adı izinli değil." };
