@@ -158,11 +158,11 @@ export default function FillConfirmSheet({ summary, lang = 'EN', txGate = null, 
             <Lock className="h-4 w-4 shrink-0 text-brand" strokeWidth={2} aria-hidden="true" />
             {t.bond}
           </span>
-          <span className="text-right text-sm font-bold tabular-nums text-textPrimary" data-testid="fill-confirm-bond">{upper}{bond ?? t.unknown}</span>
+          <span className="shrink-0 whitespace-nowrap text-right text-sm font-bold tabular-nums text-textPrimary" data-testid="fill-confirm-bond">{upper}{bond ?? t.unknown}</span>
         </div>
         <div className="mt-2 flex items-start justify-between gap-4 border-t border-borderSubtle pt-2">
           <span className="text-sm text-textSecondary">{t.total}</span>
-          <span className="text-right text-sm font-semibold tabular-nums text-textPrimary" data-testid="fill-confirm-total">{upper}{total ?? t.unknown}</span>
+          <span className="shrink-0 whitespace-nowrap text-right text-sm font-semibold tabular-nums text-textPrimary" data-testid="fill-confirm-total">{upper}{total ?? t.unknown}</span>
         </div>
         <p className="mt-1.5 text-xs text-textMuted">{buying ? t.totalHintBuy : t.totalHintSell}</p>
       </div>
@@ -184,7 +184,7 @@ export default function FillConfirmSheet({ summary, lang = 'EN', txGate = null, 
           onClick={() => decide(true)}
           disabled={blocked}
           data-testid="fill-confirm-accept"
-          className="h-12 w-full rounded-xl bg-brand text-sm font-bold text-black transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:cursor-not-allowed disabled:opacity-40 sm:flex-1"
+          className="h-12 w-full rounded-xl bg-brand text-sm font-bold text-black transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:cursor-not-allowed disabled:border disabled:border-borderSubtle disabled:bg-elevated disabled:text-textMuted sm:flex-1"
         >
           {t.confirm}
         </button>
