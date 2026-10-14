@@ -15,10 +15,15 @@ const { ethers } = require("ethers");
 const logger = require("../utils/logger");
 const { redactRpcUrl, redactRpcSecrets } = require("../utils/logRedaction");
 const { assertProviderExpectedChainOrThrow, resolveExpectedChainIdOrThrow } = require("./expectedChain");
+const { runtimeValueSync } = require("../utils/runtimeValue");
 
 const RATE_LIMIT_COOLDOWN_MS = 60_000;
 const MONTHLY_CAPACITY_COOLDOWN_MS = 10 * 60_000;
 const NETWORK_ERROR_COOLDOWN_MS = 30_000;
+const RPC_RATE_KEY = "RPC_MAX_REQUESTS_PER_SEC";
+const RATE_WINDOW_MS = 1_000;
+const RATE_QUEUE_MAX = 200;
+const RATE_QUEUE_MAX_WAIT_MS = 30_000;
 
 function _errText(err) {
   const parts = [err?.message, err?.shortMessage, err?.info?.responseBody, err?.info?.error?.message, err?.error?.message];
@@ -91,8 +96,9 @@ function getRpcUrls(env = process.env) {
 function _newFetchRequest(url) {
   if (typeof ethers.FetchRequest !== "function") return url; // (yalnız ethers'ı taklit eden testler)
   const req = new ethers.FetchRequest(url);
-  // [TR] ethers'ın dahili 429 yeniden denemesi kısa tutulur; geri çekilmeyi biz yönetiriz.
-  req.setThrottleParams({ maxAttempts: 2, slotInterval: 250 });
+  // [TR] ethers'ın dahili 429 yeniden denemesi KAPALI (maxAttempts: 1): iç yeniden deneme hız sınırlayıcıyı atlar
+  //      ve 429 fırtınası yaratır. Yeniden deneme/geri çekilme havuzun soğuma + fallback mantığına bırakılır.
+  req.setThrottleParams({ maxAttempts: 1, slotInterval: 250 });
   return req;
 }
 
@@ -118,6 +124,70 @@ function createChainProbe(url) {
   };
 }
 
+/**
+ * [TR] Kayan pencereli (1 sn) hız sınırlayıcı, FIFO kuyruk: herhangi bir 1 sn'lik pencerede en fazla `getRate()`
+ *      istek serbest bırakılır (token bucket'tan daha sıkı: patlama + yenilenme kaynaklı aşım yok). Değer her
+ *      denetimde yeniden okunur (çalışma anında değişebilir). Kuyruk dolarsa ya da bekleme süresi aşılırsa
+ *      rate-limit sınıfından (isRateLimitError) bir hata ile reddeder.
+ * [EN] Sliding-window (1s) FIFO rate limiter; bounded queue and bounded wait, rejects with a rate-limit-class error.
+ */
+function createRateLimiter({
+  getRate = () => runtimeValueSync(RPC_RATE_KEY),
+  now = () => Date.now(),
+  sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+  maxQueue = RATE_QUEUE_MAX,
+  maxWaitMs = RATE_QUEUE_MAX_WAIT_MS,
+  onRelease = null, // [TR] test/gözlem kancası: serbest bırakma zamanı
+} = {}) {
+  const stamps = [];
+  const queue = [];
+  let pumping = false;
+
+  function localLimitError(msg) {
+    const e = new Error(`[RpcRateLimiter] Too Many Requests: ${msg}`);
+    e.code = "RPC_LOCAL_RATE_LIMIT";
+    return e;
+  }
+
+  async function pump() {
+    if (pumping) return;
+    pumping = true;
+    try {
+      while (queue.length > 0) {
+        const t = now();
+        while (stamps.length > 0 && stamps[0] <= t - RATE_WINDOW_MS) stamps.shift();
+        const rate = Math.max(1, Number(getRate()) || 1);
+        const head = queue[0];
+        if (t - head.at >= maxWaitMs) {
+          queue.shift();
+          head.reject(localLimitError(`queue wait exceeded ${maxWaitMs} ms`));
+          continue;
+        }
+        if (stamps.length < rate) {
+          stamps.push(t);
+          if (onRelease) onRelease(t);
+          queue.shift().resolve();
+          continue;
+        }
+        const wait = stamps[stamps.length - rate] + RATE_WINDOW_MS - t;
+        await sleep(Math.max(1, wait));
+      }
+    } finally {
+      pumping = false;
+    }
+  }
+
+  function acquire() {
+    if (queue.length >= maxQueue) return Promise.reject(localLimitError(`queue full (${maxQueue})`));
+    return new Promise((resolve, reject) => {
+      queue.push({ resolve, reject, at: now() });
+      pump();
+    });
+  }
+
+  return { acquire, get queued() { return queue.length; } };
+}
+
 function _safeError(err) {
   return redactRpcSecrets(err?.message || String(err));
 }
@@ -126,12 +196,13 @@ function _safeError(err) {
  * [TR] Havuz: URL listesi + doğrulama/soğuma durumu. `createInner(url, chainId)` ve `probeFor(url)` test için
  *      enjekte edilebilir.
  */
-function createRpcPool({ urls, surface = "RpcPool", probeFor = createChainProbe, createInner, now = () => Date.now(), log = logger } = {}) {
+function createRpcPool({ urls, surface = "RpcPool", probeFor = createChainProbe, createInner, now = () => Date.now(), log = logger, rateLimiterFor = () => createRateLimiter() } = {}) {
   if (!Array.isArray(urls) || urls.length === 0) throw new Error("[RpcPool] En az bir RPC URL gerekli.");
   const entries = urls.map((url, index) => ({
     url, index, label: redactRpcUrl(url),
     verified: false, chainId: null, verifying: null,
     rejected: false, cooldownUntil: 0, inner: null,
+    limiter: rateLimiterFor(url, index), // [TR] URL başına bağımsız hız sınırı
   }));
 
   async function ensureVerified(entry) {
@@ -139,6 +210,7 @@ function createRpcPool({ urls, surface = "RpcPool", probeFor = createChainProbe,
     if (entry.verified) return entry;
     if (!entry.verifying) {
       entry.verifying = (async () => {
+        await entry.limiter.acquire(); // zincir sorgusu da bu URL'ye giden bir istektir
         const { actualChainId } = await assertProviderExpectedChainOrThrow(probeFor(entry.url), {
           rpcUrl: entry.url,
           rpcEnvName: entry.index === 0 ? "BASE_RPC_URL" : `BASE_RPC_URL_FALLBACKS[${entry.index - 1}]`,
@@ -206,6 +278,7 @@ function createRpcPool({ urls, surface = "RpcPool", probeFor = createChainProbe,
         continue;
       }
       try {
+        await entry.limiter.acquire();
         const result = await innerFor(entry)._send(payload);
         const soft = _jsonRpcLevelError(result);
         if (soft) throw soft;
@@ -260,9 +333,10 @@ function _expectedNetworkOrNull() {
 
 function _buildJsonRpcProvider(url, network) {
   const req = _newFetchRequest(url);
+  // [TR] batchMaxCount: 1 -> toplu JSON-RPC yok; her istek ayrı gider ve hız sınırlayıcıdan ayrı ayrı geçer.
   return network
-    ? new ethers.JsonRpcProvider(req, network, { staticNetwork: network })
-    : new ethers.JsonRpcProvider(req);
+    ? new ethers.JsonRpcProvider(req, network, { staticNetwork: network, batchMaxCount: 1 })
+    : new ethers.JsonRpcProvider(req, undefined, { batchMaxCount: 1 });
 }
 
 let _shared = null;
@@ -317,6 +391,8 @@ module.exports = {
   resetSharedProviderForTests,
   createRpcPool,
   createChainProbe,
+  createRateLimiter,
+  _buildJsonRpcProvider,
   getRpcUrls,
   classifyRpcError,
   isRateLimitError,
