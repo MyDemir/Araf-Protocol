@@ -10,7 +10,8 @@ import { SettlementQueueCard } from './contexts/operations/OperationsPanels';
 import OperationsCenterPage from './contexts/operations/OperationsCenterPage';
 import ProfileContextPage from './contexts/profile/ProfileContextPage';
 import { getOrderSideCopy } from './orderUiModel';
-import { countActiveMarketFilters, MARKET_FIAT_OPTIONS, MARKET_FILTER_DEFAULTS } from './contexts/marketplace/marketFilters';
+import { countActiveMarketFilters, MARKET_FILTER_DEFAULTS } from './contexts/marketplace/marketFilters';
+import MarketFilters, { MarketEmpty } from './contexts/marketplace/MarketFilters';
 import { mapResolutionTypeLabel } from './useAppSessionData';
 import TradeRoomPage from './contexts/trade-room/TradeRoomPage';
 import ThemeToggle from './shell/ThemeToggle';
@@ -19,8 +20,8 @@ import { isOwnerRailDisabled, ownerRailDisabledMessage, isOwnerPayoutProfileMiss
 import { deriveTradeTimeline } from './contexts/trade-room/tradeTimeline';
 import { isViewInNav, NAV_ORDER, VIEW_REGISTRY } from './viewRegistry';
 import {
-  Banknote, ChevronDown, CircleCheck, CirclePause, Clock, Droplets, Flame, Handshake, History, Hourglass, Layers, ListPlus, LoaderCircle, Lock, Menu, Paperclip, Plus, RotateCcw, Search, Settings, Store, Swords,
-  TriangleAlert, Undo2, Unplug, Wallet, X, EyeOff, Info, Maximize2, Minimize2, Download, Share,
+  Banknote, ChevronDown, CircleCheck, CirclePause, Clock, Droplets, Flame, Handshake, History, Hourglass, Layers, ListPlus, LoaderCircle, Lock, Menu, Paperclip, Plus, Settings, Store, Swords,
+  TriangleAlert, Undo2, Unplug, Wallet, X, Info, Maximize2, Minimize2, Download, Share,
 } from 'lucide-react';
 import { buildTradeRoomPanelCallbacks, getBurnExpiredDeadlinePassed, getPaymentWindowExpired } from './contexts/trade-room/tradeRoomPanelActions';
 
@@ -55,22 +56,6 @@ const Row = ({ icon, label, count, active, tone = 'default', onClick }) => (
 );
 const SectionLabel = ({ children }) => (
   <p className="px-3 mb-1.5 text-[11px] font-semibold tracking-wider text-textMuted">{children}</p>
-);
-
-const Segmented = ({ items, value, onChange, label }) => (
-  <div role="tablist" aria-label={label} className="flex min-w-0 bg-surface border border-borderSubtle rounded-lg p-1">
-    {items.map((it) => (
-      <span
-        key={it.value}
-        role="tab"
-        tabIndex={0}
-        aria-selected={value === it.value}
-        onClick={() => onChange(it.value)}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onChange(it.value); } }}
-        className={`flex-1 min-w-0 md:flex-none cursor-pointer select-none text-center px-2 md:px-3 h-8 leading-8 rounded-md text-xs font-semibold transition ${value === it.value ? (it.activeClass || 'bg-elevated text-textPrimary shadow-sm') : 'text-textMuted hover:text-textPrimary'}`}
-      >{it.label}</span>
-    ))}
-  </div>
 );
 
 // [TR] Ayarlanmamış sosyal linkler gösterilmez (önceden github.com / x.com ana sayfasına gidiyordu).
@@ -573,115 +558,16 @@ export const buildAppViews = (ctx) => {
     // [TR] İlk sayfa 50 emirle sınırlı; sunucu toplamı daha büyükse ayrıca gösterilir. [EN] Show the server total when it exceeds the first page.
     const loadedCount = (orders || []).length;
     const totalCount = Number.isFinite(marketOrdersTotal) ? marketOrdersTotal : loadedCount;
-    const fieldClass = 'h-9 w-full min-w-0 bg-surface text-textPrimary rounded-lg border border-borderSubtle outline-none focus:border-brand/50 text-sm transition';
-    // [TR] Bileşen değil fonksiyon: her render'da yeni tip oluşup odak kaybolmasın. [EN] Plain call keeps focus across renders.
-    const selectField = ({ value, onChange, label, options, className = '' }) => (
-      <label key={label} className={`relative min-w-0 ${className}`}>
-        <span className="sr-only">{label}</span>
-        <select value={value} onChange={(e) => onChange(e.target.value)} className={`${fieldClass} appearance-none cursor-pointer pl-3 pr-8`}>
-          {options.map((o) => <option key={o.value} value={o.value} disabled={o.disabled}>{o.label}</option>)}
-        </select>
-        <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-textMuted" strokeWidth={1.8} aria-hidden="true" />
-      </label>
-    );
-    return (
-      <div className="w-full max-w-[1200px] min-w-0 p-4 md:p-8">
+    const marketHeader = (
         <div className="mb-4 flex items-center justify-between gap-3">
           <h2 className="text-xl font-bold text-textPrimary">{tr ? 'Pazar' : 'Market'}</h2>
           <button onClick={openCreateOrder} disabled={newTxBlocked} className="inline-flex items-center gap-1.5 h-9 px-3 md:px-4 rounded-lg bg-brand text-black text-sm font-semibold hover:opacity-90 disabled:opacity-50">
             <Plus className="w-4 h-4" strokeWidth={2} aria-hidden="true" />{tr ? 'Emir oluştur' : 'Create order'}
           </button>
         </div>
-
-        <div className="mb-3 grid grid-cols-2 md:flex md:items-center gap-2">
-          <Segmented
-            label={tr ? 'İşlem yönü' : 'Trade side'}
-            value={side}
-            onChange={(v) => setFilter('side', v)}
-            items={[
-              { value: 'ALL', label: tr ? 'Tümü' : 'All' },
-              { value: 'BUY', label: tr ? 'Al' : 'Buy', activeClass: 'bg-emerald-600 text-white shadow-sm' },
-              { value: 'SELL', label: tr ? 'Sat' : 'Sell', activeClass: 'bg-danger text-white shadow-sm' },
-            ]}
-          />
-          <Segmented
-            label={tr ? 'Varlık' : 'Asset'}
-            value={filters.token}
-            onChange={(v) => setFilter('token', v)}
-            items={[{ value: 'ALL', label: tr ? 'Hepsi' : 'Any' }, { value: 'USDT', label: 'USDT' }, { value: 'USDC', label: 'USDC' }]}
-          />
-        </div>
-
-        {/* [TR] Gelişmiş filtreler: tutar tek işleme sığan emirleri, para birimi, teminat/tier ve sıralama.
-             Tümü sunucuda uygulanır; "kendi emirlerimi gizle" yalnız istemcide. */}
-        <div role="search" aria-label={tr ? 'Pazar filtreleri' : 'Market filters'} className="mb-2 grid grid-cols-2 md:flex md:flex-wrap md:items-center gap-2">
-          <div className="relative col-span-2 md:w-56">
-            <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-textMuted" strokeWidth={1.8} aria-hidden="true" />
-            <input
-              type="number"
-              inputMode="decimal"
-              min="0"
-              value={filters.amount}
-              onChange={(e) => setFilter('amount', e.target.value)}
-              placeholder={tr ? 'İşlem tutarı' : 'Trade amount'}
-              aria-label={tr ? 'İşlem tutarı' : 'Trade amount'}
-              className={`${fieldClass} pl-9 pr-16 [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none`}
-            />
-            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-textMuted">{filters.token === 'ALL' ? 'USD₮/C' : filters.token}</span>
-          </div>
-          {selectField({
-            className: 'md:w-44',
-            label: tr ? 'Para birimi' : 'Currency',
-            value: filters.fiat,
-            onChange: (v) => setFilter('fiat', v),
-            options: [{ value: 'ALL', label: tr ? 'Tüm dövizler' : 'All currencies' }, ...MARKET_FIAT_OPTIONS.map((c) => ({ value: c, label: c }))],
-          })}
-          {selectField({
-            className: 'md:w-48',
-            label: tr ? 'Teminat' : 'Bond',
-            value: filters.tier,
-            onChange: (v) => setFilter('tier', v),
-            options: [
-              { value: 'ALL', label: tr ? 'Tüm tier’lar' : 'All tiers' },
-              { value: 'NO_BOND', label: tr ? 'Teminatsız (Tier 0)' : 'No bond (Tier 0)' },
-              { value: 'ELIGIBLE', label: viewerTier != null ? (tr ? `Girebildiklerim (≤ T${viewerTier})` : `I can take (≤ T${viewerTier})`) : (tr ? 'Girebildiklerim (giriş gerekli)' : 'I can take (sign in)'), disabled: viewerTier == null },
-            ],
-          })}
-          {selectField({
-            className: address ? 'md:w-44' : 'col-span-2 md:col-span-1 md:w-44',
-            label: tr ? 'Sıralama' : 'Sort',
-            value: sortValue,
-            onChange: (v) => setFilter('sort', v),
-            options: sortOptions,
-          })}
-          {address && (
-            <button
-              type="button"
-              aria-pressed={filters.hideOwn}
-              onClick={() => setFilter('hideOwn', !filters.hideOwn)}
-              className={`h-9 min-w-0 inline-flex items-center justify-center gap-1.5 px-3 rounded-lg border text-sm font-medium transition ${filters.hideOwn ? 'border-brand/50 bg-brand/10 text-textPrimary' : 'border-borderSubtle bg-surface text-textSecondary hover:text-textPrimary'}`}
-            >
-              <EyeOff className="w-4 h-4 shrink-0" strokeWidth={1.8} aria-hidden="true" />
-              <span className="truncate">{tr ? 'Emirlerimi gizle' : 'Hide mine'}</span>
-            </button>
-          )}
-        </div>
-
-        <div className="mb-3 flex min-h-[1.75rem] items-center justify-between gap-2 text-xs text-textMuted">
-          <p aria-live="polite" className="tabular-nums">
-            {loading || ordersFeedError ? '\u00a0' : totalCount > loadedCount
-              ? (tr ? `${shownCount} emir · toplam ${totalCount}` : `${shownCount} ${shownCount === 1 ? 'order' : 'orders'} · ${totalCount} total`)
-              : (tr ? `${shownCount} emir` : `${shownCount} ${shownCount === 1 ? 'order' : 'orders'}`)}
-          </p>
-          {activeFilterCount > 0 && (
-            <button type="button" onClick={() => resetMarketFilters?.()} className="inline-flex items-center gap-1 h-7 px-2 rounded-md font-semibold text-textSecondary hover:text-textPrimary hover:bg-elevated">
-              <RotateCcw className="w-3.5 h-3.5" strokeWidth={1.8} aria-hidden="true" />
-              {tr ? `Filtreleri temizle (${activeFilterCount})` : `Clear filters (${activeFilterCount})`}
-            </button>
-          )}
-        </div>
-
-        {isFaucetEnabled && (
+    );
+    const referenceTicker = <ReferenceRateTicker lang={lang} />;
+    const faucetRow = isFaucetEnabled && (
           <div className="mb-3 flex items-center gap-2 text-xs text-textMuted">
             <Droplets className="w-3.5 h-3.5" strokeWidth={1.8} aria-hidden="true" />
             <span>{tr ? 'Test token:' : 'Test tokens:'}</span>
@@ -692,10 +578,22 @@ export const buildAppViews = (ctx) => {
               </button>
             ))}
           </div>
-        )}
-
-        <ReferenceRateTicker lang={lang} />
-
+        );
+    const emptyState = (
+      <MarketEmpty
+        lang={lang}
+        filters={filters}
+        setFilter={setFilter}
+        onReset={resetMarketFilters}
+        activeFilterCount={activeFilterCount}
+        isNarrowed={isNarrowed}
+        viewerTier={viewerTier}
+        feedError={ordersFeedError}
+        canCreate={!newTxBlocked}
+        onCreate={openCreateOrder}
+      />
+    );
+    const orderList = (
         <div className="space-y-2">
           {loading ? (
             <div className="space-y-2" aria-busy="true">
@@ -837,27 +735,30 @@ export const buildAppViews = (ctx) => {
               );
             })
           ) : (
-            <div className="p-8 text-center border border-dashed border-borderSubtle rounded-xl">
-              <p className="text-sm text-textMuted mb-4">
-                {ordersFeedError
-                  ? (tr ? 'Pazar verisi alınamadı. Bağlantı düzelince liste otomatik yenilenecek.' : 'Market data unavailable. The list refreshes automatically.')
-                  : isNarrowed
-                    ? (tr ? 'Bu filtreye uyan emir yok.' : 'No orders match this filter.')
-                    : (tr ? 'Henüz açık emir yok.' : 'No open orders yet.')}
-              </p>
-              {!ordersFeedError && activeFilterCount > 0 && (
-                <button type="button" onClick={() => resetMarketFilters?.()} className="mb-3 mx-auto flex items-center gap-1.5 h-9 px-4 rounded-lg border border-borderSubtle bg-surface text-sm font-semibold text-textPrimary hover:bg-elevated">
-                  <RotateCcw className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />{tr ? 'Filtreleri temizle' : 'Clear filters'}
-                </button>
-              )}
-              {!newTxBlocked && !ordersFeedError && (
-                <button onClick={openCreateOrder} className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-brand text-black text-sm font-semibold hover:opacity-90">
-                  <Plus className="w-4 h-4" strokeWidth={2} aria-hidden="true" />{tr ? 'İlk emri oluştur' : 'Create the first order'}
-                </button>
-              )}
-            </div>
+            emptyState
           )}
         </div>
+    );
+    return (
+      <div className="w-full max-w-[1200px] min-w-0 p-4 md:p-8">
+        {marketHeader}
+        <MarketFilters
+          lang={lang}
+          filters={filters}
+          setFilter={setFilter}
+          onReset={resetMarketFilters}
+          activeFilterCount={activeFilterCount}
+          sortOptions={sortOptions}
+          sortValue={sortValue}
+          viewerTier={viewerTier}
+          canHideOwn={Boolean(address)}
+          result={{ loading, error: ordersFeedError, shown: shownCount, total: totalCount, loaded: loadedCount }}
+          closedRailCount={visibleOrders.filter(isOwnerRailDisabled).length}
+        >
+          {faucetRow}
+          {referenceTicker}
+          {orderList}
+        </MarketFilters>
       </div>
     );
   };

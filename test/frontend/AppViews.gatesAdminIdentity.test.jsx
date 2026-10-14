@@ -184,17 +184,17 @@ describe('F19.5: admin entry follows the server answer', () => {
 });
 
 describe('P2: inline components keep their identity across renders', () => {
-  it('keeps the same DOM node (and focus) for market segmented tabs when the view re-renders', () => {
+  it('keeps the same DOM node (and focus) for the market side clause when the view re-renders', () => {
     const first = buildAppViews({ ...baseCtx });
     const { rerender } = render(<div>{first.renderMarket()}</div>);
-    const tab = screen.getByRole('tab', { name: 'Buy' });
-    tab.focus();
-    expect(document.activeElement).toBe(tab);
+    const slot = screen.getByTestId('market-clause-side');
+    slot.focus();
+    expect(document.activeElement).toBe(slot);
 
     rerender(<div>{buildAppViews({ ...baseCtx }).renderMarket()}</div>);
 
-    expect(screen.getByRole('tab', { name: 'Buy' })).toBe(tab);
-    expect(document.activeElement).toBe(tab);
+    expect(screen.getByTestId('market-clause-side')).toBe(slot);
+    expect(document.activeElement).toBe(slot);
   });
 
   it('keeps the same DOM node (and focus) for drawer rows when the view re-renders', () => {
