@@ -28,6 +28,8 @@ export const resolveSystemStatuses = ({
   ordersFeedError = false,
   backendUnreachable = false,
   rpcUnreachable = false,
+  serviceDegraded = false,
+  configStale = false,
   lang = 'EN',
 }) => {
   const statuses = [];
@@ -121,6 +123,34 @@ export const resolveSystemStatuses = ({
     });
   }
 
+  // [TR] Kısıtlı mod: backend ayakta ama bazı uçlar kapalı. Tam erişilemezlik bandı varsa o yeterlidir.
+  if (serviceDegraded && !backendUnreachable) {
+    statuses.push({
+      key: 'service_degraded',
+      tone: 'info',
+      title: t(lang, 'Sistem kısıtlı modda', 'System in restricted mode'),
+      message: t(
+        lang,
+        'Sistem kısıtlı modda: bazı işlemler (ödeme bilgisi, dekont, işlem odası) geçici olarak kapalı. Yeni işlem açma geçici olarak kapalı. Mevcut işlemleriniz zincirde güvende.',
+        'System is in restricted mode: some actions (payment details, receipts, trade room) are temporarily unavailable. Opening new trades is temporarily disabled. Your existing trades are safe on-chain.',
+      ),
+      details: [envError(ENV_ERROR_CODES.SERVICE_DEGRADED, 'Backend restricted mode (503 SERVICE_DEGRADED)')],
+    });
+  }
+
+  if (configStale) {
+    statuses.push({
+      key: 'config_stale',
+      tone: 'info',
+      title: t(lang, 'Protokol ayarları güncel olmayabilir', 'Protocol settings may be stale'),
+      message: t(
+        lang,
+        'Protokol ayarları son bilinen değerlerden gösteriliyor; güncel olmayabilir.',
+        'Protocol settings are shown from last known values and may be out of date.',
+      ),
+    });
+  }
+
   if (rpcUnreachable) {
     statuses.push({
       key: 'rpc_unreachable',
@@ -159,6 +189,8 @@ const dismissToneClass = (tone) => {
 export const SystemStatusBar = ({
   backendUnreachable: backendUnreachableProp,
   rpcUnreachable: rpcUnreachableProp,
+  serviceDegraded: serviceDegradedProp,
+  configStale: configStaleProp,
   envErrors = [],
   isPaused = false,
   isConnected = false,
@@ -181,9 +213,13 @@ export const SystemStatusBar = ({
   const infra = useInfraHealth();
   const backendUnreachable = backendUnreachableProp ?? infra.backend;
   const rpcUnreachable = rpcUnreachableProp ?? infra.rpc;
+  const serviceDegraded = serviceDegradedProp ?? infra.degraded;
+  const configStale = configStaleProp ?? infra.configStale;
   const statuses = resolveSystemStatuses({
     backendUnreachable,
     rpcUnreachable,
+    serviceDegraded,
+    configStale,
     envErrors,
     isPaused,
     isConnected,

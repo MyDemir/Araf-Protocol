@@ -4,6 +4,7 @@ const request = require("supertest");
 const express = require("express");
 
 jest.mock("../../backend/scripts/services/protocolConfig", () => ({
+  isProtocolConfigStale: jest.fn(() => false),
   getConfig: jest.fn(() => ({
     bondMap: { 1: { maker: 800, taker: 1000 } },
     feeConfig: { currentTakerFeeBps: 10, currentMakerFeeBps: 5 },
@@ -114,5 +115,20 @@ describe("GET /api/orders/config", () => {
         nonAuthoritative: true,
       },
     });
+  });
+  it("configStale_true_when_protocolConfig_reports_stale_even_if_serviceMode_clear", async () => {
+    const pc = require("../../backend/scripts/services/protocolConfig");
+    const router = require("../../backend/scripts/routes/orders");
+    const app = express();
+    app.use("/api/orders", router);
+    pc.isProtocolConfigStale.mockReturnValue(true);
+    try {
+      const a = await request(app).get("/api/orders/config").expect(200);
+      const b = await request(app).get("/api/orders/payment-risk-config").expect(200);
+      expect(a.body.configStale).toBe(true);
+      expect(b.body.configStale).toBe(true);
+    } finally {
+      pc.isProtocolConfigStale.mockReturnValue(false);
+    }
   });
 });

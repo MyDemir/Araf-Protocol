@@ -682,6 +682,17 @@ export function useAppSessionData({
     return r.ok;
   }), []);
 
+  // [TR] Kısıtlı mod / bayat config toparlanma yoklaması: /orders/config izinli uçtur; bayrak kalktıysa true döner.
+  const probeConfigClean = React.useCallback(async (kind) => {
+    const r = await fetchWithTimeout(() => buildApiUrl('orders/config'), { credentials: 'include', timeoutMs: 8000 });
+    if (!r.ok) return false;
+    if (kind === 'degraded') return r.headers?.get?.('x-araf-degraded') !== 'true';
+    const body = await r.json().catch(() => null);
+    return body?.configStale !== true;
+  }, []);
+  useEffect(() => registerInfraProbe('degraded', () => probeConfigClean('degraded')), [probeConfigClean]);
+  useEffect(() => registerInfraProbe('configStale', () => probeConfigClean('configStale')), [probeConfigClean]);
+
   // Protocol configuration and read models
   useEffect(() => {
     let cancelled = false;
@@ -692,6 +703,9 @@ export function useAppSessionData({
       })
       .then((data) => {
         if (cancelled) return;
+        // [TR] Bayat config: yeni emir kapısı kapanır, bilgi bandı görünür; temiz yanıt gelince kalkar.
+        if (data.configStale === true) markInfraFailure('configStale');
+        else markInfraOk('configStale');
         if (data.bondMap) setOnchainBondMap(data.bondMap);
         if (data.tokenMap) setOnchainTokenMap(data.tokenMap);
         if (data.feeConfig) setProtocolFeeConfig(data.feeConfig);

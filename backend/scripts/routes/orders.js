@@ -20,7 +20,7 @@ const Order = require("../models/Order");
 const Trade = require("../models/Trade");
 const User = require("../models/User");
 const logger = require("../utils/logger");
-const { getConfig } = require("../services/protocolConfig");
+const { getConfig, isProtocolConfigStale } = require("../services/protocolConfig");
 const { isConfigStale } = require("../services/serviceMode");
 const { getRailStates, applyRailStatesToRiskConfig, getEnabledRailCodes, isRailEnabledStrict } = require("../services/paymentRails");
 const { buildTradeHealthSignals } = require("./tradeRisk");
@@ -265,7 +265,7 @@ router.get("/config", marketReadLimiter, async (_req, res, next) => {
     const paymentRiskConfig = await applyRailStatesToRiskConfig(config.paymentRiskConfig || {});
     const enabledPaymentRails = await getEnabledRailCodes();
     return res.json({
-      configStale: isConfigStale(),
+      configStale: isConfigStale() || isProtocolConfigStale(),
       bondMap: config.bondMap,
       feeConfig: config.feeConfig,
       cooldownConfig: config.cooldownConfig,
@@ -294,7 +294,7 @@ router.get("/payment-risk-config", marketReadLimiter, async (_req, res, next) =>
   try {
     const config = getConfig();
     return res.json({
-      configStale: isConfigStale(),
+      configStale: isConfigStale() || isProtocolConfigStale(),
       paymentRiskConfig: await applyRailStatesToRiskConfig(config.paymentRiskConfig || {}),
       enabledPaymentRails: await getEnabledRailCodes(),
       selectedOrderRiskLevel: {

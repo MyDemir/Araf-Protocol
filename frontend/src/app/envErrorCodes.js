@@ -15,6 +15,8 @@ export const ENV_ERROR_CODES = Object.freeze({
   // [EN] Infrastructure unreachable (dismissible, not a safety alert): deliberately NOT in the critical list.
   BACKEND_UNREACHABLE: 'BACKEND_UNREACHABLE',
   RPC_UNREACHABLE: 'RPC_UNREACHABLE',
+  // [TR] Backend erişilebilir ama kısıtlı modda (503 SERVICE_DEGRADED): sakin, kapatılabilir; kritik listeye GİRMEZ.
+  SERVICE_DEGRADED: 'SERVICE_DEGRADED',
 });
 
 // [TR] Güvenlik kodları kritiktir. BACKEND_UNREACHABLE / RPC_UNREACHABLE bilgi amaçlıdır, kritik değildir.
