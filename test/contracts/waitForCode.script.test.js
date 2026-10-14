@@ -1,7 +1,7 @@
 const { expect } = require("chai");
 const path = require("path");
 
-const { waitForCode, retryRead, isTransientError, confirmationsFor, settleDeployment } = require(
+const { waitForCode, retryRead, blockOverrides, isTransientError, confirmationsFor, settleDeployment } = require(
   path.join(__dirname, "..", "..", "contracts", "scripts", "lib", "waitForCode.js")
 );
 
@@ -149,6 +149,44 @@ describe("waitForCode / retryRead helpers", function () {
       expect(addr).to.equal(ADDR);
       expect(waited).to.equal(2);
       expect(i).to.equal(2);
+    });
+  });
+  describe("block-lag (pinned read) errors", function () {
+    const lag = (msg) => { const e = new Error(msg); e.code = "UNKNOWN_ERROR"; return e; };
+
+    for (const msg of ["header not found", "unknown block", "block not found", "missing trie node abc"]) {
+      it(`treats "${msg}" as transient and retries`, async function () {
+        const clk = fakeClock();
+        let calls = 0;
+        const v = await retryRead(async () => { if (++calls < 3) throw lag(msg); return "ok"; }, clk);
+        expect(v).to.equal("ok");
+        expect(calls).to.equal(3);
+        expect(isTransientError(lag(msg))).to.equal(true);
+      });
+    }
+
+    it("detects block-lag text nested in ethers error.error / info.error", function () {
+      const e1 = new Error("could not coalesce error"); e1.error = { code: -32000, message: "header not found" };
+      const e2 = new Error("unknown"); e2.info = { error: { message: "Unknown block" } };
+      expect(isTransientError(e1)).to.equal(true);
+      expect(isTransientError(e2)).to.equal(true);
+    });
+
+    it("still never retries a revert, even if the message mentions a block", async function () {
+      const clk = fakeClock();
+      let calls = 0;
+      const e = revertErr();
+      e.message = "execution reverted: unknown block";
+      try { await retryRead(async () => { calls++; throw e; }, clk); } catch (_) {}
+      expect(calls).to.equal(1);
+      expect(isTransientError(lag("execution reverted: header not found"))).to.equal(false);
+    });
+
+    it("blockOverrides pins to blockTag, empty when no block", function () {
+      expect(blockOverrides(42)).to.deep.equal([{ blockTag: 42 }]);
+      expect(blockOverrides(0)).to.deep.equal([{ blockTag: 0 }]);
+      expect(blockOverrides(undefined)).to.deep.equal([]);
+      expect(blockOverrides(null)).to.deep.equal([]);
     });
   });
 });

@@ -20,7 +20,7 @@ const hre = require('hardhat');
 const { ethers, artifacts, network } = hre;
 const fs = require('fs');
 const path = require('path');
-const { retryRead, settleDeployment } = require('./lib/waitForCode');
+const { retryRead, settleDeployment, blockOverrides } = require('./lib/waitForCode');
 
 const LOCAL = new Set(['hardhat', 'localhost']);
 const ZERO = '0x0000000000000000000000000000000000000000';
@@ -126,14 +126,16 @@ async function assertRewardsRedeploySafety({ provider, existingManifest, escrowA
 async function transferIfNeeded(contract, label, finalOwner) {
   const address = await contract.getAddress();
   const current = ethers.getAddress(await retryRead(() => contract.owner()));
-  if (current === finalOwner) return;
+  if (current === finalOwner) return null;
+  let transferReceipt;
   try {
-    await (await contract.transferOwnership(finalOwner)).wait();
+    transferReceipt = await (await contract.transferOwnership(finalOwner)).wait();
   } catch (err) {
     throw new Error(`${label} ownership transfer failed; deployer still owner of ${address} (${err && err.message ? err.message.split('\n')[0] : err})`);
   }
-  const after = ethers.getAddress(await retryRead(() => contract.owner()));
+  const after = ethers.getAddress(await retryRead(() => contract.owner(...blockOverrides(transferReceipt && transferReceipt.blockNumber))));
   if (after !== finalOwner) throw new Error(`${label} ownership transfer failed; deployer still owner of ${address} (owner()=${after}, expected ${finalOwner})`);
+  return transferReceipt && transferReceipt.blockNumber != null ? transferReceipt.blockNumber : null;
 }
 
 async function describeOwners(vault, rewards) {
@@ -141,17 +143,19 @@ async function describeOwners(vault, rewards) {
   return { vaultOwner: await read(vault), rewardsOwner: await read(rewards) };
 }
 
-async function verifyWiring({ vault, rewards, escrowAddress, vaultAddress, rewardsAddress, finalTreasury, finalOwner, usdt, usdc }) {
+async function verifyWiring({ vault, rewards, escrowAddress, vaultAddress, rewardsAddress, finalTreasury, finalOwner, usdt, usdc, blockTag }) {
+  // [TR] Tüm okumalar son yazma tx'inin receipt bloğuna sabit. [EN] All reads pinned to the last write's receipt block.
+  const bo = blockOverrides(blockTag);
   const checks = [
-    ['vault.escrow', ethers.getAddress(await retryRead(() => vault.escrow())) === escrowAddress],
-    ['vault.rewards', ethers.getAddress(await retryRead(() => vault.rewards())) === rewardsAddress],
-    ['vault.finalTreasury', ethers.getAddress(await retryRead(() => vault.finalTreasury())) === finalTreasury],
-    ['vault.owner', ethers.getAddress(await retryRead(() => vault.owner())) === finalOwner],
-    ['rewards.escrow', ethers.getAddress(await retryRead(() => rewards.escrow())) === escrowAddress],
-    ['rewards.revenueVault', ethers.getAddress(await retryRead(() => rewards.revenueVault())) === vaultAddress],
-    ['rewards.owner', ethers.getAddress(await retryRead(() => rewards.owner())) === finalOwner],
-    ['USDT supported', (await retryRead(() => vault.supportedToken(usdt))) === true],
-    ['USDC supported', (await retryRead(() => vault.supportedToken(usdc))) === true],
+    ['vault.escrow', ethers.getAddress(await retryRead(() => vault.escrow(...bo))) === escrowAddress],
+    ['vault.rewards', ethers.getAddress(await retryRead(() => vault.rewards(...bo))) === rewardsAddress],
+    ['vault.finalTreasury', ethers.getAddress(await retryRead(() => vault.finalTreasury(...bo))) === finalTreasury],
+    ['vault.owner', ethers.getAddress(await retryRead(() => vault.owner(...bo))) === finalOwner],
+    ['rewards.escrow', ethers.getAddress(await retryRead(() => rewards.escrow(...bo))) === escrowAddress],
+    ['rewards.revenueVault', ethers.getAddress(await retryRead(() => rewards.revenueVault(...bo))) === vaultAddress],
+    ['rewards.owner', ethers.getAddress(await retryRead(() => rewards.owner(...bo))) === finalOwner],
+    ['USDT supported', (await retryRead(() => vault.supportedToken(usdt, ...bo))) === true],
+    ['USDC supported', (await retryRead(() => vault.supportedToken(usdc, ...bo))) === true],
   ];
   const failed = checks.filter(([, ok]) => !ok).map(([n]) => n);
   if (failed.length) throw new Error(`Rewards wiring verification failed: ${failed.join(', ')}`);
@@ -253,14 +257,18 @@ async function main(env = process.env, opts = {}) {
     // GERİ ALINAMAZ / IRREVERSIBLE: one-shot (RewardsAlreadySet).
     await (await vault.setRewards(rewardsAddress)).wait();
     await (await vault.setSupportedToken(usdt, true)).wait();
-    await (await vault.setSupportedToken(usdc, true)).wait();
-    const rewardBps = await retryRead(() => vault.rewardBps());
+    const lastWriteReceipt = await (await vault.setSupportedToken(usdc, true)).wait();
+    const wiringBlock = lastWriteReceipt && lastWriteReceipt.blockNumber;
+    const rewardBps = await retryRead(() => vault.rewardBps(...blockOverrides(wiringBlock)));
     if (rewardBps !== 4000n) throw new Error(`rewardBps mismatch: ${rewardBps}`);
     manifest.rewardBps = rewardBps.toString();
 
-    await transferIfNeeded(vault, 'vault', finalOwner);
-    await transferIfNeeded(rewards, 'rewards', finalOwner);
-    await verifyWiring({ vault, rewards, escrowAddress, vaultAddress, rewardsAddress, finalTreasury, finalOwner, usdt, usdc });
+    const vaultXferBlock = await transferIfNeeded(vault, 'vault', finalOwner);
+    const rewardsXferBlock = await transferIfNeeded(rewards, 'rewards', finalOwner);
+    const verifyBlock = [wiringBlock, vaultXferBlock, rewardsXferBlock]
+      .filter((b) => b != null)
+      .reduce((m, b) => (m == null || b > m ? b : m), null);
+    await verifyWiring({ vault, rewards, escrowAddress, vaultAddress, rewardsAddress, finalTreasury, finalOwner, usdt, usdc, blockTag: verifyBlock });
   } catch (err) {
     const owners = await describeOwners(vault, rewards);
     console.error('REWARDS DEPLOY INCOMPLETE (manifest status=pending):');
