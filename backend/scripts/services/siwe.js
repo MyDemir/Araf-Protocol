@@ -166,6 +166,9 @@ async function generateNonce(walletAddress) {
   const existing = await redis.get(key);
   if (existing) {
     logger.debug(`[Auth] Mevcut nonce kullanılıyor: ${walletAddress}`);
+    // Aynı nonce döner (ezilmez, yenisi üretilmez); yalnız ömrü yenilenir ki mobilde cüzdana gidip dönen
+    // kullanıcının nonce'u önceki denemeden kalan kısa ömürle dolmasın.
+    await redis.expire(key, NONCE_TTL_SECS);
     return existing;
   }
 
@@ -180,6 +183,7 @@ async function generateNonce(walletAddress) {
     }
 
     logger.debug(`[Auth] Nonce race condition çözüldü, mevcut nonce kullanılıyor: ${walletAddress}`);
+    await redis.expire(key, NONCE_TTL_SECS);
     return racedNonce;
   }
 

@@ -59,6 +59,13 @@ const SETTING_DEFS = {
       EN: "Upper bound of replay backoff. Must not be lower than the backoff base.",
     },
   },
+  RPC_MAX_REQUESTS_PER_SEC: {
+    group: "worker", unit: "req/s", min: 1, max: 50, default: 4,
+    description: {
+      TR: "Her RPC URL'si için saniyede en fazla istek (sağlayıcının saniyelik kredi sınırı; aşılırsa 429 alınır). Aşan istekler kuyruğa girer.",
+      EN: "Maximum requests per second per RPC URL (provider per-second credit limit; exceeding it returns 429). Excess requests are queued.",
+    },
+  },
   // ── Watchdog / Sağlık ──
   WORKER_BLOCK_STALE_MS: {
     group: "watchdog", unit: "ms", min: 30_000, max: 900_000, default: 75_000,
