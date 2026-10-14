@@ -37,7 +37,13 @@ export function OkxBadge({ className = 'w-10 h-10' }) {
     <svg viewBox="0 0 40 40" className={base(className)} aria-hidden="true" focusable="false">
       <rect width="40" height="40" fill="#000" />
       <rect x="0.5" y="0.5" width="39" height="39" rx="11" fill="none" stroke="#fff" strokeOpacity="0.14" />
-      <path d="M13.5 13.5l13 13M26.5 13.5l-13 13" stroke="#fff" strokeWidth="3.4" strokeLinecap="round" />
+      <g fill="#fff">
+        <rect x="9" y="9" width="6.4" height="6.4" rx="1.2" />
+        <rect x="24.6" y="9" width="6.4" height="6.4" rx="1.2" />
+        <rect x="16.8" y="16.8" width="6.4" height="6.4" rx="1.2" />
+        <rect x="9" y="24.6" width="6.4" height="6.4" rx="1.2" />
+        <rect x="24.6" y="24.6" width="6.4" height="6.4" rx="1.2" />
+      </g>
     </svg>
   );
 }
