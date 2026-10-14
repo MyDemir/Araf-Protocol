@@ -102,6 +102,7 @@ jobs:
           # Kontrat deploy'u yok: vault/rewards bu escrow'a bağlı değilse durmak güvenli.
           ON_MISMATCH: error
           BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+          BASE_SEPOLIA_RPC_URL_FALLBACKS: ${{ secrets.BASE_SEPOLIA_RPC_URL_FALLBACKS }}
         run: |
           set -euo pipefail
 
