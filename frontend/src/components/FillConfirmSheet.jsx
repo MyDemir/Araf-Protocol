@@ -166,17 +166,15 @@ export default function FillConfirmSheet({ summary, lang = 'EN', txGate = null, 
         <Row
           label={t.fee}
           testId="fill-confirm-fee"
-          sub={summary.feeBps !== null ? (
-            <>
-              <span className="block">{summary.feeFrom === 'bond' ? t.feeBond : t.feeReceived}</span>
-              <span className="mt-1 block" data-testid="fill-confirm-fee-note">{t.feeNote}</span>
-            </>
-          ) : null}
+          sub={summary.feeBps !== null ? (summary.feeFrom === 'bond' ? t.feeBond : t.feeReceived) : null}
         >
           {summary.feeBps !== null ? `${fmtBps(summary.feeBps, lang)}${feeAmount ? ` · ${feeAmount}` : ''}` : t.unknown}
         </Row>
         <Row label={t.window} testId="fill-confirm-window">{windowHours} {t.hours}</Row>
       </dl>
+      {summary.feeBps !== null ? (
+        <p className="mb-1 mt-1 text-xs leading-snug text-textMuted" data-testid="fill-confirm-fee-note">{t.feeNote}</p>
+      ) : null}
 
       <div className="mt-2 rounded-2xl border border-borderStrong bg-elevated px-4 py-3" data-testid="fill-confirm-bond-box">
         <div className="flex items-start justify-between gap-4">
