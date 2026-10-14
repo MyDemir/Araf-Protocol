@@ -20,6 +20,7 @@ const hre = require('hardhat');
 const { ethers, artifacts, network } = hre;
 const fs = require('fs');
 const path = require('path');
+const { retryRead, settleDeployment } = require('./lib/waitForCode');
 
 const LOCAL = new Set(['hardhat', 'localhost']);
 const ZERO = '0x0000000000000000000000000000000000000000';
@@ -45,8 +46,7 @@ function resolvePublicTokens(chainId) {
 async function maybeDeployMockToken(symbol) {
   const Mock = await ethers.getContractFactory('MockERC20');
   const t = await Mock.deploy(`Mock ${symbol}`, symbol, 6);
-  await t.waitForDeployment();
-  return await t.getAddress();
+  return await settleDeployment(t, ethers.provider, network.name, { label: symbol });
 }
 
 async function exportAbi(contractNames) {
@@ -107,7 +107,7 @@ async function assertRewardsRedeploySafety({ provider, existingManifest, escrowA
   if (await hasCode(provider, existingRewards)) reasons.push(`existing rewards contract has code at ${existingRewards}`);
   if (escrowAddress && (await hasCode(provider, escrowAddress))) {
     const escrow = await ethers.getContractAt('ArafEscrow', escrowAddress);
-    const treasury = ethers.getAddress(await escrow.treasury());
+    const treasury = ethers.getAddress(await retryRead(() => escrow.treasury()));
     const treasuryRewards = await readRewardsOf(provider, treasury);
     if (treasuryRewards && treasuryRewards !== ZERO) reasons.push(`escrow treasury ${treasury} is already a vault wired to rewards ${treasuryRewards}`);
   }
@@ -125,14 +125,14 @@ async function assertRewardsRedeploySafety({ provider, existingManifest, escrowA
 // [EN] Ownable is single-step: a transfer to a wrong address cannot be undone.
 async function transferIfNeeded(contract, label, finalOwner) {
   const address = await contract.getAddress();
-  const current = ethers.getAddress(await contract.owner());
+  const current = ethers.getAddress(await retryRead(() => contract.owner()));
   if (current === finalOwner) return;
   try {
     await (await contract.transferOwnership(finalOwner)).wait();
   } catch (err) {
     throw new Error(`${label} ownership transfer failed; deployer still owner of ${address} (${err && err.message ? err.message.split('\n')[0] : err})`);
   }
-  const after = ethers.getAddress(await contract.owner());
+  const after = ethers.getAddress(await retryRead(() => contract.owner()));
   if (after !== finalOwner) throw new Error(`${label} ownership transfer failed; deployer still owner of ${address} (owner()=${after}, expected ${finalOwner})`);
 }
 
@@ -143,15 +143,15 @@ async function describeOwners(vault, rewards) {
 
 async function verifyWiring({ vault, rewards, escrowAddress, vaultAddress, rewardsAddress, finalTreasury, finalOwner, usdt, usdc }) {
   const checks = [
-    ['vault.escrow', ethers.getAddress(await vault.escrow()) === escrowAddress],
-    ['vault.rewards', ethers.getAddress(await vault.rewards()) === rewardsAddress],
-    ['vault.finalTreasury', ethers.getAddress(await vault.finalTreasury()) === finalTreasury],
-    ['vault.owner', ethers.getAddress(await vault.owner()) === finalOwner],
-    ['rewards.escrow', ethers.getAddress(await rewards.escrow()) === escrowAddress],
-    ['rewards.revenueVault', ethers.getAddress(await rewards.revenueVault()) === vaultAddress],
-    ['rewards.owner', ethers.getAddress(await rewards.owner()) === finalOwner],
-    ['USDT supported', (await vault.supportedToken(usdt)) === true],
-    ['USDC supported', (await vault.supportedToken(usdc)) === true],
+    ['vault.escrow', ethers.getAddress(await retryRead(() => vault.escrow())) === escrowAddress],
+    ['vault.rewards', ethers.getAddress(await retryRead(() => vault.rewards())) === rewardsAddress],
+    ['vault.finalTreasury', ethers.getAddress(await retryRead(() => vault.finalTreasury())) === finalTreasury],
+    ['vault.owner', ethers.getAddress(await retryRead(() => vault.owner())) === finalOwner],
+    ['rewards.escrow', ethers.getAddress(await retryRead(() => rewards.escrow())) === escrowAddress],
+    ['rewards.revenueVault', ethers.getAddress(await retryRead(() => rewards.revenueVault())) === vaultAddress],
+    ['rewards.owner', ethers.getAddress(await retryRead(() => rewards.owner())) === finalOwner],
+    ['USDT supported', (await retryRead(() => vault.supportedToken(usdt))) === true],
+    ['USDC supported', (await retryRead(() => vault.supportedToken(usdc))) === true],
   ];
   const failed = checks.filter(([, ok]) => !ok).map(([n]) => n);
   if (failed.length) throw new Error(`Rewards wiring verification failed: ${failed.join(', ')}`);
@@ -210,13 +210,11 @@ async function main(env = process.env, opts = {}) {
 
   const Vault = await ethers.getContractFactory('ArafRevenueVault');
   const vault = await Vault.deploy(escrowAddress, finalTreasury, constructorOwner);
-  await vault.waitForDeployment();
-  const vaultAddress = await vault.getAddress();
+  const vaultAddress = await settleDeployment(vault, ethers.provider, network.name, { label: 'ArafRevenueVault' });
 
   const Rewards = await ethers.getContractFactory('ArafRewards');
   const rewards = await Rewards.deploy(escrowAddress, vaultAddress, constructorOwner);
-  await rewards.waitForDeployment();
-  const rewardsAddress = await rewards.getAddress();
+  const rewardsAddress = await settleDeployment(rewards, ethers.provider, network.name, { label: 'ArafRewards' });
 
   const manifest = {
     status: 'pending',
@@ -256,7 +254,7 @@ async function main(env = process.env, opts = {}) {
     await (await vault.setRewards(rewardsAddress)).wait();
     await (await vault.setSupportedToken(usdt, true)).wait();
     await (await vault.setSupportedToken(usdc, true)).wait();
-    const rewardBps = await vault.rewardBps();
+    const rewardBps = await retryRead(() => vault.rewardBps());
     if (rewardBps !== 4000n) throw new Error(`rewardBps mismatch: ${rewardBps}`);
     manifest.rewardBps = rewardBps.toString();
 

@@ -9,6 +9,7 @@
 const hre = require("hardhat");
 const fs = require("fs");
 const path = require("path");
+const { retryRead, settleDeployment } = require("./lib/waitForCode");
 
 const ALLOWED_CHAIN_IDS = new Set([84532, 31337]);
 const PUBLIC_CHAIN_IDS = new Set([84532]);
@@ -47,11 +48,10 @@ async function main() {
   const [deployer] = await ethers.getSigners();
   const factory = await ethers.getContractFactory("MockERC20", deployer);
   const token = await factory.deploy(name, symbol, DECIMALS);
-  await token.waitForDeployment();
-  const address = await token.getAddress();
+  const address = await settleDeployment(token, ethers.provider, network.name, { label: symbol });
   const txHash = token.deploymentTransaction()?.hash ?? null;
 
-  const onchainDecimals = Number(await token.decimals());
+  const onchainDecimals = Number(await retryRead(() => token.decimals(), { label: "decimals" }));
   if (onchainDecimals !== DECIMALS) throw new Error(`decimals beklenen ${DECIMALS}, gerçek ${onchainDecimals}`);
 
   const filePath = path.resolve(__dirname, `../deployments/${network.name}-test-tokens.json`);
