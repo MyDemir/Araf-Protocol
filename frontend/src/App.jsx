@@ -1208,12 +1208,12 @@ function App() {
         />
       )}
 
-      {/* [TR] Mobilde yalnız ikon: içerik ve başlıkların üstüne binmez. [EN] Icon-only on mobile. */}
+      {/* [TR] Mobilde gizli (içeriğin üstüne biniyordu); giriş Menü panelinde. [EN] Hidden on mobile; entry lives in the Menu panel. */}
       <button
         onClick={() => setShowFeedbackModal(true)}
         title={lang === 'TR' ? 'Geri Bildirim' : 'Feedback'}
         aria-label={lang === 'TR' ? 'Geri Bildirim' : 'Feedback'}
-        className="fixed top-[calc(0.75rem_+_env(safe-area-inset-top))] right-[calc(0.75rem_+_env(safe-area-inset-right))] md:top-6 md:right-6 z-40 h-10 w-10 md:w-auto md:px-4 bg-surface/90 hover:bg-elevated border border-borderSubtle rounded-full md:rounded-2xl flex items-center justify-center gap-2 text-sm font-semibold text-textPrimary shadow-sm backdrop-blur transition hover:border-borderStrong"
+        className="hidden md:flex fixed md:top-6 md:right-6 z-40 h-10 md:w-auto md:px-4 bg-surface/90 hover:bg-elevated border border-borderSubtle md:rounded-2xl items-center justify-center gap-2 text-sm font-semibold text-textPrimary shadow-sm backdrop-blur transition hover:border-borderStrong"
       >
         <MessageSquare className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />
         <span className="hidden md:inline">{lang === 'TR' ? 'Geri Bildirim' : 'Feedback'}</span>

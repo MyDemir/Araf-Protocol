@@ -21,7 +21,7 @@ import { deriveTradeTimeline } from './contexts/trade-room/tradeTimeline';
 import { isViewInNav, NAV_ORDER, VIEW_REGISTRY } from './viewRegistry';
 import {
   Banknote, ChevronDown, CircleCheck, CirclePause, Clock, Droplets, Flame, Handshake, History, Hourglass, Layers, ListPlus, LoaderCircle, Lock, Menu, Paperclip, Plus, Settings, Store, Swords,
-  TriangleAlert, Undo2, Unplug, Wallet, X, Info, Maximize2, Minimize2, Download, Share,
+  TriangleAlert, Undo2, Unplug, Wallet, X, Info, Maximize2, Minimize2, Download, Share, MessageSquare,
 } from 'lucide-react';
 import { buildTradeRoomPanelCallbacks, getBurnExpiredDeadlinePassed, getPaymentWindowExpired } from './contexts/trade-room/tradeRoomPanelActions';
 
@@ -395,6 +395,10 @@ export const buildAppViews = (ctx) => {
                 )}
               </div>
             )}
+            {/* [TR] Mobilde sabit geri bildirim düğmesi gizlidir (içeriğin üstüne biniyordu); giriş burada. */}
+            <div className="md:hidden -mx-1" data-testid="drawer-feedback">
+              <Row icon={ico(MessageSquare)} label={tr ? 'Geri bildirim' : 'Feedback'} onClick={() => { setSidebarOpen(false); setShowFeedbackModal(true); }} />
+            </div>
             <div className="flex items-center gap-2">
               <div className="flex flex-1 bg-surface rounded-lg p-1 border border-borderSubtle" role="group" aria-label={tr ? 'Dil' : 'Language'}>
                 {['TR', 'EN'].map((code) => (
