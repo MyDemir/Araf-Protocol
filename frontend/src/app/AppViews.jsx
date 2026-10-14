@@ -256,7 +256,7 @@ export const buildAppViews = (ctx) => {
         <div className="w-full flex justify-center">
           <ThemeToggle lang={lang} />
         </div>
-        <button onClick={() => setLang(lang === 'TR' ? 'EN' : 'TR')} title={lang === 'TR' ? 'Dili Değiştir' : 'Change Language'} className="text-xs font-bold text-textMuted hover:text-textPrimary mb-1">{lang}</button>
+        <button onClick={() => setLang(lang === 'TR' ? 'EN' : 'TR')} title={lang === 'TR' ? 'Dili Değiştir' : 'Change Language'} className="w-11 h-11 -my-1 flex items-center justify-center rounded-xl text-xs font-bold text-textMuted hover:text-textPrimary hover:bg-elevated transition">{lang}</button>
         <button onClick={handleAuthAction} title={isConnected && isAuthenticated ? (lang === 'TR' ? 'Profil Merkezi' : 'Profile Center') : (lang === 'TR' ? 'Cüzdan Bağla' : 'Connect Wallet')} className={`w-10 h-10 rounded-full border-2 flex items-center justify-center transition-all shadow-lg mx-auto ${isConnected && isAuthenticated ? 'border-emerald-500 bg-emerald-900/20 text-emerald-400 hover:bg-emerald-900/40 shadow-[0_0_10px_rgba(16,185,129,0.2)]' : 'border-borderStrong bg-surface text-textMuted hover:text-textPrimary hover:border-brand/50 hover:bg-elevated'}`}>
           {isLoggingIn || !authChecked ? <LoaderCircle className="w-4 h-4 animate-spin" strokeWidth={1.8} aria-hidden="true" /> : <Wallet className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" />}
         </button>
@@ -565,7 +565,7 @@ export const buildAppViews = (ctx) => {
     const marketHeader = (
         <div className="mb-4 flex items-center justify-between gap-3">
           <h2 className="text-xl font-bold text-textPrimary">{tr ? 'Pazar' : 'Market'}</h2>
-          <button onClick={openCreateOrder} disabled={newTxBlocked} className="inline-flex items-center gap-1.5 h-9 px-3 md:px-4 rounded-lg bg-brand text-black text-sm font-semibold hover:opacity-90 disabled:opacity-50">
+          <button onClick={openCreateOrder} disabled={newTxBlocked} className="inline-flex items-center gap-1.5 h-11 md:h-9 px-3 md:px-4 rounded-lg bg-brand text-black text-sm font-semibold hover:opacity-90 disabled:opacity-50">
             <Plus className="w-4 h-4" strokeWidth={2} aria-hidden="true" />{tr ? 'Emir oluştur' : 'Create order'}
           </button>
         </div>
@@ -576,7 +576,7 @@ export const buildAppViews = (ctx) => {
             <Droplets className="w-3.5 h-3.5" strokeWidth={1.8} aria-hidden="true" />
             <span>{tr ? 'Test token:' : 'Test tokens:'}</span>
             {['USDT', 'USDC'].map((sym) => (
-              <button key={sym} onClick={() => handleMint(sym)} disabled={isContractLoading} className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md border border-borderSubtle bg-surface font-semibold text-textSecondary hover:text-textPrimary hover:bg-elevated disabled:opacity-50">
+              <button key={sym} onClick={() => handleMint(sym)} disabled={isContractLoading} className="relative inline-flex items-center gap-1 h-7 px-2.5 rounded-md border border-borderSubtle bg-surface font-semibold text-textSecondary hover:text-textPrimary hover:bg-elevated disabled:opacity-50 after:absolute after:-inset-y-2 after:inset-x-0 after:content-['']">
                 {isContractLoading && loadingText.includes(sym) ? <LoaderCircle className="w-3.5 h-3.5 animate-spin" strokeWidth={1.8} aria-hidden="true" /> : null}
                 {tr ? `${sym} al` : `Get ${sym}`}
               </button>
@@ -690,7 +690,7 @@ export const buildAppViews = (ctx) => {
                     </div>
                     <div className="shrink-0 flex flex-col items-end gap-2">
                       <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${sideBadgeClass}`}>{sideLabel}</span>
-                      <button onClick={() => (needsSignIn ? handleAuthAction() : handleStartTrade(order))} disabled={isDisabled} title={needsSignIn ? (tr ? 'Önce cüzdanınızı bağlayıp giriş yapın' : 'Connect your wallet and sign in first') : undefined} className={`h-9 min-w-[5.5rem] px-4 rounded-lg text-sm font-semibold transition inline-flex items-center justify-center gap-1.5 ${ctaTone}`}>
+                      <button onClick={() => (needsSignIn ? handleAuthAction() : handleStartTrade(order))} disabled={isDisabled} title={needsSignIn ? (tr ? 'Önce cüzdanınızı bağlayıp giriş yapın' : 'Connect your wallet and sign in first') : undefined} className={`h-11 md:h-9 min-w-[5.5rem] px-4 rounded-lg text-sm font-semibold transition inline-flex items-center justify-center gap-1.5 ${ctaTone}`}>
                         {ctaContent}
                       </button>
                       {needsOwnProfile && (
@@ -712,7 +712,7 @@ export const buildAppViews = (ctx) => {
                     {order.paymentRiskSignal && <PaymentRiskBadge lang={lang} riskEntry={order.paymentRiskSignal} compact />}
                     {/* [TR] Hover yerine dokunmatik uyumlu açılır özet; mobilde de çalışır. */}
                     <details className="group ml-auto min-w-0 text-xs">
-                      <summary className="cursor-pointer list-none text-textMuted hover:text-textPrimary inline-flex items-center gap-1">
+                      <summary className="relative cursor-pointer list-none text-textMuted hover:text-textPrimary inline-flex items-center gap-1 after:absolute after:-inset-x-3 after:-inset-y-3 after:content-['']">
                         <Info className="w-3.5 h-3.5" strokeWidth={1.8} aria-hidden="true" />{tr ? 'Özet' : 'Summary'}
                       </summary>
                       <div className="mt-2 rounded-lg border border-borderSubtle bg-elevated p-3 w-[min(18rem,calc(100vw_-_3rem))]">
