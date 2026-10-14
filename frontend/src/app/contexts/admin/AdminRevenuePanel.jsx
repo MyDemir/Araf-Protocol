@@ -3,8 +3,9 @@ import { buildApiUrl } from '../../apiConfig';
 import { REVENUE_KIND_LABELS } from './adminChainConfig';
 import { formatTokenAmount } from '../../orderUiModel';
 import { shortAddress as short, tx as t } from '../../copy';
+import { fmtDateTime, fmtInt } from '../../format';
 
-const fmtUnits = (raw, decimals = 6) => formatTokenAmount(raw, decimals, 2);
+const fmtUnits = (raw, lang, decimals = 6) => formatTokenAmount(raw, decimals, 2, lang);
 
 // [TR] Gelir & Ödül sekmesi: backend'in zaten sunduğu /admin/revenue (kontrat RevenueEvent aynası) ve
 //      /admin/rewards/health uçlarını gösterir. Önceden bu veriler hiçbir ekranda görünmüyordu.
@@ -64,10 +65,10 @@ export default function AdminRevenuePanel({ lang = 'EN', authenticatedFetch, tok
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
         {[
-          { k: 'events', label: t(lang, 'Gelir olayı', 'Revenue events'), value: state.rows.length },
-          { k: 'epochs', label: t(lang, 'Ödül dönemi', 'Reward epochs'), value: state.rewards?.counts?.epochs ?? '—' },
-          { k: 'funding', label: t(lang, 'Fonlama', 'Fundings'), value: state.rewards?.counts?.funding ?? '—' },
-          { k: 'claims', label: t(lang, 'Talep (claim)', 'Claims'), value: state.rewards?.counts?.claims ?? '—' },
+          { k: 'events', label: t(lang, 'Gelir olayı', 'Revenue events'), value: fmtInt(state.rows.length, lang) },
+          { k: 'epochs', label: t(lang, 'Ödül dönemi', 'Reward epochs'), value: fmtInt(state.rewards?.counts?.epochs, lang) },
+          { k: 'funding', label: t(lang, 'Fonlama', 'Fundings'), value: fmtInt(state.rewards?.counts?.funding, lang) },
+          { k: 'claims', label: t(lang, 'Talep (claim)', 'Claims'), value: fmtInt(state.rewards?.counts?.claims, lang) },
         ].map((tile) => (
           <div key={tile.k} className="bg-surface border border-borderSubtle rounded-xl px-3 py-2.5">
             <p className="text-[11px] uppercase tracking-wider text-textMuted">{tile.label}</p>
@@ -83,9 +84,9 @@ export default function AdminRevenuePanel({ lang = 'EN', authenticatedFetch, tok
             {totals.map(([token, acc]) => (
               <div key={token} className="grid grid-cols-2 md:grid-cols-4 gap-2 py-2">
                 <span className="font-semibold text-textPrimary">{symbolOf(token)} <span className="text-textMuted font-normal">· {acc.count}</span></span>
-                <span className="text-textSecondary">{t(lang, 'Toplam', 'Total')}: <b className="text-textPrimary tabular-nums">{fmtUnits(acc.amount)}</b></span>
-                <span className="text-textSecondary">{t(lang, 'Ödül payı', 'Reward share')}: <b className="text-success tabular-nums">{fmtUnits(acc.reward)}</b></span>
-                <span className="text-textSecondary">{t(lang, 'Hazine payı', 'Treasury share')}: <b className="text-textPrimary tabular-nums">{fmtUnits(acc.treasury)}</b></span>
+                <span className="text-textSecondary">{t(lang, 'Toplam', 'Total')}: <b className="text-textPrimary tabular-nums">{fmtUnits(acc.amount, lang)}</b></span>
+                <span className="text-textSecondary">{t(lang, 'Ödül payı', 'Reward share')}: <b className="text-success tabular-nums">{fmtUnits(acc.reward, lang)}</b></span>
+                <span className="text-textSecondary">{t(lang, 'Hazine payı', 'Treasury share')}: <b className="text-textPrimary tabular-nums">{fmtUnits(acc.treasury, lang)}</b></span>
               </div>
             ))}
           </div>
@@ -109,10 +110,10 @@ export default function AdminRevenuePanel({ lang = 'EN', authenticatedFetch, tok
               <tr><td colSpan={6} className="px-3 py-4 text-textMuted">{t(lang, 'Henüz gelir olayı yok.', 'No revenue events yet.')}</td></tr>
             ) : state.rows.slice(0, 100).map((row) => (
               <tr key={`${row.tx_hash}-${row.log_index}`} className="text-textSecondary">
-                <td className="px-3 py-2 whitespace-nowrap">{row.created_at_onchain ? new Date(row.created_at_onchain).toLocaleString() : `#${row.block_number}`}</td>
+                <td className="px-3 py-2 whitespace-nowrap">{row.created_at_onchain ? fmtDateTime(row.created_at_onchain, lang, { seconds: true }) : `#${row.block_number}`}</td>
                 <td className="px-3 py-2">{REVENUE_KIND_LABELS[Number(row.kind)]?.[lang === 'TR' ? 'TR' : 'EN'] || `#${row.kind}`}</td>
                 <td className="px-3 py-2">{symbolOf(row.token)}</td>
-                <td className="px-3 py-2 text-right font-mono text-textPrimary">{fmtUnits(row.amount)}</td>
+                <td className="px-3 py-2 text-right font-mono text-textPrimary">{fmtUnits(row.amount, lang)}</td>
                 <td className="px-3 py-2 font-mono">{row.trade_id ? `#${row.trade_id}` : '—'}</td>
                 <td className="px-3 py-2 font-mono">{short(row.tx_hash)}</td>
               </tr>

@@ -1,5 +1,6 @@
 import PIIDisplay from '../components/PIIDisplay';
-import { fmtBps, isKnownNumber, fmtNum, fmtPct, getStateLabel, localeOf } from './copy';
+import { fmtBps, isKnownNumber, fmtNum, fmtPct, getStateLabel } from './copy';
+import { fmtCompact, fmtInt, fmtNumber } from './format';
 import ReferenceRateTicker from '../components/ReferenceRateTicker';
 import SettlementProposalCard from '../components/SettlementProposalCard';
 import { normalizeSettlementState } from './contexts/settlement/settlementActionModel';
@@ -28,10 +29,10 @@ import { buildTradeRoomPanelCallbacks, getBurnExpiredDeadlinePassed, getPaymentW
 // [TR] App ana görünüm/render katmanı burada tutulur.
 // [EN] Main application view/render layer lives here.
 // [TR] Ana sayfa istatistik değişim rozeti (yalnız burada kullanılır). [EN] Home stat delta badge.
-const StatChange = ({ value }) => {
+const StatChange = ({ value, lang = 'EN' }) => {
   if (value == null) return null;
   const isPositive = value >= 0;
-  return <span className={`text-[10px] ml-2 font-bold ${isPositive ? 'text-success' : 'text-danger'}`}>{isPositive ? '▲' : '▼'}{Math.abs(value).toFixed(1)}%</span>;
+  return <span className={`text-[10px] ml-2 font-bold ${isPositive ? 'text-success' : 'text-danger'}`}>{isPositive ? '▲' : '▼'}{lang === 'TR' ? `%${Math.abs(value).toFixed(1).replace('.', ',')}` : `${Math.abs(value).toFixed(1)}%`}</span>;
 };
 
 // [TR] P2 — Modül düzeyi bileşenler: render içinde tanımlanınca her render'da yeni tip oluşur, alt ağaç yeniden
@@ -449,17 +450,17 @@ export const buildAppViews = (ctx) => {
 
       {(() => {
         const tr = lang === 'TR';
-        const usd = (v) => `$${Number(v).toLocaleString('en-US', { notation: 'compact', maximumFractionDigits: 1 })}`;
+        const usd = (v) => `$${fmtCompact(v, lang, 1)}`;
         const openOrders = protocolStats && (protocolStats.open_sell_orders != null || protocolStats.open_buy_orders != null)
           ? Number(protocolStats.open_sell_orders || 0) + Number(protocolStats.open_buy_orders || 0)
           : null;
         const hours = protocolStats?.avg_trade_hours;
         const tiles = [
           { k: 'vol', label: tr ? 'Tamamlanan hacim' : 'Settled volume', value: statValue(protocolStats?.total_volume_usdt, usd), change: protocolStats?.changes_30d?.total_volume_usdt_pct },
-          { k: 'trades', label: tr ? 'Başarılı işlem' : 'Successful trades', value: statValue(protocolStats?.completed_trades, (v) => Number(v).toLocaleString(localeOf(lang))), change: protocolStats?.changes_30d?.completed_trades_pct },
-          { k: 'open', label: tr ? 'Açık emir' : 'Open orders', value: openOrders == null ? '—' : openOrders.toLocaleString(), sub: openOrders == null ? null : (tr ? `${protocolStats.open_sell_orders || 0} satış · ${protocolStats.open_buy_orders || 0} alış` : `${protocolStats.open_sell_orders || 0} sell · ${protocolStats.open_buy_orders || 0} buy`) },
-          { k: 'time', label: tr ? 'Ort. işlem süresi' : 'Avg. trade time', value: hours != null ? (hours < 1 ? `${Math.max(1, Math.round(hours * 60))} ${tr ? 'dk' : 'min'}` : `${Number(hours).toLocaleString(localeOf(lang), { maximumFractionDigits: 1 })} ${tr ? 'sa' : 'h'}`) : '—' },
-          { k: 'burn', label: tr ? 'Eriyen ve yakılan' : 'Decayed & burned', value: statValue(protocolStats?.burned_bonds_usdt, (v) => `$${Number(v).toLocaleString('en-US', { maximumFractionDigits: 0 })}`), danger: true, sub: tr ? 'Uzlaşmayanların kaybı' : 'Lost by those who would not settle' },
+          { k: 'trades', label: tr ? 'Başarılı işlem' : 'Successful trades', value: statValue(protocolStats?.completed_trades, (v) => fmtInt(v, lang)), change: protocolStats?.changes_30d?.completed_trades_pct },
+          { k: 'open', label: tr ? 'Açık emir' : 'Open orders', value: openOrders == null ? '—' : fmtInt(openOrders, lang), sub: openOrders == null ? null : (tr ? `${protocolStats.open_sell_orders || 0} satış · ${protocolStats.open_buy_orders || 0} alış` : `${protocolStats.open_sell_orders || 0} sell · ${protocolStats.open_buy_orders || 0} buy`) },
+          { k: 'time', label: tr ? 'Ort. işlem süresi' : 'Avg. trade time', value: hours != null ? (hours < 1 ? `${Math.max(1, Math.round(hours * 60))} ${tr ? 'dk' : 'min'}` : `${fmtNumber(hours, lang, { maxFractionDigits: 1 })} ${tr ? 'sa' : 'h'}`) : '—' },
+          { k: 'burn', label: tr ? 'Eriyen ve yakılan' : 'Decayed & burned', value: statValue(protocolStats?.burned_bonds_usdt, (v) => `$${fmtInt(v, lang)}`), danger: true, sub: tr ? 'Uzlaşmayanların kaybı' : 'Lost by those who would not settle' },
         ];
         return (
           <div className="mb-10">
@@ -473,7 +474,7 @@ export const buildAppViews = (ctx) => {
                   ) : (
                     <div className="flex min-w-0 flex-wrap items-baseline relative">
                       <span className={`max-w-full truncate text-2xl font-bold tabular-nums ${tile.danger ? 'text-danger' : 'text-textPrimary'}`}>{tile.value}</span>
-                      {tile.change != null && <StatChange value={tile.change} />}
+                      {tile.change != null && <StatChange value={tile.change} lang={lang} />}
                     </div>
                   )}
                   {tile.sub && <p className="text-[11px] text-textMuted mt-1 truncate relative">{tile.sub}</p>}
@@ -958,7 +959,7 @@ export const buildAppViews = (ctx) => {
               <div className="mb-4 rounded-xl border border-danger/30 bg-danger/5 p-4" data-testid="bleeding-meter">
                 <div className="mb-3">
                   <p className="flex items-center gap-1.5 text-sm font-bold text-danger"><Flame className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />{lang === 'TR' ? 'Eriyen emanet' : 'Bleeding escrow'}</p>
-                  <p className="mt-0.5 text-xs text-textSecondary">{lang === 'TR' ? 'Eriyen toplam' : 'Total burned'}: <span className="font-semibold text-danger tabular-nums">{bleedingAmounts ? `${formatTokenAmountFromRaw(bleedingAmounts.totalDecayed ?? 0n, tradeTokenDecimals)} ${asset}` : (lang === 'TR' ? 'hesaplanıyor…' : 'calculating…')}</span></p>
+                  <p className="mt-0.5 text-xs text-textSecondary">{lang === 'TR' ? 'Eriyen toplam' : 'Total burned'}: <span className="font-semibold text-danger tabular-nums">{bleedingAmounts ? `${formatTokenAmountFromRaw(bleedingAmounts.totalDecayed ?? 0n, tradeTokenDecimals, 4, lang)} ${asset}` : (lang === 'TR' ? 'hesaplanıyor…' : 'calculating…')}</span></p>
                 </div>
                 <div className="space-y-2.5">
                   {rows.map((row) => (

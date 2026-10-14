@@ -1,6 +1,7 @@
 import React from 'react';
 import { buildApiUrl } from '../../apiConfig';
 import { shortAddress as short, tx as t } from '../../copy';
+import { fmtDateTime } from '../../format';
 
 // [TR] "Çalışma ayarları" sekmesi: worker performans/operasyon ayarları (admin > env > varsayılan).
 //      Değişiklik yeniden başlatma gerekmeden sonraki turda etkili olur. Sınırlar sunucuda zorlanır.
@@ -23,11 +24,6 @@ const GROUPS = [
   { id: 'jobs', TR: 'Arka plan işleri', EN: 'Background jobs' },
 ];
 
-const fmtDate = (v) => {
-  if (!v) return '—';
-  const d = new Date(v);
-  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString();
-};
 
 const REASON_MAX = 300;
 
@@ -261,7 +257,7 @@ export default function AdminRuntimeSettingsPanel({ lang = 'EN', authenticatedFe
               </div>
               {s.changedAt && (
                 <div className="text-xs text-textMuted">
-                  {t(lang, 'Son değişiklik', 'Last change')}: {fmtDate(s.changedAt)}{s.changedBy ? ` · ${short(s.changedBy)}` : ''}
+                  {t(lang, 'Son değişiklik', 'Last change')}: {fmtDateTime(s.changedAt, lang, { seconds: true })}{s.changedBy ? ` · ${short(s.changedBy)}` : ''}
                 </div>
               )}
             </li>
@@ -282,7 +278,7 @@ export default function AdminRuntimeSettingsPanel({ lang = 'EN', authenticatedFe
               <li key={a.id} className="text-xs text-textSecondary border-b border-borderSubtle pb-2 last:border-0 break-words">
                 <span className="font-mono text-textPrimary">{a.setting}</span>{' '}
                 {fmtVal(a.previousValue)} → {a.newValue === null ? t(lang, 'env’e dönüş', 'revert to env') : a.newValue}
-                {' · '}{short(a.adminWallet)}{' · '}{fmtDate(a.createdAt)}
+                {' · '}{short(a.adminWallet)}{' · '}{fmtDateTime(a.createdAt, lang, { seconds: true })}
                 {a.reason ? <div className="text-textMuted break-words">{a.reason}</div> : null}
               </li>
             ))}
