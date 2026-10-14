@@ -19,6 +19,7 @@ describe('frontend ↔ backend API path alignment', () => {
       '/api/pii',
       '/api/stats',
       '/api/receipts',
+      '/api/social-links',
     ].forEach((prefix) => expect(mounts).toContain(`path: "${prefix}"`));
   });
 
