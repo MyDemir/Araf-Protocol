@@ -4,65 +4,23 @@ import { buildMakerPreview, getMakerModalCopy, getOrderSideCopy, resolveEffectiv
 import { resolveTierMaxAmounts } from './actions/orderCreationActions';
 import { TERMS_ACKNOWLEDGEMENTS, TERMS_SECTIONS, TERMS_VERSION } from './legal/terms';
 import PaymentRiskBadge from '../components/PaymentRiskBadge';
+import BottomSheet from '../components/BottomSheet';
 import MobileWalletPicker, { WalletOption } from '../components/MobileWalletPicker';
 import { ConnectorIcon } from '../components/wallet-icons';
 import { describeConnectError, shouldShowMobileWalletPicker } from './mobileWallet';
 import { fmtBps, isKnownNumber, fmtNum } from './copy';
 import { profileRequiredMessage } from './payoutProfileGate';
 
-// [TR] Cüzdan modalı kabuğu: mobilde alttan açılan sheet (tutamak, yuvarlak üst köşe, safe-area payı), masaüstünde
-//      ortalanmış kart. Esc ve arka plana tıklama kapatır; giriş geçişi prefers-reduced-motion'da kapalı.
-// [EN] Wallet modal shell: bottom sheet on mobile (grab handle, rounded top, safe-area padding), centred card on
-//      desktop. Esc and backdrop click close it; entrance transition is off under prefers-reduced-motion.
+// [TR] Cüzdan modalı: ortak BottomSheet kabuğu + güvenlik notu. [EN] Wallet modal: shared BottomSheet shell + safety note.
 function WalletSheet({ title, closeLabel, note, onClose, children }) {
-  const [shown, setShown] = React.useState(false);
-  const panelRef = React.useRef(null);
-  const onCloseRef = React.useRef(onClose);
-  React.useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
-  // [TR] Yalnız açılışta: giriş geçişi, odak ve Esc dinleyicisi (üst bileşen her çizimde yeni onClose verir).
-  // [EN] Mount-only: entrance, focus and Esc listener (the parent passes a fresh onClose on every render).
-  React.useEffect(() => {
-    const id = requestAnimationFrame(() => setShown(true));
-    panelRef.current?.focus({ preventScroll: true });
-    const onKey = (e) => { if (e.key === 'Escape') onCloseRef.current(); };
-    window.addEventListener('keydown', onKey);
-    return () => { cancelAnimationFrame(id); window.removeEventListener('keydown', onKey); };
-  }, []);
   return (
-    <div
-      className={`fixed inset-0 z-[100] flex max-w-full items-end justify-center overflow-x-hidden bg-black/60 backdrop-blur-sm transition-opacity duration-200 motion-reduce:transition-none sm:items-center sm:p-4 ${shown ? 'opacity-100' : 'opacity-0'}`}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="wallet-modal-title"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-    >
-      <div
-        ref={panelRef}
-        tabIndex={-1}
-        data-testid="wallet-sheet"
-        className={`w-full overflow-y-auto overflow-x-hidden overscroll-contain rounded-t-[1.75rem] border border-b-0 border-borderSubtle bg-surface pb-[calc(1.25rem_+_env(safe-area-inset-bottom))] pl-[max(1.25rem,env(safe-area-inset-left))] pr-[max(1.25rem,env(safe-area-inset-right))] shadow-2xl outline-none transition duration-300 ease-out max-h-[calc(100dvh_-_0.75rem_-_env(safe-area-inset-top))] motion-reduce:transition-none sm:max-h-[calc(100dvh_-_2rem)] sm:max-w-[400px] sm:rounded-3xl sm:border-b sm:p-6 ${
-          shown ? 'translate-y-0 sm:scale-100 sm:opacity-100' : 'translate-y-full sm:translate-y-0 sm:scale-95 sm:opacity-0'
-        }`}
-      >
-        <div className="mx-auto mt-2.5 h-1.5 w-10 rounded-full bg-textMuted/40 sm:hidden" aria-hidden="true" />
-        <div className="flex items-center justify-between gap-3 pb-4 pt-2 sm:pt-0">
-          <h2 id="wallet-modal-title" className="text-lg font-bold tracking-tight text-textPrimary">{title}</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label={closeLabel}
-            className="-mr-2.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-textSecondary transition hover:bg-elevated hover:text-textPrimary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand motion-reduce:transition-none"
-          >
-            <X className="h-5 w-5" strokeWidth={2} aria-hidden="true" />
-          </button>
-        </div>
-        {children}
-        <p className="mt-4 flex items-center gap-2.5 rounded-2xl bg-success/10 px-3.5 py-3 text-xs leading-snug text-textSecondary">
-          <ShieldCheck className="h-5 w-5 shrink-0 text-success" strokeWidth={2} aria-hidden="true" />
-          <span>{note}</span>
-        </p>
-      </div>
-    </div>
+    <BottomSheet title={title} titleId="wallet-modal-title" closeLabel={closeLabel} onClose={onClose} testId="wallet-sheet">
+      {children}
+      <p className="mt-4 flex items-center gap-2.5 rounded-2xl bg-success/10 px-3.5 py-3 text-xs leading-snug text-textSecondary">
+        <ShieldCheck className="h-5 w-5 shrink-0 text-success" strokeWidth={2} aria-hidden="true" />
+        <span>{note}</span>
+      </p>
+    </BottomSheet>
   );
 }
 
