@@ -254,7 +254,8 @@ describe('workflow scripts: check-rewards-binding.js (eth_call over fetch)', fun
     state = { answers: {}, rpcError: true };
     r = await binding.checkRewardsBinding({ rpcUrl: url, escrow: ESCROW, vault: VAULT, rewards: REWARDS });
     expect(r.ok).to.equal(false);
-    expect(r.problems.join()).to.match(/read failed/);
+    expect(r.readErrors.join()).to.match(/read failed/);
+    expect(r.problems).to.deep.equal([]);
 
     state = { answers: {} }; // kod yok: '0x' sonucu
     r = await binding.checkRewardsBinding({ rpcUrl: url, escrow: ESCROW, vault: VAULT, rewards: REWARDS });
@@ -268,7 +269,7 @@ describe('workflow scripts: check-rewards-binding.js (eth_call over fetch)', fun
     state = { answers: {}, rpcError: true };
     const bad = await runCli({ ON_MISMATCH: 'error' });
     expect(bad.status).to.equal(1);
-    expect(bad.stderr).to.match(/::error::vault\/rewards are NOT bound/);
+    expect(bad.stderr).to.match(/::error::could not read binding from chain \(RPC unavailable\); NOT clearing anything/);
     expect(bad.stderr).to.not.include(url);
 
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'araf-bind-'));
@@ -348,10 +349,187 @@ exit 0
       srv.dirty = true;
       const r = await binding.checkRewardsBinding({ rpcUrl: u, escrow: ESCROW, vault: VAULT, rewards: REWARDS });
       expect(r.ok).to.equal(false);
-      expect(r.problems.join()).to.match(/upper 12 bytes non-zero/);
+      expect(r.readErrors.join()).to.match(/upper 12 bytes non-zero/);
+      expect(r.problems).to.deep.equal([]);
     } finally {
       await new Promise((r) => srv.close(r));
     }
+  });
+
+  describe('RPC read errors vs real mismatch (retry, fallbacks, no clearing)', function () {
+    const PRIMARY = 'https://primary.example/v2/SECRETKEY1';
+    const FB0 = 'https://fb0.example/v2/SECRETKEY2';
+    const FB1 = 'https://fb1.example/v2/SECRETKEY3';
+    const URLS = [PRIMARY, FB0, FB1];
+    const okAnswers = bound();
+    const jsonRes = (body, status = 200) => ({ ok: status < 400, status, json: async () => body });
+    const answer = (to, data, answers) => {
+      const v = answers[`${to.toLowerCase()}:${data}`];
+      return jsonRes({ jsonrpc: '2.0', id: 1, result: v ? word(v) : '0x' });
+    };
+    // behaviour: (url, callIndexForUrl) => response | throws
+    function makeFetch(behaviour, answers = okAnswers) {
+      const calls = [];
+      const counts = {};
+      const fetchImpl = async (u, init) => {
+        counts[u] = (counts[u] || 0) + 1;
+        calls.push(u);
+        const { to, data } = JSON.parse(init.body).params[0];
+        const b = behaviour(u, counts[u]);
+        if (b === 'ok') return answer(to, data, answers);
+        if (b instanceof Error) throw b;
+        return b;
+      };
+      return { fetchImpl, calls };
+    }
+    const sleeps = [];
+    const sleep = async (ms) => { sleeps.push(ms); };
+    const base = () => { sleeps.length = 0; return { escrow: ESCROW, vault: VAULT, rewards: REWARDS, sleep }; };
+    const http429 = () => jsonRes({}, 429);
+
+    function runCliInProc(env, opts) {
+      const out = []; const err = [];
+      const oLog = console.log; const oErr = console.error;
+      console.log = (...a) => out.push(a.join(' ')); console.error = (...a) => err.push(a.join(' '));
+      return binding.cli({ ESCROW, REVENUE_VAULT: VAULT, REWARDS, BASE_SEPOLIA_RPC_URL: PRIMARY, ...env }, { sleep, ...opts })
+        .then((status) => ({ status, out: out.join('\n'), err: err.join('\n') }))
+        .finally(() => { console.log = oLog; console.error = oErr; });
+    }
+    const tmpEnv = () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'araf-bind-'));
+      return { dir, file: path.join(dir, 'env') };
+    };
+
+    it('429 then success on the same endpoint -> ok (retry with exponential backoff)', async function () {
+      const { fetchImpl, calls } = makeFetch((u, n) => (n <= 2 ? http429() : 'ok'));
+      const r = await binding.checkRewardsBinding({ ...base(), rpcUrl: PRIMARY, fetchImpl });
+      expect(r.ok).to.equal(true);
+      expect(r.readErrors).to.deep.equal([]);
+      expect(sleeps).to.deep.equal([1000, 2000]);
+      expect(new Set(calls)).to.deep.equal(new Set([PRIMARY]));
+    });
+
+    it('transient kinds: 5xx, network error, -32005, rate-limit message are retried', async function () {
+      const kinds = [
+        () => jsonRes({}, 503),
+        () => Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } }),
+        () => jsonRes({ jsonrpc: '2.0', id: 1, error: { code: -32005, message: 'limit exceeded' } }),
+        () => jsonRes({ jsonrpc: '2.0', id: 1, error: { code: -32000, message: 'Rate limit reached' } }),
+      ];
+      for (const k of kinds) {
+        const { fetchImpl } = makeFetch((u, n) => (n === 1 ? k() : 'ok'));
+        const r = await binding.checkRewardsBinding({ ...base(), rpcUrl: PRIMARY, fetchImpl });
+        expect(r.ok, String(r.readErrors)).to.equal(true);
+        expect(sleeps).to.deep.equal([1000]);
+      }
+    });
+
+    it('primary always 429, fallback succeeds -> ok', async function () {
+      const { fetchImpl, calls } = makeFetch((u) => (u === PRIMARY ? http429() : 'ok'));
+      const r = await binding.checkRewardsBinding({ ...base(), rpcUrl: PRIMARY, fallbackUrls: [FB0, FB1], fetchImpl });
+      expect(r.ok).to.equal(true);
+      expect(calls.filter((u) => u === PRIMARY)).to.have.length(5);
+      expect(calls).to.include(FB0);
+      expect(calls).to.not.include(FB1);
+    });
+
+    it('total backoff stays within the budget', async function () {
+      const { fetchImpl } = makeFetch(() => http429());
+      const r = await binding.checkRewardsBinding({ ...base(), rpcUrl: PRIMARY, fallbackUrls: [FB0, FB1], fetchImpl });
+      expect(r.ok).to.equal(false);
+      expect(sleeps.reduce((a, b) => a + b, 0)).to.be.at.most(30000);
+    });
+
+    it('hanging fetch honoring the abort signal times out, is retried, then falls back', async function () {
+      const { fetchImpl, calls } = makeFetch((u) => (u === PRIMARY ? 'hang' : 'ok'));
+      const hanging = (u, init) => {
+        if (u !== PRIMARY) return fetchImpl(u, init);
+        calls.push(u);
+        return new Promise((resolve, reject) => {
+          init.signal.addEventListener('abort', () => reject(init.signal.reason));
+        });
+      };
+      const r = await binding.checkRewardsBinding({
+        ...base(), rpcUrl: PRIMARY, fallbackUrls: [FB0], fetchImpl: hanging, requestTimeoutMs: 20, maxAttempts: 2,
+      });
+      expect(r.ok, String(r.readErrors)).to.equal(true);
+      expect(calls.filter((u) => u === PRIMARY)).to.have.length(2);
+      expect(calls).to.include(FB0);
+      expect(sleeps).to.deep.equal([1000]);
+    });
+
+    it('parseFallbacks keeps only https:// entries', function () {
+      expect(binding.parseFallbacks(` ${FB0} , http://insecure.example , ,ftp://x, ${FB1}`)).to.deep.equal([FB0, FB1]);
+      expect(binding.parseFallbacks(undefined)).to.deep.equal([]);
+    });
+
+    it('all endpoints failing: clear mode exits 1, writes NOTHING to GITHUB_ENV; error mode exits 1; no URL in output', async function () {
+      const { dir, file } = tmpEnv();
+      const fb = `${FB0},${FB1}`;
+      for (const mode of ['clear', 'error']) {
+        const { fetchImpl } = makeFetch(() => http429());
+        const r = await runCliInProc({ ON_MISMATCH: mode, GITHUB_ENV: file, BASE_SEPOLIA_RPC_URL_FALLBACKS: fb }, { fetchImpl });
+        expect(r.status, mode).to.equal(1);
+        expect(r.err).to.match(/::error::could not read binding from chain \(RPC unavailable\); NOT clearing anything/);
+        expect(r.err + r.out).to.not.match(/NOT bound/);
+        for (const u of URLS) expect(r.err + r.out).to.not.include(u);
+        expect(r.err + r.out).to.not.match(/SECRETKEY|example/);
+        expect(r.err).to.include('[fallback[1]]');
+      }
+      expect(fs.existsSync(file)).to.equal(false);
+      fs.rmSync(dir, { recursive: true, force: true });
+    });
+
+    it('network error message does not leak the URL', async function () {
+      const leaky = new TypeError(`request to ${PRIMARY} failed`);
+      const { fetchImpl } = makeFetch(() => leaky);
+      const r = await runCliInProc({ ON_MISMATCH: 'error' }, { fetchImpl });
+      expect(r.status).to.equal(1);
+      expect(r.err).to.not.match(/SECRETKEY|primary\.example/);
+    });
+
+    it('real mismatch keeps old behaviour: error -> exit 1; clear -> warning + clearing', async function () {
+      const answers = { ...okAnswers, [`${REWARDS.toLowerCase()}:${binding.SEL.escrow}`]: OTHER };
+      const { dir, file } = tmpEnv();
+      let m = makeFetch(() => 'ok', answers);
+      let r = await runCliInProc({ ON_MISMATCH: 'error', GITHUB_ENV: file }, { fetchImpl: m.fetchImpl });
+      expect(r.status).to.equal(1);
+      expect(r.err).to.match(/::error::vault\/rewards are NOT bound/);
+      expect(fs.existsSync(file)).to.equal(false);
+
+      m = makeFetch(() => 'ok', answers);
+      r = await runCliInProc({ ON_MISMATCH: 'clear', GITHUB_ENV: file }, { fetchImpl: m.fetchImpl });
+      expect(r.status).to.equal(0);
+      expect(r.out).to.match(/::warning::.*deploy_rewards=true/);
+      expect(fs.readFileSync(file, 'utf8')).to.equal('REVENUE_VAULT=\nREWARDS=\nREWARDS_UNBOUND=1\n');
+      fs.rmSync(dir, { recursive: true, force: true });
+    });
+
+    it('revert / invalid result is NOT retried, goes to readErrors, no fallback, nothing cleared', async function () {
+      const dirty = '0x' + 'ff'.repeat(12) + ESCROW.slice(2).toLowerCase();
+      const cases = [
+        () => jsonRes({ jsonrpc: '2.0', id: 1, error: { code: 3, message: 'execution reverted' } }),
+        () => jsonRes({ jsonrpc: '2.0', id: 1, result: dirty }),
+        () => jsonRes({ jsonrpc: '2.0', id: 1, result: '0x' }),
+        () => jsonRes({}, 400),
+      ];
+      for (const c of cases) {
+        const { fetchImpl, calls } = makeFetch(() => c());
+        const res = await binding.checkRewardsBinding({ ...base(), rpcUrl: PRIMARY, fallbackUrls: [FB0], fetchImpl });
+        expect(res.ok).to.equal(false);
+        expect(res.problems).to.deep.equal([]);
+        expect(res.readErrors).to.have.length(3);
+        expect(sleeps).to.deep.equal([]);
+        expect(calls).to.have.length(3); // one call per check, no retries
+        expect(calls).to.not.include(FB0);
+      }
+      const { dir, file } = tmpEnv();
+      const { fetchImpl } = makeFetch(() => jsonRes({ jsonrpc: '2.0', id: 1, error: { code: 3, message: 'execution reverted' } }));
+      const r = await runCliInProc({ ON_MISMATCH: 'clear', GITHUB_ENV: file }, { fetchImpl });
+      expect(r.status).to.equal(1);
+      expect(fs.existsSync(file)).to.equal(false);
+      fs.rmSync(dir, { recursive: true, force: true });
+    });
   });
 });
 
