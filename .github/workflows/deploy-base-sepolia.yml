@@ -266,7 +266,7 @@ jobs:
         with:
           name: base-sepolia-rewards-manifest
           path: contracts/deployments/base-sepolia-rewards.json
-          if-no-files-found: warn
+          if-no-files-found: ignore
           retention-days: 30
 
       # deploy_rewards=true: adresler manifest'ten (repo variable'larıyla çelişirse hata).
