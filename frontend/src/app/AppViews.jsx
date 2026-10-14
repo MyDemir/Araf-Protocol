@@ -1120,10 +1120,10 @@ export const buildAppViews = (ctx) => {
         key={key}
         onClick={onClick}
         aria-label={label}
-        className={`h-10 min-w-0 flex-1 basis-0 rounded-xl transition-all relative flex flex-col items-center justify-center gap-0.5 leading-none ${active ? `bg-elevated ${activeClass}` : 'text-textMuted'}`}
+        className={`min-h-[48px] min-w-0 flex-1 basis-0 rounded-xl transition-all relative flex flex-col items-center justify-center gap-0.5 ${active ? `bg-elevated ${activeClass}` : 'text-textMuted'}`}
       >
         <Icon className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" />
-        <span className="text-[9px] font-semibold truncate max-w-full">{label}</span>
+        <span className="text-[11px] leading-tight py-px font-semibold truncate max-w-full">{label}</span>
         {dot && <span className={`absolute top-0.5 right-2 w-2 h-2 border border-shell rounded-full ${dot}`}></span>}
       </button>
     );
