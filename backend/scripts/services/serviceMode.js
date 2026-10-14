@@ -86,6 +86,8 @@ function _httpStatusOf(e) {
   return Number.isInteger(n) ? n : null;
 }
 
+const QUOTA_TEXT_RE = /capacity|limit exceeded|\brate\b/i;
+
 /** [TR] Zincirde Mongo/Redis, 4xx (429 hariç) veya ENOTFOUND varsa KESİN hata (RPC kaynaklı değil/yanlış yapılandırma). */
 function _isDefinitiveNonTransient(err) {
   for (const e of _chain(err)) {
@@ -93,7 +95,11 @@ function _isDefinitiveNonTransient(err) {
     if (NON_RPC_TEXT_RE.test(String(e.message || ""))) return true;
     if (e.code === "ENOTFOUND" || /\bENOTFOUND\b/.test(String(e.message || ""))) return true;
     const st = _httpStatusOf(e);
-    if (st !== null && st >= 400 && st < 500 && st !== 429) return true;
+    if (st !== null && st >= 400 && st < 500 && st !== 429) {
+      // [TR] Bazı sağlayıcılar kota/oran aşımı için 403 döner: 403 + kota metni geçicidir. 401 ve diğer 403'ler kesin.
+      if (st === 403 && QUOTA_TEXT_RE.test(String(e.message || ""))) continue;
+      return true;
+    }
   }
   return false;
 }
@@ -108,6 +114,7 @@ function _isTransientRpc(err) {
     if (TRANSIENT_CODES.has(e.code)) return true;
     const st = _httpStatusOf(e);
     if (st === 429 || st === 502 || st === 503 || st === 504) return true;
+    if (st === 403 && QUOTA_TEXT_RE.test(String(e.message || ""))) return true;
     if (TRANSIENT_TEXT_RE.test(String(e.message || ""))) return true;
   }
   return false;
@@ -124,7 +131,8 @@ function classifyStartupError(err) {
 
   if (err.code === "CONFIG_STALE_RETRY") return "transient";
   if (/\[ChainGuard\]/.test(message)) return "fatal";
-  if (/actual chain=|definitive-wrong-chain-seen/.test(message)) return "fatal";
+  // [TR] Kesin yanlış zincir: yalnız hata nesnesi özelliği (encryption.js). Mesaj metni (RPC kaynaklı olabilir) bakılmaz.
+  if (err.definitiveWrongChain === true || err.code === "SEC01_WRONG_CHAIN") return "fatal";
 
   if (message.includes(SEC01_PREFIX)) {
     // SEC-01 hataları yalnız "hiçbir RPC doğrulanamadı + son neden geçici" biçiminde geçicidir.

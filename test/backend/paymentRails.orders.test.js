@@ -65,6 +65,7 @@ function build({ states, ownerRail = null, getConfigResult, dbDown = false }) {
     jest.doMock("../../backend/scripts/models/Trade", () => ({ aggregate: jest.fn().mockResolvedValue([]) }));
     jest.doMock("../../backend/scripts/models/User", () => User);
     jest.doMock("../../backend/scripts/services/protocolConfig", () => ({
+      isProtocolConfigStale: jest.fn(() => false),
       getConfig: jest.fn(() => getConfigResult || { bondMap: {}, feeConfig: {}, cooldownConfig: {}, tokenMap: {} }),
     }));
     router = require("../../backend/scripts/routes/orders");

@@ -271,9 +271,16 @@ async function _assertTestnetRpcChainOrThrow() {
   //      fail-closed (fırlatır). Kesin yanıt (farklı zincir) yeniden denenmez. Atlatma bayrağı yoktur.
   // [EN] Bounded retry on TRANSIENT errors only (1/3/9s). If no URL returns 84532 it still throws (fail-closed).
   const retryDelaysMs = [1000, 3000, 9000];
-  const definitiveFailure = (message) => new Error(
+  // [TR] Kesin yanlış zincir kararı hata NESNESİNİN özelliğiyle taşınır (serviceMode sınıflandırıcısı yalnız buna bakar);
+  //      RPC yanıt metni bu kararı etkileyemez. [EN] The verdict travels as an error property, never via message text.
+  const markWrongChain = (err) => {
+    err.code = "SEC01_WRONG_CHAIN";
+    err.definitiveWrongChain = true;
+    return err;
+  };
+  const definitiveFailure = (message) => markWrongChain(new Error(
     "SEC-01 BLOCKER: ALLOW_ENV_KMS_ON_TESTNET için RPC'nin Base Sepolia (84532) olduğu doğrulanamadı: " + message
-  );
+  ));
   let lastMessage = "";
   let sawDefinitiveWrongChain = false; // herhangi bir URL kesin yanlış zincir döndürdü mü (yeniden deneme sınıflandırması)
   for (let attempt = 0; attempt <= retryDelaysMs.length; attempt += 1) {
@@ -303,10 +310,10 @@ async function _assertTestnetRpcChainOrThrow() {
     if (!transient || attempt === retryDelaysMs.length) break;
     await new Promise((resolve) => setTimeout(resolve, retryDelaysMs[attempt]));
   }
-  throw new Error(
-    "SEC-01 BLOCKER: ALLOW_ENV_KMS_ON_TESTNET için RPC'nin Base Sepolia (84532) olduğu doğrulanamadı: " +
-    lastMessage + (sawDefinitiveWrongChain ? " [definitive-wrong-chain-seen]" : "")
+  const finalErr = new Error(
+    "SEC-01 BLOCKER: ALLOW_ENV_KMS_ON_TESTNET için RPC'nin Base Sepolia (84532) olduğu doğrulanamadı: " + lastMessage
   );
+  throw sawDefinitiveWrongChain ? markWrongChain(finalErr) : finalErr;
 }
 
 async function runProductionKmsStartupSelfTest() {
