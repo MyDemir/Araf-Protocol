@@ -1,4 +1,5 @@
 import PIIDisplay from '../components/PIIDisplay';
+import { getEscrowExplorerUrl, resolveTargetChain } from './chainPolicy';
 import { fmtBps, isKnownNumber, fmtNum, fmtPct, getStateLabel } from './copy';
 import { fmtCompact, fmtInt, fmtNumber } from './format';
 import ReferenceRateTicker from '../components/ReferenceRateTicker';
@@ -17,6 +18,7 @@ import { mapResolutionTypeLabel } from './useAppSessionData';
 import TradeRoomPage from './contexts/trade-room/TradeRoomPage';
 import ThemeToggle from './shell/ThemeToggle';
 import NowBoundary from './shell/NowBoundary';
+import FooterSocialLinks from './shell/FooterSocialLinks';
 import { isOwnerRailDisabled, ownerRailDisabledMessage, isOwnerPayoutProfileMissing, isPayoutProfileSaved, ownerProfileMissingMessage, profileRequiredMessage } from './payoutProfileGate';
 import { deriveTradeTimeline } from './contexts/trade-room/tradeTimeline';
 import { isViewInNav, NAV_ORDER, VIEW_REGISTRY } from './viewRegistry';
@@ -1214,11 +1216,17 @@ export const buildAppViews = (ctx) => {
   };
 
   const renderFooter = () => {
-    const links = [
-      { k: 'github', label: 'GitHub', href: SOCIAL_LINKS.github },
-      { k: 'twitter', label: 'X', href: SOCIAL_LINKS.twitter },
-      { k: 'farcaster', label: 'Farcaster', href: SOCIAL_LINKS.farcaster },
-    ].filter((l) => l.href);
+    // [TR] Admin yönetimli linkler FooterSocialLinks içinde public uçtan gelir; env listesi yedektir.
+    const envLinks = [
+      { label: 'GitHub', url: SOCIAL_LINKS.github },
+      { label: 'X', url: SOCIAL_LINKS.twitter },
+      { label: 'Farcaster', url: SOCIAL_LINKS.farcaster },
+    ].filter((l) => l.url);
+    // [TR] Adres yalnız build-time VITE_ESCROW_ADDRESS'ten; admin/backend/runtime kaynağı bilinçli olarak yok.
+    // [EN] Address comes only from build-time VITE_ESCROW_ADDRESS; no admin/backend/runtime source by design.
+    const escrowAddr = String(import.meta.env.VITE_ESCROW_ADDRESS || '').trim();
+    const escrowUrl = getEscrowExplorerUrl({ address: escrowAddr, targetChain: resolveTargetChain() });
+    const escrowShort = escrowUrl ? `${escrowAddr.slice(0, 6)}…${escrowAddr.slice(-4)}` : '';
     return (
       <footer className="w-full max-w-[1200px] px-4 md:px-8 pb-6 md:pb-8 mt-2" data-testid="app-footer">
         <div className="border-t border-borderSubtle pt-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
@@ -1231,9 +1239,10 @@ export const buildAppViews = (ctx) => {
             <button type="button" onClick={() => setShowFeedbackModal(true)} className="px-3 py-2 rounded-lg border border-borderSubtle text-xs font-semibold text-textSecondary hover:text-textPrimary hover:bg-elevated transition">
               {lang === 'TR' ? 'Geri bildirim' : 'Feedback'}
             </button>
-            {links.map((l) => (
-              <a key={l.k} href={l.href} target="_blank" rel="noreferrer noopener" className="px-3 py-2 rounded-lg border border-borderSubtle text-xs font-semibold text-textSecondary hover:text-textPrimary hover:bg-elevated transition">{l.label}</a>
-            ))}
+            <FooterSocialLinks envLinks={envLinks} />
+            {escrowUrl && (
+              <a href={escrowUrl} target="_blank" rel="noreferrer noopener" title={escrowShort} aria-label={`${lang === 'TR' ? 'Kontrat' : 'Contract'} ${escrowShort}`} data-testid="footer-contract-link" className="px-3 py-2 rounded-lg border border-borderSubtle text-xs font-semibold text-textSecondary hover:text-textPrimary hover:bg-elevated transition">{lang === 'TR' ? 'Kontrat' : 'Contract'}</a>
+            )}
           </div>
         </div>
       </footer>

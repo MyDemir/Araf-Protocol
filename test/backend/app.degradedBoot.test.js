@@ -3,7 +3,7 @@
 const express = require("express");
 const request = require("supertest");
 
-const ROUTES = ["logs", "auth", "orders", "trades", "pii", "feedback", "stats", "receipts", "admin", "referenceRates", "rewards"];
+const ROUTES = ["logs", "auth", "orders", "trades", "pii", "feedback", "stats", "receipts", "admin", "referenceRates", "rewards", "socialLinks"];
 
 function rpc429() {
   const e = new Error("server response 429 Too Many Requests (compute units exceeded)");
