@@ -254,6 +254,7 @@ Aylık CU tahmini (`eth_getLogs` ~75 CU + `eth_blockNumber` ~10 CU = tur başın
 | Değişken | Ne işe yarar | Zorunlu mu? | Y | S | M | Nereye | Kullanıldığı yer |
 |---|---|---|---|---|---|---|---|
 | `ADMIN_WALLETS` | `/api/admin/*` ve `isAdmin` için cüzdanlar (virgüllü) | Opsiyonel ama **üretimde fiilen gerekli**: boşsa kimse admin değil, admin menüsü hiç görünmez ve açılışta tek uyarı loglanır. Fly: `fly secrets set ADMIN_WALLETS=0x…,0x…` (deploy workflow'u yalnız GitHub variable doluysa yazar); değişince yeniden başlat | kendi cüzdanın | `0x…40 hex` | `0x…40 hex` | B/.env, Fly | `utils/adminWallets.js:6` |
+| `SOCIAL_LINK_ALLOWED_HOSTS` | Footer sosyal linklerinde izinli hostname listesi (virgüllü; tam eşleşme ya da `.` ile alt alan adı). Doluysa kod içi varsayılan listenin YERİNE geçer (daraltır/değiştirir); admin panelinden değiştirilemez. Linkler yalnız `https`, userinfo/port/IDN/punycode yok | Opsiyonel; boşsa kod varsayılanı (x.com, github.com, warpcast.com, …) | boş | boş | boş | B/.env, Fly | `utils/socialLinks.js` |
 | `IDENTITY_NORMALIZATION_GUARD` | `off` / `warn` / `enforce` (karışık numeric id guard'ı) | Opsiyonel (prod `enforce`, diğer `warn`) | boş | boş | boş | B/.env, Fly | `app.js:88-94` |
 | `PII_IDENTITY_NORMALIZATION_GUARD` | PII route'ları için ayrı mod | Opsiyonel (önceki değişken, o da yoksa `enforce`) | boş | boş | boş | B/.env, Fly | `routes/pii.js:80` |
 | `IDENTITY_MIGRATION_BATCH_SIZE` | `migrate:identity` batch boyutu | Opsiyonel (`1000`) | boş | boş | boş | B/.env | `migrations/normalizeIdentityFields.js:170` |

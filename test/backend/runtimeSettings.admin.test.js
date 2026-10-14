@@ -82,7 +82,7 @@ function build({ ready = true } = {}) {
   jest.doMock("../../backend/scripts/middleware/rateLimiter", () => new Proxy({}, { get: () => (_req, _res, next) => next() }));
   jest.doMock("../../backend/scripts/models/RuntimeSetting", () => fakes.Setting);
   jest.doMock("../../backend/scripts/models/RuntimeSettingAudit", () => fakes.Audit);
-  for (const m of ["PaymentRailSetting", "PaymentRailAudit", "Feedback", "HistoricalStat", "RevenueEvent", "RewardEpoch", "RewardFunding", "RewardClaim"]) {
+  for (const m of ["PaymentRailSetting", "PaymentRailAudit", "SocialLinkSetting", "SocialLinkAudit", "Feedback", "HistoricalStat", "RevenueEvent", "RewardEpoch", "RewardFunding", "RewardClaim"]) {
     jest.doMock(`../../backend/scripts/models/${m}`, () => ({}));
   }
   jest.doMock("../../backend/scripts/models/User", () => ({}));

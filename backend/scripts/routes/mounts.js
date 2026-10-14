@@ -17,6 +17,7 @@ const ROUTE_MOUNTS = Object.freeze([
   Object.freeze({ path: "/api/admin", file: "admin" }),
   Object.freeze({ path: "/api/reference-rates", file: "referenceRates" }),
   Object.freeze({ path: "/api/rewards", file: "rewards" }),
+  Object.freeze({ path: "/api/social-links", file: "socialLinks" }),
 ]);
 
 module.exports = { ROUTE_MOUNTS };

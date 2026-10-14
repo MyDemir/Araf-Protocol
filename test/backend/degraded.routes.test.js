@@ -18,6 +18,7 @@ const EXPECTED_OPEN = [
   "GET /api/orders/config",
   "GET /api/orders/payment-risk-config",
   "GET /api/reference-rates/ticker",
+  "GET /api/social-links/",
   "GET /api/rewards/:wallet/claimable",
   "GET /api/rewards/:wallet/history",
   "GET /api/rewards/epochs/:epoch",
