@@ -1,16 +1,19 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { ArrowDownUp, Check, ChevronDown, Lock, Pencil, Plus, RotateCcw, X } from 'lucide-react';
+import {
+  ArrowDownUp, Banknote, Check, ChevronDown, CloudOff, Coins, EyeOff, Lock, Plus, RotateCcw, SearchX, ShieldCheck, Store, X,
+} from 'lucide-react';
 import BottomSheet from '../../../components/BottomSheet';
 import { MARKET_FIAT_OPTIONS, MARKET_FILTER_DEFAULTS } from './marketFilters';
 
-// [TR] Pazar filtreleri — "Şart Cümlesi". Filtreler bir sözleşme maddesi gibi okunur: "TRY ile 500 USDT almak
-//      istiyorum; teminatsız emirler." Her vurgulu kelime bir şarttır; kesik çizgili şart açık (varsayılan), dolu
-//      şart bağlıdır. Masaüstünde (≥768px) cümle yerinde düzenlenir, şartlar çapalı açılır pencerede seçilir.
-//      Telefonda cümle kompakt bir özet kartına dönüşür; "Düzenle" aynı cümleyi alttan açılan sheet'te açar.
-//      State ve davranış değişmez: yalnız setMarketFilter / resetMarketFilters çağrılır.
-// [EN] Market filters — "Clause line". Filters read like a contract clause; dashed slots are open (default), solid
-//      slots are bound. Desktop edits the sentence in place with anchored popovers; phones show a compact summary
-//      card whose "Edit" opens the same sentence in a bottom sheet. State and behaviour are unchanged.
+// [TR] Pazar filtreleri — tek satır chip çubuğu. Al/Sat segmenti + döviz, token, tutar, kademe, "emirlerimi gizle"
+//      ve sıralama chip'leri. Telefonda satır yatay kayar (sağ kenar soluklaşır), masaüstünde sarar. Varsayılan chip
+//      boyut adını ("Döviz"), seçili chip değeri ("TRY") gösterir ve marka rengiyle dolar. Seçenekler masaüstünde
+//      çapalı açılır pencerede, telefonda ortak BottomSheet'te açılır. Filtre mantığı (marketFilters.js) aynıdır:
+//      yalnız setFilter / onReset çağrılır.
+// [EN] Market filters — a single chip bar. Buy/Sell segment + currency, token, amount, tier, "hide mine" and sort
+//      chips. Scrolls horizontally on phones (right edge fades), wraps on desktop. Idle chips show the dimension name,
+//      bound chips show the value in the brand tint. Options open in an anchored popover (desktop) or the shared
+//      BottomSheet (phone). Filter logic (marketFilters.js) is unchanged: only setFilter / onReset are called.
 
 const DESKTOP_QUERY = '(min-width: 768px)';
 const hasMatchMedia = () => typeof window !== 'undefined' && typeof window.matchMedia === 'function';
@@ -31,7 +34,7 @@ const useIsDesktop = () => {
 
 // [TR] Sonuç satırı metni; mevcut sayaç kuralı aynen. [EN] Result line text; keeps the current counter rule.
 export const marketResultText = ({ tr, loading, error, shown, total, loaded }) => {
-  if (loading || error) return ' ';
+  if (loading || error) return ' ';
   if (total > loaded) return tr ? `${shown} emir · toplam ${total}` : `${shown} ${shown === 1 ? 'order' : 'orders'} · ${total} total`;
   return tr ? `${shown} emir` : `${shown} ${shown === 1 ? 'order' : 'orders'}`;
 };
@@ -43,76 +46,70 @@ export const closedRailText = (tr, n) => (tr
 // [TR] Tutar birimi: token seçili değilse okunaklı "USDT/USDC". [EN] Amount unit: readable "USDT/USDC" when no token is set.
 export const amountUnit = (token) => (token === 'USDT' || token === 'USDC' ? token : 'USDT/USDC');
 
-const SIDE_TONE = { BUY: 'bg-emerald-500', SELL: 'bg-danger' };
+const iconCls = 'h-4 w-4 shrink-0';
 
-const buildClauses = ({ tr, filters, sortOptions, sortValue, viewerTier }) => {
-  const tierEligible = viewerTier != null
-    ? (tr ? `girebildiğim (≤ T${viewerTier})` : `enterable (≤ T${viewerTier})`)
-    : (tr ? 'girebildiğim' : 'enterable');
-  return {
-    side: {
-      title: tr ? 'İşlem yönü' : 'Trade side',
-      options: [
-        { value: 'ALL', label: tr ? 'Al ya da sat' : 'Buy or sell', short: tr ? 'alıp satmak' : 'buy or sell' },
-        { value: 'BUY', label: tr ? 'Al' : 'Buy', short: tr ? 'almak' : 'buy', hint: tr ? 'Kripto satan emirler' : 'Orders selling crypto', dot: SIDE_TONE.BUY },
-        { value: 'SELL', label: tr ? 'Sat' : 'Sell', short: tr ? 'satmak' : 'sell', hint: tr ? 'Kripto alan emirler' : 'Orders buying crypto', dot: SIDE_TONE.SELL },
-      ],
-      value: filters.side,
-    },
-    token: {
-      title: tr ? 'Varlık' : 'Asset',
-      options: [
-        { value: 'ALL', label: tr ? 'USDT ya da USDC' : 'USDT or USDC', short: 'USDT/USDC' },
-        { value: 'USDT', label: 'USDT' },
-        { value: 'USDC', label: 'USDC' },
-      ],
-      value: filters.token,
-    },
-    fiat: {
-      title: tr ? 'Para birimi' : 'Currency',
-      options: [
-        { value: 'ALL', label: tr ? 'Her döviz' : 'Any currency', short: tr ? 'her döviz' : 'any currency' },
-        ...MARKET_FIAT_OPTIONS.map((c) => ({ value: c, label: c })),
-      ],
-      value: filters.fiat,
-    },
-    tier: {
-      title: tr ? 'Teminat kademesi' : 'Bond tier',
-      options: [
-        { value: 'ALL', label: tr ? 'Tüm kademeler' : 'All tiers', short: tr ? 'her kademeden' : 'all-tier' },
-        { value: 'NO_BOND', label: tr ? 'Teminatsız (Tier 0)' : 'No bond (Tier 0)', short: tr ? 'teminatsız' : 'no-bond' },
-        {
-          value: 'ELIGIBLE',
-          label: viewerTier != null ? (tr ? `Girebildiklerim (≤ T${viewerTier})` : `I can take (≤ T${viewerTier})`) : (tr ? 'Girebildiklerim' : 'I can take'),
-          short: tierEligible,
-          hint: viewerTier == null ? (tr ? 'Giriş yapınca açılır' : 'Available after sign-in') : undefined,
-          disabled: viewerTier == null,
-        },
-      ],
-      value: filters.tier,
-    },
-    sort: {
-      title: tr ? 'Sıralama' : 'Sort',
-      options: sortOptions,
-      value: sortValue,
-      neutral: true,
-      icon: <ArrowDownUp className="h-3.5 w-3.5 shrink-0 text-textSecondary" strokeWidth={2} aria-hidden="true" />,
-    },
-  };
+const buildClauses = ({ tr, filters, sortOptions, sortValue, viewerTier }) => ({
+  token: {
+    title: tr ? 'Varlık' : 'Asset',
+    idle: 'Token',
+    icon: <Coins className={iconCls} strokeWidth={2} aria-hidden="true" />,
+    options: [
+      { value: 'ALL', label: tr ? 'USDT ya da USDC' : 'USDT or USDC' },
+      { value: 'USDT', label: 'USDT' },
+      { value: 'USDC', label: 'USDC' },
+    ],
+    value: filters.token,
+  },
+  fiat: {
+    title: tr ? 'Para birimi' : 'Currency',
+    idle: tr ? 'Döviz' : 'Currency',
+    icon: <Banknote className={iconCls} strokeWidth={2} aria-hidden="true" />,
+    options: [
+      { value: 'ALL', label: tr ? 'Her döviz' : 'Any currency' },
+      ...MARKET_FIAT_OPTIONS.map((c) => ({ value: c, label: c })),
+    ],
+    value: filters.fiat,
+  },
+  tier: {
+    title: tr ? 'Teminat kademesi' : 'Bond tier',
+    idle: tr ? 'Kademe' : 'Tier',
+    icon: <ShieldCheck className={iconCls} strokeWidth={2} aria-hidden="true" />,
+    options: [
+      { value: 'ALL', label: tr ? 'Tüm kademeler' : 'All tiers' },
+      { value: 'NO_BOND', label: tr ? 'Teminatsız (Tier 0)' : 'No bond (Tier 0)', short: tr ? 'Teminatsız' : 'No bond' },
+      {
+        value: 'ELIGIBLE',
+        label: viewerTier != null ? (tr ? `Girebildiklerim (≤ T${viewerTier})` : `I can take (≤ T${viewerTier})`) : (tr ? 'Girebildiklerim' : 'I can take'),
+        short: viewerTier != null ? `≤ T${viewerTier}` : (tr ? 'Girebildiğim' : 'Enterable'),
+        hint: viewerTier == null ? (tr ? 'Giriş yapınca açılır' : 'Available after sign-in') : undefined,
+        disabled: viewerTier == null,
+      },
+    ],
+    value: filters.tier,
+  },
+  sort: {
+    title: tr ? 'Sıralama' : 'Sort',
+    icon: <ArrowDownUp className={iconCls} strokeWidth={2} aria-hidden="true" />,
+    options: sortOptions,
+    value: sortValue,
+    neutral: true,
+  },
+});
+
+const currentOption = (clause) => clause.options.find((o) => o.value === clause.value) || clause.options[0] || { label: '' };
+const isBound = (clause) => !clause.neutral && clause.value !== clause.options[0]?.value;
+// [TR] Boşta chip boyut adını, bağlı chip seçilen değeri gösterir. [EN] Idle chip shows the dimension, bound chip the value.
+const chipText = (clause) => {
+  if (!clause.neutral && !isBound(clause)) return clause.idle;
+  const o = currentOption(clause);
+  return o.short || o.label;
 };
 
-const currentOption = (clause) => clause.options.find((o) => o.value === clause.value) || clause.options[0];
-const optionShort = (clause) => { const o = currentOption(clause); return o.short || o.label; };
-const isBound = (clause) => !clause.neutral && clause.value !== clause.options[0].value;
-
-// [TR] Şart görsel olarak 40px, dokunma alanı ::after ile 44px. Açık (varsayılan) şart kesik çizgili, bağlı şart dolu.
-// [EN] 40px visual slot with a 44px hit area via ::after. Dashed = open (default), solid = bound.
-const slotCls = (bound, neutral = false) => `relative inline-flex h-10 max-w-full items-center gap-1.5 rounded-xl border px-3 text-sm font-semibold transition duration-150 after:absolute after:-inset-y-0.5 after:inset-x-0 after:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand motion-reduce:transition-none md:text-[15px] ${
-  neutral
-    ? 'border-borderSubtle bg-elevated text-textPrimary hover:border-borderStrong'
-    : bound
-      ? 'border-brand/60 bg-brand/[0.12] text-textPrimary hover:bg-brand/[0.18]'
-      : 'border-dashed border-textMuted/60 text-textPrimary hover:border-brand/60 hover:bg-brand/[0.05]'
+// [TR] Chip 36px; dokunma alanı ::after ile 44px. Bağlı chip marka tonunda dolu. [EN] 36px chip, 44px hit area; bound = brand tint.
+export const chipCls = (bound) => `relative inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 text-[13px] font-semibold transition duration-150 after:absolute after:-inset-y-1 after:inset-x-0 after:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand motion-reduce:transition-none ${
+  bound
+    ? 'border-brand/50 bg-brand/[0.12] text-textPrimary hover:bg-brand/[0.18]'
+    : 'border-borderSubtle bg-surface text-textSecondary hover:border-borderStrong hover:text-textPrimary'
 }`;
 
 // [TR] Ok tuşlarıyla seçenekler arasında gezinme (radiogroup). [EN] Arrow-key roving within the radiogroup.
@@ -148,7 +145,6 @@ function ClauseOptions({ clause, filterKey, onPick, listRef, compact }) {
                 : `min-h-[56px] rounded-2xl px-3.5 py-2.5 ${on ? 'border-brand/50 bg-brand/[0.08]' : 'border-borderSubtle bg-elevated hover:bg-brand/[0.06]'}`
             }`}
           >
-            {o.dot && <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${o.dot}`} aria-hidden="true" />}
             <span className="min-w-0 flex-1">
               <span className={`block truncate font-semibold text-textPrimary ${compact ? 'text-sm' : 'text-[15px]'}`}>{o.label}</span>
               {o.hint && <span className="mt-0.5 block text-xs text-textSecondary">{o.hint}</span>}
@@ -163,21 +159,9 @@ function ClauseOptions({ clause, filterKey, onPick, listRef, compact }) {
   );
 }
 
-const SlotFace = ({ clause, open }) => {
-  const current = currentOption(clause);
-  return (
-    <>
-      {clause.icon}
-      {current.dot && <span className={`h-2 w-2 shrink-0 rounded-full ${current.dot}`} aria-hidden="true" />}
-      <span className="truncate">{optionShort(clause)}</span>
-      <ChevronDown className={`h-4 w-4 shrink-0 text-textSecondary transition-transform duration-200 motion-reduce:transition-none ${open ? 'rotate-180' : ''}`} strokeWidth={2} aria-hidden="true" />
-    </>
-  );
-};
-
-// [TR] Bağımsız şart: masaüstünde çapalı açılır pencere, telefonda ortak BottomSheet (ör. sıralama).
-// [EN] Standalone clause: anchored popover on desktop, shared BottomSheet on phones (e.g. sort).
-function ClauseSlot({ clause, filterKey, onPick, tr, testId }) {
+// [TR] Seçenek chip'i: masaüstünde çapalı açılır pencere, telefonda ortak BottomSheet.
+// [EN] Option chip: anchored popover on desktop, shared BottomSheet on phones.
+function ClauseChip({ clause, filterKey, onPick, tr, testId }) {
   const desktop = useIsDesktop();
   const [open, setOpen] = useState(false);
   const [shown, setShown] = useState(false);
@@ -211,13 +195,13 @@ function ClauseSlot({ clause, filterKey, onPick, tr, testId }) {
   const toggle = () => {
     if (open) { close(); return; }
     const r = btnRef.current?.getBoundingClientRect();
-    setAlignRight(Boolean(r && r.left + 300 > window.innerWidth - 16));
+    setAlignRight(Boolean(r && r.left + 280 > window.innerWidth - 16));
     setOpen(true);
   };
   const pick = (v) => { onPick(v); close(); };
 
   return (
-    <span ref={wrapRef} className="relative inline-flex max-w-full">
+    <span ref={wrapRef} className="relative inline-flex shrink-0">
       <button
         ref={btnRef}
         type="button"
@@ -226,15 +210,17 @@ function ClauseSlot({ clause, filterKey, onPick, tr, testId }) {
         aria-expanded={open}
         aria-label={`${clause.title}: ${current.label}`}
         onClick={toggle}
-        className={slotCls(isBound(clause), clause.neutral)}
+        className={`${chipCls(isBound(clause))} ${open ? 'ring-2 ring-brand' : ''}`}
       >
-        <SlotFace clause={clause} open={open} />
+        {clause.icon}
+        <span>{chipText(clause)}</span>
+        <ChevronDown className={`h-3.5 w-3.5 shrink-0 opacity-70 transition-transform duration-200 motion-reduce:transition-none ${open ? 'rotate-180' : ''}`} strokeWidth={2.2} aria-hidden="true" />
       </button>
       {open && desktop && (
         <div
           role="dialog"
           aria-label={clause.title}
-          className={`absolute top-full z-[101] mt-2 w-[300px] rounded-2xl border border-borderSubtle bg-surface p-2 shadow-xl transition duration-150 ease-out motion-reduce:transition-none ${
+          className={`absolute top-full z-[101] mt-2 w-[280px] rounded-2xl border border-borderSubtle bg-surface p-2 shadow-xl transition duration-150 ease-out motion-reduce:transition-none ${
             alignRight ? 'right-0' : 'left-0'
           } ${shown ? 'scale-100 opacity-100' : 'scale-95 opacity-0'}`}
         >
@@ -251,287 +237,134 @@ function ClauseSlot({ clause, filterKey, onPick, tr, testId }) {
   );
 }
 
-const Word = ({ children }) => <span className="text-sm text-textSecondary md:text-[15px]">{children}</span>;
-// [TR] Kelimeler komşu şartla birlikte sarılır; satır başında yetim kelime kalmaz. [EN] Words wrap with their slot.
-const Group = ({ children }) => <span className="inline-flex max-w-full items-center gap-x-1.5">{children}</span>;
-
-// [TR] Şart cümlesi. "popover": masaüstü, her şart kendi penceresini açar. "inline": sheet içinde, dokunulan şartın
-//      seçenekleri cümlenin altında açılır (iç içe sheet yok).
-// [EN] Clause sentence. "popover": desktop, each slot opens its own popover. "inline": inside the sheet, the tapped
-//      slot's options open below the sentence (no nested sheets).
-function ClauseSentence({ tr, c, filters, setFilter, canHideOwn, inline = false, idPrefix = 'market-clause' }) {
-  const [activeKey, setActiveKey] = useState(null);
-  const panelId = useId();
-  const slotRefs = useRef({});
-  const listRef = useRef(null);
-  const panelRef = useRef(null);
-  const amountSet = String(filters.amount || '').trim() !== '';
-
-  useEffect(() => {
-    if (!activeKey) return;
-    focusSelected(listRef.current);
-    panelRef.current?.scrollIntoView?.({ block: 'nearest' });
-  }, [activeKey]);
-
-  const collapse = () => {
-    const key = activeKey;
-    setActiveKey(null);
-    if (key) slotRefs.current[key]?.focus({ preventScroll: true });
+// [TR] Al/Sat segmenti: renk kullanıcının yapacağı işi anlatır (Al yeşil, Sat kırmızı). Ok tuşları seçimi kaydırır.
+// [EN] Buy/Sell segment: colour follows the viewer's action (buy green, sell red). Arrow keys move the selection.
+const SIDE_ACTIVE = {
+  ALL: 'bg-textPrimary text-app shadow-sm',
+  BUY: 'bg-brand text-black shadow-sm',
+  SELL: 'bg-danger text-[color:var(--color-on-danger)] shadow-sm',
+};
+function SideSegment({ tr, value, onPick }) {
+  const opts = [
+    { value: 'ALL', label: tr ? 'Tümü' : 'All', title: tr ? 'Al ya da sat' : 'Buy or sell' },
+    { value: 'BUY', label: tr ? 'Al' : 'Buy', title: tr ? 'Al: kripto satan emirler' : 'Buy: orders selling crypto' },
+    { value: 'SELL', label: tr ? 'Sat' : 'Sell', title: tr ? 'Sat: kripto alan emirler' : 'Sell: orders buying crypto' },
+  ];
+  const onKey = (e) => {
+    if (!['ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+    e.preventDefault();
+    const i = opts.findIndex((o) => o.value === value);
+    const next = opts[(i + (e.key === 'ArrowRight' ? 1 : -1) + opts.length) % opts.length];
+    onPick(next.value);
+    e.currentTarget.querySelector(`[data-value="${next.value}"]`)?.focus();
   };
-
-  const slot = (key) => {
-    if (!inline) return <ClauseSlot key={key} clause={c[key]} filterKey={key} tr={tr} testId={`${idPrefix}-${key}`} onPick={(v) => setFilter(key, v)} />;
-    const open = activeKey === key;
-    return (
-      <button
-        key={key}
-        ref={(el) => { slotRefs.current[key] = el; }}
-        type="button"
-        data-testid={`${idPrefix}-${key}`}
-        aria-expanded={open}
-        aria-controls={open ? panelId : undefined}
-        aria-label={`${c[key].title}: ${currentOption(c[key]).label}`}
-        onClick={() => setActiveKey(open ? null : key)}
-        className={`${slotCls(isBound(c[key]))} ${open ? 'ring-2 ring-brand' : ''}`}
-      >
-        <SlotFace clause={c[key]} open={open} />
-      </button>
-    );
-  };
-
-  const amount = (
-    <label key="amount" className={`${slotCls(amountSet)} cursor-text gap-1 pr-2.5 focus-within:ring-2 focus-within:ring-brand`}>
-      <input
-        type="number"
-        inputMode="decimal"
-        min="0"
-        value={filters.amount}
-        onChange={(e) => setFilter('amount', e.target.value)}
-        onFocus={() => inline && setActiveKey(null)}
-        placeholder={tr ? 'tutar' : 'amount'}
-        aria-label={tr ? 'İşlem tutarı' : 'Trade amount'}
-        style={{ width: `${Math.max(4, String(filters.amount || '').length + 1)}ch` }}
-        className="min-w-0 max-w-[9ch] bg-transparent text-sm font-semibold md:text-[15px] tabular-nums text-textPrimary outline-none placeholder:font-semibold placeholder:text-textSecondary [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-      />
-      <span className="whitespace-nowrap text-[11px] font-semibold text-textSecondary">{amountUnit(filters.token)}</span>
-    </label>
-  );
-  const hideOwn = canHideOwn ? (
-    <button
-      key="hideOwn"
-      type="button"
-      aria-pressed={filters.hideOwn}
-      onClick={() => setFilter('hideOwn', !filters.hideOwn)}
-      className={slotCls(filters.hideOwn)}
-    >
-      <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md ${filters.hideOwn ? 'bg-brand text-black' : 'border border-borderStrong'}`} aria-hidden="true">
-        {filters.hideOwn && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
-      </span>
-      {tr ? 'kendi emirlerim hariç' : 'excluding mine'}
-    </button>
-  ) : null;
-
-  // [TR] Dil başına kelime sırası. [EN] Word order per language.
-  const sentence = tr
-    ? [
-      <Group key="g1">{slot('fiat')}<Word>ile</Word></Group>, amount, slot('token'),
-      <Group key="g2">{slot('side')}<Word>istiyorum;</Word></Group>,
-      <Group key="g3">{slot('tier')}<Word>emirler.</Word></Group>, hideOwn,
-    ]
-    : [
-      <Group key="g1"><Word>I want to</Word>{slot('side')}</Group>, amount, slot('token'),
-      <Group key="g2"><Word>for</Word>{slot('fiat')}<Word>·</Word></Group>,
-      <Group key="g3">{slot('tier')}<Word>orders.</Word></Group>, hideOwn,
-    ];
-
-  const active = activeKey ? c[activeKey] : null;
   return (
-    <div onKeyDown={inline ? (e) => { if (e.key === 'Escape' && activeKey) { e.preventDefault(); collapse(); } } : undefined}>
-      <div className={`flex flex-wrap items-center gap-x-1.5 leading-none ${inline ? 'gap-y-3' : 'gap-y-2'}`}>{sentence}</div>
-      {inline && active && (
-        <div ref={panelRef} id={panelId} className="mt-4 rounded-2xl border border-borderSubtle bg-elevated/50 p-3">
-          <p className="mb-2 px-1 text-xs font-semibold tracking-wider text-textSecondary">{active.title}</p>
-          <ClauseOptions clause={active} filterKey={activeKey} listRef={listRef} onPick={(v) => { setFilter(activeKey, v); collapse(); }} />
-        </div>
-      )}
+    <div role="radiogroup" aria-label={tr ? 'İşlem yönü' : 'Trade side'} onKeyDown={onKey} className="inline-flex h-9 shrink-0 items-center rounded-full border border-borderSubtle bg-elevated p-0.5">
+      {opts.map((o) => {
+        const on = o.value === value;
+        return (
+          <button
+            key={o.value}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            tabIndex={on ? 0 : -1}
+            title={o.title}
+            data-testid={`market-side-${o.value}`}
+            data-value={o.value}
+            onClick={() => onPick(o.value)}
+            className={`relative inline-flex h-8 min-w-[3rem] items-center justify-center rounded-full px-3 text-[13px] font-bold transition duration-150 after:absolute after:-inset-y-1.5 after:inset-x-0 after:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand motion-reduce:transition-none ${
+              on ? SIDE_ACTIVE[o.value] : 'text-textSecondary hover:text-textPrimary'
+            }`}
+          >
+            {o.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
 
-// [TR] Telefon özeti: varsayılan şartlar soluk, bağlı şartlar vurgulu. [EN] Phone summary: open terms muted, bound terms emphasised.
-const summaryParts = ({ tr, filters, viewerTier }) => {
-  const amountSet = String(filters.amount || '').trim() !== '';
-  const parts = [
-    { key: 'fiat', bound: filters.fiat !== 'ALL', text: filters.fiat !== 'ALL' ? filters.fiat : (tr ? 'Her döviz' : 'Any currency') },
-    amountSet
-      ? { key: 'amount', bound: true, text: `${filters.amount} ${amountUnit(filters.token)}` }
-      : { key: 'token', bound: filters.token !== 'ALL', text: amountUnit(filters.token) },
-    { key: 'side', bound: filters.side !== 'ALL', text: { BUY: tr ? 'Al' : 'Buy', SELL: tr ? 'Sat' : 'Sell' }[filters.side] || (tr ? 'Al/Sat' : 'Buy/Sell') },
-    {
-      key: 'tier',
-      bound: filters.tier !== 'ALL',
-      text: filters.tier === 'NO_BOND' ? (tr ? 'Teminatsız' : 'No bond')
-        : filters.tier === 'ELIGIBLE' ? (viewerTier != null ? `≤ T${viewerTier}` : (tr ? 'Girebildiklerim' : 'I can take'))
-          : (tr ? 'Tüm kademeler' : 'All tiers'),
-    },
-  ];
-  if (filters.hideOwn) parts.push({ key: 'hideOwn', bound: true, text: tr ? 'Kendi emirlerim hariç' : 'Excluding mine' });
-  return parts;
-};
-
-const boundBadge = (tr, n) => (tr ? `${n} bağlı` : `${n} set`);
-const SectionMark = () => (
-  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border border-borderSubtle bg-elevated font-serif text-sm font-bold leading-none text-textPrimary" aria-hidden="true">§</span>
-);
-const resetBtnCls = 'inline-flex h-11 items-center gap-1.5 rounded-xl px-3 text-sm font-semibold text-textSecondary transition hover:bg-elevated hover:text-textPrimary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand motion-reduce:transition-none';
-
 export default function MarketFilters({
   lang = 'TR', filters: rawFilters, setFilter, onReset, activeFilterCount = 0, sortOptions = [], sortValue,
-  viewerTier = null, canHideOwn = false, result = {}, closedRailCount = 0, children,
+  viewerTier = null, canHideOwn = false, result = {}, closedRailCount = 0, trailing = null, children,
 }) {
   const tr = lang === 'TR';
   const filters = { ...MARKET_FILTER_DEFAULTS, ...rawFilters };
   const c = buildClauses({ tr, filters, sortOptions, sortValue, viewerTier });
-  const [sheetOpen, setSheetOpen] = useState(false);
-  const sheetTitleId = useId();
   const resultText = marketResultText({ tr, ...result });
-  const parts = summaryParts({ tr, filters, viewerTier });
-  const summaryLabel = parts.map((p) => p.text).join(' · ');
-
-  // [TR] Sheet açıkken ekran masaüstü genişliğine çıkarsa sheet kapanır; cümle yerinde görünür.
-  // [EN] If the viewport grows to desktop while the sheet is open, close it; the sentence is inline there.
-  useEffect(() => {
-    if (!sheetOpen || !hasMatchMedia()) return undefined;
-    const media = window.matchMedia(DESKTOP_QUERY);
-    const onChange = () => { if (media.matches) setSheetOpen(false); };
-    media.addEventListener?.('change', onChange);
-    return () => media.removeEventListener?.('change', onChange);
-  }, [sheetOpen]);
-
-  const editProps = { tr, c, filters, setFilter, canHideOwn };
-  const showLabel = result.loading || result.error
-    ? (tr ? 'Emirleri göster' : 'Show orders')
-    : (tr ? `${result.shown ?? 0} emri göster` : `Show ${result.shown ?? 0} ${result.shown === 1 ? 'order' : 'orders'}`);
+  const amountSet = String(filters.amount || '').trim() !== '';
+  const chip = (key) => <ClauseChip clause={c[key]} filterKey={key} tr={tr} testId={`market-clause-${key}`} onPick={(v) => setFilter(key, v)} />;
 
   return (
     <>
-      <section role="search" aria-label={tr ? 'Pazar filtreleri' : 'Market filters'} data-testid="market-filters" className="relative mb-4 overflow-visible rounded-[1.25rem] border border-borderSubtle bg-surface p-3 md:p-5">
-        <span className="pointer-events-none absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-brand/50 to-transparent" aria-hidden="true" />
-
-        {/* [TR] Telefon: kompakt özet kartı. Üst satır: başlık, bağlı şart rozeti, Sıfırla; alt satır: özet + Düzenle.
-             [EN] Phone: compact summary. Top row: label, bound-count badge, Reset; next row: summary + Edit. */}
-        <div className="md:hidden" data-testid="market-filters-summary">
-          <div className="flex h-6 items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-2">
-              <SectionMark />
-              <p className="truncate text-[11px] font-semibold tracking-[0.14em] text-textSecondary">{tr ? 'ŞARTLARIN' : 'YOUR TERMS'}</p>
-              {activeFilterCount > 0 && (
-                <span className="shrink-0 rounded-full bg-brand/15 px-2 py-0.5 text-[11px] font-bold tabular-nums text-textPrimary">{boundBadge(tr, activeFilterCount)}</span>
-              )}
-            </div>
-            {activeFilterCount > 0 && (
-              <button type="button" onClick={() => onReset?.()} className={`-my-2.5 -mr-1.5 shrink-0 px-2.5 ${resetBtnCls}`}>
-                <RotateCcw className="h-4 w-4" strokeWidth={2} aria-hidden="true" />{tr ? 'Sıfırla' : 'Reset'}
-              </button>
-            )}
-          </div>
-          <div className="mt-2 flex items-center gap-3">
-            <p className="min-w-0 flex-1 line-clamp-2 text-sm leading-5" aria-hidden="true">
-              {parts.map((p, i) => (
-                <span key={p.key}>
-                  {i > 0 && <span className="text-textMuted"> · </span>}
-                  <span className={`whitespace-nowrap ${p.bound ? 'font-semibold text-textPrimary' : 'text-textSecondary'}`}>{p.text}</span>
-                </span>
-              ))}
-            </p>
+      <section role="search" aria-label={tr ? 'Pazar filtreleri' : 'Market filters'} data-testid="market-filters" className="mb-3">
+        {/* [TR] Telefonda kenardan kenara kayan şerit; sağ kenar maske ile soluklaşır. Masaüstünde sarar (açılır pencere kırpılmaz).
+             [EN] Edge-to-edge scrolling strip on phones with a right-edge fade; wraps on desktop so popovers are not clipped. */}
+        <div
+          data-testid="market-filter-row"
+          className="no-scrollbar -mx-4 flex items-center gap-2 overflow-x-auto py-1 pl-4 pr-10 [-webkit-mask-image:linear-gradient(to_right,#000_calc(100%_-_2.5rem),transparent)] [mask-image:linear-gradient(to_right,#000_calc(100%_-_2.5rem),transparent)] md:mx-0 md:flex-wrap md:overflow-visible md:px-0 md:[-webkit-mask-image:none] md:[mask-image:none]"
+        >
+          <SideSegment tr={tr} value={filters.side} onPick={(v) => setFilter('side', v)} />
+          <span className="mx-0.5 h-5 w-px shrink-0 bg-borderSubtle" aria-hidden="true" />
+          {activeFilterCount > 0 && (
             <button
               type="button"
-              data-testid="market-filters-edit"
-              aria-haspopup="dialog"
-              aria-expanded={sheetOpen}
-              aria-label={tr ? `Şartları düzenle: ${summaryLabel}` : `Edit terms: ${summaryLabel}`}
-              onClick={() => setSheetOpen(true)}
-              className="inline-flex h-11 shrink-0 items-center gap-1.5 rounded-xl border border-borderSubtle bg-elevated px-3 text-sm font-semibold text-textPrimary transition hover:border-borderStrong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand motion-reduce:transition-none"
+              data-testid="market-filters-reset"
+              onClick={() => onReset?.()}
+              aria-label={tr ? `Filtreleri sıfırla (${activeFilterCount})` : `Reset filters (${activeFilterCount})`}
+              title={tr ? 'Filtreleri sıfırla' : 'Reset filters'}
+              className={`${chipCls(false)} px-2.5`}
             >
-              <Pencil className="h-4 w-4" strokeWidth={2} aria-hidden="true" />{tr ? 'Düzenle' : 'Edit'}
+              <RotateCcw className="h-4 w-4" strokeWidth={2} aria-hidden="true" />
+              <span className="flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-brand px-1 text-[11px] font-bold tabular-nums text-black">{activeFilterCount}</span>
             </button>
-          </div>
-        </div>
-
-        {/* [TR] Masaüstü: cümle yerinde düzenlenir. [EN] Desktop: the sentence is edited in place. */}
-        <div className="hidden md:block">
-          <div className={`flex items-center justify-between gap-3 ${activeFilterCount > 0 ? '-mt-1.5 mb-1.5' : 'mb-3'}`}>
-            <div className="flex items-center gap-2">
-              <SectionMark />
-              <p className="text-[11px] font-semibold tracking-[0.14em] text-textSecondary">{tr ? 'ŞARTLARIN' : 'YOUR TERMS'}</p>
-              {activeFilterCount > 0 && (
-                <span className="rounded-full bg-brand/15 px-2 py-0.5 text-[11px] font-bold tabular-nums text-textPrimary">{boundBadge(tr, activeFilterCount)}</span>
-              )}
-            </div>
-            {activeFilterCount > 0 && (
-              <button type="button" onClick={() => onReset?.()} className={`-mr-2 ${resetBtnCls}`}>
-                <RotateCcw className="h-4 w-4" strokeWidth={2} aria-hidden="true" />{tr ? 'Sıfırla' : 'Reset'}
-              </button>
-            )}
-          </div>
-          <ClauseSentence {...editProps} />
-        </div>
-
-        {/* [TR] Sıralama filtre sayılmaz; sonuç satırında durur. [EN] Sort is not a filter; it lives on the result line. */}
-        <div className="mt-2 border-t border-borderSubtle pt-2 md:mt-4 md:pt-3">
-          <div className="flex items-center justify-between gap-3">
-            <p aria-live="polite" className="min-w-0 truncate text-sm font-semibold tabular-nums text-textPrimary">{resultText}</p>
-            <span className="min-w-0 shrink-0"><ClauseSlot clause={c.sort} filterKey="sort" tr={tr} testId="market-clause-sort" onPick={(v) => setFilter('sort', v)} /></span>
-          </div>
-          {closedRailCount > 0 && (
-            <p className="mt-1.5 flex items-start gap-1.5 text-xs text-textSecondary md:mt-2">
-              <Lock className="mt-px h-3.5 w-3.5 shrink-0" strokeWidth={2} aria-hidden="true" />
-              <span>{closedRailText(tr, closedRailCount)}</span>
-            </p>
           )}
+          {chip('fiat')}
+          {chip('token')}
+          <label className={`${chipCls(amountSet)} cursor-text gap-1 focus-within:ring-2 focus-within:ring-brand`}>
+            <input
+              type="number"
+              inputMode="decimal"
+              min="0"
+              value={filters.amount}
+              onChange={(e) => setFilter('amount', e.target.value)}
+              placeholder={tr ? 'Tutar' : 'Amount'}
+              aria-label={tr ? 'İşlem tutarı' : 'Trade amount'}
+              style={{ width: `${Math.max(5, String(filters.amount || '').length + 1)}ch` }}
+              className="min-w-0 max-w-[9ch] bg-transparent text-[13px] font-semibold tabular-nums text-textPrimary outline-none placeholder:font-semibold placeholder:text-textSecondary [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+            />
+            {amountSet && <span className="text-[11px] font-semibold text-textSecondary">{amountUnit(filters.token)}</span>}
+          </label>
+          {chip('tier')}
+          {canHideOwn && (
+            <button type="button" aria-pressed={filters.hideOwn} onClick={() => setFilter('hideOwn', !filters.hideOwn)} className={chipCls(filters.hideOwn)}>
+              <EyeOff className={iconCls} strokeWidth={2} aria-hidden="true" />{tr ? 'Emirlerimi gizle' : 'Hide mine'}
+            </button>
+          )}
+          <span className="inline-flex shrink-0 md:ml-auto">{chip('sort')}</span>
+        </div>
+
+        <div className="mt-2 flex min-h-[1.75rem] flex-wrap items-center gap-x-3 gap-y-1.5">
+          <p aria-live="polite" className="min-w-0 truncate text-xs font-semibold tabular-nums text-textSecondary">{resultText}</p>
+          {closedRailCount > 0 && (
+            <span title={closedRailText(tr, closedRailCount)} className="inline-flex items-center gap-1 text-xs text-textSecondary">
+              <Lock className="h-3.5 w-3.5 shrink-0" strokeWidth={2} aria-hidden="true" />
+              <span>{closedRailText(tr, closedRailCount)}</span>
+            </span>
+          )}
+          {trailing && <div className="ml-auto flex shrink-0 items-center">{trailing}</div>}
         </div>
       </section>
-
-      {sheetOpen && (
-        <BottomSheet
-          title={tr ? 'Şartların' : 'Your terms'}
-          titleId={sheetTitleId}
-          closeLabel={tr ? 'Kapat' : 'Close'}
-          onClose={() => setSheetOpen(false)}
-          testId="market-filters-sheet"
-        >
-          <p className="-mt-2 mb-4 text-sm text-textSecondary">
-            {tr ? 'Kesik çizgili şartlar açık; dokunup bağlayın.' : 'Dashed terms are open; tap one to set it.'}
-          </p>
-          <ClauseSentence {...editProps} inline idPrefix="market-sheet-clause" />
-          <div className="mt-6 flex items-center gap-2">
-            {activeFilterCount > 0 && (
-              <button
-                type="button"
-                onClick={() => onReset?.()}
-                className="inline-flex h-12 shrink-0 items-center gap-1.5 rounded-2xl border border-borderSubtle bg-elevated px-4 text-sm font-semibold text-textPrimary transition hover:border-borderStrong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand motion-reduce:transition-none"
-              >
-                <RotateCcw className="h-4 w-4" strokeWidth={2} aria-hidden="true" />{tr ? `Sıfırla (${activeFilterCount})` : `Reset (${activeFilterCount})`}
-              </button>
-            )}
-            <button
-              type="button"
-              data-testid="market-filters-apply"
-              onClick={() => setSheetOpen(false)}
-              className="inline-flex h-12 min-w-0 flex-1 items-center justify-center rounded-2xl bg-brand px-4 text-[15px] font-bold text-black transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-surface motion-reduce:transition-none"
-            >
-              <span className="truncate">{showLabel}</span>
-            </button>
-          </div>
-        </BottomSheet>
-      )}
       {children}
     </>
   );
 }
 
-// [TR] Boş sonuç: hangi şartın listeyi daralttığını gösterir; her şart tek dokunuşla gevşetilir.
-// [EN] Empty result: lists the binding clauses; each one can be loosened with a single tap.
+// [TR] Boş durum: ortada küçük illüstrasyon, tek satır mesaj ve tek aksiyon. Daraltılmış listede her filtre tek
+//      dokunuşla gevşetilir. Yeni emir kapısı kapalıysa CTA yerine sakin bir "geçici olarak kapalı" chip'i görünür.
+// [EN] Empty state: small centred illustration, one-line message, one action. A narrowed list offers one-tap
+//      loosening per filter. When the new-order gate is closed a calm "temporarily closed" chip replaces the CTA.
 export function MarketEmpty({ lang = 'TR', filters: rawFilters, setFilter, onReset, activeFilterCount = 0, isNarrowed, feedError, canCreate, onCreate, viewerTier = null }) {
   const tr = lang === 'TR';
   const f = { ...MARKET_FILTER_DEFAULTS, ...rawFilters };
@@ -541,46 +374,62 @@ export function MarketEmpty({ lang = 'TR', filters: rawFilters, setFilter, onRes
     f.fiat !== 'ALL' && { key: 'fiat', label: f.fiat },
     String(f.amount || '').trim() !== '' && Number(f.amount) > 0 && { key: 'amount', label: `${f.amount} ${amountUnit(f.token)}` },
     f.tier !== 'ALL' && { key: 'tier', label: f.tier === 'NO_BOND' ? (tr ? 'teminatsız' : 'no bond') : (viewerTier != null ? `≤ T${viewerTier}` : (tr ? 'girebildiğim' : 'enterable')) },
-    f.hideOwn && { key: 'hideOwn', label: tr ? 'kendi emirlerim hariç' : 'excluding mine' },
+    f.hideOwn && { key: 'hideOwn', label: tr ? 'emirlerimi gizle' : 'hide mine' },
   ].filter(Boolean);
   const title = feedError
-    ? (tr ? 'Pazar verisi alınamadı. Bağlantı düzelince liste otomatik yenilenecek.' : 'Market data unavailable. The list refreshes automatically.')
+    ? (tr ? 'Pazar verisi alınamadı' : 'Market data unavailable')
     : isNarrowed
-      ? (tr ? 'Bu şartlarla eşleşen emir yok.' : 'No orders match these terms.')
-      : (tr ? 'Henüz açık emir yok.' : 'No open orders yet.');
+      ? (tr ? 'Bu filtrelerle emir yok' : 'No orders match these filters')
+      : (tr ? 'Henüz açık emir yok' : 'No open orders yet');
+  const Icon = feedError ? CloudOff : isNarrowed ? SearchX : Store;
+  const showCreate = !feedError && canCreate;
+  const showClosed = !feedError && !canCreate;
   return (
-    <div data-testid="market-empty" className="rounded-[1.25rem] border border-dashed border-borderStrong bg-surface/60 p-6 text-center md:p-8">
-      <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl border border-borderSubtle bg-elevated font-serif text-xl font-bold text-textSecondary" aria-hidden="true">§</span>
+    <div data-testid="market-empty" className="flex flex-col items-center px-4 py-10 text-center md:py-16">
+      <div className="relative mb-4" aria-hidden="true">
+        <span className="absolute inset-0 -m-3 rounded-full bg-brand/[0.08] blur-xl" />
+        <span className={`relative flex h-16 w-16 items-center justify-center rounded-2xl border bg-surface shadow-sm ${feedError ? 'border-borderStrong text-textSecondary' : 'border-brand/30 text-brand'}`}>
+          <Icon className="h-7 w-7" strokeWidth={1.8} />
+        </span>
+        {(showCreate || showClosed) && !isNarrowed && (
+          <span className={`absolute -bottom-1.5 -right-1.5 flex h-6 w-6 items-center justify-center rounded-full border-2 border-app ${showClosed ? 'bg-elevated text-textSecondary' : 'bg-brand text-black'}`}>
+            {showClosed ? <Lock className="h-3 w-3" strokeWidth={2.5} /> : <Plus className="h-3.5 w-3.5" strokeWidth={3} />}
+          </span>
+        )}
+      </div>
       <p className="text-[15px] font-semibold text-textPrimary">{title}</p>
+      {feedError && <p className="mt-1 text-xs text-textMuted">{tr ? 'Bağlantı gelince liste kendiliğinden yenilenir.' : 'The list refreshes automatically.'}</p>}
       {!feedError && chips.length > 0 && (
-        <>
-          <p className="mt-1 text-sm text-textSecondary">{tr ? 'Bir şartı gevşetin:' : 'Loosen a term:'}</p>
-          <ul className="mt-3 flex flex-wrap justify-center gap-2">
-            {chips.map((ch) => (
-              <li key={ch.key}>
-                <button
-                  type="button"
-                  onClick={() => setFilter(ch.key, MARKET_FILTER_DEFAULTS[ch.key])}
-                  aria-label={tr ? `${ch.label} şartını kaldır` : `Remove ${ch.label}`}
-                  className="inline-flex h-11 items-center gap-1.5 rounded-xl border border-brand/50 bg-brand/[0.1] px-3 text-sm font-semibold text-textPrimary transition hover:bg-brand/[0.16] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand motion-reduce:transition-none"
-                >
-                  <X className="h-4 w-4 text-textSecondary" strokeWidth={2} aria-hidden="true" />{ch.label}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </>
+        <ul className="mt-3 flex flex-wrap justify-center gap-2" aria-label={tr ? 'Etkin filtreler' : 'Active filters'}>
+          {chips.map((ch) => (
+            <li key={ch.key}>
+              <button
+                type="button"
+                onClick={() => setFilter(ch.key, MARKET_FILTER_DEFAULTS[ch.key])}
+                aria-label={tr ? `${ch.label} filtresini kaldır` : `Remove ${ch.label}`}
+                className={chipCls(true)}
+              >
+                {ch.label}<X className="h-3.5 w-3.5 text-textSecondary" strokeWidth={2.4} aria-hidden="true" />
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
       <div className="mt-5 flex flex-wrap justify-center gap-2">
         {!feedError && activeFilterCount > 0 && (
-          <button type="button" onClick={() => onReset?.()} className="inline-flex h-11 items-center gap-1.5 rounded-xl border border-borderSubtle bg-elevated px-4 text-sm font-semibold text-textPrimary transition hover:border-borderStrong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand motion-reduce:transition-none">
-            <RotateCcw className="h-4 w-4" strokeWidth={2} aria-hidden="true" />{tr ? 'Tüm şartları sıfırla' : 'Reset all terms'}
+          <button type="button" onClick={() => onReset?.()} className="inline-flex h-10 items-center gap-1.5 rounded-full border border-borderSubtle bg-surface px-4 text-sm font-semibold text-textPrimary transition hover:border-borderStrong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand motion-reduce:transition-none">
+            <RotateCcw className="h-4 w-4" strokeWidth={2} aria-hidden="true" />{tr ? 'Tümünü sıfırla' : 'Reset all'}
           </button>
         )}
-        {canCreate && !feedError && (
-          <button type="button" onClick={onCreate} className="inline-flex h-11 items-center gap-1.5 rounded-xl bg-brand px-4 text-sm font-semibold text-black transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 motion-reduce:transition-none">
-            <Plus className="h-4 w-4" strokeWidth={2} aria-hidden="true" />{isNarrowed ? (tr ? 'Emir oluştur' : 'Create order') : (tr ? 'İlk emri oluştur' : 'Create the first order')}
+        {showCreate && (
+          <button type="button" onClick={onCreate} className="inline-flex h-10 items-center gap-1.5 rounded-full bg-brand px-5 text-sm font-bold text-black transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-app motion-reduce:transition-none">
+            <Plus className="h-4 w-4" strokeWidth={2.4} aria-hidden="true" />{isNarrowed ? (tr ? 'Emir oluştur' : 'Create order') : (tr ? 'İlk emri sen aç' : 'Post the first order')}
           </button>
+        )}
+        {showClosed && (
+          <span data-testid="market-empty-closed" className="inline-flex h-9 items-center gap-1.5 rounded-full border border-borderSubtle bg-elevated px-3.5 text-xs font-semibold text-textSecondary">
+            <Lock className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />{tr ? 'Yeni emirler geçici olarak kapalı' : 'New orders are temporarily closed'}
+          </span>
         )}
       </div>
     </div>

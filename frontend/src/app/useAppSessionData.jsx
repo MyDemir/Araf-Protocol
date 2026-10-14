@@ -7,7 +7,7 @@ import { buildMarketOrdersQuery, MARKET_FILTER_DEFAULTS, matchesMarketFilters } 
 import { mapApiOrderToUi, formatTokenAmount as formatTokenAmountFromRaw, tokenToNumber as rawTokenToDisplayNumber } from './orderUiModel';
 import { buildApiUrl } from './apiConfig';
 import { fetchWithTimeout, isTimeoutError, DEFAULT_FETCH_TIMEOUT_MS, WRITE_FETCH_TIMEOUT_MS } from './fetchWithTimeout';
-import { markInfraFailure, markInfraOk, registerInfraProbe, useInfraHealth } from './infraHealth';
+import { installInfraRevalidation, markInfraFailure, markInfraOk, registerInfraProbe, useInfraHealth } from './infraHealth';
 import { WALLET_AGE_MIN_SEC } from './walletAge';
 import { applyStatePin, createStatePin, isTerminalTradeState } from './tradeStateSync';
 
@@ -692,6 +692,18 @@ export function useAppSessionData({
   }, []);
   useEffect(() => registerInfraProbe('degraded', () => probeConfigClean('degraded')), [probeConfigClean]);
   useEffect(() => registerInfraProbe('configStale', () => probeConfigClean('configStale')), [probeConfigClean]);
+
+  // [TR] Pasif öğrenme yetmez: sekme görünür/odaklı olunca tek bir /orders/config kontrolü (15 sn throttle, tek uçuş).
+  //      Ağ hatası/5xx fetchWithTimeout(infra:'backend') ile arıza yoluna gider; temiz yanıt açık bayrağı kapatır.
+  useEffect(() => installInfraRevalidation(async () => {
+    const r = await fetchWithTimeout(() => buildApiUrl('orders/config'), { credentials: 'include', infra: 'backend', timeoutMs: 8000 });
+    if (!r.ok) return;
+    if (r.headers?.get?.('x-araf-degraded') === 'true') markInfraFailure('degraded');
+    else markInfraOk('degraded');
+    const body = await r.json().catch(() => null);
+    if (body?.configStale === true) markInfraFailure('configStale');
+    else if (body) markInfraOk('configStale');
+  }), []);
 
   // Protocol configuration and read models
   useEffect(() => {

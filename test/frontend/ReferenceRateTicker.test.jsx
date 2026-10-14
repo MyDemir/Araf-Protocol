@@ -77,6 +77,26 @@ describe('ReferenceRateTicker', () => {
     expect(screen.getAllByText(/harici FX ref\./i).length).toBeGreaterThan(0);
   });
 
+  it('keeps the disclaimer behind the info disclosure and the source label in the chip title', async () => {
+    global.fetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        items: [{ symbol: 'USD/TRY', rate: 34, sourceKind: 'FIAT_OFFICIAL_REFERENCE', stale: false }],
+        informationalOnly: true,
+      }),
+    });
+
+    render(<ReferenceRateTicker lang="TR" />);
+
+    const ticker = await screen.findByTestId('reference-rate-ticker');
+    const summary = screen.getByText('Referans kurlar hakkında').closest('summary');
+    expect(summary).not.toBeNull();
+    expect(summary.parentElement.tagName).toBe('DETAILS');
+    expect(summary.parentElement).toHaveTextContent(/bilgilendirme amaçlıdır/);
+    expect(ticker.querySelector('[title="harici FX ref."]')).not.toBeNull();
+    expect(screen.queryByText(/Bilgilendirme bayrağı doğrulanamadı/)).toBeNull();
+  });
+
   it('does not crash UI on fetch failures', async () => {
     global.fetch.mockRejectedValue(new Error('network down'));
 

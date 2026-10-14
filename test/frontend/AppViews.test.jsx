@@ -99,8 +99,43 @@ describe('AppViews market side-aware rendering', () => {
     });
 
     render(<div>{views.renderMarket()}</div>);
-    expect(screen.queryByText(/Get Test USDT|Test USDT Al/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Get Test USDC|Test USDC Al/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Get test USDT|Test USDT al/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Get test USDC|Test USDC al/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: /test tokens/i })).not.toBeInTheDocument();
+  });
+
+  it('testnet shows the drop-icon faucet chips and mints the tapped token', () => {
+    const handleMint = vi.fn();
+    const views = buildAppViews({ ...baseCtx, isFaucetEnabled: true, handleMint });
+    render(<div>{views.renderMarket()}</div>);
+    const group = screen.getByRole('group', { name: 'Get test tokens' });
+    fireEvent.click(within(group).getByRole('button', { name: 'Get test USDC' }));
+    expect(handleMint).toHaveBeenCalledWith('USDC');
+  });
+
+  it('disabled create button carries a short reason badge; the gate still blocks it', () => {
+    const handleOpenMakerModal = vi.fn();
+    const views = buildAppViews({ ...baseCtx, handleOpenMakerModal, txGate: resolveNewTxGate({ serviceDegraded: true }) });
+    render(<div>{views.renderMarket()}</div>);
+    const create = screen.getByRole('button', { name: 'Create order' });
+    expect(create).toBeDisabled();
+    const badge = screen.getByTestId('market-create-gate');
+    expect(badge).toHaveTextContent('Restricted mode');
+    expect(badge).toHaveAttribute('title', expect.stringMatching(/restricted mode/i));
+    expect(create).toHaveAttribute('aria-describedby', badge.id);
+    fireEvent.click(create);
+    expect(handleOpenMakerModal).not.toHaveBeenCalled();
+    // Empty market under the closed gate: calm chip instead of a create CTA.
+    expect(screen.getByTestId('market-empty-closed')).toHaveTextContent('New orders are temporarily closed');
+    expect(screen.queryByRole('button', { name: 'Post the first order' })).not.toBeInTheDocument();
+  });
+
+  it('open gate: no reason badge and the empty market invites the first order', () => {
+    const views = buildAppViews({ ...baseCtx });
+    render(<div>{views.renderMarket()}</div>);
+    expect(screen.getByRole('button', { name: 'Create order' })).toBeEnabled();
+    expect(screen.queryByTestId('market-create-gate')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Post the first order' })).toBeInTheDocument();
   });
 
   it('shows the admin entry for authenticated users when the server flags them as admin', () => {
@@ -611,7 +646,7 @@ describe('AppViews market side-aware rendering', () => {
     expect(screen.getByRole('button', { name: 'Install app' })).toBeInTheDocument();
   });
 
-  it('market terms sentence wires fiat, tier, sort, amount and hide-mine to setMarketFilter', () => {
+  it('market chips wire side, fiat, tier, sort, amount and hide-mine to setMarketFilter', () => {
     const setMarketFilter = vi.fn();
     const views = buildAppViews({ ...baseCtx, address: '0x' + '1'.repeat(40), isAuthenticated: true, userReputation: { effectiveTier: 2 }, setMarketFilter });
     render(<div>{views.renderMarket()}</div>);
@@ -619,6 +654,7 @@ describe('AppViews market side-aware rendering', () => {
       fireEvent.click(screen.getByTestId(slot));
       fireEvent.click(within(screen.getByRole('dialog')).getByRole('radio', { name }));
     };
+    fireEvent.click(screen.getByTestId('market-side-BUY'));
     pick('market-clause-fiat', 'TRY');
     pick('market-clause-tier', 'I can take (≤ T2)');
     // Without a side "best rate" is ambiguous, so the sort list starts at largest amount.
@@ -626,11 +662,11 @@ describe('AppViews market side-aware rendering', () => {
     expect(screen.queryByRole('radio', { name: 'Best rate' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('radio', { name: 'Newest' }));
     fireEvent.change(screen.getByLabelText('Trade amount'), { target: { value: '250' } });
-    fireEvent.click(screen.getByRole('button', { name: 'excluding mine' }));
-    expect(setMarketFilter.mock.calls).toEqual([['fiat', 'TRY'], ['tier', 'ELIGIBLE'], ['sort', 'NEWEST'], ['amount', '250'], ['hideOwn', true]]);
+    fireEvent.click(screen.getByRole('button', { name: 'Hide mine' }));
+    expect(setMarketFilter.mock.calls).toEqual([['side', 'BUY'], ['fiat', 'TRY'], ['tier', 'ELIGIBLE'], ['sort', 'NEWEST'], ['amount', '250'], ['hideOwn', true]]);
   });
 
-  it('market terms show the bound count, reset and the server total', () => {
+  it('market chips show the bound count, reset and the server total', () => {
     const resetMarketFilters = vi.fn();
     const views = buildAppViews({
       ...baseCtx,
@@ -642,20 +678,20 @@ describe('AppViews market side-aware rendering', () => {
     });
     render(<div>{views.renderMarket()}</div>);
     expect(screen.getByText('1 order · 120 total')).toBeInTheDocument();
-    expect(screen.getAllByText('2 set').length).toBeGreaterThan(0);
+    const reset = screen.getByRole('button', { name: 'Reset filters (2)' });
     fireEvent.click(screen.getByTestId('market-clause-sort'));
     expect(screen.getByRole('radio', { name: 'Best rate' })).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('market-clause-tier'));
     expect(screen.getByRole('radio', { name: /I can take/ })).toBeDisabled();
-    fireEvent.click(screen.getAllByRole('button', { name: 'Reset' })[0]);
+    fireEvent.click(reset);
     expect(resetMarketFilters).toHaveBeenCalled();
   });
 
   it('empty filtered market offers a reset instead of "no orders yet"', () => {
     const views = buildAppViews({ ...baseCtx, marketFilters: { ...baseCtx.marketFilters, fiat: 'EUR' }, filteredOrders: [] });
     render(<div>{views.renderMarket()}</div>);
-    expect(screen.getByText('No orders match these terms.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Reset all terms' })).toBeInTheDocument();
+    expect(screen.getByText('No orders match these filters')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reset all' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Remove EUR' })).toBeInTheDocument();
   });
 });
