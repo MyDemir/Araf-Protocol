@@ -368,6 +368,16 @@ jobs:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: flyctl deploy --remote-only -a "$FLY_APP_NAME"
 
+      # Eski escrow'un Redis checkpoint'i (worker:last_block / worker:last_safe_block) escrow'a bağlı değildir; silinmezse worker
+      # yeni deploy bloğunu atlayabilir. Yarışı önlemek için tüm makineler durdurulur, yalnız bu iki anahtar silinir, makineler
+      # başlatılır (hata olsa da). Bu adım yalnız kontrat deploy eden bu workflow'dadır. Secret basılmaz.
+      - name: Reset worker checkpoint for new deployment
+        shell: bash
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+        run: bash .github/scripts/reset-worker-checkpoint.sh
+
       # /health 200 zorunlu; /ready 503 degraded:true ise yalnız ::warning:: (deploy başarılı sayılır).
       - name: Check backend health
         shell: bash
