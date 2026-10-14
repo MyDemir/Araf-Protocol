@@ -43,7 +43,7 @@ export const TimerStack = ({ timerCards = [], lang = 'EN' }) => {
         {timerCards.map((timer) => (
           <li key={timer.key} className="flex items-center justify-between gap-3 py-2">
             <span className="min-w-0">{timer.label}</span>
-            <span className={`shrink-0 font-mono tabular-nums ${timer.finished ? 'text-warning font-semibold' : 'text-textPrimary'}`}>{timer.summary}</span>
+            <span className={`shrink-0 tabular-nums font-semibold ${timer.finished ? 'text-warning font-semibold' : 'text-textPrimary'}`}>{timer.summary}</span>
           </li>
         ))}
       </ul>

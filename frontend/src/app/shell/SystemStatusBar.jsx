@@ -1,5 +1,5 @@
 import React from 'react';
-import { EyeOff, LoaderCircle, ShieldAlert, X } from 'lucide-react';
+import { EyeOff, LoaderCircle, ShieldAlert, TriangleAlert, X } from 'lucide-react';
 import { WALLET_AGE_MIN_DAYS } from '../walletAge';
 import { tx as t } from '../copy';
 import { isTestnetBuild } from '../chainPolicy';
@@ -174,15 +174,15 @@ export const resolveSystemStatuses = ({
 };
 
 const toneClass = (tone) => {
-  if (tone === 'danger') return 'bg-red-950/90 border-red-800 text-red-100';
-  if (tone === 'warning') return 'bg-orange-950/80 border-orange-800 text-orange-100';
+  if (tone === 'danger') return 'bg-danger/10 border-danger/40 text-textPrimary';
+  if (tone === 'warning') return 'bg-warning/10 border-warning/40 text-textPrimary';
   return 'bg-surface border-borderSubtle text-textPrimary';
 };
 
 // [TR] Kapat düğmesinin üzerine gelme/odak rengi bant tonuna göre. [EN] Dismiss hover/focus colour follows the tone.
 const dismissToneClass = (tone) => {
-  if (tone === 'danger') return 'hover:bg-red-100/15 focus-visible:ring-red-200';
-  if (tone === 'warning') return 'hover:bg-orange-100/15 focus-visible:ring-orange-200';
+  if (tone === 'danger') return 'hover:bg-danger/15 focus-visible:ring-brand';
+  if (tone === 'warning') return 'hover:bg-warning/15 focus-visible:ring-brand';
   return 'hover:bg-elevated focus-visible:ring-brand';
 };
 
@@ -300,17 +300,22 @@ const SystemStatusBarView = ({ statuses, isTestnet, isRegisteringWallet, onRegis
     <section ref={sectionRef} aria-label={lang === 'TR' ? 'Sistem durumu' : 'System status'} className="shrink-0 border-b border-borderSubtle" data-testid="system-status-bar">
       <div className="flex flex-col">
         {isTestnet && (
-          <div role="status" className={`pl-4 pr-[4.75rem] md:pr-44 py-1 text-xs font-bold text-center border-b bg-info border-info text-black`} data-testid="testnet-banner">
+          <div role="status" className={`px-4 md:pr-44 py-1 text-xs font-bold text-center border-b bg-info border-info text-black`} data-testid="testnet-banner">
             {t(lang, 'Base Sepolia Testnet — test tokenları, gerçek para yok', 'Base Sepolia Testnet — test tokens, no real money')}
           </div>
         )}
         {visible.map((status) => {
           const critical = isCriticalStatus(status);
           return (
-            <div key={status.key} className={`pl-4 pr-[4.75rem] md:pr-52 py-1.5 md:py-2 text-xs md:text-sm border-b last:border-b-0 ${toneClass(status.tone)}`} data-status-key={status.key} data-critical={critical ? 'true' : undefined}>
+            <div key={status.key} className={`pl-4 pr-2 md:pr-52 py-1.5 md:py-2 text-xs md:text-sm border-b last:border-b-0 ${toneClass(status.tone)}`} data-status-key={status.key} data-critical={critical ? 'true' : undefined}>
               <div className="max-w-[1200px] mx-auto flex items-center justify-between gap-2 md:gap-3">
                 <div className="min-w-0 flex-1">
-                  <p className="font-bold break-words">{status.title}</p>
+                  <p className="font-bold break-words">
+                    {(status.tone === 'danger' || status.tone === 'warning') && (
+                      <TriangleAlert className={`inline-block w-4 h-4 mr-1.5 -mt-0.5 align-middle ${status.tone === 'danger' ? 'text-danger' : 'text-warning'}`} strokeWidth={2} aria-hidden="true" />
+                    )}
+                    {status.title}
+                  </p>
                   {/* [TR] Mobilde bant ekranın üçte birini kaplamasın: açıklama masaüstünde görünür. */}
                   <p className="hidden md:block opacity-90">{status.message}</p>
                   {Array.isArray(status.details) && status.details.length > 0 && (
@@ -328,7 +333,7 @@ const SystemStatusBarView = ({ statuses, isTestnet, isRegisteringWallet, onRegis
                       type="button"
                       onClick={onRegisterWallet || undefined}
                       disabled={isRegisteringWallet}
-                      className="bg-orange-500 text-black px-4 py-1.5 rounded-lg text-xs font-bold hover:bg-orange-400 disabled:opacity-50 transition shrink-0"
+                      className="bg-warning text-black px-4 py-1.5 rounded-lg text-xs font-bold hover:opacity-90 disabled:opacity-50 transition shrink-0"
                     >
                       {isRegisteringWallet ? <LoaderCircle className="w-4 h-4 animate-spin" strokeWidth={1.8} aria-hidden="true" /> : (lang === 'TR' ? 'Kaydet' : 'Register')}
                     </button>
@@ -357,7 +362,7 @@ const SystemStatusBarView = ({ statuses, isTestnet, isRegisteringWallet, onRegis
           );
         })}
         {hidden.length > 0 && (
-          <div className="pl-4 pr-[4.75rem] md:pr-52 border-b last:border-b-0 bg-surface border-borderSubtle text-textSecondary text-xs" data-testid="status-hidden-indicator">
+          <div className="pl-4 pr-2 md:pr-52 border-b last:border-b-0 bg-surface border-borderSubtle text-textSecondary text-xs" data-testid="status-hidden-indicator">
             <div className="max-w-[1200px] mx-auto flex items-center gap-2">
               <EyeOff className="w-3.5 h-3.5 shrink-0" strokeWidth={1.8} aria-hidden="true" />
               <span className="min-w-0 truncate">{hiddenText}</span>

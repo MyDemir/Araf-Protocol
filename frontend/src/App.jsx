@@ -1,4 +1,4 @@
-import { CircleCheck, Info, MessageSquare, TriangleAlert, Wallet } from 'lucide-react';
+import { CircleCheck, Info, MessageSquare, TriangleAlert, Wallet, X } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 import { useAccount, useConnect, useDisconnect, useSignMessage, useChainId, usePublicClient } from 'wagmi';
 import { canonicalizePayoutProfileDraft, formatTokenAmount as formatTokenAmountFromRaw, tokenToNumber as rawTokenToDisplayNumber } from './app/orderUiModel';
@@ -147,6 +147,13 @@ function App() {
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem(APP_LANG_STORAGE_KEY, lang);
+  }, [lang]);
+
+  // [TR] <html lang> seçili dille eşlenir: CSS uppercase "i/İ" ve ekran okuyucu doğru çalışır.
+  // [EN] Keep <html lang> in sync with the selected language (correct uppercase "İ" and screen-reader voice).
+  React.useEffect(() => {
+    if (typeof document === 'undefined') return;
+    document.documentElement.lang = lang === 'TR' ? 'tr' : 'en';
   }, [lang]);
 
   // [TR] Tüm kontrat metodları tek bir hook instance'ından alınır
@@ -1201,12 +1208,12 @@ function App() {
         />
       )}
 
-      {/* [TR] Mobilde yalnız ikon: içerik ve başlıkların üstüne binmez. [EN] Icon-only on mobile. */}
+      {/* [TR] Mobilde gizli (içeriğin üstüne biniyordu); giriş Menü panelinde. [EN] Hidden on mobile; entry lives in the Menu panel. */}
       <button
         onClick={() => setShowFeedbackModal(true)}
         title={lang === 'TR' ? 'Geri Bildirim' : 'Feedback'}
         aria-label={lang === 'TR' ? 'Geri Bildirim' : 'Feedback'}
-        className="fixed top-[calc(0.75rem_+_env(safe-area-inset-top))] right-[calc(0.75rem_+_env(safe-area-inset-right))] md:top-6 md:right-6 z-40 h-10 w-10 md:w-auto md:px-4 bg-surface/90 hover:bg-elevated border border-borderSubtle rounded-full md:rounded-2xl flex items-center justify-center gap-2 text-sm font-semibold text-textPrimary shadow-sm backdrop-blur transition hover:border-borderStrong"
+        className="hidden md:flex fixed md:top-6 md:right-6 z-40 h-10 md:w-auto md:px-4 bg-surface/90 hover:bg-elevated border border-borderSubtle md:rounded-2xl items-center justify-center gap-2 text-sm font-semibold text-textPrimary shadow-sm backdrop-blur transition hover:border-borderStrong"
       >
         <MessageSquare className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />
         <span className="hidden md:inline">{lang === 'TR' ? 'Geri Bildirim' : 'Feedback'}</span>
@@ -1223,7 +1230,7 @@ function App() {
               {toast.type === 'error' ? <TriangleAlert className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" /> : toast.type === 'info' ? <Info className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" /> : <CircleCheck className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />}
             </span>
             <span className="flex-1 leading-snug">{toast.message}</span>
-            <button type="button" onClick={() => setToast(null)} aria-label={lang === 'TR' ? 'Kapat' : 'Close'} className="text-textMuted hover:text-textPrimary leading-none">×</button>
+            <button type="button" onClick={() => setToast(null)} aria-label={lang === 'TR' ? 'Kapat' : 'Close'} className="-my-3 -mr-3 w-11 h-11 shrink-0 flex items-center justify-center rounded-xl text-textMuted hover:text-textPrimary"><X className="w-4 h-4" strokeWidth={2} aria-hidden="true" /></button>
           </div>
         </div>
       )}

@@ -1,4 +1,5 @@
 import { fmtBps } from '../app/copy';
+import { fmtNumber } from '../app/format';
 
 
 function normalizeRawBigInt(value) {
@@ -19,17 +20,16 @@ function normalizeRawBigInt(value) {
   return null;
 }
 
-export function shortNum(value) {
+// [TR] Yalnız gösterim dile göre (TR 1.234,5 / EN 1,234.5); basamak sayısı ve yuvarlama aynı.
+// [EN] Display follows the language; digit count and rounding are unchanged.
+export function shortNum(value, lang = 'EN') {
   const asBigInt = normalizeRawBigInt(value);
   if (asBigInt === null) {
     const num = Number(value ?? 0);
     if (!Number.isFinite(num)) return String(value ?? '0');
-    return num.toLocaleString('en-US', { maximumFractionDigits: 6 });
+    return fmtNumber(num, lang, { maxFractionDigits: 6 });
   }
-  const abs = asBigInt < 0n ? -asBigInt : asBigInt;
-  const raw = abs.toString();
-  const grouped = raw.length > 3 ? raw.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : raw;
-  return `${asBigInt < 0n ? '-' : ''}${grouped}`;
+  return fmtNumber(asBigInt, lang, { maxFractionDigits: 0 });
 }
 
 export function getPreviewTotalPool(previewData) {
@@ -40,16 +40,16 @@ export function getPreviewTotalPool(previewData) {
 
 // [TR] Backend ham taban birim (ör. USDT 6 ondalık) döndürür; kullanıcıya token birimiyle gösterilir.
 // [EN] Backend returns raw base units; show them in token units.
-export function formatTokenUnits(value, decimals = 6) {
+export function formatTokenUnits(value, decimals = 6, lang = 'EN') {
   const raw = normalizeRawBigInt(value);
   if (raw === null) return String(value ?? '0');
   const d = Number.isInteger(Number(decimals)) && Number(decimals) >= 0 ? Number(decimals) : 6;
   const base = 10n ** BigInt(d);
   const neg = raw < 0n;
   const abs = neg ? -raw : raw;
-  const whole = shortNum(abs / base);
+  const whole = shortNum(abs / base, lang);
   const frac = d > 0 ? (abs % base).toString().padStart(d, '0').slice(0, 2) : '';
-  return `${neg ? '-' : ''}${whole}${frac && frac !== '00' ? `.${frac}` : ''}`;
+  return `${neg ? '-' : ''}${whole}${frac && frac !== '00' ? `${lang === 'TR' ? ',' : '.'}${frac}` : ''}`;
 }
 
 
@@ -72,7 +72,7 @@ export default function SettlementPreviewModal({
 }) {
   if (!isOpen) return null;
   const isTR = lang === 'TR';
-  const fmt = (v) => `${formatTokenUnits(v, decimals)} ${tokenSymbol}`;
+  const fmt = (v) => `${formatTokenUnits(v, decimals, isTR ? 'TR' : 'EN')} ${tokenSymbol}`;
   const share = (bps) => fmtBps(bps, isTR ? 'TR' : 'EN');
 
   const makerPayout = previewData?.makerPayout ?? previewData?.maker_payout ?? 0;

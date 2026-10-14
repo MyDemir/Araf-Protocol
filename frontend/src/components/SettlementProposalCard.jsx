@@ -5,6 +5,7 @@ import SettlementPreviewModal from './SettlementPreviewModal';
 import { useSettlementActions } from '../app/contexts/settlement/useSettlementActions';
 import { normalizeSettlementState, toUnixSeconds } from '../app/contexts/settlement/settlementActionModel';
 import { fmtBps } from '../app/copy';
+import { fmtDateTime } from '../app/format';
 
 const ACTIVE_ROOM_STATES = ['CHALLENGED'];
 const TERMINAL_ROOM_STATES = ['RESOLVED', 'CANCELED', 'BURNED'];
@@ -30,11 +31,10 @@ export const SETTLEMENT_NEUTRALITY_COPY = {
 };
 
 const shortHash = (hash) => (hash && hash.length > 12 ? `${hash.slice(0, 8)}...${hash.slice(-4)}` : hash || '—');
-export const safeDate = (v) => {
+export const safeDate = (v, lang = 'EN') => {
   const ts = toUnixSeconds(v);
   if (!ts) return '—';
-  const d = new Date(ts * 1000);
-  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString();
+  return fmtDateTime(ts * 1000, lang);
 };
 
 const CLOSED_PROPOSAL_STATES = ['REJECTED', 'WITHDRAWN', 'EXPIRED'];
@@ -288,7 +288,7 @@ export default function SettlementProposalCard({
                 <p className={`mt-1 text-xs ${isExpired ? 'text-danger' : 'text-textMuted'}`}>
                   {isExpired
                     ? (lang === 'TR' ? 'Teklif süresi doldu.' : 'Proposal is expired.')
-                    : `${lang === 'TR' ? 'Kalan' : 'Time left'}: ${Math.floor(Math.max(0, expiresAt - nowTs) / 60)} ${lang === 'TR' ? 'dk' : 'min'} · ${safeDate(expiresAt)}`}
+                    : `${lang === 'TR' ? 'Kalan' : 'Time left'}: ${Math.floor(Math.max(0, expiresAt - nowTs) / 60)} ${lang === 'TR' ? 'dk' : 'min'} · ${safeDate(expiresAt, lang)}`}
                 </p>
               </div>
             );
@@ -321,7 +321,7 @@ export default function SettlementProposalCard({
                   <button
                     onClick={onPreviewAccept}
                     disabled={isContractLoading || !hasOnchainTradeId || !hasBackendTradeId || !settlementActions.canAccept}
-                    className="px-3 py-2 text-sm rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 transition disabled:opacity-50"
+                    className="px-3 py-2 text-sm rounded-lg bg-brand text-black hover:opacity-90 transition disabled:opacity-50"
                   >
                     {lang === 'TR' ? 'Kabul Et (Önizleme)' : 'Accept (Preview)'}
                   </button>
@@ -353,7 +353,7 @@ export default function SettlementProposalCard({
           <p className="text-success font-bold">{lang === 'TR' ? 'Uzlaşma tamamlandı' : 'Settlement finalized'}</p>
           <p className="text-textSecondary">{lang === 'TR' ? 'Satıcıya' : 'Maker payout'}: <span className="font-mono">{proposal?.makerPayout ?? proposal?.maker_payout ?? '—'}</span></p>
           <p className="text-textSecondary">{lang === 'TR' ? 'Alıcıya' : 'Taker payout'}: <span className="font-mono">{proposal?.takerPayout ?? proposal?.taker_payout ?? '—'}</span></p>
-          <p className="text-textMuted">{lang === 'TR' ? 'Tarih' : 'Finalized at'}: {safeDate(proposal?.finalizedAt ?? proposal?.finalized_at)}</p>
+          <p className="text-textMuted">{lang === 'TR' ? 'Tarih' : 'Finalized at'}: {safeDate(proposal?.finalizedAt ?? proposal?.finalized_at, lang)}</p>
           <p className="text-textMuted">txHash: <span className="font-mono text-textPrimary">{shortHash(proposal?.txHash ?? proposal?.tx_hash)}</span></p>
         </div>
       )}
@@ -432,7 +432,7 @@ export default function SettlementProposalCard({
           <button
             onClick={onPreviewCreate}
             disabled={isContractLoading || !hasBackendTradeId || !hasOnchainTradeId}
-            className={`w-full py-2.5 rounded-lg text-sm font-bold transition ${isContractLoading ? 'bg-elevated text-textMuted border border-borderStrong cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50'}`}
+            className={`w-full py-2.5 rounded-lg text-sm font-bold transition ${isContractLoading ? 'bg-elevated text-textMuted border border-borderStrong cursor-not-allowed' : 'bg-brand hover:opacity-90 text-black disabled:opacity-50'}`}
           >
             {lang === 'TR' ? 'Teklifi önizle' : 'Preview offer'}
           </button>

@@ -1,4 +1,5 @@
 import { getStateLabel, langKey } from '../../copy';
+import { fmtNumber } from '../../format';
 import { normalizeSettlementState } from '../settlement/settlementActionModel';
 
 const roleCopy = {
@@ -31,12 +32,12 @@ const getRoleLabel = (role, lang = 'EN') => {
 };
 
 
-const safeFiatEstimate = (rawTrade) => {
+const safeFiatEstimate = (rawTrade, lang = 'EN') => {
   if (rawTrade?.max === null || rawTrade?.max === undefined) return null;
   const max = Number(rawTrade.max);
   if (!Number.isFinite(max) || max <= 0) return null;
   const fiat = rawTrade?.fiat || rawTrade?.financials?.fiat_currency || null;
-  return `${max.toFixed(0)}${fiat ? ` ${fiat}` : ''}`;
+  return `${fmtNumber(max, lang, { maxFractionDigits: 0 })}${fiat ? ` ${fiat}` : ''}`;
 };
 
 const shortenAddress = (value) => {
@@ -73,7 +74,7 @@ const resolveCardModel = (escrow = {}, lang = 'EN') => {
   const role = escrow?.role || rawTrade?.role || '—';
   const state = escrow?.state || rawTrade?.state || rawTrade?.status || '—';
   const amount = escrow?.amount || rawTrade?.amount || (rawTrade?.cryptoAmountUi != null && rawTrade?.crypto ? `${rawTrade.cryptoAmountUi} ${rawTrade.crypto}` : null);
-  const fiatEstimate = safeFiatEstimate(rawTrade);
+  const fiatEstimate = safeFiatEstimate(rawTrade, lang);
   const settlementProposal = rawTrade?.settlementProposal || escrow?.settlementProposal || null;
   const settlementState = normalizeSettlementState(settlementProposal?.state);
   const hasSettlementProposal = settlementProposal && !['NONE', 'UNKNOWN'].includes(settlementState);

@@ -346,7 +346,7 @@ describe('AppViews market side-aware rendering', () => {
     const buttons = within(mobileNav).getAllByRole('button');
     expect(buttons.length).toBeGreaterThan(0);
     buttons.forEach((button) => {
-      expect(button.className).toContain('h-10');
+      expect(button.className).toContain('min-h-[48px]');
       expect(button.className).toContain('min-w-0');
       expect(button.className).toContain('flex-1');
       expect(button.className).toContain('basis-0');
