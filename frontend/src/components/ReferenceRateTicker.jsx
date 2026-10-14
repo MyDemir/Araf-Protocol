@@ -116,7 +116,7 @@ export default function ReferenceRateTicker({ lang = 'TR' }) {
       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand/[0.12] text-brand" aria-hidden="true">
         <Activity className="h-3.5 w-3.5" strokeWidth={2.4} />
       </span>
-      <div className="reference-ticker-track-wrap min-w-0 flex-1 [-webkit-mask-image:linear-gradient(to_right,transparent,#000_1.5rem,#000_calc(100%_-_2rem),transparent)] [mask-image:linear-gradient(to_right,transparent,#000_1.5rem,#000_calc(100%_-_2rem),transparent)] focus-within:[&_.reference-ticker-track]:[animation-play-state:paused] hover:[&_.reference-ticker-track]:[animation-play-state:paused]">
+      <div className="reference-ticker-track-wrap min-w-0 flex-1 [-webkit-mask-image:linear-gradient(to_right,transparent,#000_2rem,#000_calc(100%_-_2rem),transparent)] [mask-image:linear-gradient(to_right,transparent,#000_2rem,#000_calc(100%_-_2rem),transparent)] focus-within:[&_.reference-ticker-track]:[animation-play-state:paused] hover:[&_.reference-ticker-track]:[animation-play-state:paused]">
         <div className="reference-ticker-track">
           {[...items, ...items].map((item, idx) => (
             <div
