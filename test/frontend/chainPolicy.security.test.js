@@ -3,6 +3,8 @@ import {
   getSupportedChainIds,
   isSupportedChainId,
   isMintTokenEnabled,
+  isFaucetChainId,
+  isConfiguredTestToken,
   checkDeploymentAlignment,
   resolveTargetChain,
   getSupportedChainsMap,
@@ -23,8 +25,19 @@ describe('frontend chain policy security', () => {
   });
 
   it('security_mint_feature_disabled_in_production_policy', () => {
-    expect(isMintTokenEnabled(true)).toBe(false);
-    expect(isMintTokenEnabled(false)).toBe(true);
+    expect(isMintTokenEnabled(true, 'base')).toBe(false);
+    expect(isMintTokenEnabled(true, '')).toBe(false);
+    expect(isMintTokenEnabled(true, 'bogus')).toBe(false);
+    expect(isMintTokenEnabled(true, undefined)).toBe(false);
+    expect(isMintTokenEnabled(false, 'base')).toBe(true);
+    expect(isMintTokenEnabled(true, 'base-sepolia')).toBe(true);
+    expect(isFaucetChainId(8453)).toBe(false);
+    expect(isFaucetChainId(84532)).toBe(true);
+    expect(isFaucetChainId(31337)).toBe(true);
+    const env = { VITE_USDT_ADDRESS: '0x1111111111111111111111111111111111111111', VITE_USDC_ADDRESS: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' };
+    expect(isConfiguredTestToken(env.VITE_USDT_ADDRESS, env)).toBe(true);
+    expect(isConfiguredTestToken(env.VITE_USDC_ADDRESS, env)).toBe(false);
+    expect(isConfiguredTestToken('0x2222222222222222222222222222222222222222', env)).toBe(false);
   });
 });
 
@@ -75,8 +88,9 @@ describe('VITE_TARGET_CHAIN policy', () => {
     expect(getSupportedChainIds(false, 'base')).toEqual([31337, 84532, 8453]);
     expect(getSupportedChainIds(false, 'base-sepolia')).toEqual([31337, 84532, 8453]);
   });
-  it('mint stays disabled in prod regardless of target', () => {
-    expect(isMintTokenEnabled(true)).toBe(false);
+  it('mint stays disabled in prod unless target is base-sepolia', () => {
+    expect(isMintTokenEnabled(true, 'base')).toBe(false);
+    expect(isMintTokenEnabled(true, 'base-sepolia')).toBe(true);
   });
   it('alignment: testnet build accepts 84532, flags 8453', () => {
     expect(checkDeploymentAlignment({ frontendEscrowAddress: escrow, backendDeployment: dep(84532), isProd: true, targetChain: 'base-sepolia' })).toEqual([]);

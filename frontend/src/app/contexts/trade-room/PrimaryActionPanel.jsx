@@ -21,7 +21,7 @@ export const ActionGuidanceButton = ({ action, actionCallbacks, disabledReasons 
 
   const enabledClass = variant === 'secondary'
     ? 'bg-elevated hover:bg-surface text-textPrimary border border-borderStrong'
-    : 'bg-emerald-600 hover:bg-emerald-500 text-white';
+    : 'bg-brand hover:opacity-90 text-black';
 
   return (
     <div className={compact ? '' : 'mt-3'}>
@@ -43,7 +43,10 @@ export const ActionGuidanceButton = ({ action, actionCallbacks, disabledReasons 
 // [TR] Tek birincil aksiyon kartı: (varsa) kısa açıklama, gerekli girdiler (dekont, isim kontrolü, onay) ve tek buton.
 //      "Şimdi yapılacak" / "Önce gerekli" kutuları aynı bilgiyi tekrar ettiği için kaldırıldı.
 // [EN] Single primary action card: optional one-liner, required inputs (receipt, name check, acknowledgement) and one button.
-export const PrimaryActionPanel = ({ primaryAction, disabledReasons = [], actionCallbacks, children = null }) => {
+export const PrimaryActionPanel = ({ primaryAction: primaryActionProp, disabledReasons = [], actionCallbacks, children = null }) => {
+  // [TR] "Aşağıdaki uzlaşma kartı" yönlendirmesi kaldırıldı: kart artık itiraz özetinin hemen altında.
+  // [EN] The "see the settlement card below" pointer is gone: the card now sits right under the challenge summary.
+  const primaryAction = primaryActionProp?.key === 'settlement_guidance' ? null : primaryActionProp;
   if (!primaryAction && !disabledReasons.length && !children) return null;
   const isExecutable = EXECUTABLE_ACTION_TYPES.has(primaryAction?.type) && Boolean(resolveActionConfig(primaryAction, actionCallbacks));
   return (

@@ -46,7 +46,7 @@ The "Where to set" column in the tables shows the **target location** for Base S
 >
 > **If the frontend is also deployed, 3 extra secrets:** `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`.
 >
-> **Optional:** secrets `RELAYER_PRIVATE_KEY`, `GH_VARIABLES_TOKEN` (fine-grained PAT, this repo only, "Variables: read and write"; makes the full-deploy addresses variables automatically), `BASESCAN_API_KEY` (only for `verify_contracts=true`); variables `FLY_APP_NAME` (default `araf-protocol-backend`), `ADMIN_WALLETS`, `VITE_RPC_URL`, `ARAF_REVENUE_VAULT_ADDRESS`, `ARAF_REWARDS_ADDRESS` (if rewards was deployed separately; when defined they are passed to Fly and Vercel).
+> **Optional:** secrets `RELAYER_PRIVATE_KEY`, `GH_VARIABLES_TOKEN` (fine-grained PAT, this repo only, "Variables: read and write"; makes the full-deploy addresses variables automatically), `ETHERSCAN_API_KEY` (only for `verify_contracts=true`; legacy `BASESCAN_API_KEY` still read); variables `FLY_APP_NAME` (default `araf-protocol-backend`), `ADMIN_WALLETS`, `VITE_RPC_URL`, `ARAF_REVENUE_VAULT_ADDRESS`, `ARAF_REWARDS_ADDRESS` (together; written automatically after `deploy_rewards=true` or set manually; when defined they are passed to Fly and Vercel), `FINAL_TREASURY_ADDRESS` (required only with `deploy_rewards=true`), `LIVE_POLL_INTERVAL_MS`, `WORKER_BLOCK_BATCH_SIZE`, `WORKER_REPLAY_BATCH_DELAY_MS`, `EXPECTED_CHAIN_ID` (empty or 84532); secret `BASE_SEPOLIA_RPC_URL_FALLBACKS` (written to Fly as `BASE_RPC_URL_FALLBACKS`). Empty optional values keep the current Fly value.
 >
 > **AFTER deploy (2 variables):** `ARAF_ESCROW_ADDRESS`, `ARAF_DEPLOYMENT_BLOCK`; needed only for later runs of `deploy-runtime-base-sepolia.yml`.
 > If the `GH_VARIABLES_TOKEN` secret is defined, the full-deploy workflow writes these itself; if not, it prints a warning and puts the `gh variable set` lines to run manually on the summary page.
@@ -70,7 +70,11 @@ Columns: L = Local, S = Base Sepolia, M = Mainnet. "Required": always / for the 
 | `BASE_SEPOLIA_RPC_URL` | Base Sepolia RPC URL | With `--network base-sepolia`; errors if missing | not needed | `https://…alchemy…/v2/KEY` | not needed | C/.env | `hardhat.config.js:35`, `:96` |
 | `BASE_RPC_URL` | Base Mainnet RPC URL | With `--network base`; errors if missing | not needed | not needed | `https://…/v2/KEY` | C/.env | `hardhat.config.js:32` |
 | 🔒 `DEPLOYER_PRIVATE_KEY` | Private key of the signing wallet on public networks | On public networks (if missing, the account list is empty) | not needed | `0x…64 hex` | `0x…64 hex` | C/.env | `hardhat.config.js:90`, `:98` |
-| 🔒 `BASESCAN_API_KEY` | API key for BaseScan verification | Optional (`""`) | not needed | optional | optional | C/.env | `hardhat.config.js:106` |
+| 🔒 `ETHERSCAN_API_KEY` | Etherscan V2 API key (etherscan.io account; valid for all chains incl. Base). Replaces `BASESCAN_API_KEY` | Optional (`""`) | not needed | optional | optional | C/.env | `hardhat.config.js` (`etherscan.apiKey`) |
+| 🔒 `BASESCAN_API_KEY` | **Legacy**; read only as a fallback when `ETHERSCAN_API_KEY` is empty. A basescan.org V1 key no longer verifies anything | Optional (`""`) | not needed | avoid | avoid | C/.env | `hardhat.config.js` |
+| `VERIFY_AFTER_DEPLOY` | `true` = `deploy.js` waits 5 confirmations then runs `verify.js` logic; failure only warns | Optional (`false`) | ignored | optional | optional | terminal | `deploy.js` |
+| `VERIFY_DRY_RUN` | `true` = `verify.js` prints the plan without network calls | Optional (`false`) | optional | optional | optional | terminal | `verify.js` |
+| `VERIFY_RETRIES` / `VERIFY_RETRY_DELAY_MS` | Retries (default 5) / delay (default 20000 ms) when the explorer has not indexed the bytecode yet | Optional | optional | optional | optional | terminal | `verify.js` |
 | `REPORT_GAS` | Gas report if `true` | Optional (off) | `false` | `false` | `false` | C/.env | `hardhat.config.js:129` |
 | 🔒 `CMC_API_KEY` | CoinMarketCap key for prices in the gas report | Optional | not needed | not needed | not needed | C/.env | `hardhat.config.js:131` |
 | `ARAF_SOLCJS_PATH` | Path to `soljson.js` in environments where the native compiler cannot be downloaded | Optional (no effect) | rarely | rarely | rarely | C/.env | `hardhat.config.js:48` |
@@ -160,7 +164,8 @@ Shared reading: L = Local, S = Base Sepolia (still runs with `NODE_ENV=productio
 | Variable | What it does | Required? | L | S | M | Where | Used at |
 |---|---|---|---|---|---|---|---|
 | 🔒 `BASE_RPC_URL` | Chain RPC URL (the key is in the URL) | In prod (no public fallback) | `https://…/v2/KEY` | Sepolia RPC | Mainnet RPC | B/.env, Fly | `eventListener.js:589`, `health.js:103` |
-| 🔒 `BASE_WS_RPC_URL` | WebSocket RPC; if missing, HTTP is used (must be `wss://`) | Recommended (optional) | empty | `wss://…` | `wss://…` | B/.env, Fly | `eventListener.js:619` |
+| 🔒 `BASE_RPC_URL_FALLBACKS` | Comma-separated backup RPC URLs (ordered failover on 429/network error; each is chain-verified against `EXPECTED_CHAIN_ID` before first use, unverifiable URLs are never used) | Optional | empty | `https://sepolia.base.org` | 2nd provider URL | B/.env, Fly | `rpcProvider.js` |
+| 🔒 `BASE_WS_RPC_URL` | **Not used for live monitoring** (no WS subscriptions are opened; they burn Alchemy CU). Kept for compatibility/readiness reporting only | Optional | empty | empty | empty | B/.env, Fly | `health.js` |
 | `EXPECTED_CHAIN_ID` | Expected chain: `8453` Base, `84532` Sepolia | In prod; also in dev if `BASE_RPC_URL` is set | `84532` or `31337` | `84532` | `8453` | B/.env, Fly | `expectedChain.js:19`, `tokenEnv.js:35` |
 | `ALLOW_UNSAFE_CHAIN_ID_BYPASS` | Dev only: skips the chain check when `EXPECTED_CHAIN_ID` is empty | Optional (`false`); no effect in prod | optional | never | never | B/.env | `expectedChain.js:20` |
 | `ARAF_ESCROW_ADDRESS` | ArafEscrow address | In prod (worker exits if missing); in dev the worker runs "dry-run" | `0x…40 hex` | deploy output | deploy output | B/.env, Fly | `eventListener.js:590`, `protocolConfig.js:107` |
@@ -203,7 +208,9 @@ In prod `KMS_PROVIDER=env` is **rejected**; the only exception is a narrow testn
 | `WORKER_START_BLOCK` | Alternative to the above | Same (one of the two) | empty | alternative | alternative | B/.env, Fly | `eventListener.js:1095` |
 | `WORKER_DISABLED` | If `true`, the worker never starts (API only) | Optional (`false`) | empty | empty | empty | B/.env, Fly | `eventListener.js:591` |
 | `WORKER_FINALITY_DEPTH` | Block depth for the safe checkpoint | Optional (`6` in prod, `1` otherwise) | empty | empty | empty | B/.env, Fly | `eventListener.js:80-81` |
-| `WORKER_BLOCK_BATCH_SIZE` | Replay batch size | Optional (`1000`) | empty | empty | empty | B/.env, Fly | `eventListener.js:78` |
+| `WORKER_BLOCK_BATCH_SIZE` | Block range per `eth_getLogs` for replay AND live ticks. **Alchemy free plan: set `10`** | Optional (`1000`) | empty | `10` (free plan) | `10` (free plan) | B/.env, Fly | `eventListener.js:78` |
+| `LIVE_POLL_INTERVAL_MS` | Live polling period (timer, NOT per block). Each tick = 1x `eth_blockNumber` + 1x `eth_getLogs`. Lower bound 2000 | Optional (`15000`; keep ≤ 30000 so the block watchdog stays quiet) | empty | `15000` | `15000` | B/.env, Fly | `eventListener.js` |
+| `WORKER_REPLAY_BATCH_DELAY_MS` | Pause between replay / catch-up batches (per-second CU cap; with 10-block batches ≈ 4 getLogs/s ≈ 300 CU/s) | Optional (`250`) | empty | empty | empty | B/.env, Fly | `eventListener.js` |
 | `WORKER_CHECKPOINT_INTERVAL_BLOCKS` | Checkpoint interval (blocks) | Optional (`50`) | empty | empty | empty | B/.env, Fly | `eventListener.js:79` |
 | `WORKER_REPLAY_BACKOFF_BASE_MS` / `_MAX_MS` | Floor/ceiling of the replay error backoff | Optional (`5000` / `300000`) | empty | empty | empty | B/.env, Fly | `eventListener.js:83-84` |
 | `WORKER_BLOCK_STALE_MS` | If no new block for this many ms, reconnect; if still none, the process exits | Optional (`75000`) | empty | empty | empty | B/.env, Fly | `eventListener.js:87` |
@@ -212,6 +219,27 @@ In prod `KMS_PROVIDER=env` is **rejected**; the only exception is a narrow testn
 | `WORKER_MAX_LAG_BLOCKS` | Maximum block lag for `/ready` | Optional (`25`) | empty | empty | empty | B/.env, Fly | `health.js:20` |
 | 🔒 `READY_INTERNAL_TOKEN` | `x-internal-token` value for the full `/ready` body | Optional (feature is off if missing) | empty | long random | long random | B/.env, Fly | `health.js:348` |
 | `READY_CACHE_TTL_MS` | `/ready` cache duration (clamped to 5000-10000) | Optional (`7000`) | empty | empty | empty | B/.env, Fly | `health.js:291` |
+
+### 3.7.1 RPC budget (Alchemy free plan) and recommended profile
+
+- Live monitoring is timer-driven HTTP polling (`eth_blockNumber` + one `eth_getLogs` for all watched contracts). **No WebSocket subscription is ever opened**, even if `BASE_WS_RPC_URL` is set, because Alchemy WS subscriptions also burn CU. All HTTP users (worker, protocol config, on-chain trade state, jobs) share one provider with a static network: chain ID is verified once, not on every call.
+- On 429 / "compute units" / "capacity" / block-range errors the worker backs off (interval x2 + jitter, max 5 min; monthly-capacity message: 30 min), never advances past the unread range, logs one warning per backoff window and one info on recovery. `/ready` reports `rpc_rate_limited` in `degradedReasons`.
+- Free plan: `eth_getLogs` is limited to a **10-block range** -> set `WORKER_BLOCK_BATCH_SIZE=10`. A range error is logged with "WORKER_BLOCK_BATCH_SIZE'ı düşür".
+- The free quota (~30M CU/month) is shared by **all apps in the same Alchemy account**. If testnet and mainnet use the same account the quota is split in two.
+- Failover note: a backup RPC that lags behind the primary only adds latency (events are read later); fork/reorg differences are covered by `WORKER_FINALITY_DEPTH` (the safe checkpoint only advances past finalized blocks).
+- Secrets: RPC URLs (API keys) are masked in every log/error (`/v2/[REDACTED]`).
+
+Monthly CU estimate (`eth_getLogs` ~75 CU + `eth_blockNumber` ~10 CU = ~85 CU per tick, 30 days):
+
+| `LIVE_POLL_INTERVAL_MS` | Ticks / month | CU / month | Fits in 30M? |
+|---|---|---|---|
+| 2000 (old per-block behaviour ~ same) | 1 296 000 | ~110 M | No |
+| 12000 | 216 000 | ~18.4 M | Yes, but only ~1 environment |
+| **15000 (default)** | 172 800 | **~14.7 M** | Yes (two environments do not fit) |
+| 30000 | 86 400 | ~7.3 M | Yes (two environments fit) |
+
+Recommended free-plan profile: `LIVE_POLL_INTERVAL_MS=15000`, `WORKER_BLOCK_BATCH_SIZE=10`, `WORKER_REPLAY_BATCH_DELAY_MS=250`, `BASE_RPC_URL_FALLBACKS=<2nd free provider>` (for Base Sepolia the public `https://sepolia.base.org` works). Other RPC load is small: `/ready` (cached 5-10 s, ~10 CU per refresh), protocol config refresh (event-driven, ~12 `eth_call`), on-chain trade state (cached 10 s), daily/hourly jobs.
+
 
 ### 3.8 Relayer / rewards
 
@@ -227,7 +255,7 @@ In prod `KMS_PROVIDER=env` is **rejected**; the only exception is a narrow testn
 
 | Variable | What it does | Required? | L | S | M | Where | Used at |
 |---|---|---|---|---|---|---|---|
-| `ADMIN_WALLETS` | Wallets for `/api/admin/*` and `isAdmin` (comma-separated) | Optional (if empty, nobody is admin) | your own wallet | `0x…40 hex` | `0x…40 hex` | B/.env, Fly | `utils/adminWallets.js:6` |
+| `ADMIN_WALLETS` | Wallets for `/api/admin/*` and `isAdmin` (comma-separated) | Optional but **effectively required in production**: if empty nobody is admin, the admin menu never appears and one warning is logged at startup. Fly: `fly secrets set ADMIN_WALLETS=0x…,0x…` (the deploy workflow writes it only if the GitHub variable is set); restart after changing | your own wallet | `0x…40 hex` | `0x…40 hex` | B/.env, Fly | `utils/adminWallets.js:6` |
 | `IDENTITY_NORMALIZATION_GUARD` | `off` / `warn` / `enforce` (mixed numeric id guard) | Optional (`enforce` in prod, `warn` otherwise) | empty | empty | empty | B/.env, Fly | `app.js:88-94` |
 | `PII_IDENTITY_NORMALIZATION_GUARD` | Separate mode for PII routes | Optional (falls back to the previous variable, then `enforce`) | empty | empty | empty | B/.env, Fly | `routes/pii.js:80` |
 | `IDENTITY_MIGRATION_BATCH_SIZE` | Batch size for `migrate:identity` | Optional (`1000`) | empty | empty | empty | B/.env | `migrations/normalizeIdentityFields.js:170` |
@@ -305,7 +333,7 @@ For a local Sepolia build, `npm run build:frontend:testnet` (`package.json:12`) 
 | Private key / token | `DEPLOYER_PRIVATE_KEY`, `RELAYER_PRIVATE_KEY`, `FLY_API_TOKEN`, `VERCEL_TOKEN` | Never in the repo, logs, or frontend. Deployer and relayer should be different, low-balance wallets. |
 | Secret / token | `JWT_SECRET`, `MASTER_ENCRYPTION_KEY` (on Sepolia it sits as a plain Fly secret; testnet only, no real PII), `AWS_ENCRYPTED_DATA_KEY`, `VAULT_TOKEN`, `VAULT_ENCRYPTED_DATA_KEY`, `READY_INTERNAL_TOKEN` | Fly secrets / `.env`; never committed to the repo. |
 | Key/password inside a URL | `MONGODB_URI`, `REDIS_URL`, `BASE_RPC_URL`, `BASE_WS_RPC_URL`, `BASE_SEPOLIA_RPC_URL` | The Alchemy key and DB/Redis password sit in the URL; treat them as secrets. |
-| API key | `BASESCAN_API_KEY`, `CMC_API_KEY` | Low risk, but do not share them. |
+| API key | `ETHERSCAN_API_KEY`, `CMC_API_KEY` | Low risk, but do not share them. |
 
 **None of them may be set as `VITE_*` in the frontend.** `VITE_*` values are **embedded as plain text** in the JavaScript bundle at build time; anyone who opens the site can
 see them (even with source maps disabled, `frontend/vite.config.js:28` only disables source maps; it does not prevent value embedding). So `VITE_*` must contain only public information
@@ -326,7 +354,7 @@ Addresses (`ARAF_ESCROW_ADDRESS`, token addresses) are not secrets.
 | `AWS_KMS_KEY_ARN` (`KMS_KEY_ARN`) | `docs/TR/MAINNET_READINESS_CHECKLIST.md:54`; `backend/.env.example:66` (says it is not read) | Not read; the key ID is inside the `CiphertextBlob`. Do not set it. |
 | `MIN_REWARD_BPS`, `MAX_REWARD_BPS` | `docs/TR/REWARDS_ROLLOUT.md` | Not read as env in code (contract constant; **not verified**, only seen via grep that it is not read as env). |
 | `VITE_ADMIN_WALLETS` | Old docs | Removed (`AppViews.jsx:206`). |
-| `BASESCAN_API_KEY` (as a GitHub secret) | `docs/EN/DEPLOY_BASE_SEPOLIA.md:14` | No workflow reads it; meaningful only in `contracts/.env` for a manual `hardhat verify`. |
+| `BASESCAN_API_KEY` (as a GitHub secret) | `.github/workflows/deploy-base-sepolia.yml` | **Legacy name.** `deploy-base-sepolia.yml` reads it only as a fallback when `ETHERSCAN_API_KEY` is missing and `verify_contracts=true` (`ETHERSCAN_API_KEY \|\| BASESCAN_API_KEY`). Use `ETHERSCAN_API_KEY` for new setups. |
 | `NODE_PATH` | `contracts/hardhat.config.js:9-10` | Not read; the script sets it itself; you do not need to set it. |
 
 ### 6.2 Aliases (which one to prefer)
@@ -345,7 +373,7 @@ Addresses (`ARAF_ESCROW_ADDRESS`, token addresses) are not secrets.
 ## 7. What the workflow sets automatically
 
 There are two workflows: `deploy-base-sepolia.yml` (contract + Fly + optional Vercel) and `deploy-runtime-base-sepolia.yml` (Fly and/or Vercel without redeploying the contract).
-`deployRewards.js` is not part of the workflows (deliberately). The user does **not** enter the values below manually. Line numbers in this section are approximate; the workflow files have been updated, so check the file for current lines.
+`deployRewards.js` runs only in the full deploy with `deploy_rewards=true` (off by default; lock and confirmation: `DEPLOY_BASE_SEPOLIA.md`). The Fly secret and Vercel build-env lists come from one shared script in both workflows: `.github/scripts/stage-runtime-env.sh`. The user does **not** enter the values below manually. Line numbers in this section are approximate; the workflow files have been updated, so check the file for current lines.
 
 ### 7.1 Fly secrets: what the workflow writes (`flyctl secrets import --stage`, then `flyctl deploy`)
 
@@ -368,10 +396,12 @@ Full deploy: `deploy-base-sepolia.yml:141-178` · runtime: `deploy-runtime-base-
 | `MONGODB_URI`, `REDIS_URL`, `JWT_SECRET`, `MASTER_ENCRYPTION_KEY` | GitHub secret of the same name | 158-160, 165 / 146-148, 153 |
 | `RELAYER_PRIVATE_KEY`, `ADMIN_WALLETS` | GitHub secret / variable; **not written if empty** | 176-177 / 164-165 |
 
-Conditional (in both workflows): if the repo variable `ARAF_REVENUE_VAULT_ADDRESS` / `ARAF_REWARDS_ADDRESS` is defined (validated with an address regex), it is written to Fly secrets under the same names; if not defined, nothing is written and the reward mirror/recorder stay inactive.
+Conditional (both workflows, resolved by `.github/scripts/resolve-rewards-addresses.js`): `ARAF_REVENUE_VAULT_ADDRESS` / `ARAF_REWARDS_ADDRESS` (full deploy with `deploy_rewards=true`: the rewards manifest; otherwise the repo variables, with a non-empty runtime input first) are written to Fly under the same names. Validation: 0x+40 hex, non-zero, valid EIP-55 checksum if mixed case, both together; a manifest/variable conflict fails. If not defined, nothing is written and the reward mirror/recorder stay inactive.
+
+Conditional, not written when empty (the Fly value is kept): `BASE_RPC_URL_FALLBACKS` (GitHub secret `BASE_SEPOLIA_RPC_URL_FALLBACKS`; RPC URLs carry keys), `LIVE_POLL_INTERVAL_MS` [2000-300000], `WORKER_BLOCK_BATCH_SIZE` [1-2000], `WORKER_REPLAY_BATCH_DELAY_MS` [0-10000] (GitHub variables). `EXPECTED_CHAIN_ID` is always written as 84532; if the variable is set it must be 84532. `ETHERSCAN_API_KEY` is never sent to the backend.
 
 Backend variables the workflow does not write (all optional/with defaults):
-`ARAF_TRACKED_TOKENS`, `WORKER_*`, `JOB_*`, `READY_INTERNAL_TOKEN`, `AWS_*`, `VAULT_*` and other tuning variables.
+`ARAF_TRACKED_TOKENS`, `WORKER_*` other than the above, `JOB_*`, `READY_INTERNAL_TOKEN`, `AWS_*`, `VAULT_*` and other tuning variables.
 
 ### 7.2 Vercel build-env: what the workflow supplies (`vercel deploy --prod --build-env ...`)
 
@@ -391,7 +421,7 @@ Full: `deploy-base-sepolia.yml:211-228` · runtime: `deploy-runtime-base-sepolia
 ### 7.3 Contracts: what is passed as env to the deploy step (`contracts/.env` is not written)
 
 `deploy-base-sepolia.yml:87-100`: `CONFIRM_PUBLIC_DEPLOY=yes` (fixed), `DEPLOYER_PRIVATE_KEY`, `BASE_SEPOLIA_RPC_URL` (secrets), `TREASURY_ADDRESS`, `FINAL_OWNER_ADDRESS`,
-`BASE_SEPOLIA_USDT_ADDRESS`, `BASE_SEPOLIA_USDC_ADDRESS` (variables). `BASESCAN_API_KEY` is passed in a separate step only when `verify_contracts=true` (experimental, `continue-on-error`); it is not passed to the `deploy.js` step.
+`BASE_SEPOLIA_USDT_ADDRESS`, `BASE_SEPOLIA_USDC_ADDRESS` (variables). `ETHERSCAN_API_KEY` (falls back to the legacy `BASESCAN_API_KEY` secret) is passed in a separate step only when `verify_contracts=true` (experimental, `continue-on-error`, runs `npm run verify:base-sepolia`); it is not passed to the `deploy.js` step.
 
 ### 7.4 Names meaningful only in GitHub (not read by code)
 
@@ -405,7 +435,7 @@ Full: `deploy-base-sepolia.yml:211-228` · runtime: `deploy-runtime-base-sepolia
 | `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` | secret | Vercel CLI identity (`:31-32`, `:197-202`) |
 | `GH_VARIABLES_TOKEN` | secret (optional) | Fine-grained PAT (this repo only, Variables: read and write) for `gh variable set ARAF_ESCROW_ADDRESS/ARAF_DEPLOYMENT_BLOCK` after a full deploy. Not printed in logs |
 | `deploy_test_usdt` | workflow input (full deploy) | If true and the `BASE_SEPOLIA_USDT_ADDRESS` variable is empty, deploys tUSDT first; ignored if the variable is set |
-| `BASESCAN_API_KEY` | secret (optional) | Only `verify_contracts=true` (experimental) |
+| `ETHERSCAN_API_KEY` (legacy: `BASESCAN_API_KEY`) | secret (optional) | Only `verify_contracts=true` (experimental) |
 | `ARAF_REVENUE_VAULT_ADDRESS`, `ARAF_REWARDS_ADDRESS` | variable (optional) | If defined, passed as Fly secrets and Vercel `VITE_*` build-env |
 
 ---
@@ -427,3 +457,39 @@ Fixed items are marked "fixed"; the others are open. (The earlier draft's items 
 11. **[fixed: `scripts/init-env.js` / `npm run init:env` generates the secrets; a local `EXPECTED_CHAIN_ID=31337` note was added to `.env.example`, the example value stayed 8453]** **`backend/.env.example` does not work as is when copied with a plain `cp` (deliberate):** the `JWT_SECRET` example is 60 characters (`:30`), the code requires at least 64 (`siwe.js:95`); the `MASTER_ENCRYPTION_KEY` example (`:75`) is not 64 hex (`encryption.js:114`); the `EXPECTED_CHAIN_ID=8453` example (`:83`) gives a mismatch error locally if the RPC is different (`expectedChain.js:55-58`).
 12. **[fixed: backend/.env.example comments were clarified]** **Fail-fast in prod but under-emphasized in the example:** `JWT_SECRET` is not prod-specific; it is required in **every environment** (`siwe.js:94`, at module load; `/ready` also requires it via `health.js:96-99`). A localhost-only `ALLOWED_ORIGINS` stops the process at startup (`app.js:161-163`). If `ARAF_DEPLOYMENT_BLOCK`/`WORKER_START_BLOCK` and the Redis checkpoint are both missing, the worker `throw`s in prod (`eventListener.js:1098-1100`).
 13. **[fixed: rewards deploy is deliberately kept outside the workflow; however, if the repo variable `ARAF_REVENUE_VAULT_ADDRESS`/`ARAF_REWARDS_ADDRESS` is defined (validated with an address regex), both workflows pass them as Fly secrets (same names) and Vercel build-env (`VITE_REVENUE_VAULT_ADDRESS`, `VITE_REWARDS_ADDRESS`); if not defined, nothing is written]** **Rewards is outside the workflow.** Rewards is a separate operation (`DEPLOY_BASE_SEPOLIA.md`); until the addresses are entered as variables, the reward mirror and recorder stay inactive in the Sepolia demo.
+
+
+### Runtime settings (admin panel)
+
+Precedence: **admin value > env > code default**; bounds are enforced server-side for every source. Changes apply from the next round without a restart (15 s cache; if the DB is unreadable the last known value, else env/default, is used).
+
+| Setting | Bounds | Default |
+|---|---|---|
+| `LIVE_POLL_INTERVAL_MS` | 5000–300000 | 15000 |
+| `WORKER_BLOCK_BATCH_SIZE` | 1–2000 | 1000 |
+| `WORKER_REPLAY_BATCH_DELAY_MS` | 0–10000 | 250 |
+
+Extreme combinations (e.g. `WORKER_BLOCK_BATCH_SIZE=1` with `WORKER_REPLAY_BATCH_DELAY_MS=0`) make the worker hammer the RPC and can exhaust the quota or trigger 429s.
+
+Recommendation: enforce append-only at the DB role level for the audit collections (`runtimesettingaudits`, `paymentrailaudits`): grant the application role only `insert` and `find`, no `update`/`remove`. Schema-level immutability is enforced in code only; the DB role is the second layer.
+
+RPC URLs (`BASE_RPC_URL`, `BASE_RPC_URL_FALLBACKS`) are intentionally not in the panel and stay env-only: a hijacked admin session could supply an RPC that reports the right chain ID but returns forged logs, and the worker trusts those logs. Secrets, contract addresses, `EXPECTED_CHAIN_ID`, finality, CORS, `ADMIN_WALLETS`, KMS and SEC-01 settings are also env-only.
+
+
+### Admin "Runtime settings"
+
+Precedence: admin (DB) > env > default; bounds apply to every source; no restart needed (cache up to ~15 s). Groups and bounds live in `backend/scripts/config/runtimeSettingDefs.js`.
+
+- Worker: `LIVE_POLL_INTERVAL_MS`, `WORKER_BLOCK_BATCH_SIZE`, `WORKER_REPLAY_BATCH_DELAY_MS`, `WORKER_CHECKPOINT_INTERVAL_BLOCKS` (1-1000), `WORKER_REPLAY_BACKOFF_BASE_MS` (500-60000), `WORKER_REPLAY_BACKOFF_MAX_MS` (5000-1800000)
+- Watchdog/Health: `WORKER_BLOCK_STALE_MS` (30000-900000), `WORKER_WATCHDOG_INTERVAL_MS` (5000-120000), `WORKER_LIVENESS_STALE_MS` (60000-1800000; default 2x block stale + 30 s), `WORKER_MAX_LAG_BLOCKS` (1-1000)
+- Caches: `READY_CACHE_TTL_MS` (5000-10000), `MARKET_CACHE_TTL_MS` (0-60000), `CONFIG_CACHE_TTL_SECONDS` (60-21600), `RATE_LIMIT_TIER_CACHE_TTL_SECONDS` (10-600; tier cache only, not limit counts)
+- Rate reference: `REFERENCE_TICKER_CRYPTO_TTL_SECONDS`, `..._FIAT_TTL_SECONDS`, `..._LAST_GOOD_TTL_SECONDS`, `..._MAX_STALE_SECONDS`
+- Background jobs: `REPUTATION_DECAY_CANDIDATE_LIMIT`, `REPUTATION_DECAY_TX_LIMIT` (1-100, relayer gas), `REWARD_RECORDER_CANDIDATE_LIMIT`, `REWARD_RECORDER_BATCH_LIMIT` (1-50, relayer gas; ~100k gas per id estimated, the same ids are retried if the tx reverts)
+
+Cross-field constraints (on effective values, `400` on violation): liveness >= 2 x block stale; replay backoff base <= max; block stale >= 3 x `LIVE_POLL_INTERVAL_MS`; ticker last-good TTL >= max stale; ticker fiat TTL <= max stale.
+
+Intentionally not added: `PAYMENT_RAILS_CACHE_TTL_MS` (payment-rail disable propagation), `USER_BANK_RISK_CLEANUP_CURSOR_BATCH_SIZE` (PII path), `IDENTITY_MIGRATION_BATCH_SIZE` (one-off CLI), `REDIS_READY_WAIT_MS` (read at startup only; needs restart).
+
+Startup audit: once at process start, each key's raw env value is checked. A non-integer value (ignored) or one clamped to the bounds produces a `logger.warn` (key, raw value, applied value); env/default values that violate a constraint also warn. There is no per-read logging. The admin GET reports the same violations via `constraintViolations`.
+
+Note: the `WORKER_BLOCK_STALE_MS >= 3 x LIVE_POLL_INTERVAL_MS` constraint is enforced only when `WORKER_BLOCK_STALE_MS` is changed; raising the poll interval is not blocked. The watchdog already uses `max(WORKER_BLOCK_STALE_MS, 3 x LIVE_POLL_INTERVAL_MS)` as its threshold, so there is no false-alarm risk.

@@ -11,9 +11,15 @@ export const ENV_ERROR_CODES = Object.freeze({
   ESCROW_ADDRESS_MISSING: 'ESCROW_ADDRESS_MISSING',
   // [TR] API taban URL politikası ihlali (ör. production'da mutlak VITE_API_URL).
   API_POLICY_VIOLATION: 'API_POLICY_VIOLATION',
+  // [TR] Altyapı erişilemiyor (kapatılabilir, güvenlik uyarısı DEĞİL): kritik listeye bilerek girmez.
+  // [EN] Infrastructure unreachable (dismissible, not a safety alert): deliberately NOT in the critical list.
+  BACKEND_UNREACHABLE: 'BACKEND_UNREACHABLE',
+  RPC_UNREACHABLE: 'RPC_UNREACHABLE',
+  // [TR] Backend erişilebilir ama kısıtlı modda (503 SERVICE_DEGRADED): sakin, kapatılabilir; kritik listeye GİRMEZ.
+  SERVICE_DEGRADED: 'SERVICE_DEGRADED',
 });
 
-// [TR] Şu an tanımlı tüm kodlar kritiktir; ileride kritik olmayan bir kod eklenirse bu listeye girmez.
+// [TR] Güvenlik kodları kritiktir. BACKEND_UNREACHABLE / RPC_UNREACHABLE bilgi amaçlıdır, kritik değildir.
 export const CRITICAL_ENV_ERROR_CODES = Object.freeze([
   ENV_ERROR_CODES.ESCROW_MISMATCH,
   ENV_ERROR_CODES.BACKEND_CHAIN_UNSUPPORTED,

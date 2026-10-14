@@ -3,6 +3,7 @@ import { afterEach, describe, it, expect, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { buildAppViews } from '../../frontend/src/app/AppViews';
+import { resolveNewTxGate } from '../../frontend/src/app/txGate';
 
 afterEach(() => cleanup());
 
@@ -191,8 +192,8 @@ describe('AppViews market side-aware rendering', () => {
 
     expect(screen.getAllByText('Sell Order').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Buy Order').length).toBeGreaterThan(0);
-    expect(screen.getByRole('button', { name: /Buy/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Sell/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Buy' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sell' })).toBeInTheDocument();
     expect(screen.getAllByText('ORDER OWNER SUMMARY').length).toBeGreaterThan(0);
     expect(screen.getByText('Order owner is selling crypto')).toBeInTheDocument();
     expect(screen.getByText('Order owner is buying crypto')).toBeInTheDocument();
@@ -345,7 +346,7 @@ describe('AppViews market side-aware rendering', () => {
     const buttons = within(mobileNav).getAllByRole('button');
     expect(buttons.length).toBeGreaterThan(0);
     buttons.forEach((button) => {
-      expect(button.className).toContain('h-10');
+      expect(button.className).toContain('min-h-[48px]');
       expect(button.className).toContain('min-w-0');
       expect(button.className).toContain('flex-1');
       expect(button.className).toContain('basis-0');
@@ -610,22 +611,26 @@ describe('AppViews market side-aware rendering', () => {
     expect(screen.getByRole('button', { name: 'Install app' })).toBeInTheDocument();
   });
 
-  it('market filter bar wires fiat, tier, sort, amount and hide-mine to setMarketFilter', () => {
+  it('market terms sentence wires fiat, tier, sort, amount and hide-mine to setMarketFilter', () => {
     const setMarketFilter = vi.fn();
     const views = buildAppViews({ ...baseCtx, address: '0x' + '1'.repeat(40), isAuthenticated: true, userReputation: { effectiveTier: 2 }, setMarketFilter });
     render(<div>{views.renderMarket()}</div>);
-    fireEvent.change(screen.getByLabelText('Currency'), { target: { value: 'TRY' } });
-    fireEvent.change(screen.getByLabelText('Bond'), { target: { value: 'ELIGIBLE' } });
-    fireEvent.change(screen.getByLabelText('Sort'), { target: { value: 'NEWEST' } });
-    fireEvent.change(screen.getByLabelText('Trade amount'), { target: { value: '250' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Hide mine' }));
-    expect(setMarketFilter.mock.calls).toEqual([['fiat', 'TRY'], ['tier', 'ELIGIBLE'], ['sort', 'NEWEST'], ['amount', '250'], ['hideOwn', true]]);
-    expect(screen.getByRole('option', { name: 'I can take (≤ T2)' })).not.toBeDisabled();
+    const pick = (slot, name) => {
+      fireEvent.click(screen.getByTestId(slot));
+      fireEvent.click(within(screen.getByRole('dialog')).getByRole('radio', { name }));
+    };
+    pick('market-clause-fiat', 'TRY');
+    pick('market-clause-tier', 'I can take (≤ T2)');
     // Without a side "best rate" is ambiguous, so the sort list starts at largest amount.
-    expect(screen.queryByRole('option', { name: 'Best rate' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('market-clause-sort'));
+    expect(screen.queryByRole('radio', { name: 'Best rate' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: 'Newest' }));
+    fireEvent.change(screen.getByLabelText('Trade amount'), { target: { value: '250' } });
+    fireEvent.click(screen.getByRole('button', { name: 'excluding mine' }));
+    expect(setMarketFilter.mock.calls).toEqual([['fiat', 'TRY'], ['tier', 'ELIGIBLE'], ['sort', 'NEWEST'], ['amount', '250'], ['hideOwn', true]]);
   });
 
-  it('market filter bar shows the active filter count, reset and the server total', () => {
+  it('market terms show the bound count, reset and the server total', () => {
     const resetMarketFilters = vi.fn();
     const views = buildAppViews({
       ...baseCtx,
@@ -637,17 +642,21 @@ describe('AppViews market side-aware rendering', () => {
     });
     render(<div>{views.renderMarket()}</div>);
     expect(screen.getByText('1 order · 120 total')).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Best rate' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: /sign in/ })).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Clear filters (2)' }));
+    expect(screen.getAllByText('2 set').length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByTestId('market-clause-sort'));
+    expect(screen.getByRole('radio', { name: 'Best rate' })).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('market-clause-tier'));
+    expect(screen.getByRole('radio', { name: /I can take/ })).toBeDisabled();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Reset' })[0]);
     expect(resetMarketFilters).toHaveBeenCalled();
   });
 
   it('empty filtered market offers a reset instead of "no orders yet"', () => {
     const views = buildAppViews({ ...baseCtx, marketFilters: { ...baseCtx.marketFilters, fiat: 'EUR' }, filteredOrders: [] });
     render(<div>{views.renderMarket()}</div>);
-    expect(screen.getByText('No orders match this filter.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Clear filters' })).toBeInTheDocument();
+    expect(screen.getByText('No orders match these terms.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reset all terms' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remove EUR' })).toBeInTheDocument();
   });
 });
 
@@ -687,5 +696,39 @@ describe('item 9: trade room fee is unknown, not 0', () => {
     render(<div>{buildAppViews(roomCtx({ takerFeeBps: 10 })).renderTradeRoom()}</div>);
     expect(screen.queryByText(/Fee unknown/)).not.toBeInTheDocument();
     expect(screen.getByText(/Fee 0\.01/)).toBeInTheDocument();
+  });
+});
+
+describe('trade room under infra failure (fail-closed gate scope)', () => {
+  const lockedTrade = { id: 'trade-1', onchainId: 1, max: 100, fiat: 'TRY', crypto: 'USDT', rate: 10, maker: '0xmaker' };
+
+  it('shows the calm notice but does NOT claim maintenance mode: exit actions are not gated by infra', () => {
+    const views = buildAppViews({
+      ...baseCtx, currentView: 'tradeRoom', activeTrade: lockedTrade,
+      txGate: resolveNewTxGate({ rpcChecked: true, rpcUnreachable: true }), infraDegraded: true,
+    });
+    render(<div>{views.renderTradeRoom()}</div>);
+    expect(screen.getByTestId('trade-room-infra-notice')).toHaveTextContent(/verified on-chain by the contract rules/);
+    expect(screen.queryByText('System is in maintenance mode.')).toBeNull();
+  });
+
+  it('real contract pause keeps the old behaviour (maintenance reason, no infra notice)', () => {
+    const views = buildAppViews({
+      ...baseCtx, currentView: 'tradeRoom', activeTrade: lockedTrade, isPaused: true,
+      txGate: resolveNewTxGate({ isPaused: true, rpcChecked: true }),
+    });
+    render(<div>{views.renderTradeRoom()}</div>);
+    expect(screen.getAllByText('System is in maintenance mode.').length).toBeGreaterThan(0);
+    expect(screen.queryByTestId('trade-room-infra-notice')).toBeNull();
+  });
+
+  it('market take button is unavailable while the gate is closed', () => {
+    const order = { id: 'o1', onchainId: 1, side: 'SELL_CRYPTO', crypto: 'USDT', fiat: 'TRY', rate: 10, max: 100, min: 10, tier: 1, maker: '0xmaker', makerAddress: '0xmaker', ctaLabel: 'Buy' };
+    const views = buildAppViews({
+      ...baseCtx, currentView: 'market', orders: [order], filteredOrders: [order],
+      txGate: resolveNewTxGate({ rpcChecked: false }),
+    });
+    render(<div>{views.renderMarket()}</div>);
+    expect(screen.queryAllByText(/Checking…/).length).toBeGreaterThan(0);
   });
 });

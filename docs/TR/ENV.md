@@ -44,7 +44,7 @@ Tablolardaki "Nereye girilir" sütunu Base Sepolia/Mainnet için **hedef yeri** 
 >
 > **Frontend de deploy edilecekse ek 3 secret:** `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`.
 >
-> **Opsiyonel:** secret `RELAYER_PRIVATE_KEY`, `GH_VARIABLES_TOKEN` (fine-grained PAT, yalnız bu repo, "Variables: read and write"; tam deploy adresleri otomatik variable yapar), `BASESCAN_API_KEY` (yalnız `verify_contracts=true`); variable `FLY_APP_NAME` (varsayılan `araf-protocol-backend`), `ADMIN_WALLETS`, `VITE_RPC_URL`, `ARAF_REVENUE_VAULT_ADDRESS`, `ARAF_REWARDS_ADDRESS` (rewards ayrı deploy edildiyse; tanımlıysa Fly ve Vercel'e geçer).
+> **Opsiyonel:** secret `RELAYER_PRIVATE_KEY`, `GH_VARIABLES_TOKEN` (fine-grained PAT, yalnız bu repo, "Variables: read and write"; tam deploy adresleri otomatik variable yapar), `ETHERSCAN_API_KEY` (yalnız `verify_contracts=true`; eski `BASESCAN_API_KEY` hâlâ okunur); variable `FLY_APP_NAME` (varsayılan `araf-protocol-backend`), `ADMIN_WALLETS`, `VITE_RPC_URL`, `ARAF_REVENUE_VAULT_ADDRESS`, `ARAF_REWARDS_ADDRESS` (birlikte; `deploy_rewards=true` sonrası otomatik yazılır ya da elle; tanımlıysa Fly ve Vercel'e geçer), `FINAL_TREASURY_ADDRESS` (yalnız `deploy_rewards=true` iken zorunlu), `LIVE_POLL_INTERVAL_MS`, `WORKER_BLOCK_BATCH_SIZE`, `WORKER_REPLAY_BATCH_DELAY_MS`, `EXPECTED_CHAIN_ID` (boş ya da 84532); secret `BASE_SEPOLIA_RPC_URL_FALLBACKS` (Fly'a `BASE_RPC_URL_FALLBACKS` olarak). Opsiyoneller boşsa Fly'daki mevcut değer korunur.
 >
 > **Deploy SONRASI (2 variable):** `ARAF_ESCROW_ADDRESS`, `ARAF_DEPLOYMENT_BLOCK`; yalnız sonraki `deploy-runtime-base-sepolia.yml` çalıştırmaları için gerekir.
 > `GH_VARIABLES_TOKEN` secret'ı tanımlıysa tam deploy workflow'u bunları kendisi yazar; tanımlı değilse uyarı verir ve özet sayfasına elle çalıştırılacak `gh variable set` satırlarını basar.
@@ -68,7 +68,11 @@ Sütunlar: Y = Yerel, S = Base Sepolia, M = Mainnet. "Zorunlu": her zaman / ilgi
 | `BASE_SEPOLIA_RPC_URL` | Base Sepolia RPC adresi | `--network base-sepolia` iken; yoksa hata | gerekmez | `https://…alchemy…/v2/KEY` | gerekmez | C/.env | `hardhat.config.js:35`, `:96` |
 | `BASE_RPC_URL` | Base Mainnet RPC adresi | `--network base` iken; yoksa hata | gerekmez | gerekmez | `https://…/v2/KEY` | C/.env | `hardhat.config.js:32` |
 | 🔒 `DEPLOYER_PRIVATE_KEY` | Public ağlarda imzalayan cüzdanın özel anahtarı | Public ağlarda (yoksa hesap listesi boş kalır) | gerekmez | `0x…64 hex` | `0x…64 hex` | C/.env | `hardhat.config.js:90`, `:98` |
-| 🔒 `BASESCAN_API_KEY` | BaseScan doğrulaması için API anahtarı | Opsiyonel (`""`) | gerekmez | opsiyonel | opsiyonel | C/.env | `hardhat.config.js:106` |
+| 🔒 `ETHERSCAN_API_KEY` | Etherscan V2 API anahtarı (etherscan.io hesabı; Base dahil tüm zincirlerde geçerli). `BASESCAN_API_KEY` yerine geçer | Opsiyonel (`""`) | gerekmez | opsiyonel | opsiyonel | C/.env | `hardhat.config.js` (`etherscan.apiKey`) |
+| 🔒 `BASESCAN_API_KEY` | **Eski**; yalnız `ETHERSCAN_API_KEY` boşsa yedek okunur. basescan.org V1 anahtarı artık hiçbir şeyi doğrulamaz | Opsiyonel (`""`) | gerekmez | kaçının | kaçının | C/.env | `hardhat.config.js` |
+| `VERIFY_AFTER_DEPLOY` | `true` = `deploy.js` 5 onay bekler, sonra `verify.js` mantığını çalıştırır; hata yalnız uyarır | Opsiyonel (`false`) | yok sayılır | opsiyonel | opsiyonel | terminal | `deploy.js` |
+| `VERIFY_DRY_RUN` | `true` = `verify.js` ağ çağrısı yapmadan planı yazdırır | Opsiyonel (`false`) | opsiyonel | opsiyonel | opsiyonel | terminal | `verify.js` |
+| `VERIFY_RETRIES` / `VERIFY_RETRY_DELAY_MS` | Explorer bytecode'u henüz indekslemediyse deneme sayısı (varsayılan 5) / bekleme (varsayılan 20000 ms) | Opsiyonel | opsiyonel | opsiyonel | opsiyonel | terminal | `verify.js` |
 | `REPORT_GAS` | `true` ise gas raporu | Opsiyonel (kapalı) | `false` | `false` | `false` | C/.env | `hardhat.config.js:129` |
 | 🔒 `CMC_API_KEY` | Gas raporunda fiyat için CoinMarketCap anahtarı | Opsiyonel | gerekmez | gerekmez | gerekmez | C/.env | `hardhat.config.js:131` |
 | `ARAF_SOLCJS_PATH` | Native derleyici indirilemeyen ortamda `soljson.js` yolu | Opsiyonel (etkisiz) | nadiren | nadiren | nadiren | C/.env | `hardhat.config.js:48` |
@@ -158,7 +162,8 @@ Ortak okuma: Y = Yerel, S = Base Sepolia (Fly'da yine `NODE_ENV=production` çal
 | Değişken | Ne işe yarar | Zorunlu mu? | Y | S | M | Nereye | Kullanıldığı yer |
 |---|---|---|---|---|---|---|---|
 | 🔒 `BASE_RPC_URL` | Zincir RPC adresi (anahtar URL'de olur) | Prod'da (public fallback yok) | `https://…/v2/KEY` | Sepolia RPC | Mainnet RPC | B/.env, Fly | `eventListener.js:589`, `health.js:103` |
-| 🔒 `BASE_WS_RPC_URL` | WebSocket RPC; yoksa HTTP kullanılır (`wss://` olmalı) | Önerilir (opsiyonel) | boş | `wss://…` | `wss://…` | B/.env, Fly | `eventListener.js:619` |
+| 🔒 `BASE_RPC_URL_FALLBACKS` | Virgülle ayrık yedek RPC URL'leri (429/ağ hatasında sıralı failover; her biri ilk kullanımdan önce `EXPECTED_CHAIN_ID` ile zincir doğrulamasından geçer, doğrulanamayan URL hiç kullanılmaz) | Opsiyonel | boş | `https://sepolia.base.org` | 2. sağlayıcı URL'si | B/.env, Fly | `rpcProvider.js` |
+| 🔒 `BASE_WS_RPC_URL` | **Canlı izlemede kullanılmaz** (WS aboneliği açılmaz; Alchemy CU yakar). Yalnız uyumluluk/readiness raporu için tutulur | Opsiyonel | boş | boş | boş | B/.env, Fly | `health.js` |
 | `EXPECTED_CHAIN_ID` | Beklenen zincir: `8453` Base, `84532` Sepolia | Prod'da; `BASE_RPC_URL` varsa dev'de de | `84532` ya da `31337` | `84532` | `8453` | B/.env, Fly | `expectedChain.js:19`, `tokenEnv.js:35` |
 | `ALLOW_UNSAFE_CHAIN_ID_BYPASS` | Yalnız dev: `EXPECTED_CHAIN_ID` boşken zincir kontrolünü atlar | Opsiyonel (`false`); prod'da etkisiz | opsiyonel | asla | asla | B/.env | `expectedChain.js:20` |
 | `ARAF_ESCROW_ADDRESS` | ArafEscrow adresi | Prod'da (yoksa worker çıkar); dev'de worker "dry-run" | `0x…40 hex` | deploy çıktısı | deploy çıktısı | B/.env, Fly | `eventListener.js:590`, `protocolConfig.js:107` |
@@ -201,7 +206,9 @@ Prod'da `KMS_PROVIDER=env` **reddedilir**; tek istisna dar testnet kuralıdır: 
 | `WORKER_START_BLOCK` | Yukarıdakine alternatif | Aynı (ikisinden biri) | boş | alternatif | alternatif | B/.env, Fly | `eventListener.js:1095` |
 | `WORKER_DISABLED` | `true` ise worker hiç başlamaz (yalnız API) | Opsiyonel (`false`) | boş | boş | boş | B/.env, Fly | `eventListener.js:591` |
 | `WORKER_FINALITY_DEPTH` | Safe checkpoint için blok derinliği | Opsiyonel (prod `6`, diğer `1`) | boş | boş | boş | B/.env, Fly | `eventListener.js:80-81` |
-| `WORKER_BLOCK_BATCH_SIZE` | Replay batch boyutu | Opsiyonel (`1000`) | boş | boş | boş | B/.env, Fly | `eventListener.js:78` |
+| `WORKER_BLOCK_BATCH_SIZE` | Replay VE canlı turlarda `eth_getLogs` başına blok aralığı. **Alchemy ücretsiz plan: `10` yapın** | Opsiyonel (`1000`) | boş | `10` (ücretsiz plan) | `10` (ücretsiz plan) | B/.env, Fly | `eventListener.js:78` |
+| `LIVE_POLL_INTERVAL_MS` | Canlı yoklama periyodu (zamanlayıcı, blok başına DEĞİL). Her tur = 1x `eth_blockNumber` + 1x `eth_getLogs`. Alt sınır 2000 | Opsiyonel (`15000`; blok watchdog'u sessiz kalsın diye ≤ 30000 tutun) | boş | `15000` | `15000` | B/.env, Fly | `eventListener.js` |
+| `WORKER_REPLAY_BATCH_DELAY_MS` | Replay / geri yetişme batch'leri arası bekleme (saniyelik CU sınırı; 10 blokluk batch ile ≈ 4 getLogs/sn ≈ 300 CU/sn) | Opsiyonel (`250`) | boş | boş | boş | B/.env, Fly | `eventListener.js` |
 | `WORKER_CHECKPOINT_INTERVAL_BLOCKS` | Checkpoint aralığı (blok) | Opsiyonel (`50`) | boş | boş | boş | B/.env, Fly | `eventListener.js:79` |
 | `WORKER_REPLAY_BACKOFF_BASE_MS` / `_MAX_MS` | Replay hata backoff'u taban/tavan | Opsiyonel (`5000` / `300000`) | boş | boş | boş | B/.env, Fly | `eventListener.js:83-84` |
 | `WORKER_BLOCK_STALE_MS` | Bu kadar ms yeni blok yoksa reconnect, hâlâ yoksa süreç çıkar | Opsiyonel (`75000`) | boş | boş | boş | B/.env, Fly | `eventListener.js:87` |
@@ -210,6 +217,27 @@ Prod'da `KMS_PROVIDER=env` **reddedilir**; tek istisna dar testnet kuralıdır: 
 | `WORKER_MAX_LAG_BLOCKS` | `/ready` için en büyük blok gecikmesi | Opsiyonel (`25`) | boş | boş | boş | B/.env, Fly | `health.js:20` |
 | 🔒 `READY_INTERNAL_TOKEN` | `/ready` tam gövdesi için `x-internal-token` değeri | Opsiyonel (yoksa özellik kapalı) | boş | uzun rastgele | uzun rastgele | B/.env, Fly | `health.js:348` |
 | `READY_CACHE_TTL_MS` | `/ready` önbellek süresi (5000-10000'e sıkıştırılır) | Opsiyonel (`7000`) | boş | boş | boş | B/.env, Fly | `health.js:291` |
+
+### 3.7.1 RPC bütçesi (Alchemy ücretsiz plan) ve önerilen profil
+
+- Canlı izleme, zamanlayıcıyla HTTP yoklamadır (`eth_blockNumber` + izlenen tüm kontratlar için tek `eth_getLogs`). `BASE_WS_RPC_URL` tanımlı olsa bile **hiçbir WebSocket aboneliği açılmaz**; çünkü Alchemy WS abonelikleri de CU yakar. Tüm HTTP kullanıcıları (worker, protokol config, zincir üstü trade durumu, job'lar) statik ağlı tek sağlayıcıyı paylaşır: zincir kimliği her çağrıda değil, bir kez doğrulanır.
+- 429 / "compute units" / "capacity" / blok aralığı hatalarında worker geri çekilir (aralık x2 + jitter, en çok 5 dk; aylık kapasite mesajında 30 dk), okunmamış aralığı atlamaz, geri çekilme penceresi başına tek uyarı ve iyileşince tek info yazar. `/ready` `degradedReasons` içinde `rpc_rate_limited` bildirir.
+- Ücretsiz planda `eth_getLogs` **10 blok aralığıyla** sınırlıdır -> `WORKER_BLOCK_BATCH_SIZE=10`. Aralık hatası "WORKER_BLOCK_BATCH_SIZE'ı düşür" mesajıyla loglanır.
+- Ücretsiz kota (~30M CU/ay) **aynı Alchemy hesabındaki tüm uygulamalar** arasında paylaşılır. Testnet ve mainnet aynı hesabı kullanırsa kota ikiye bölünür.
+- Failover notu: birincilin gerisinde kalan bir yedek RPC yalnız gecikme yaratır (olaylar daha geç okunur); fork/reorg farkı `WORKER_FINALITY_DEPTH` ile korunur (safe checkpoint yalnız finalize bloklara ilerler).
+- Sırlar: RPC URL'leri (API anahtarı) her log/hata mesajında maskelenir (`/v2/[REDACTED]`).
+
+Aylık CU tahmini (`eth_getLogs` ~75 CU + `eth_blockNumber` ~10 CU = tur başına ~85 CU, 30 gün):
+
+| `LIVE_POLL_INTERVAL_MS` | Tur / ay | CU / ay | 30M'e sığar mı? |
+|---|---|---|---|
+| 2000 (eski blok-başı davranışla yaklaşık aynı) | 1 296 000 | ~110 M | Hayır |
+| 12000 | 216 000 | ~18,4 M | Evet, ama yalnız ~1 ortam |
+| **15000 (varsayılan)** | 172 800 | **~14,7 M** | Evet (iki ortam sığmaz) |
+| 30000 | 86 400 | ~7,3 M | Evet (iki ortam sığar) |
+
+Önerilen ücretsiz plan profili: `LIVE_POLL_INTERVAL_MS=15000`, `WORKER_BLOCK_BATCH_SIZE=10`, `WORKER_REPLAY_BATCH_DELAY_MS=250`, `BASE_RPC_URL_FALLBACKS=<2. ücretsiz sağlayıcı>` (Base Sepolia için herkese açık `https://sepolia.base.org` kullanılabilir). Diğer RPC yükü küçüktür: `/ready` (5-10 sn önbellek, yenilemede ~10 CU), protokol config yenilemesi (olay tetikli, ~12 `eth_call`), zincir üstü trade durumu (10 sn önbellek), günlük/saatlik job'lar.
+
 
 ### 3.8 Relayer / ödüller
 
@@ -225,7 +253,7 @@ Prod'da `KMS_PROVIDER=env` **reddedilir**; tek istisna dar testnet kuralıdır: 
 
 | Değişken | Ne işe yarar | Zorunlu mu? | Y | S | M | Nereye | Kullanıldığı yer |
 |---|---|---|---|---|---|---|---|
-| `ADMIN_WALLETS` | `/api/admin/*` ve `isAdmin` için cüzdanlar (virgüllü) | Opsiyonel (boşsa kimse admin değil) | kendi cüzdanın | `0x…40 hex` | `0x…40 hex` | B/.env, Fly | `utils/adminWallets.js:6` |
+| `ADMIN_WALLETS` | `/api/admin/*` ve `isAdmin` için cüzdanlar (virgüllü) | Opsiyonel ama **üretimde fiilen gerekli**: boşsa kimse admin değil, admin menüsü hiç görünmez ve açılışta tek uyarı loglanır. Fly: `fly secrets set ADMIN_WALLETS=0x…,0x…` (deploy workflow'u yalnız GitHub variable doluysa yazar); değişince yeniden başlat | kendi cüzdanın | `0x…40 hex` | `0x…40 hex` | B/.env, Fly | `utils/adminWallets.js:6` |
 | `IDENTITY_NORMALIZATION_GUARD` | `off` / `warn` / `enforce` (karışık numeric id guard'ı) | Opsiyonel (prod `enforce`, diğer `warn`) | boş | boş | boş | B/.env, Fly | `app.js:88-94` |
 | `PII_IDENTITY_NORMALIZATION_GUARD` | PII route'ları için ayrı mod | Opsiyonel (önceki değişken, o da yoksa `enforce`) | boş | boş | boş | B/.env, Fly | `routes/pii.js:80` |
 | `IDENTITY_MIGRATION_BATCH_SIZE` | `migrate:identity` batch boyutu | Opsiyonel (`1000`) | boş | boş | boş | B/.env | `migrations/normalizeIdentityFields.js:170` |
@@ -303,7 +331,7 @@ Yerelde Sepolia build'i için `npm run build:frontend:testnet` (`package.json:12
 | Özel anahtar / token | `DEPLOYER_PRIVATE_KEY`, `RELAYER_PRIVATE_KEY`, `FLY_API_TOKEN`, `VERCEL_TOKEN` | Asla repoya, log'a ya da frontend'e. Deployer ve relayer farklı, düşük bakiyeli cüzdan olsun. |
 | Sır / token | `JWT_SECRET`, `MASTER_ENCRYPTION_KEY` (Sepolia'da düz Fly secret olarak durur; yalnız testnet, gerçek PII yok), `AWS_ENCRYPTED_DATA_KEY`, `VAULT_TOKEN`, `VAULT_ENCRYPTED_DATA_KEY`, `READY_INTERNAL_TOKEN` | Fly secrets / `.env`; repoya girmez. |
 | URL içinde anahtar/şifre | `MONGODB_URI`, `REDIS_URL`, `BASE_RPC_URL`, `BASE_WS_RPC_URL`, `BASE_SEPOLIA_RPC_URL` | Alchemy anahtarı ve DB/Redis şifresi URL'de durur; sır gibi davranın. |
-| API anahtarı | `BASESCAN_API_KEY`, `CMC_API_KEY` | Düşük risk ama paylaşmayın. |
+| API anahtarı | `ETHERSCAN_API_KEY`, `CMC_API_KEY` | Düşük risk ama paylaşmayın. |
 
 **Hiçbiri `VITE_*` olarak frontend'e konmamalıdır.** `VITE_*` değerleri build sırasında JavaScript paketine **düz metin olarak gömülür**; siteyi açan herkes
 görebilir (kaynak haritası kapalı olsa da `frontend/vite.config.js:28` yalnız kaynak haritasını kapatır, değer gömülmesini engellemez). Bu yüzden `VITE_*` içinde yalnız herkese açık bilgi
@@ -324,7 +352,7 @@ Adresler (`ARAF_ESCROW_ADDRESS`, token adresleri) sır değildir.
 | `AWS_KMS_KEY_ARN` (`KMS_KEY_ARN`) | `docs/TR/MAINNET_READINESS_CHECKLIST.md:54`; `backend/.env.example:66` (okunmaz der) | Okunmaz; anahtar kimliği `CiphertextBlob` içindedir. Girmeyin. |
 | `MIN_REWARD_BPS`, `MAX_REWARD_BPS` | `docs/TR/REWARDS_ROLLOUT.md` | Kodda env olarak okunmaz (kontrat sabiti; **doğrulanmadı**, env olarak okunmadığı grep ile görüldü). |
 | `VITE_ADMIN_WALLETS` | Eski belgeler | Kaldırıldı (`AppViews.jsx:206`). |
-| `BASESCAN_API_KEY` (GitHub secret olarak) | `docs/TR/DEPLOY_BASE_SEPOLIA.md:14` | Hiçbir workflow okumaz; yalnız elle `hardhat verify` için `contracts/.env`'de anlamlı. |
+| `BASESCAN_API_KEY` (GitHub secret olarak) | `.github/workflows/deploy-base-sepolia.yml` | **Eski ad.** `deploy-base-sepolia.yml` yalnız `verify_contracts=true` iken `ETHERSCAN_API_KEY` yoksa yedek olarak okur (`ETHERSCAN_API_KEY \|\| BASESCAN_API_KEY`). Yeni kurulumda `ETHERSCAN_API_KEY` kullanın. |
 | `NODE_PATH` | `contracts/hardhat.config.js:9-10` | Okunmaz, script kendisi ayarlar; sizin girmeniz gerekmez. |
 
 ### 6.2 Takma adlar (hangisi tercih edilir)
@@ -343,7 +371,7 @@ Adresler (`ARAF_ESCROW_ADDRESS`, token adresleri) sır değildir.
 ## 7. Workflow'un otomatik ayarladıkları
 
 İki workflow var: `deploy-base-sepolia.yml` (kontrat + Fly + opsiyonel Vercel) ve `deploy-runtime-base-sepolia.yml` (kontratı yeniden deploy etmeden Fly ve/veya Vercel).
-`deployRewards.js` workflow'lara dahil değildir (bilinçli). Kullanıcı aşağıdaki değerleri **elle girmez**. Satır numaraları bu bölümde yaklaşıktır; workflow dosyaları güncellendi, güncel satır için dosyaya bakın.
+`deployRewards.js` yalnız tam deploy'da `deploy_rewards=true` iken çalışır (varsayılan kapalı; kilit ve onay: `DEPLOY_BASE_SEPOLIA.md`). Fly secret ve Vercel build-env listesi iki workflow'da da ortak betikten gelir: `.github/scripts/stage-runtime-env.sh`. Kullanıcı aşağıdaki değerleri **elle girmez**. Satır numaraları bu bölümde yaklaşıktır; workflow dosyaları güncellendi, güncel satır için dosyaya bakın.
 
 ### 7.1 Fly secrets: workflow'un yazdıkları (`flyctl secrets import --stage`, sonra `flyctl deploy`)
 
@@ -366,10 +394,12 @@ Tam deploy: `deploy-base-sepolia.yml:141-178` · runtime: `deploy-runtime-base-s
 | `MONGODB_URI`, `REDIS_URL`, `JWT_SECRET`, `MASTER_ENCRYPTION_KEY` | aynı adlı GitHub secret | 158-160, 165 / 146-148, 153 |
 | `RELAYER_PRIVATE_KEY`, `ADMIN_WALLETS` | GitHub secret / variable; **boşsa yazılmaz** | 176-177 / 164-165 |
 
-Koşullu (iki workflow'da da): repo variable `ARAF_REVENUE_VAULT_ADDRESS` / `ARAF_REWARDS_ADDRESS` tanımlıysa (adres regex'iyle doğrulanır) aynı adlarla Fly secret'a yazılır; tanımlı değilse hiçbir şey yazılmaz ve reward mirror/recorder pasif kalır.
+Koşullu (iki workflow'da da, `.github/scripts/resolve-rewards-addresses.js` ile çözülür): `ARAF_REVENUE_VAULT_ADDRESS` / `ARAF_REWARDS_ADDRESS` (tam deploy `deploy_rewards=true`: rewards manifest'i; aksi halde repo variable, runtime'da dolu input önce) aynı adlarla Fly secret'a yazılır. Doğrulama: 0x+40 hex, sıfır değil, karışık harfliyse EIP-55 checksum, ikisi birlikte; manifest ile variable çelişirse hata. Tanımlı değilse hiçbir şey yazılmaz ve reward mirror/recorder pasif kalır.
+
+Koşullu, boşsa yazılmaz (Fly'daki değer korunur): `BASE_RPC_URL_FALLBACKS` (GitHub secret `BASE_SEPOLIA_RPC_URL_FALLBACKS`; RPC URL'leri anahtar içerir), `LIVE_POLL_INTERVAL_MS` [2000-300000], `WORKER_BLOCK_BATCH_SIZE` [1-2000], `WORKER_REPLAY_BATCH_DELAY_MS` [0-10000] (GitHub variable). `EXPECTED_CHAIN_ID` her zaman 84532 yazılır; variable tanımlıysa 84532 olmalı. `ETHERSCAN_API_KEY` backend'e hiç gönderilmez.
 
 Workflow'un yazmadığı backend değişkenleri (hepsi opsiyonel/varsayılanlı):
-`ARAF_TRACKED_TOKENS`, `WORKER_*`, `JOB_*`, `READY_INTERNAL_TOKEN`, `AWS_*`, `VAULT_*` ve diğer ayar değişkenleri.
+`ARAF_TRACKED_TOKENS`, yukarıdakiler dışındaki `WORKER_*`, `JOB_*`, `READY_INTERNAL_TOKEN`, `AWS_*`, `VAULT_*` ve diğer ayar değişkenleri.
 
 ### 7.2 Vercel build-env: workflow'un verdikleri (`vercel deploy --prod --build-env ...`)
 
@@ -389,7 +419,7 @@ Tam: `deploy-base-sepolia.yml:211-228` · runtime: `deploy-runtime-base-sepolia.
 ### 7.3 Contracts: deploy adımına env olarak verilenler (`contracts/.env` yazılmaz)
 
 `deploy-base-sepolia.yml:87-100`: `CONFIRM_PUBLIC_DEPLOY=yes` (sabit), `DEPLOYER_PRIVATE_KEY`, `BASE_SEPOLIA_RPC_URL` (secret), `TREASURY_ADDRESS`, `FINAL_OWNER_ADDRESS`,
-`BASE_SEPOLIA_USDT_ADDRESS`, `BASE_SEPOLIA_USDC_ADDRESS` (variable). `BASESCAN_API_KEY` yalnız `verify_contracts=true` iken (deneysel, `continue-on-error`) ayrı adımda verilir; `deploy.js` adımına verilmez.
+`BASE_SEPOLIA_USDT_ADDRESS`, `BASE_SEPOLIA_USDC_ADDRESS` (variable). `ETHERSCAN_API_KEY` (yoksa eski `BASESCAN_API_KEY` secret'ı) yalnız `verify_contracts=true` iken (deneysel, `continue-on-error`, `npm run verify:base-sepolia` çalıştırır) ayrı adımda verilir; `deploy.js` adımına verilmez.
 
 ### 7.4 Yalnız GitHub'da anlamı olan adlar (kodda okunmaz)
 
@@ -403,7 +433,7 @@ Tam: `deploy-base-sepolia.yml:211-228` · runtime: `deploy-runtime-base-sepolia.
 | `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` | secret | Vercel CLI kimliği (`:31-32`, `:197-202`) |
 | `GH_VARIABLES_TOKEN` | secret (opsiyonel) | Tam deploy sonrası `gh variable set ARAF_ESCROW_ADDRESS/ARAF_DEPLOYMENT_BLOCK` için fine-grained PAT (yalnız bu repo, Variables: read and write). Log'a basılmaz |
 | `deploy_test_usdt` | workflow girdisi (tam deploy) | true ve `BASE_SEPOLIA_USDT_ADDRESS` variable'ı boşsa önce tUSDT deploy eder; variable doluysa yok sayılır |
-| `BASESCAN_API_KEY` | secret (opsiyonel) | Yalnız `verify_contracts=true` (deneysel) |
+| `ETHERSCAN_API_KEY` (eski: `BASESCAN_API_KEY`) | secret (opsiyonel) | Yalnız `verify_contracts=true` (deneysel) |
 | `ARAF_REVENUE_VAULT_ADDRESS`, `ARAF_REWARDS_ADDRESS` | variable (opsiyonel) | Tanımlıysa Fly secret ve Vercel `VITE_*` build-env olarak geçer |
 
 ---
@@ -425,3 +455,39 @@ Düzeltilenler "düzeltildi" ile işaretlidir; diğerleri açıktır. (Önceki t
 11. **[düzeltildi: `scripts/init-env.js` / `npm run init:env` sırları üretir; `.env.example`'a yerel `EXPECTED_CHAIN_ID=31337` notu eklendi, örnek değer 8453 kaldı]** **`backend/.env.example` düz `cp` ile kopyalanınca olduğu gibi çalışmaz (bilinçli):** `JWT_SECRET` örneği 60 karakter (`:30`), kod en az 64 ister (`siwe.js:95`); `MASTER_ENCRYPTION_KEY` örneği (`:75`) 64 hex değil (`encryption.js:114`); `EXPECTED_CHAIN_ID=8453` örneği (`:83`) yerelde RPC farklıysa uyuşmazlık hatası verir (`expectedChain.js:55-58`).
 12. **[düzeltildi: backend/.env.example yorumları netleştirildi]** **Prod'da fail-fast olup örnekte az vurgulananlar:** `JWT_SECRET` prod'a özel değil, **her ortamda** zorunlu (`siwe.js:94`, modül yüklenirken; `/ready` de `health.js:96-99` ile ister). Yalnız-localhost `ALLOWED_ORIGINS` açılışta süreci durdurur (`app.js:161-163`). `ARAF_DEPLOYMENT_BLOCK`/`WORKER_START_BLOCK` ve Redis checkpoint yoksa prod'da worker `throw` eder (`eventListener.js:1098-1100`).
 13. **[düzeltildi: rewards deploy'u bilinçli olarak workflow dışı kalır; ancak repo variable `ARAF_REVENUE_VAULT_ADDRESS`/`ARAF_REWARDS_ADDRESS` tanımlıysa (adres regex'iyle doğrulanır) her iki workflow bunları Fly secret (aynı adlar) ve Vercel build-env (`VITE_REVENUE_VAULT_ADDRESS`, `VITE_REWARDS_ADDRESS`) olarak geçirir; tanımlı değilse hiçbir şey yazılmaz]** **Rewards workflow dışı.** Rewards ayrı operasyondur (`DEPLOY_BASE_SEPOLIA.md`); adresler variable olarak girilene kadar Sepolia demosunda reward mirror ve recorder pasif kalır.
+
+
+### Çalışma ayarları (admin panelinden)
+
+Öncelik: **admin değeri > env > koddaki varsayılan**; sınırlar her kaynak için sunucuda uygulanır. Değişiklik yeniden başlatma gerekmeden sonraki turdan itibaren geçerlidir (önbellek 15 sn; DB okunamazsa son bilinen değer, o da yoksa env/varsayılan).
+
+| Ayar | Sınır | Varsayılan |
+|---|---|---|
+| `LIVE_POLL_INTERVAL_MS` | 5000–300000 | 15000 |
+| `WORKER_BLOCK_BATCH_SIZE` | 1–2000 | 1000 |
+| `WORKER_REPLAY_BATCH_DELAY_MS` | 0–10000 | 250 |
+
+Uç kombinasyonlar (ör. `WORKER_BLOCK_BATCH_SIZE=1` ile `WORKER_REPLAY_BATCH_DELAY_MS=0`) RPC'yi çok yoğun sorgulatır ve 429/kota tükenmesine yol açabilir.
+
+Öneri: `runtimesettings`/`runtimesettingaudits` ve `paymentrailaudits` koleksiyonlarında uygulama DB rolüne DB rolü düzeyinde append-only izin verin (audit koleksiyonlarında yalnız `insert` ve `find`; `update`/`remove` yok). Şema düzeyindeki değiştirilemezlik kodla sınırlıdır; DB rolü ikinci katmandır.
+
+RPC URL'leri (`BASE_RPC_URL`, `BASE_RPC_URL_FALLBACKS`) bilerek panelde yoktur ve yalnız env'de kalır: ele geçirilmiş bir admin oturumu doğru zincir ID'siyle sahte log döndüren bir RPC verebilir ve worker o log'lara güvenir. Gizli anahtarlar, kontrat adresleri, `EXPECTED_CHAIN_ID`, finality, CORS, `ADMIN_WALLETS`, KMS ve SEC-01 ayarları da yalnız env'dir.
+
+
+### Admin "Çalışma ayarları" (runtime settings)
+
+Öncelik: admin (DB) > env > varsayılan; sınırlar her kaynak için uygulanır; değişiklik yeniden başlatma gerektirmez (en fazla ~15 sn önbellek). Gruplar ve sınırlar `backend/scripts/config/runtimeSettingDefs.js` içindedir.
+
+- Worker: `LIVE_POLL_INTERVAL_MS`, `WORKER_BLOCK_BATCH_SIZE`, `WORKER_REPLAY_BATCH_DELAY_MS`, `WORKER_CHECKPOINT_INTERVAL_BLOCKS` (1-1000), `WORKER_REPLAY_BACKOFF_BASE_MS` (500-60000), `WORKER_REPLAY_BACKOFF_MAX_MS` (5000-1800000)
+- Watchdog/Sağlık: `WORKER_BLOCK_STALE_MS` (30000-900000), `WORKER_WATCHDOG_INTERVAL_MS` (5000-120000), `WORKER_LIVENESS_STALE_MS` (60000-1800000; varsayılan 2x blok bayatlık + 30 sn), `WORKER_MAX_LAG_BLOCKS` (1-1000)
+- Önbellekler: `READY_CACHE_TTL_MS` (5000-10000), `MARKET_CACHE_TTL_MS` (0-60000), `CONFIG_CACHE_TTL_SECONDS` (60-21600), `RATE_LIMIT_TIER_CACHE_TTL_SECONDS` (10-600; yalnız tier önbelleği, limit sayıları değil)
+- Kur referansı: `REFERENCE_TICKER_CRYPTO_TTL_SECONDS`, `..._FIAT_TTL_SECONDS`, `..._LAST_GOOD_TTL_SECONDS`, `..._MAX_STALE_SECONDS`
+- Arka plan işleri: `REPUTATION_DECAY_CANDIDATE_LIMIT`, `REPUTATION_DECAY_TX_LIMIT` (1-100, relayer gas'ı), `REWARD_RECORDER_CANDIDATE_LIMIT`, `REWARD_RECORDER_BATCH_LIMIT` (1-50, relayer gas'ı; id başına ~100k gas tahmini, revert olursa aynı id'ler yeniden denenir)
+
+Alanlar arası kısıtlar (etkin değerler üzerinden, ihlalde `400`): liveness >= 2 x blok bayatlık; replay backoff base <= max; blok bayatlık >= 3 x `LIVE_POLL_INTERVAL_MS`; kur last-good TTL >= max stale; kur fiat TTL <= max stale.
+
+Bilerek eklenmeyenler: `PAYMENT_RAILS_CACHE_TTL_MS` (ödeme yöntemi kapatma yayılımı), `USER_BANK_RISK_CLEANUP_CURSOR_BATCH_SIZE` (PII yolu), `IDENTITY_MIGRATION_BATCH_SIZE` (tek seferlik CLI), `REDIS_READY_WAIT_MS` (yalnız açılışta okunur; yeniden başlatma gerektirir).
+
+Açılış denetimi: süreç başlarken bir kez, her anahtar için env ham değeri kontrol edilir. Tam sayı değilse (yok sayılır) ya da sınıra kırpılıyorsa `logger.warn` yazılır (anahtar, ham değer, uygulanan değer); env/varsayılan değerler kısıtları ihlal ediyorsa ayrıca uyarı yazılır. Okuma başına log yoktur. Admin GET yanıtı aynı ihlalleri `constraintViolations` ile gösterir.
+
+Not: `WORKER_BLOCK_STALE_MS >= 3 x LIVE_POLL_INTERVAL_MS` kısıtı yalnız `WORKER_BLOCK_STALE_MS` değiştirilirken zorlanır; poll yükseltmesi engellenmez. Watchdog zaten `max(WORKER_BLOCK_STALE_MS, 3 x LIVE_POLL_INTERVAL_MS)` eşiğini kullanır, yanlış alarm riski yoktur.

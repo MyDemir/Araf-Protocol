@@ -32,11 +32,13 @@ const formatTimerValue = (timer, lang) => {
   if (!timer || typeof timer !== 'object') return null;
   if (timer.isFinished) return t(lang, 'Süre doldu', 'Elapsed');
 
+  // [TR] Birimler dile göre: TR "1 g 22 sa 59 dk 57 sn", EN "1d 22h 59m 57s". Sayaç mantığı aynı.
+  const units = langKey(lang) === 'TR' ? { d: ' g', h: ' sa', m: ' dk', s: ' sn' } : { d: 'd', h: 'h', m: 'm', s: 's' };
   const parts = [];
-  if (Number.isFinite(Number(timer.days)) && Number(timer.days) > 0) parts.push(`${Number(timer.days)}d`);
-  if (Number.isFinite(Number(timer.hours))) parts.push(`${String(Number(timer.hours)).padStart(2, '0')}h`);
-  if (Number.isFinite(Number(timer.minutes))) parts.push(`${String(Number(timer.minutes)).padStart(2, '0')}m`);
-  if (Number.isFinite(Number(timer.seconds))) parts.push(`${String(Number(timer.seconds)).padStart(2, '0')}s`);
+  if (Number.isFinite(Number(timer.days)) && Number(timer.days) > 0) parts.push(`${Number(timer.days)}${units.d}`);
+  if (Number.isFinite(Number(timer.hours))) parts.push(`${String(Number(timer.hours)).padStart(2, '0')}${units.h}`);
+  if (Number.isFinite(Number(timer.minutes))) parts.push(`${String(Number(timer.minutes)).padStart(2, '0')}${units.m}`);
+  if (Number.isFinite(Number(timer.seconds))) parts.push(`${String(Number(timer.seconds)).padStart(2, '0')}${units.s}`);
 
   return parts.length ? parts.join(' ') : null;
 };

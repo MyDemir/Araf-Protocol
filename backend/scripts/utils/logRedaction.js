@@ -12,8 +12,45 @@ const WALLET_RX = /\b0x[a-fA-F0-9]{40}\b/g;
 const URL_QUERY_RX = /(https?:\/\/[^\s?]+)\?[^\s]*/gi;
 const ASSIGNMENT_SECRET_RX = /\b(MASTER_ENCRYPTION_KEY|AWS_ENCRYPTED_DATA_KEY|VAULT_TOKEN|KMS_PLAINTEXT_KEY)\s*=\s*[^\s]+/gi;
 
+// [TR] RPC sağlayıcı URL'lerinde API anahtarı yolda (/v2/<key>, /v3/<key>, QuickNode /<token>/) ya da sorguda
+//      (?apikey=) bulunur. Anahtar maskelenir; host korunur (teşhis için).
+// [EN] RPC provider URLs carry the API key in the path or the query. The key is masked; the host is kept.
+const RPC_URL_RX = /\b(?:https?|wss?):\/\/[^\s"'<>`\\)\]}]+/gi;
+const RPC_KEY_SEGMENT_RX = /^[A-Za-z0-9_-]{16,}$/;
+const RPC_VERSION_SEGMENT_RX = /^v\d+$/i;
+
+function redactRpcUrl(rawUrl) {
+  const input = String(rawUrl ?? "");
+  let parsed;
+  try {
+    parsed = new URL(input);
+  } catch {
+    return "[invalid-rpc-url]";
+  }
+  const segments = parsed.pathname.split("/");
+  const maskedSegments = segments.map((seg, i) => {
+    if (!seg) return seg;
+    const afterVersion = i > 0 && RPC_VERSION_SEGMENT_RX.test(segments[i - 1]);
+    return afterVersion || RPC_KEY_SEGMENT_RX.test(seg) ? "[REDACTED]" : seg;
+  });
+  const query = parsed.search ? "?[REDACTED_QUERY]" : "";
+  return `${parsed.protocol}//${parsed.host}${maskedSegments.join("/")}${query}`;
+}
+
+// [TR] Serbest metin (ethers hata mesajı, requestUrl alanı dahil) içindeki tüm URL'leri maskeler.
+// [EN] Masks every URL inside free text (ethers error messages incl. the requestUrl field).
+function redactRpcSecrets(text) {
+  return String(text ?? "").replace(RPC_URL_RX, (match) => {
+    const trailing = match.match(/[.,;:]+$/)?.[0] || "";
+    const url = trailing ? match.slice(0, -trailing.length) : match;
+    const redacted = redactRpcUrl(url);
+    return (redacted === "[invalid-rpc-url]" ? url : redacted) + trailing;
+  });
+}
+
 function redactString(value) {
   let v = String(value);
+  v = redactRpcSecrets(v);
   v = v.replace(URL_QUERY_RX, "$1?[REDACTED_QUERY]");
   v = v.replace(JWT_RX, REDACTED);
   v = v.replace(ETH_PK_RX, REDACTED);
@@ -70,4 +107,6 @@ function redactValue(value, keyHint = "") {
 module.exports = {
   redactLogMeta: redactValue,
   redactLogString: redactString,
+  redactRpcUrl,
+  redactRpcSecrets,
 };

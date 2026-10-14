@@ -5,6 +5,7 @@ import { fmtNum } from '../copy';
 import { computeCreateAllowance } from './allowanceMath';
 import { computeMinFillRaw, parseDecimalToUnits } from './decimalUnits';
 import { isPayoutProfileSaved, profileRequiredMessage } from '../payoutProfileGate';
+import { enforceTxGate } from '../txGate';
 
 export const MAKER_ORDER_DEFAULTS = {
   makerTier: 1,
@@ -127,7 +128,10 @@ export const buildCreateOrderAction = ({
   // [TR] Backend'deki KAYITLI profil durumu (true/false/null=bilinmiyor). Yalnız true iken emir açılır (fail-closed).
   hasPayoutProfile = null,
   openProfilePage = null,
+  // [TR] Fail-closed kapı (getter ya da nesne): approve/tx'ten ÖNCE değerlendirilir. Modal açıkken arıza başlarsa da reddeder.
+  txGate = null,
 }) => async () => {
+  if (txGate && !enforceTxGate(txGate, showToast)) return;
   if (!requireSignedSessionForActiveWallet()) return;
 
   // [TR] Ödeme profili kapısı: kayıtlı profili olmayan (ya da durumu bilinmeyen) kullanıcı emir oluşturamaz.

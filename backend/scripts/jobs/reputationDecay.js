@@ -20,6 +20,7 @@
 const { ethers } = require("ethers");
 const User = require("../models/User");
 const logger = require("../utils/logger");
+const { getSharedProvider } = require("../services/rpcProvider");
 
 const DECAY_ABI = [
   "function decayReputation(address _wallet)",
@@ -32,8 +33,8 @@ const DECAY_ABI = [
 // [TR] Fallback değer; gerçek süre kontrattaki mutable cleanPeriod'dan okunur (setReputationPolicy).
 // [EN] Fallback only; the real window is the contract's mutable cleanPeriod (setReputationPolicy).
 const CLEAN_SLATE_DAYS = 90;
-const DEFAULT_CANDIDATE_LIMIT = Number(process.env.REPUTATION_DECAY_CANDIDATE_LIMIT || 250);
-const DEFAULT_TX_LIMIT = Number(process.env.REPUTATION_DECAY_TX_LIMIT || 50);
+// [TR] Limitler her çalıştırmada çalışma ayarlarından okunur (admin > env > varsayılan; sınırlı).
+const { runtimeValue } = require("../utils/runtimeValue");
 
 let relayerWallet = null;
 let decayContract = null;
@@ -49,7 +50,7 @@ function getRelayer() {
     return null;
   }
 
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const provider = getSharedProvider();
   relayerWallet = new ethers.Wallet(privateKey, provider);
   logger.info(`[DecayJob] Relayer cüzdanı yüklendi: ${relayerWallet.address}`);
   return relayerWallet;
@@ -88,6 +89,8 @@ async function runReputationDecay() {
   // [TR] Mirror alanları stale olabilir. Bu yüzden query yalnız aday havuzu içindir.
   //      Nihai eligibility kararı kontratın getReputation() çağrısından gelir.
   // [EN] Mirror fields may be stale. This query only builds a candidate pool.
+  const candidateLimit = await runtimeValue("REPUTATION_DECAY_CANDIDATE_LIMIT");
+  const txLimit = await runtimeValue("REPUTATION_DECAY_TX_LIMIT");
   const candidates = await User.find({
     consecutive_bans: { $gt: 0 },
     // [TR] banned_until ban bitince null'lanır; bu yüzden kalıcı last_ban_ends_at esas alınır
@@ -100,7 +103,7 @@ async function runReputationDecay() {
   })
     .select("wallet_address consecutive_bans banned_until last_ban_ends_at")
     .sort({ last_ban_ends_at: 1, banned_until: 1, wallet_address: 1 })
-    .limit(DEFAULT_CANDIDATE_LIMIT)
+    .limit(candidateLimit)
     .lean();
 
   if (candidates.length === 0) {
@@ -120,7 +123,7 @@ async function runReputationDecay() {
       if (bannedUntilMs <= cutoffMs) {
         usersToClean.push(user.wallet_address);
       }
-      if (usersToClean.length >= DEFAULT_TX_LIMIT) break;
+      if (usersToClean.length >= txLimit) break;
     } catch (err) {
       logger.warn(`[DecayJob] getReputation() okunamadı: ${user.wallet_address} err=${err.message}`);
       hadErrors = true;

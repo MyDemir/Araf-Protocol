@@ -51,7 +51,7 @@ describe('madde 2: challenge penceresi acikken rehber', () => {
     expect(en.guidance.join(' ')).not.toMatch(/A ping is a claim/);
     expect(en.timerCards.map((c) => c.key)).not.toContain('makerChallenge');
     expect(en.timerCards.map((c) => c.key)).toContain('makerChallengeDeadline');
-    expect(model('TR').guidance[0]).toMatch(/Şu an itiraz açabilirsin — son süre: 18h/);
+    expect(model('TR').guidance[0]).toMatch(/Şu an itiraz açabilirsin — son süre: 18 sa 00 dk 00 sn/);
   });
 
   it('vurgu panelde isaretlenir', () => {

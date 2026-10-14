@@ -190,6 +190,14 @@ describe('buildTradeDecisionModel', () => {
     ]);
   });
 
+  it('formats timer units per language (TR: g/sa/dk/sn, EN: d/h/m/s)', () => {
+    const timers = { gracePeriod: { isFinished: false, days: 1, hours: 22, minutes: 59, seconds: 7 } };
+    const tr = buildTradeDecisionModel({ ...base, lang: 'TR', tradeState: 'PAID', timers });
+    expect(tr.timerCards[0].summary).toBe('1 g 22 sa 59 dk 07 sn');
+    const en = buildTradeDecisionModel({ ...base, lang: 'EN', tradeState: 'PAID', timers });
+    expect(en.timerCards[0].summary).toBe('1d 22h 59m 07s');
+  });
+
   it('shows only timers that matter for the current state and role', () => {
     const timers = {
       paymentWindow: { isFinished: false, hours: 5, minutes: 0, seconds: 0 },

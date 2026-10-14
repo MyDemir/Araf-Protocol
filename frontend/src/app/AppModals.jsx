@@ -4,8 +4,26 @@ import { buildMakerPreview, getMakerModalCopy, getOrderSideCopy, resolveEffectiv
 import { resolveTierMaxAmounts } from './actions/orderCreationActions';
 import { TERMS_ACKNOWLEDGEMENTS, TERMS_SECTIONS, TERMS_VERSION } from './legal/terms';
 import PaymentRiskBadge from '../components/PaymentRiskBadge';
+import BottomSheet from '../components/BottomSheet';
+import FillConfirmSheet from '../components/FillConfirmSheet';
+import MobileWalletPicker, { WalletOption } from '../components/MobileWalletPicker';
+import { ConnectorIcon } from '../components/wallet-icons';
+import { describeConnectError, shouldShowMobileWalletPicker } from './mobileWallet';
 import { fmtBps, isKnownNumber, fmtNum } from './copy';
 import { profileRequiredMessage } from './payoutProfileGate';
+
+// [TR] Cüzdan modalı: ortak BottomSheet kabuğu + güvenlik notu. [EN] Wallet modal: shared BottomSheet shell + safety note.
+function WalletSheet({ title, closeLabel, note, onClose, children }) {
+  return (
+    <BottomSheet title={title} titleId="wallet-modal-title" closeLabel={closeLabel} onClose={onClose} testId="wallet-sheet">
+      {children}
+      <p className="mt-4 flex items-center gap-2.5 rounded-2xl bg-success/10 px-3.5 py-3 text-xs leading-snug text-textSecondary">
+        <ShieldCheck className="h-5 w-5 shrink-0 text-success" strokeWidth={2} aria-hidden="true" />
+        <span>{note}</span>
+      </p>
+    </BottomSheet>
+  );
+}
 
 function TermsModal({ lang = 'EN', onAcceptTerms, onDeclineTerms }) {
   const isTR = lang === 'TR';
@@ -83,6 +101,7 @@ export const buildAppModals = (ctx) => {
     setShowWalletModal,
     connectors,
     connect,
+    showToast,
     getWalletIcon,
     showFeedbackModal,
     setShowFeedbackModal,
@@ -124,6 +143,9 @@ export const buildAppModals = (ctx) => {
     makerPayoutRiskEntry,
     isCreateTemporarilyDisabledByRisk,
     isPayoutProfileGateBlocked = false,
+    txGate = null,
+    fillConfirmSummary = null,
+    settleFillConfirm = null,
     openProfilePage,
     isContractLoading,
     loadingText,
@@ -142,41 +164,50 @@ export const buildAppModals = (ctx) => {
     </button>
   );
 
+  // [TR] Hata sessiz kalmaz: bağlantı başarısızsa toast ile anlaşılır mesaj gösterilir.
+  const connectWith = (connector) => {
+    setShowWalletModal(false);
+    try {
+      connect({ connector }, { onError: (err) => showToast?.(describeConnectError(err, lang), 'error') });
+    } catch (err) {
+      showToast?.(describeConnectError(err, lang), 'error');
+    }
+  };
+
   const renderWalletModal = () => {
     if (!showWalletModal) return null;
+    const mobilePicker = typeof window !== 'undefined' && shouldShowMobileWalletPicker(window.navigator, window);
+    const tr = lang === 'TR';
+    // [TR] Genel "Injected" bağlayıcı adı teknik jargon; kullanıcıya "Tarayıcı cüzdanı" olarak gösterilir.
+    // [EN] The generic "Injected" connector name is jargon; shown to users as "Browser wallet".
+    const connectorLabel = (c) => (c.id === 'injected' && c.name === 'Injected' ? (tr ? 'Tarayıcı cüzdanı' : 'Browser wallet') : c.name);
     return (
-      <div className="fixed inset-0 max-w-full overflow-x-hidden bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center sm:p-4 safe-area-x z-[100]" role="dialog" aria-modal="true" aria-labelledby="wallet-modal-title">
-        <div className="bg-surface border border-borderSubtle rounded-t-2xl sm:rounded-2xl p-5 sm:p-6 w-full sm:max-w-sm shadow-2xl max-h-[calc(100dvh_-_2rem_-_env(safe-area-inset-top)_-_env(safe-area-inset-bottom))] overflow-x-hidden overflow-y-auto overscroll-contain pb-[calc(1.25rem_+_env(safe-area-inset-bottom))] sm:pb-6">
-          <div className="flex justify-between items-center mb-1">
-            <h2 id="wallet-modal-title" className="text-lg font-bold text-textPrimary">{lang === 'TR' ? 'Cüzdan bağla' : 'Connect wallet'}</h2>
-            {closeBtn(() => setShowWalletModal(false), lang === 'TR' ? 'Kapat' : 'Close')}
-          </div>
-          <p className="text-xs text-textMuted mb-4">{lang === 'TR' ? 'Bağlandıktan sonra oturumu cüzdan imzasıyla açarsınız.' : 'After connecting, you sign in with a wallet signature.'}</p>
-          <div className="space-y-2">
+      <WalletSheet
+        title={tr ? 'Cüzdan bağla' : 'Connect wallet'}
+        closeLabel={tr ? 'Kapat' : 'Close'}
+        note={tr ? 'Araf hiçbir zaman özel anahtar veya kurtarma ifadesi istemez.' : 'Araf never asks for private keys or seed phrases.'}
+        onClose={() => setShowWalletModal(false)}
+      >
+        {mobilePicker ? (
+          <MobileWalletPicker lang={lang} location={window.location} connectors={connectors} onConnect={connectWith} />
+        ) : (
+          <div className="space-y-2.5">
             {connectors.length === 0 && (
-              <p className="text-sm text-textSecondary bg-elevated border border-borderSubtle rounded-xl p-4">{lang === 'TR' ? 'Tarayıcıda cüzdan bulunamadı. MetaMask, Coinbase Wallet veya Rabby kurun.' : 'No wallet found in this browser. Install MetaMask, Coinbase Wallet or Rabby.'}</p>
+              <p className="rounded-2xl border border-borderSubtle bg-elevated p-4 text-sm text-textSecondary">{tr ? 'Tarayıcıda cüzdan bulunamadı. MetaMask, Coinbase Wallet veya Rabby kurun.' : 'No wallet found in this browser. Install MetaMask, Coinbase Wallet or Rabby.'}</p>
             )}
             {connectors.map((connector) => (
-              <button
+              <WalletOption
                 key={connector.uid}
-                type="button"
-                onClick={() => { connect({ connector }); setShowWalletModal(false); }}
-                className="w-full flex items-center justify-between bg-elevated hover:border-brand/50 border border-borderSubtle px-4 py-3 rounded-xl transition group"
-              >
-                <span className="flex items-center gap-3">
-                  <span className="w-8 h-8 flex items-center justify-center">{getWalletIcon(connector)}</span>
-                  <span className="font-semibold text-textPrimary">{connector.name}</span>
-                </span>
-                <ChevronRight className="w-4 h-4 text-textMuted group-hover:text-brand" strokeWidth={1.8} aria-hidden="true" />
-              </button>
+                onClick={() => connectWith(connector)}
+                icon={connector.icon
+                  ? <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-[28%]">{getWalletIcon(connector)}</span>
+                  : <ConnectorIcon connector={connector} />}
+                label={connectorLabel(connector)}
+              />
             ))}
           </div>
-          <p className="mt-4 text-xs text-textMuted flex items-center justify-center gap-1.5">
-            <ShieldCheck className="w-3.5 h-3.5 text-success" strokeWidth={1.8} aria-hidden="true" />
-            {lang === 'TR' ? 'Araf hiçbir zaman özel anahtar veya kurtarma ifadesi istemez.' : 'Araf never asks for private keys or seed phrases.'}
-          </p>
-        </div>
-      </div>
+        )}
+      </WalletSheet>
     );
   };
 
@@ -286,7 +317,7 @@ export const buildAppModals = (ctx) => {
     const modalCopy = getMakerModalCopy(makerSide, lang);
     const payoutRiskEntry = makerPayoutRiskEntry;
     const validationError = makerValidationError || null;
-    const isSubmitDisabled = isContractLoading || validationError !== null || isCreateTemporarilyDisabledByRisk || isPayoutProfileGateBlocked;
+    const isSubmitDisabled = isContractLoading || validationError !== null || isCreateTemporarilyDisabledByRisk || isPayoutProfileGateBlocked || Boolean(txGate?.blocked);
     const seg = (active) => `flex-1 h-9 rounded-lg text-sm font-semibold transition ${active ? 'bg-surface text-textPrimary shadow-sm' : 'text-textMuted hover:text-textPrimary'} disabled:opacity-40 disabled:cursor-not-allowed`;
 
     return (
@@ -412,6 +443,11 @@ export const buildAppModals = (ctx) => {
                 {tr ? 'Bu ödeme yöntemi şu an kısıtlı. Bu bir kontrat hükmü değildir.' : 'This payment method is currently restricted. This is not a contract authority rule.'}
               </p>
             )}
+            {txGate?.blocked && (
+              <p data-testid="create-tx-gate" role="status" className="text-sm text-textSecondary bg-elevated border border-borderSubtle rounded-lg p-3 leading-relaxed">
+                {txGate.message}
+              </p>
+            )}
             {isPayoutProfileGateBlocked && (
               <div data-testid="create-needs-profile" className="text-sm text-danger bg-danger/10 border border-danger/30 rounded-lg p-3 leading-relaxed">
                 <p>{profileRequiredMessage(lang)}</p>
@@ -453,10 +489,28 @@ export const buildAppModals = (ctx) => {
     return <TermsModal key={`${address || ''}-${TERMS_VERSION}`} lang={lang} onAcceptTerms={onAcceptTerms} onDeclineTerms={onDeclineTerms} />;
   };
 
+  // [TR] Emre girme onayı: özet yoksa hiç render edilmez (her açılış yeni örnek). txGate canlı geçilir; pencere açıkken
+  //      kapanırsa onay düğmesi pasifleşir.
+  // [EN] Order-entry confirmation: not rendered without a summary (fresh instance per opening); live txGate disables confirm.
+  const renderFillConfirm = () => {
+    if (!fillConfirmSummary) return null;
+    return (
+      <FillConfirmSheet
+        key={fillConfirmSummary.seq}
+        summary={fillConfirmSummary}
+        lang={lang}
+        txGate={txGate}
+        onConfirm={() => settleFillConfirm?.(true)}
+        onCancel={() => settleFillConfirm?.(false)}
+      />
+    );
+  };
+
   return {
     renderWalletModal,
     renderFeedbackModal,
     renderMakerModal,
     renderTermsModal,
+    renderFillConfirm,
   };
 };

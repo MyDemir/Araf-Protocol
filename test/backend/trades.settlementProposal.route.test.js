@@ -208,6 +208,9 @@ describe("trades settlement proposal read-model routes", () => {
           },
         };
       });
+      jest.doMock("../../backend/scripts/services/rpcProvider", () => ({
+        getSharedProvider: () => new (require("ethers").ethers.JsonRpcProvider)(),
+      }));
       process.env.BASE_RPC_URL = "https://example-rpc";
       process.env.ARAF_ESCROW_ADDRESS = "0x3333333333333333333333333333333333333333";
       process.env.EXPECTED_CHAIN_ID = "8453";

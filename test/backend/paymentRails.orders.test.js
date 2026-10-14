@@ -9,7 +9,7 @@ const CLOSED_OWNER = "0x2222222222222222222222222222222222222222";
 const ENABLED = { enabled: true, changed_at: null, changed_by: null };
 const DISABLED = { enabled: false, changed_at: null, changed_by: null };
 
-function build({ states, ownerRail = null, getConfigResult, dbDown = false }) {
+function build({ states, ownerRail = null, getConfigResult, dbDown = false, noProfiles = false }) {
   jest.resetModules();
   const base = {
     side: "SELL_CRYPTO", status: "OPEN", tier: 1,
@@ -35,10 +35,11 @@ function build({ states, ownerRail = null, getConfigResult, dbDown = false }) {
     find: jest.fn((q) => ({
       select: () => ({
         lean: async () =>
-          q["payout_profile.payout_details_enc"]
+          q["payout_profile.payout_details_enc"] && !noProfiles
             ? [
-                { wallet_address: OPEN_OWNER, payout_profile: { rail: "TR_IBAN" } },
-                { wallet_address: CLOSED_OWNER, payout_profile: { rail: "US_ACH" } },
+                // [TR] Sahte kayıt bilerek PII taşır: yanıta hiçbiri sızmamalı (yalnız rail kodu çıkar).
+                { wallet_address: OPEN_OWNER, payout_profile: { rail: "TR_IBAN", iban: "TR330006100519786457841326", account_holder_name: "Ali Veli", payout_details_enc: "enc-blob" } },
+                { wallet_address: CLOSED_OWNER, payout_profile: { rail: "US_ACH", routing_number: "021000021", account_number: "123456789" } },
               ]
             : [],
       }),
@@ -65,6 +66,7 @@ function build({ states, ownerRail = null, getConfigResult, dbDown = false }) {
     jest.doMock("../../backend/scripts/models/Trade", () => ({ aggregate: jest.fn().mockResolvedValue([]) }));
     jest.doMock("../../backend/scripts/models/User", () => User);
     jest.doMock("../../backend/scripts/services/protocolConfig", () => ({
+      isProtocolConfigStale: jest.fn(() => false),
       getConfig: jest.fn(() => getConfigResult || { bondMap: {}, feeConfig: {}, cooldownConfig: {}, tokenMap: {} }),
     }));
     router = require("../../backend/scripts/routes/orders");
@@ -87,6 +89,25 @@ describe("payment rails on orders surfaces", () => {
     expect(byOwner[CLOSED_OWNER].owner_rail_enabled).toBe(false);
     expect(byOwner[CLOSED_OWNER].owner_has_payout_profile).toBe(true);
     expect(JSON.stringify(res.body)).not.toContain("payout_details_enc");
+  });
+
+  it("market list exposes owner_rail as a bare code and never leaks IBAN, name or other PII", async () => {
+    const { app } = build({ states: { TR_IBAN: ENABLED, US_ACH: DISABLED, SEPA_IBAN: ENABLED } });
+    const res = await request(app).get("/api/orders");
+    expect(res.status).toBe(200);
+    const byOwner = Object.fromEntries(res.body.orders.map((o) => [o.owner_address, o]));
+    expect(byOwner[OPEN_OWNER].owner_rail).toBe("TR_IBAN");
+    expect(byOwner[CLOSED_OWNER].owner_rail).toBe("US_ACH");
+    const body = JSON.stringify(res.body);
+    for (const secret of ["TR330006100519786457841326", "Ali Veli", "enc-blob", "021000021", "123456789", "\"payout_profile\""]) {
+      expect(body).not.toContain(secret);
+    }
+  });
+
+  it("owner_rail is null when the owner has no saved profile or an unknown code", async () => {
+    const { app } = build({ states: { TR_IBAN: ENABLED, US_ACH: ENABLED, SEPA_IBAN: ENABLED }, noProfiles: true });
+    const res = await request(app).get("/api/orders");
+    expect(res.body.orders.every((o) => o.owner_rail === null)).toBe(true);
   });
 
   it("config and payment-risk-config return only the enabled-rail overlay", async () => {

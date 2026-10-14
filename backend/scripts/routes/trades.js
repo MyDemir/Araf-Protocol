@@ -15,6 +15,7 @@ const logger = require("../utils/logger");
 const { hmacDigest } = require("../services/encryption");
 const { buildBankProfileRisk, buildTradeHealthSignals } = require("./tradeRisk");
 const { assertProviderExpectedChainOrThrow } = require("../services/expectedChain");
+const { getSharedProvider } = require("../services/rpcProvider");
 
 // [TR] Yalnız settlement preview için okunan on-chain yüzey. İptal koordinasyonu artık tamamen on-chain:
 //      her taraf proposeOrApproveCancel(tradeId) çağırır, worker CancelProposed event'ini mirror'lar.
@@ -45,20 +46,15 @@ async function _getPreviewReadContract() {
     return null;
   }
 
-  // [TR] Provider yerel oluşturulur; zincir doğrulaması başarılı olana kadar modül cache'ine yazılmaz.
-  //      Başarısızlıkta provider kapatılır (her istekte sızan yeni provider oluşmaz).
-  // [EN] Build locally, publish to the cache only after chain validation succeeds; destroy on failure.
-  const candidate = new ethers.JsonRpcProvider(rpcUrl);
-  try {
-    await assertProviderExpectedChainOrThrow(candidate, {
-      rpcUrl,
-      rpcEnvName: "BASE_RPC_URL",
-      surface: "TradesSettlementPreview",
-    });
-  } catch (err) {
-    try { candidate.destroy(); } catch (_) { /* ignore */ }
-    throw err;
-  }
+  // [TR] Paylaşılan provider kullanılır (yeni bağlantı/eth_chainId yükü yok; yok edilmez). Kontrat, zincir
+  //      doğrulaması başarılı olana kadar modül cache'ine yazılmaz.
+  // [EN] Uses the shared provider (never destroyed). The contract is cached only after chain validation succeeds.
+  const candidate = getSharedProvider();
+  await assertProviderExpectedChainOrThrow(candidate, {
+    rpcUrl,
+    rpcEnvName: "BASE_RPC_URL",
+    surface: "TradesSettlementPreview",
+  });
   previewReadProvider = candidate;
   previewReadContract = new ethers.Contract(contractAddress, PREVIEW_READ_ABI, previewReadProvider);
   previewReadCacheKey = cacheKey;

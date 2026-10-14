@@ -164,7 +164,10 @@ function makeSensitiveLimiter({
   };
 }
 
-const RATE_LIMIT_TIER_CACHE_TTL_SECONDS = Number(process.env.RATE_LIMIT_TIER_CACHE_TTL_SECONDS || 120);
+const { runtimeValueSync } = require("../utils/runtimeValue");
+
+// [TR] Yalnız tier ÖNBELLEK süresi (limit sayıları değil); her yazımda çalışma ayarından okunur.
+const tierCacheTtlSeconds = () => runtimeValueSync("RATE_LIMIT_TIER_CACHE_TTL_SECONDS");
 const DEFAULT_ANON_TIER = 0;
 const MIN_TIER = 0;
 const MAX_TIER = 4;
@@ -226,7 +229,7 @@ async function resolveRequestTier(req) {
 
     if (isReady()) {
       try {
-        await getRedisClient().setEx(cacheKey, RATE_LIMIT_TIER_CACHE_TTL_SECONDS, String(req.rateLimitTier));
+        await getRedisClient().setEx(cacheKey, tierCacheTtlSeconds(), String(req.rateLimitTier));
       } catch (err) {
         logger.warn(`[RateLimit:TIER] Redis cache write başarısız: ${err.message}`);
       }
@@ -734,6 +737,6 @@ module.exports = {
     clampTier,
     normalizeTierFromMirror,
     resolveRequestTier,
-    RATE_LIMIT_TIER_CACHE_TTL_SECONDS,
+    get RATE_LIMIT_TIER_CACHE_TTL_SECONDS() { return tierCacheTtlSeconds(); },
   },
 };

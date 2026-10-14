@@ -23,6 +23,7 @@ const { ethers } = require("ethers");
 const { isConfiguredAddress: _isConfiguredAddress } = require("../utils/onchain");
 const Trade = require("../models/Trade");
 const logger = require("../utils/logger");
+const { getSharedProvider } = require("../services/rpcProvider");
 
 const REWARDS_RECORDER_ABI = [
   "function recordTradeOutcomes(uint256[] tradeIds)",
@@ -33,8 +34,8 @@ const REWARDS_RECORDER_ABI = [
 // [TR] Yalnız pozitif ağırlık üreten sonuçlar kaydedilir; sıfır ağırlıklı kayıt relayer gazını boşa harcar.
 // [EN] Only outcomes that can produce positive weight are recorded; zero-weight records waste relayer gas.
 const REWARDABLE_RESOLUTION_TYPES = ["MANUAL_RELEASE", "PARTIAL_SETTLEMENT"];
-const DEFAULT_CANDIDATE_LIMIT = Number(process.env.REWARD_RECORDER_CANDIDATE_LIMIT || 200);
-const DEFAULT_BATCH_LIMIT = Number(process.env.REWARD_RECORDER_BATCH_LIMIT || 50);
+// [TR] Limitler her çalıştırmada çalışma ayarlarından okunur (admin > env > varsayılan; sınırlı).
+const { runtimeValue } = require("../utils/runtimeValue");
 // [TR] ArafRewards varsayılanı (30 gün); zincirden okunamazsa kullanılır. [EN] ArafRewards default (30 days).
 const FALLBACK_EPOCH_SECONDS = 30 * 24 * 3600;
 const FALLBACK_CLAIM_DELAY_SECONDS = 24 * 3600;
@@ -58,7 +59,7 @@ function getRewardsContract() {
     return null;
   }
 
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const provider = getSharedProvider();
   const relayer = new ethers.Wallet(privateKey, provider);
   rewardsContract = new ethers.Contract(rewardsAddress, REWARDS_RECORDER_ABI, relayer);
   return rewardsContract;
@@ -84,6 +85,8 @@ async function runRewardOutcomeRecorder({ contract = getRewardsContract() } = {}
   const windowSeconds = await _readWindowSeconds(contract);
   const since = new Date(Date.now() - windowSeconds * 1000);
 
+  const candidateLimit = await runtimeValue("REWARD_RECORDER_CANDIDATE_LIMIT");
+  const batchLimit = await runtimeValue("REWARD_RECORDER_BATCH_LIMIT");
   const candidates = await Trade.find({
     resolution_type: { $in: REWARDABLE_RESOLUTION_TYPES },
     tier: { $gte: 1 },
@@ -93,7 +96,7 @@ async function runRewardOutcomeRecorder({ contract = getRewardsContract() } = {}
   })
     .select("onchain_escrow_id")
     .sort({ "timers.resolved_at": 1 })
-    .limit(DEFAULT_CANDIDATE_LIMIT)
+    .limit(candidateLimit)
     .lean();
 
   if (candidates.length === 0) return { success: true, candidates: 0, recorded: 0 };
@@ -110,7 +113,7 @@ async function runRewardOutcomeRecorder({ contract = getRewardsContract() } = {}
     if (!/^[1-9]\d*$/.test(id)) continue;
     pending.push(BigInt(id));
     pendingRaw.push(trade.onchain_escrow_id);
-    if (pending.length >= DEFAULT_BATCH_LIMIT) break;
+    if (pending.length >= batchLimit) break;
   }
 
   if (pending.length === 0) return { success: true, candidates: candidates.length, recorded: 0 };

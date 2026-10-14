@@ -128,6 +128,7 @@ vi.mock('../../frontend/src/app/AppViews', () => ({
     renderMarket: () => null,
     renderTradeRoom: () => null,
     renderSlimRail: () => null,
+    renderAdminHint: () => null,
     renderContextSidebar: () => null,
     renderMobileNav: () => null,
     renderFooter: () => null,
@@ -141,6 +142,7 @@ vi.mock('../../frontend/src/app/AppModals', () => ({
     renderMakerModal: () => null,
     renderProfileModal: () => null,
     renderTermsModal: () => null,
+    renderFillConfirm: () => null,
   }),
 }));
 

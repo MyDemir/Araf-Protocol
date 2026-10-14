@@ -62,7 +62,7 @@ function makeFakes() {
   return { store, Setting, Audit };
 }
 
-function build({ profile = null, activeTrade = false } = {}) {
+function build({ profile = null, activeTrade = false, ready = true } = {}) {
   jest.resetModules();
   process.env.ADMIN_WALLETS = ADMIN;
   const fakes = makeFakes();
@@ -137,6 +137,8 @@ function build({ profile = null, activeTrade = false } = {}) {
   app.use("/api/admin", require("../../backend/scripts/routes/admin"));
   app.use((err, _req, res, _next) => res.status(500).json({ error: err.message }));
   const rails = require("../../backend/scripts/services/paymentRails");
+  // Bağlantı "hazır" varsay; yazma yolu bağlantı yokken 503 döner.
+  Object.defineProperty(require("mongoose").connection, "readyState", { value: ready ? 1 : 0, configurable: true });
   return { app, rails, ...fakes, User, Trade };
 }
 
@@ -147,6 +149,16 @@ const as = (req, token = "admin", wallet = ADMIN, withHeader = true) => {
 
 describe("admin payment rails API", () => {
   afterEach(() => jest.resetModules());
+
+  it("write path returns 503 immediately when the DB connection is not ready (no Mongoose buffering)", async () => {
+    const { app, Setting, Audit } = build({ ready: false });
+    const res = await as(request(app).put("/api/admin/payment-rails/US_ACH").send({ enabled: false }));
+    expect(res.status).toBe(503);
+    expect(res.body.code).toBe("DB_UNAVAILABLE");
+    expect(Setting.findOne).not.toHaveBeenCalled();
+    expect(Setting.updateOne).not.toHaveBeenCalled();
+    expect(Audit.create).not.toHaveBeenCalled();
+  });
 
   it("authorization matrix for read and write", async () => {
     const { app } = build();

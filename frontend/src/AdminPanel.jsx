@@ -1,9 +1,11 @@
 import React from 'react';
 import { buildApiUrl } from './app/apiConfig';
 import { fmtPct, shortAddress as shortenWallet } from './app/copy';
+import { fmtDateTime, fmtInt, fmtNumber } from './app/format';
 import { mapResolutionTypeLabel } from './app/useAppSessionData';
 import AdminRevenuePanel from './app/contexts/admin/AdminRevenuePanel';
 import AdminRailsPanel from './app/contexts/admin/AdminRailsPanel';
+import AdminRuntimeSettingsPanel from './app/contexts/admin/AdminRuntimeSettingsPanel';
 // [TR] P5 — Zincir sekmesi yalnız açılınca yüklenir. [EN] Chain tab loads on first open.
 const AdminChainPanel = React.lazy(() => import('./app/contexts/admin/AdminChainPanel'));
 
@@ -16,7 +18,8 @@ const TAB_SETTLEMENT = 'settlement';
 const TAB_REVENUE = 'revenue';
 const TAB_CHAIN = 'chain';
 const TAB_RAILS = 'rails';
-const ALL_TABS = [TAB_OVERVIEW, TAB_SYNC, TAB_FEEDBACK, TAB_TRADES, TAB_SETTLEMENT, TAB_REVENUE, TAB_RAILS, TAB_CHAIN];
+const TAB_SETTINGS = 'settings';
+const ALL_TABS = [TAB_OVERVIEW, TAB_SYNC, TAB_FEEDBACK, TAB_TRADES, TAB_SETTLEMENT, TAB_REVENUE, TAB_RAILS, TAB_SETTINGS, TAB_CHAIN];
 
 const FEEDBACK_CATEGORY_OPTIONS = ['', 'bug', 'suggestion', 'ui/ux', 'other'];
 const FEEDBACK_RATING_OPTIONS = ['', '1', '2', '3', '4', '5'];
@@ -30,13 +33,6 @@ const SETTLEMENT_STATE_OPTIONS = ['ALL', 'PROPOSED', 'EXPIRED', 'FINALIZED', 'RE
 const SETTLEMENT_LIMIT_OPTIONS = [10, 20, 50];
 const ADMIN_POLL_INTERVAL_MS = 10 * 60 * 1000;
 
-const formatDate = (value) => {
-  if (!value) return '—';
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleString();
-};
-
 const toWorkerLagLabel = (lag) => {
   if (lag === null || lag === undefined) return '—';
   return `${lag}`;
@@ -49,6 +45,10 @@ const toBoolBadgeClass = (value) => (
 );
 
 function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, showToast, initialTab = TAB_OVERVIEW, readProtocolConfig = null, tokenSymbols = {} }) {
+  // [TR] Tarih ve sayılar seçili dile göre gösterilir (admin kayıtları için saniye dahil).
+  const formatDate = (value) => fmtDateTime(value, lang, { seconds: true });
+  const kpiInt = (value) => fmtInt(value ?? 0, lang);
+  const kpiAmount = (value) => { const out = fmtNumber(value ?? 0, lang, { maxFractionDigits: 6 }); return out === '—' ? String(value) : out; };
   const normalizeInitialTab = (tab) => (ALL_TABS.includes(tab) ? tab : TAB_OVERVIEW);
   const [activeTab, setActiveTab] = React.useState(() => normalizeInitialTab(initialTab));
 
@@ -382,25 +382,25 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
     { labelTR: 'Readiness', labelEN: 'Readiness', value: readiness?.ok ? 'OK' : 'NOT_READY', tone: readiness?.ok ? 'text-success' : 'text-danger' },
     { labelTR: 'Worker State', labelEN: 'Worker State', value: worker?.state || '—', tone: 'text-textPrimary' },
     { labelTR: 'Worker Lag', labelEN: 'Worker Lag', value: toWorkerLagLabel(worker?.lagBlocks), tone: 'text-warning' },
-    { labelTR: 'Eksik Config', labelEN: 'Missing Config', value: `${missingConfig.length}`, tone: missingConfig.length ? 'text-danger' : 'text-success' },
-    { labelTR: 'Aktif Child Trade', labelEN: 'Active Child Trades', value: `${stats?.active_child_trades ?? 0}`, tone: 'text-textPrimary' },
-    { labelTR: 'Açık Sell', labelEN: 'Open Sell Orders', value: `${stats?.open_sell_orders ?? 0}`, tone: 'text-textPrimary' },
-    { labelTR: 'Açık Buy', labelEN: 'Open Buy Orders', value: `${stats?.open_buy_orders ?? 0}`, tone: 'text-textPrimary' },
-    { labelTR: 'Tamamlanan İşlem', labelEN: 'Completed Trades', value: `${stats?.completed_trades ?? 0}`, tone: 'text-success' },
+    { labelTR: 'Eksik Config', labelEN: 'Missing Config', value: kpiInt(missingConfig.length), tone: missingConfig.length ? 'text-danger' : 'text-success' },
+    { labelTR: 'Aktif Child Trade', labelEN: 'Active Child Trades', value: kpiInt(stats?.active_child_trades), tone: 'text-textPrimary' },
+    { labelTR: 'Açık Sell', labelEN: 'Open Sell Orders', value: kpiInt(stats?.open_sell_orders), tone: 'text-textPrimary' },
+    { labelTR: 'Açık Buy', labelEN: 'Open Buy Orders', value: kpiInt(stats?.open_buy_orders), tone: 'text-textPrimary' },
+    { labelTR: 'Tamamlanan İşlem', labelEN: 'Completed Trades', value: kpiInt(stats?.completed_trades), tone: 'text-success' },
     // [TR] HistoricalStat'ta var olup gösterilmeyen emir/hacim alanları.
-    { labelTR: 'Gerçekleşen Hacim', labelEN: 'Executed Volume', value: `${stats?.executed_volume_usdt ?? 0}`, tone: 'text-textPrimary' },
-    { labelTR: 'Kısmi Dolu Emir', labelEN: 'Partially Filled', value: `${stats?.partially_filled_orders ?? 0}`, tone: 'text-textPrimary' },
-    { labelTR: 'Dolan Emir', labelEN: 'Filled Orders', value: `${stats?.filled_orders ?? 0}`, tone: 'text-textPrimary' },
-    { labelTR: 'İptal Emir', labelEN: 'Canceled Orders', value: `${stats?.canceled_orders ?? 0}`, tone: 'text-textPrimary' },
-    { labelTR: 'Yanan Bond', labelEN: 'Burned Bonds', value: `${stats?.burned_bonds_usdt ?? 0}`, tone: 'text-danger' },
-    { labelTR: 'Eksik Snapshot', labelEN: 'Incomplete Snapshot Trades', value: `${tradeCounts?.incompleteSnapshot ?? 0}`, tone: 'text-warning' },
-    { labelTR: 'Challenged', labelEN: 'Challenged Trades', value: `${tradeCounts?.challenged ?? 0}`, tone: 'text-warning' },
-    { labelTR: 'DLQ Depth', labelEN: 'DLQ Depth', value: `${dlq?.depth ?? 0}`, tone: Number(dlq?.depth || 0) > 0 ? 'text-warning' : 'text-success' },
-    { labelTR: 'Aktif Settlement', labelEN: 'Active Settlement Proposals', value: `${settlementAnalytics?.activeSettlementProposals ?? 0}`, tone: 'text-info' },
-    { labelTR: 'Expired Settlement', labelEN: 'Expired Settlement Proposals', value: `${settlementAnalytics?.expiredSettlementProposals ?? 0}`, tone: 'text-warning' },
-    { labelTR: '24s Finalized', labelEN: 'Finalized 24h', value: `${settlementAnalytics?.finalizedSettlementProposals24h ?? 0}`, tone: 'text-success' },
+    { labelTR: 'Gerçekleşen Hacim', labelEN: 'Executed Volume', value: kpiAmount(stats?.executed_volume_usdt), tone: 'text-textPrimary' },
+    { labelTR: 'Kısmi Dolu Emir', labelEN: 'Partially Filled', value: kpiInt(stats?.partially_filled_orders), tone: 'text-textPrimary' },
+    { labelTR: 'Dolan Emir', labelEN: 'Filled Orders', value: kpiInt(stats?.filled_orders), tone: 'text-textPrimary' },
+    { labelTR: 'İptal Emir', labelEN: 'Canceled Orders', value: kpiInt(stats?.canceled_orders), tone: 'text-textPrimary' },
+    { labelTR: 'Yanan Bond', labelEN: 'Burned Bonds', value: kpiAmount(stats?.burned_bonds_usdt), tone: 'text-danger' },
+    { labelTR: 'Eksik Snapshot', labelEN: 'Incomplete Snapshot Trades', value: kpiInt(tradeCounts?.incompleteSnapshot), tone: 'text-warning' },
+    { labelTR: 'Challenged', labelEN: 'Challenged Trades', value: kpiInt(tradeCounts?.challenged), tone: 'text-warning' },
+    { labelTR: 'DLQ Depth', labelEN: 'DLQ Depth', value: kpiInt(dlq?.depth), tone: Number(dlq?.depth || 0) > 0 ? 'text-warning' : 'text-success' },
+    { labelTR: 'Aktif Settlement', labelEN: 'Active Settlement Proposals', value: kpiInt(settlementAnalytics?.activeSettlementProposals), tone: 'text-info' },
+    { labelTR: 'Expired Settlement', labelEN: 'Expired Settlement Proposals', value: kpiInt(settlementAnalytics?.expiredSettlementProposals), tone: 'text-warning' },
+    { labelTR: '24s Finalized', labelEN: 'Finalized 24h', value: kpiInt(settlementAnalytics?.finalizedSettlementProposals24h), tone: 'text-success' },
     { labelTR: 'Ort. Maker Split', labelEN: 'Avg Maker Split Bps', value: `${settlementAnalytics?.avgSettlementSplitMakerBps ?? '—'}`, tone: 'text-textPrimary' },
-    { labelTR: 'Finalization Rate', labelEN: 'Settlement Finalization Rate', value: settlementAnalytics?.settlementFinalizationRate === null || settlementAnalytics?.settlementFinalizationRate === undefined ? '—' : `${Number(settlementAnalytics.settlementFinalizationRate * 100).toFixed(2)}%`, tone: 'text-textPrimary' },
+    { labelTR: 'Finalization Rate', labelEN: 'Settlement Finalization Rate', value: settlementAnalytics?.settlementFinalizationRate === null || settlementAnalytics?.settlementFinalizationRate === undefined ? '—' : (() => { const pct = Number(settlementAnalytics.settlementFinalizationRate * 100).toFixed(2); return lang === 'TR' ? `%${pct.replace('.', ',')}` : `${pct}%`; })(), tone: 'text-textPrimary' },
   ];
 
   const updateFeedbackFilter = (key, value) => {
@@ -516,7 +516,9 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
                       ? (lang === 'TR' ? 'Gelir & Ödül' : 'Revenue & Rewards')
                       : tab === TAB_RAILS
                         ? (lang === 'TR' ? 'Ödeme yöntemleri' : 'Payment methods')
-                        : (lang === 'TR' ? 'Kontrat' : 'On-chain');
+                        : tab === TAB_SETTINGS
+                          ? (lang === 'TR' ? 'Çalışma ayarları' : 'Runtime settings')
+                          : (lang === 'TR' ? 'Kontrat' : 'On-chain');
           const active = activeTab === tab;
           return (
             <button
@@ -1138,6 +1140,10 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
 
       {activeTab === TAB_RAILS && (
         <AdminRailsPanel lang={lang} authenticatedFetch={authenticatedFetch} showToast={showToast} />
+      )}
+
+      {activeTab === TAB_SETTINGS && (
+        <AdminRuntimeSettingsPanel lang={lang} authenticatedFetch={authenticatedFetch} showToast={showToast} />
       )}
 
       {activeTab === TAB_CHAIN && (

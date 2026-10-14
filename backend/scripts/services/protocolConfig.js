@@ -25,10 +25,16 @@ const logger = require("../utils/logger");
 const { getRedisClient } = require("../config/redis");
 const { getPaymentRailRiskConfig } = require("../config/paymentRailRiskConfig");
 const { assertProviderExpectedChainOrThrow } = require("./expectedChain");
+const { getSharedProvider } = require("./rpcProvider");
 const { resolveTrackedTokensOrThrow } = require("./tokenEnv");
 
 const CONFIG_CACHE_KEY = "cache:protocol_config:v3";
-const CONFIG_CACHE_TTL = Number(process.env.CONFIG_CACHE_TTL_SECONDS || 3600);
+// [TR] TTL'siz "son bilinen" kopya: RPC erişilemezken kısıtlı modda bayat olarak sunulur (yetki kaynağı değildir).
+const CONFIG_LAST_KNOWN_KEY = "cache:protocol_config:v3:last_known";
+const { runtimeValueSync } = require("../utils/runtimeValue");
+
+// [TR] TTL her yazımda çalışma ayarından okunur (admin > env > varsayılan).
+const configCacheTtl = () => runtimeValueSync("CONFIG_CACHE_TTL_SECONDS");
 
 const CONFIG_ABI = [
   "function MAKER_BOND_TIER0_BPS() view returns (uint256)",
@@ -47,6 +53,8 @@ const CONFIG_ABI = [
 ];
 
 let protocolConfig = null;
+// [TR] true: bellekteki config Redis son-bilinen kopyasından geldi (zincirden doğrulanmadı).
+let configIsStale = false;
 const PAYMENT_RISK_CONFIG = getPaymentRailRiskConfig();
 
 function _isConfigLoaded(cfg) {
@@ -70,9 +78,34 @@ function _bondEntry(makerBps, takerBps) {
 
 async function _writeCache(redis, value) {
   try {
-    await redis.setEx(CONFIG_CACHE_KEY, CONFIG_CACHE_TTL, JSON.stringify(value));
+    await redis.setEx(CONFIG_CACHE_KEY, configCacheTtl(), JSON.stringify(value));
   } catch (err) {
     logger.warn(`[Config] Redis yazma hatası: ${err.message}`);
+  }
+  try {
+    if (typeof redis.set === "function") await redis.set(CONFIG_LAST_KNOWN_KEY, JSON.stringify(value));
+  } catch (err) {
+    logger.warn(`[Config] Redis son-bilinen yazma hatası: ${err.message}`);
+  }
+}
+
+/**
+ * [TR] Kısıtlı mod: RPC olmadan, Redis'teki son bilinen config'i (varsa) belleğe yükler. Zincirden doğrulanmış
+ *      DEĞİLDİR (bayat olabilir); çağıran bunu işaretlemelidir. Yoksa null döner ve config yüklenmemiş kalır.
+ * [EN] Degraded mode: loads the last-known config from Redis without RPC. May be stale; the caller flags it.
+ */
+async function loadStaleProtocolConfig() {
+  try {
+    const raw = await getRedisClient().get(CONFIG_LAST_KNOWN_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!_isConfigLoaded(parsed)) return null;
+    protocolConfig = parsed;
+    configIsStale = true;
+    return protocolConfig;
+  } catch (err) {
+    logger.warn(`[Config] Son bilinen config okunamadı: ${err.message}`);
+    return null;
   }
 }
 
@@ -83,6 +116,7 @@ async function loadProtocolConfig() {
     const cached = await redis.get(CONFIG_CACHE_KEY);
     if (cached) {
       protocolConfig = JSON.parse(cached);
+      configIsStale = false;
       logger.info("[Config] V3 protokol parametreleri Redis önbelleğinden yüklendi.");
       return protocolConfig;
     }
@@ -92,6 +126,7 @@ async function loadProtocolConfig() {
 
   const next = await _buildConfigFromChain({ strictTokens: false });
   protocolConfig = next;
+  configIsStale = false;
   return protocolConfig;
 }
 
@@ -121,7 +156,7 @@ async function _buildConfigFromChain({ strictTokens }) {
 
   logger.info("[Config] V3 protokol parametreleri on-chain'den yükleniyor...");
 
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const provider = getSharedProvider();
   await assertProviderExpectedChainOrThrow(provider, {
     rpcUrl,
     rpcEnvName: "BASE_RPC_URL",
@@ -202,7 +237,7 @@ async function _buildConfigFromChain({ strictTokens }) {
   };
 
   await _writeCache(redis, built);
-  logger.info(`[Config] V3 on-chain parametreler yüklendi ve cache'lendi (TTL=${CONFIG_CACHE_TTL}s).`);
+  logger.info(`[Config] V3 on-chain parametreler yüklendi ve cache'lendi (TTL=${configCacheTtl()}s).`);
   return built;
 }
 
@@ -217,6 +252,7 @@ async function refreshProtocolConfig() {
   const next = await _buildConfigFromChain({ strictTokens: true });
   if (!next) return protocolConfig;
   protocolConfig = next;
+  configIsStale = false;
   return protocolConfig;
 }
 
@@ -289,6 +325,10 @@ async function updateCachedReputationPolicy(patch) {
   });
 }
 
+function isProtocolConfigStale() {
+  return configIsStale;
+}
+
 function getConfig() {
   if (!_isConfigLoaded(protocolConfig)) {
     const err = new Error(
@@ -305,6 +345,8 @@ function getConfig() {
 
 module.exports = {
   loadProtocolConfig,
+  loadStaleProtocolConfig,
+  isProtocolConfigStale,
   refreshProtocolConfig,
   getConfig,
   updateCachedFeeConfig,

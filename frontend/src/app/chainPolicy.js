@@ -55,7 +55,32 @@ export const isSupportedChainId = (chainId, isProd = import.meta.env.PROD, targe
 export const isTestnetBuild = (isProd = import.meta.env.PROD, targetChain = import.meta.env.VITE_TARGET_CHAIN) =>
   Boolean(isProd) && resolveTargetChain(targetChain) === TARGET_CHAIN_BASE_SEPOLIA;
 
-export const isMintTokenEnabled = (isProd = import.meta.env.PROD) => !isProd;
+// [TR] Musluk: dev build VEYA testnet build (production + base-sepolia). Mainnet/bilinmeyen hedef -> kapalı.
+// [EN] Faucet: dev build OR testnet build (production + base-sepolia). Mainnet/unknown target -> disabled.
+export const isMintTokenEnabled = (isProd = import.meta.env.PROD, targetChain = import.meta.env.VITE_TARGET_CHAIN) =>
+  !isProd || isTestnetBuild(isProd, targetChain);
+
+// [TR] Musluğun çalışabileceği cüzdan zincirleri: yalnız Base Sepolia ve Hardhat.
+// [EN] Wallet chains where the faucet may run: Base Sepolia and Hardhat only.
+export const FAUCET_CHAIN_IDS = [BASE_SEPOLIA_CHAIN_ID, HARDHAT_CHAIN_ID];
+export const isFaucetChainId = (chainId) => FAUCET_CHAIN_IDS.includes(Number(chainId));
+
+// [TR] Bilinen gerçek (Circle/Tether) token adresleri: asla mint denenmez.
+// [EN] Known real token addresses: mint is never attempted.
+const KNOWN_REAL_TOKENS = [
+  '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', // USDC Base
+  '0xfde4c96c8593536e31f229ea8f37b2ada2699bb2', // USDT Base
+  '0x036cbd53842c5426634e7929541ec2318f3dcf7e', // USDC Base Sepolia (Circle)
+];
+
+// [TR] Test token = VITE_USDT_ADDRESS / VITE_USDC_ADDRESS ile yapılandırılmış ve bilinen gerçek token olmayan adres.
+// [EN] Test token = configured via VITE_USDT_ADDRESS / VITE_USDC_ADDRESS and not a known real token.
+export const isConfiguredTestToken = (address, env = import.meta.env) => {
+  const a = String(address || '').toLowerCase();
+  if (!a || KNOWN_REAL_TOKENS.includes(a)) return false;
+  return [env?.VITE_USDT_ADDRESS, env?.VITE_USDC_ADDRESS]
+    .some((c) => String(c || '').toLowerCase() === a);
+};
 
 
 // [TR] Deploy uyumu: frontend ile backend aynı escrow kontratına ve desteklenen bir zincire bakmalı.

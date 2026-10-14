@@ -1,6 +1,7 @@
 import React from 'react';
 import { buildApiUrl } from '../../apiConfig';
 import { shortAddress as short, tx as t } from '../../copy';
+import { fmtDateTime } from '../../format';
 
 // [TR] "Ödeme yöntemleri" sekmesi: rail açma/kapama (switch), onay penceresi, audit listesi.
 //      Kapatılan rail yalnız YENİ profil/emir açılışını engeller; aktif işlemler etkilenmez.
@@ -14,11 +15,6 @@ const RISK_CLASS = {
   RESTRICTED: 'bg-danger/10 text-danger border border-danger/40',
 };
 
-const fmtDate = (v) => {
-  if (!v) return '—';
-  const d = new Date(v);
-  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString();
-};
 
 export default function AdminRailsPanel({ lang = 'EN', authenticatedFetch, showToast = () => {} }) {
   const [state, setState] = React.useState({ loading: true, error: '', unauthorized: false, rails: [] });
@@ -127,7 +123,7 @@ export default function AdminRailsPanel({ lang = 'EN', authenticatedFetch, showT
                   <span className={`px-2 py-0.5 rounded-full ${RISK_CLASS[rail.riskLevel] || RISK_CLASS.MEDIUM}`}>{rail.riskLevel}</span>
                 </div>
                 <div className="mt-1 text-xs text-textMuted">
-                  {t(lang, 'Son değişiklik', 'Last change')}: {fmtDate(rail.changedAt)}
+                  {t(lang, 'Son değişiklik', 'Last change')}: {fmtDateTime(rail.changedAt, lang, { seconds: true })}
                   {rail.changedBy ? ` · ${short(rail.changedBy)}` : ''}
                 </div>
               </div>
@@ -163,7 +159,7 @@ export default function AdminRailsPanel({ lang = 'EN', authenticatedFetch, showT
               <li key={a.id} className="text-xs text-textSecondary border-b border-borderSubtle pb-2 last:border-0">
                 <span className="font-mono text-textPrimary">{a.rail}</span>{' '}
                 {a.previousEnabled ? t(lang, 'Açık', 'Enabled') : t(lang, 'Kapalı', 'Disabled')} → {a.newEnabled ? t(lang, 'Açık', 'Enabled') : t(lang, 'Kapalı', 'Disabled')}
-                {' · '}{short(a.adminWallet)}{' · '}{fmtDate(a.createdAt)}
+                {' · '}{short(a.adminWallet)}{' · '}{fmtDateTime(a.createdAt, lang, { seconds: true })}
                 {a.reason ? <div className="text-textMuted break-words">{a.reason}</div> : null}
               </li>
             ))}

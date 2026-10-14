@@ -5,6 +5,7 @@
 
 import { formatUnits } from 'viem';
 import { orderSide as orderSideCopy } from './copy';
+import { fmtNumber } from './format';
 
 const DEFAULT_TOKEN_DECIMALS = 6;
 const VALID_ORDER_SIDES = new Set(['SELL_CRYPTO', 'BUY_CRYPTO']);
@@ -140,10 +141,11 @@ export const tokenToNumber = (raw, decimals = DEFAULT_TOKEN_DECIMALS) => {
   }
 };
 
-export const formatTokenAmount = (raw, decimals = DEFAULT_TOKEN_DECIMALS, maxFractionDigits = 4) => {
+// [TR] `lang` yalnız ayırıcıları seçer (varsayılan EN = önceki davranış); basamak ve yuvarlama aynı.
+export const formatTokenAmount = (raw, decimals = DEFAULT_TOKEN_DECIMALS, maxFractionDigits = 4, lang = 'EN') => {
   if (!validDecimals(decimals)) return '—';
   try {
-    return Number(formatUnits(BigInt(raw ?? 0), decimals)).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: maxFractionDigits });
+    return fmtNumber(Number(formatUnits(BigInt(raw ?? 0), decimals)), lang, { minFractionDigits: 0, maxFractionDigits });
   } catch {
     return '—';
   }
@@ -463,6 +465,8 @@ export const mapApiOrderToUi = ({ order, lang = 'TR', bondMap = {}, tokenMap = {
     // [TR] Backend boolean'ı: emir sahibinin KAYITLI ödeme profili var mı. Bilgi yoksa null (engelleme yok).
     ownerHasPayoutProfile: typeof order?.owner_has_payout_profile === 'boolean' ? order.owner_has_payout_profile : null,
     ownerRailEnabled: typeof order?.owner_rail_enabled === 'boolean' ? order.owner_rail_enabled : null,
+    // [TR] Emir sahibinin ödeme yöntemi KODU (backend owner_rail; yalnız kod, PII yok). Yoksa null = bilinmiyor.
+    paymentRail: typeof order?.owner_rail === 'string' && order.owner_rail ? order.owner_rail : null,
     maker: formatAddress(ownerAddress),
     makerFull: ownerAddress,
     side,

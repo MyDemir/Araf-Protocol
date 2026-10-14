@@ -1,4 +1,4 @@
-import { CircleCheck, Info, MessageSquare, TriangleAlert, Wallet } from 'lucide-react';
+import { CircleCheck, Info, MessageSquare, TriangleAlert, Wallet, X } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 import { useAccount, useConnect, useDisconnect, useSignMessage, useChainId, usePublicClient } from 'wagmi';
 import { canonicalizePayoutProfileDraft, formatTokenAmount as formatTokenAmountFromRaw, tokenToNumber as rawTokenToDisplayNumber } from './app/orderUiModel';
@@ -10,7 +10,7 @@ import { useSessionActions } from './app/providers/SessionProvider';
 import { useAppSessionData } from './app/useAppSessionData';
 // [TR] Admin paneli yalnız yöneticiler içindir; ayrı chunk olarak ilk ihtiyaçta yüklenir.
 // [EN] The admin panel is for admins only; loaded as a separate chunk on first use.
-const AdminPanel = React.lazy(() => import('./AdminPanel'));
+const AdminPanel = lazyWithRetry(() => import('./AdminPanel'));
 import useFullscreen from './app/shell/useFullscreen';
 import { isUiLabEnabled, loadUiLab } from './app/uiLab';
 import { SESSION_ONLY_VIEWS } from './app/viewRegistry';
@@ -19,6 +19,11 @@ import { markTermsAcceptedLocally } from './app/legal/terms';
 import { buildApiUrl, resolveApiPolicyDiagnostics } from './app/apiConfig';
 import { checkDeploymentAlignment, getSupportedChainsMap, isMintTokenEnabled, isSupportedChainId } from './app/chainPolicy';
 import { ENV_ERROR_CODES, envError } from './app/envErrorCodes';
+import ErrorBoundary from './components/ErrorBoundary';
+import { lazyWithRetry } from './app/lazyWithRetry';
+import { useInfraHealth } from './app/infraHealth';
+import { resolveNewTxGate } from './app/txGate';
+import { useFillConfirm } from './app/useFillConfirm';
 import { resolveRevenueVaultAddress } from './app/envConfig';
 import { useMakerOrderForm } from './app/contexts/marketplace/useMakerOrderForm';
 import { useMarketFilters } from './app/contexts/marketplace/marketFilters';
@@ -51,11 +56,22 @@ const ADMIN_TOKEN_SYMBOLS = Object.fromEntries(
   Object.entries(SUPPORTED_TOKEN_ADDRESSES).filter(([, a]) => a).map(([sym, a]) => [String(a).toLowerCase(), sym])
 );
 
+// [TR] Render fonksiyonunu alt bileşen olarak çalıştırır; böylece fırlattığı hata App'i değil en yakın
+//      ErrorBoundary'yi düşürür. (Bu fonksiyonlarda hook yoktur.)
+// [EN] Runs a render function as a child component so its throw reaches the nearest ErrorBoundary, not App.
+const ViewSlot = ({ render }) => render();
+
 function App() {
   // ═══════════════════════════════════════════
   // 1. EKRAN VE UI STATE YÖNETİMİ
   //    View routing + modal open/close flags
   // ═══════════════════════════════════════════
+  // [TR] Fail-closed: YENİ pozisyon açan işlemler (emir oluştur / emre gir) paused, "ilk zincir okuması gelmedi" ya da
+  //      backend/RPC arızasında kapalıdır (bkz. app/txGate.js; eylem fonksiyonları da çağrı anında kontrol eder).
+  //      Mevcut işlemden ÇIKIŞ eylemleri (ödeme bildir, release, itiraz, ping...) altyapı arızasında KAPATILMAZ:
+  //      kontrat zaman kurallarını zincirde kendisi uygular, engellemek süre kaçırtıp fon kaybettirebilir.
+  //      Trade room'a yalnız gerçek kontrat pause'u (isPaused) gider.
+  const infra = useInfraHealth();
   const uiLabEnabled = isUiLabEnabled();
   // [TR] Lab kodu yalnız etkinse ve ilk ihtiyaçta yüklenir. [EN] Lab code loads only when enabled.
   const [uiLab, setUiLab] = useState(null);
@@ -132,6 +148,13 @@ function App() {
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem(APP_LANG_STORAGE_KEY, lang);
+  }, [lang]);
+
+  // [TR] <html lang> seçili dille eşlenir: CSS uppercase "i/İ" ve ekran okuyucu doğru çalışır.
+  // [EN] Keep <html lang> in sync with the selected language (correct uppercase "İ" and screen-reader voice).
+  React.useEffect(() => {
+    if (typeof document === 'undefined') return;
+    document.documentElement.lang = lang === 'TR' ? 'tr' : 'en';
   }, [lang]);
 
   // [TR] Tüm kontrat metodları tek bir hook instance'ından alınır
@@ -211,6 +234,7 @@ function App() {
     walletAgeRemainingDays,
     takerName,
     isPaused,
+    rpcChecked,
     protocolStats,
     statsLoading,
     statsError,
@@ -282,6 +306,15 @@ function App() {
     marketFilters,
     devScenarioActive,
   });
+  const txGate = React.useMemo(() => resolveNewTxGate({
+    isPaused, rpcChecked, backendUnreachable: infra.backend, rpcUnreachable: infra.rpc, configStale: infra.configStale, serviceDegraded: infra.degraded, lang,
+  }), [isPaused, rpcChecked, infra.backend, infra.rpc, infra.configStale, infra.degraded, lang]);
+  // [TR] Eylem fonksiyonları kapıyı çağrı anında bu ref'ten okur: modal açıkken arıza başlarsa bayat kapanıştan etkilenmez.
+  const txGateRef = React.useRef(txGate);
+  txGateRef.current = txGate;
+  const getTxGate = React.useCallback(() => txGateRef.current, []);
+  const { confirmFill, fillConfirmSummary, settleFillConfirm } = useFillConfirm();
+
 
   // [TR] UI Lab kaplaması: senaryo başına bir kez kurulur; alanlar yalnız ilgili kategoride doludur.
   //      Kategoriye özgü mantık test/ui-lab/appOverlay.js içindedir ve production paketine girmez.
@@ -540,6 +573,7 @@ function App() {
     handleOpenMakerModal,
   } = useMakerOrderForm({
     isPaused,
+    txGate: getTxGate,
     requireSignedSessionForActiveWallet,
     setShowMakerModal,
     showToast,
@@ -611,6 +645,8 @@ function App() {
   }), [lang, isConnected, isFaucetEnabled, mintToken, showToast]);
 
   const handleStartTrade = React.useMemo(() => buildStartTradeAction({
+    txGate: getTxGate,
+    confirmFill,
     lang,
     address,
     isBanned,
@@ -641,6 +677,7 @@ function App() {
     hasPayoutProfile,
     openProfilePage,
   }), [
+    confirmFill,
     hasPayoutProfile,
     openProfilePage,
     setUserRole,
@@ -667,6 +704,7 @@ function App() {
     setCancelStatus,
     setChargebackAccepted,
     labOr,
+    getTxGate,
   ]);
 
   const tradeRoomActions = React.useMemo(() => buildTradeRoomActions({
@@ -911,6 +949,7 @@ function App() {
     renderProfileContext,
     renderTradeRoom,
     renderSlimRail,
+    renderAdminHint,
     renderContextSidebar,
     renderMobileNav,
     renderFooter,
@@ -925,6 +964,8 @@ function App() {
     isContractLoading,
     loadingText,
     isPaused,
+    txGate,
+    infraDegraded: infra.backend || infra.rpc,
     authChecked: effectiveAuthChecked,
     currentView,
     setCurrentView,
@@ -1041,6 +1082,7 @@ function App() {
     renderFeedbackModal,
     renderMakerModal,
     renderTermsModal,
+    renderFillConfirm,
   } = buildAppModals({
     lang,
     onRequestSignIn: handleAuthAction,
@@ -1048,6 +1090,7 @@ function App() {
     setShowWalletModal,
     connectors,
     connect,
+    showToast,
     getWalletIcon,
     showFeedbackModal,
     setShowFeedbackModal,
@@ -1089,6 +1132,9 @@ function App() {
     makerPayoutRiskEntry,
     isCreateTemporarilyDisabledByRisk,
     isPayoutProfileGateBlocked: labMaker ? false : isPayoutProfileGateBlocked,
+    txGate: labMaker ? null : txGate,
+    fillConfirmSummary,
+    settleFillConfirm,
     openProfilePage,
     isContractLoading,
     loadingText,
@@ -1109,12 +1155,16 @@ function App() {
     <div className="flex h-dvh min-h-dvh max-h-dvh w-full max-w-full flex-col overflow-hidden bg-app text-textPrimary font-sans selection:bg-emerald-500/30 relative">
       <AppShell
         status={systemStatus}
-        navigation={renderSlimRail()}
-        panel={renderContextSidebar()}
-        mobileBottom={renderMobileNav()}
+        navigation={<ErrorBoundary scope="section" fallback={null}><ViewSlot render={renderSlimRail} /></ErrorBoundary>}
+        panel={<ErrorBoundary scope="section" fallback={null}><ViewSlot render={renderContextSidebar} /></ErrorBoundary>}
+        mobileBottom={<ErrorBoundary scope="section" fallback={null}><ViewSlot render={renderMobileNav} /></ErrorBoundary>}
         outlet={(
           <div className="flex-1 min-w-0 w-full max-w-full overflow-y-auto overflow-x-hidden relative bg-app">
             <div className="box-border min-h-full w-full max-w-full min-w-0 flex flex-col pt-4 md:pt-10 pb-[calc(4rem_+_env(safe-area-inset-bottom))] md:pb-10 items-center">
+              {/* [TR] Görünüm render hatası yalnız bu bölümü düşürür; ray, bant ve diğer sekmeler çalışır. */}
+              <ErrorBoundary scope="section" resetKeys={[currentView]}>
+              <ViewSlot render={() => (<>
+              {renderAdminHint()}
               {currentView === 'home'
                 ? renderHome()
                 : currentView === 'market'
@@ -1142,6 +1192,8 @@ function App() {
                     )
                     : renderTradeRoom()}
               {currentView === 'home' && renderFooter()}
+              </>)} />
+              </ErrorBoundary>
             </div>
           </div>
         )}
@@ -1151,6 +1203,7 @@ function App() {
             {renderFeedbackModal()}
             {renderMakerModal()}
             {renderTermsModal()}
+            {renderFillConfirm()}
           </>
         )}
       />
@@ -1163,12 +1216,12 @@ function App() {
         />
       )}
 
-      {/* [TR] Mobilde yalnız ikon: içerik ve başlıkların üstüne binmez. [EN] Icon-only on mobile. */}
+      {/* [TR] Mobilde gizli (içeriğin üstüne biniyordu); giriş Menü panelinde. [EN] Hidden on mobile; entry lives in the Menu panel. */}
       <button
         onClick={() => setShowFeedbackModal(true)}
         title={lang === 'TR' ? 'Geri Bildirim' : 'Feedback'}
         aria-label={lang === 'TR' ? 'Geri Bildirim' : 'Feedback'}
-        className="fixed top-[calc(0.75rem_+_env(safe-area-inset-top))] right-[calc(0.75rem_+_env(safe-area-inset-right))] md:top-6 md:right-6 z-40 h-10 w-10 md:w-auto md:px-4 bg-surface/90 hover:bg-elevated border border-borderSubtle rounded-full md:rounded-2xl flex items-center justify-center gap-2 text-sm font-semibold text-textPrimary shadow-sm backdrop-blur transition hover:border-borderStrong"
+        className="hidden md:flex fixed md:top-6 md:right-6 z-40 h-10 md:w-auto md:px-4 bg-surface/90 hover:bg-elevated border border-borderSubtle md:rounded-2xl items-center justify-center gap-2 text-sm font-semibold text-textPrimary shadow-sm backdrop-blur transition hover:border-borderStrong"
       >
         <MessageSquare className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />
         <span className="hidden md:inline">{lang === 'TR' ? 'Geri Bildirim' : 'Feedback'}</span>
@@ -1185,7 +1238,7 @@ function App() {
               {toast.type === 'error' ? <TriangleAlert className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" /> : toast.type === 'info' ? <Info className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" /> : <CircleCheck className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />}
             </span>
             <span className="flex-1 leading-snug">{toast.message}</span>
-            <button type="button" onClick={() => setToast(null)} aria-label={lang === 'TR' ? 'Kapat' : 'Close'} className="text-textMuted hover:text-textPrimary leading-none">×</button>
+            <button type="button" onClick={() => setToast(null)} aria-label={lang === 'TR' ? 'Kapat' : 'Close'} className="-my-3 -mr-3 w-11 h-11 shrink-0 flex items-center justify-center rounded-xl text-textMuted hover:text-textPrimary"><X className="w-4 h-4" strokeWidth={2} aria-hidden="true" /></button>
           </div>
         </div>
       )}
