@@ -25,7 +25,7 @@ const SEL = {
   revenueVault: selector('revenueVault()'),
 };
 
-const DEFAULTS = { maxAttempts: 5, baseDelayMs: 1000, maxDelayMs: 8000, totalBudgetMs: 30000 };
+const DEFAULTS = { maxAttempts: 5, baseDelayMs: 1000, maxDelayMs: 8000, totalBudgetMs: 30000, requestTimeoutMs: 10000 };
 const ZERO = '0x0000000000000000000000000000000000000000';
 
 /** Geçici hata: yeniden denenebilir (429, 5xx, ağ, -32005 / rate-limit). */
@@ -36,15 +36,17 @@ function transientError(message) {
 }
 
 // NOT: hata mesajları RPC URL'sini (API anahtarı içerir) ASLA içermez.
-async function ethCallAddress(rpcUrl, to, data, fetchImpl) {
+async function ethCallAddress(rpcUrl, to, data, fetchImpl, timeoutMs = DEFAULTS.requestTimeoutMs) {
   let res;
   try {
     res = await fetchImpl(rpcUrl, {
+      signal: AbortSignal.timeout(timeoutMs),
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to, data }, 'latest'] }),
     });
   } catch (err) {
+    if (err && (err.name === 'TimeoutError' || err.name === 'AbortError')) throw transientError('request timeout');
     const code = err && (err.code || (err.cause && err.cause.code));
     throw transientError(`network error${code ? ` ${String(code).replace(/[^A-Za-z0-9_]/g, '')}` : ''}`);
   }
@@ -82,6 +84,7 @@ async function checkRewardsBinding({
   fetchImpl = globalThis.fetch, sleep = defaultSleep,
   maxAttempts = DEFAULTS.maxAttempts, baseDelayMs = DEFAULTS.baseDelayMs,
   maxDelayMs = DEFAULTS.maxDelayMs, totalBudgetMs = DEFAULTS.totalBudgetMs,
+  requestTimeoutMs = DEFAULTS.requestTimeoutMs,
 }) {
   const e = normalizeAddress('ESCROW', escrow);
   const v = normalizeAddress('REVENUE_VAULT', vault);
@@ -101,7 +104,7 @@ async function checkRewardsBinding({
       const ep = endpoints[i];
       for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         try {
-          const got = await ethCallAddress(ep.url, to, data, fetchImpl);
+          const got = await ethCallAddress(ep.url, to, data, fetchImpl, requestTimeoutMs);
           start = i;
           return got;
         } catch (err) {

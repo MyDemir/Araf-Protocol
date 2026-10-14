@@ -440,6 +440,24 @@ exit 0
       expect(sleeps.reduce((a, b) => a + b, 0)).to.be.at.most(30000);
     });
 
+    it('hanging fetch honoring the abort signal times out, is retried, then falls back', async function () {
+      const { fetchImpl, calls } = makeFetch((u) => (u === PRIMARY ? 'hang' : 'ok'));
+      const hanging = (u, init) => {
+        if (u !== PRIMARY) return fetchImpl(u, init);
+        calls.push(u);
+        return new Promise((resolve, reject) => {
+          init.signal.addEventListener('abort', () => reject(init.signal.reason));
+        });
+      };
+      const r = await binding.checkRewardsBinding({
+        ...base(), rpcUrl: PRIMARY, fallbackUrls: [FB0], fetchImpl: hanging, requestTimeoutMs: 20, maxAttempts: 2,
+      });
+      expect(r.ok, String(r.readErrors)).to.equal(true);
+      expect(calls.filter((u) => u === PRIMARY)).to.have.length(2);
+      expect(calls).to.include(FB0);
+      expect(sleeps).to.deep.equal([1000]);
+    });
+
     it('parseFallbacks keeps only https:// entries', function () {
       expect(binding.parseFallbacks(` ${FB0} , http://insecure.example , ,ftp://x, ${FB1}`)).to.deep.equal([FB0, FB1]);
       expect(binding.parseFallbacks(undefined)).to.deep.equal([]);
