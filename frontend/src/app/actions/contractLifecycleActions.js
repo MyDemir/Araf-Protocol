@@ -378,8 +378,8 @@ export const buildMintAction = ({
   try {
     if (!isFaucetEnabled) {
       throw new Error(lang === 'TR'
-        ? 'Production ortamında test faucet devre dışıdır.'
-        : 'Test faucet is disabled in production.');
+        ? "Musluk yalnız testnet'te kullanılabilir."
+        : 'Faucet is only available on testnet.');
     }
     setIsContractLoading(true);
     setLoadingText(lang === 'TR' ? `${tokenName} alınıyor...` : `Minting ${tokenName}...`);

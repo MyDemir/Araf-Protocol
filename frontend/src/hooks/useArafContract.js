@@ -21,7 +21,7 @@ import { usePublicClient, useWalletClient, useChainId, useAccount } from 'wagmi'
 import { parseAbi, getAddress, decodeEventLog } from 'viem';
 import { resolveClientErrorLogUrl } from '../app/apiConfig';
 import { setMakerChallengeWindowMs } from '../app/contexts/trade-room/tradeTimeline';
-import { getSupportedChainsMap, isMintTokenEnabled } from '../app/chainPolicy';
+import { getSupportedChainsMap, isConfiguredTestToken, isFaucetChainId, isMintTokenEnabled } from '../app/chainPolicy';
 import { ARAF_CONTRACT_ERROR_ABI, decorateContractError } from '../app/contractErrors';
 
 const ArafEscrowABI = parseAbi([
@@ -584,7 +584,13 @@ export function useArafContract({ expectedChainId = null } = {}) {
   const mintToken = useCallback(async (tokenAddress) => {
     if (!walletClient) throw new Error("İşlem için aktif wallet client bulunamadı. Cüzdan bağlantınızı ve oturum imzanızı kontrol edin.");
     if (!isMintTokenEnabled()) {
-      throw new Error("Production ortamında test faucet (mint) devre dışıdır. Lütfen Base Mainnet üzerinde gerçek token kullanın.");
+      throw new Error("Musluk yalnız testnet'te kullanılabilir (mainnet'te test faucet (mint) devre dışıdır).");
+    }
+    if (!isFaucetChainId(chainId)) {
+      throw new Error("Musluk yalnız Base Sepolia (84532) veya Hardhat (31337) ağında kullanılabilir. Cüzdan ağınızı değiştirin.");
+    }
+    if (!isConfiguredTestToken(tokenAddress)) {
+      throw new Error("Bu adres yapılandırılmış bir test token'ı değil; mint denenmedi.");
     }
     _validateChain();
     
@@ -611,7 +617,7 @@ export function useArafContract({ expectedChainId = null } = {}) {
        }).catch(() => {});
        throw error;
     }
-  }, [walletClient, publicClient, _validateChain]);
+  }, [walletClient, publicClient, _validateChain, chainId]);
  /**
    * Mevcut allowance'ı okur — approve gerekip gerekmediğini anlamak için.
    * @param {string} tokenAddress

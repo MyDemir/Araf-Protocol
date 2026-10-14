@@ -50,7 +50,7 @@ describe('frontend ↔ backend API path alignment', () => {
     expect(contract).not.toContain("import ArafEscrowAbiJson from '../../frontend/src/abi/ArafEscrow.json'");
     expect(contract).toContain("const ArafEscrowABI = parseAbi([");
     expect(contract).toContain("'function registerWallet()'");
-    expect(contract).toContain('Production ortamında test faucet (mint) devre dışıdır');
+    expect(contract).toContain("Musluk yalnız testnet'te kullanılabilir");
     expect(contract).toContain('manualReleaseCount');
     expect(contract).not.toContain('view returns (uint256 successful, uint256 failed, uint256 bannedUntil, uint256 consecutiveBans, uint8 effectiveTier)');
 
