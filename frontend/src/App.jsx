@@ -23,6 +23,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 import { lazyWithRetry } from './app/lazyWithRetry';
 import { useInfraHealth } from './app/infraHealth';
 import { resolveNewTxGate } from './app/txGate';
+import { useFillConfirm } from './app/useFillConfirm';
 import { resolveRevenueVaultAddress } from './app/envConfig';
 import { useMakerOrderForm } from './app/contexts/marketplace/useMakerOrderForm';
 import { useMarketFilters } from './app/contexts/marketplace/marketFilters';
@@ -312,6 +313,7 @@ function App() {
   const txGateRef = React.useRef(txGate);
   txGateRef.current = txGate;
   const getTxGate = React.useCallback(() => txGateRef.current, []);
+  const { confirmFill, fillConfirmSummary, settleFillConfirm } = useFillConfirm();
 
 
   // [TR] UI Lab kaplaması: senaryo başına bir kez kurulur; alanlar yalnız ilgili kategoride doludur.
@@ -644,6 +646,7 @@ function App() {
 
   const handleStartTrade = React.useMemo(() => buildStartTradeAction({
     txGate: getTxGate,
+    confirmFill,
     lang,
     address,
     isBanned,
@@ -674,6 +677,7 @@ function App() {
     hasPayoutProfile,
     openProfilePage,
   }), [
+    confirmFill,
     hasPayoutProfile,
     openProfilePage,
     setUserRole,
@@ -1078,6 +1082,7 @@ function App() {
     renderFeedbackModal,
     renderMakerModal,
     renderTermsModal,
+    renderFillConfirm,
   } = buildAppModals({
     lang,
     onRequestSignIn: handleAuthAction,
@@ -1128,6 +1133,8 @@ function App() {
     isCreateTemporarilyDisabledByRisk,
     isPayoutProfileGateBlocked: labMaker ? false : isPayoutProfileGateBlocked,
     txGate: labMaker ? null : txGate,
+    fillConfirmSummary,
+    settleFillConfirm,
     openProfilePage,
     isContractLoading,
     loadingText,
@@ -1196,6 +1203,7 @@ function App() {
             {renderFeedbackModal()}
             {renderMakerModal()}
             {renderTermsModal()}
+            {renderFillConfirm()}
           </>
         )}
       />

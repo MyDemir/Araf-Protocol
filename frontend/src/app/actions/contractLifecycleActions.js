@@ -6,6 +6,7 @@ import { normalizeOrderSide, removeOrderByOnchainId, resolveOrderActionFns } fro
 import { WALLET_AGE_MIN_DAYS } from '../walletAge';
 import { mapChainTradeState, resolveConfirmedState } from '../tradeStateSync';
 import { computeFillAllowance } from './allowanceMath';
+import { buildFillConfirmSummary } from '../fillConfirmSummary';
 import { clearAppHashRoute } from './tradeNavigationActions';
 import { isOwnerRailDisabled, ownerRailDisabledMessage, isOwnerPayoutProfileMissing, isPayoutProfileSaved, ownerProfileMissingMessage, profileRequiredMessage } from '../payoutProfileGate';
 
@@ -129,6 +130,12 @@ export const buildStartTradeAction = ({
   hasPayoutProfile = null,
   openProfilePage = null,
   confirmFn = null,
+  // [TR] Onay penceresi (async, özet alır, true/false döner). Verilirse window.confirm yerine kullanılır ve özet
+  //      zincirden okunan/hesaplanan değerlerle kurulabilsin diye okumalardan SONRA, approve'dan ÖNCE sorulur.
+  //      Okumalar tx değildir; vazgeçilirse hiçbir tx gönderilmez.
+  // [EN] Async confirmation sheet (takes a summary, resolves true/false). When given it replaces window.confirm and is
+  //      asked after the read-only chain calls (so it shows the exact amounts) but before any approve/fill tx.
+  confirmFill = null,
   // [TR] Fail-closed kapı (getter ya da nesne): approve'dan ÖNCE değerlendirilir.
   txGate = null,
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
@@ -149,17 +156,20 @@ export const buildStartTradeAction = ({
     showToast(ownerRailDisabledMessage(lang), 'error');
     return;
   }
-  const confirm = confirmFn || getConfirm();
-  if (!confirm) {
-    showToast(
-      lang === 'TR'
-        ? 'Bu tarayıcıda onay penceresi kullanılamıyor. Lütfen işlemi standart bir tarayıcıdan yapın.'
-        : 'Confirmation dialogs are unavailable in this browser. Please use a standard browser to continue.',
-      'error'
-    );
-    return;
+  const useSheet = typeof confirmFill === 'function';
+  if (!useSheet) {
+    const confirm = confirmFn || getConfirm();
+    if (!confirm) {
+      showToast(
+        lang === 'TR'
+          ? 'Bu tarayıcıda onay penceresi kullanılamıyor. Lütfen işlemi standart bir tarayıcıdan yapın.'
+          : 'Confirmation dialogs are unavailable in this browser. Please use a standard browser to continue.',
+        'error'
+      );
+      return;
+    }
+    if (!confirm(lang === 'TR' ? 'İşlemi onaylıyor musunuz?' : 'Do you confirm the transaction?')) return;
   }
-  if (!confirm(lang === 'TR' ? 'İşlemi onaylıyor musunuz?' : 'Do you confirm the transaction?')) return;
   if (isBanned) {
     showToast(
       lang === 'TR'
@@ -247,6 +257,23 @@ export const buildStartTradeAction = ({
       bondMap,
       reputation,
     });
+
+    if (useSheet) {
+      setLoadingText(lang === 'TR' ? 'Onayınız bekleniyor...' : 'Waiting for your confirmation...');
+      const accepted = await confirmFill(buildFillConfirmSummary({
+        order,
+        side,
+        tier: getOnchainOrderField(onchainOrder, 'tier', 11),
+        fillAmountRaw,
+        requiredAllowance,
+        takerFeeBpsSnapshot: getOnchainOrderField(onchainOrder, 'takerFeeBpsSnapshot', 9),
+        makerFeeBpsSnapshot: getOnchainOrderField(onchainOrder, 'makerFeeBpsSnapshot', 10),
+        bondIsUpperBound: !reputation,
+      }));
+      if (!accepted) return;
+      // [TR] Pencere açıkken altyapı arızası başladıysa approve'a geçilmez (kapı approve'dan önce yeniden değerlendirilir).
+      if (txGate && !enforceTxGate(txGate, showToast)) return;
+    }
 
     const currentAllowance = await getAllowance(tokenAddress, address);
     if (currentAllowance < requiredAllowance) {
