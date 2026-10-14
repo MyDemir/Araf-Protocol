@@ -217,6 +217,64 @@ describe("deploy script config guards", function () {
     ).to.be.rejectedWith(/doğrulaması başarısız/);
   });
 
+  it("setAndVerifyTokenConfig_pins_verification_read_to_receipt_block", async function () {
+    const config = { supported: true, allowSellOrders: true, allowBuyOrders: true, decimals: 6, tierMaxAmountsBaseUnit: [150n, 1500n, 7500n, 30000n] };
+    const seen = [];
+    const fakeEscrow = {
+      setTokenConfig: async () => ({ wait: async () => ({ hash: "0xabc", blockNumber: 777 }) }),
+      getTokenConfig: async (...args) => {
+        seen.push(args);
+        return { ...config, tierMaxAmountsBaseUnit: config.tierMaxAmountsBaseUnit };
+      },
+    };
+    const res = await setAndVerifyTokenConfig(fakeEscrow, "0x1111111111111111111111111111111111111111", "USDT", config);
+    expect(seen).to.have.length(1);
+    expect(seen[0][1]).to.deep.equal({ blockTag: 777 });
+    expect(res.blockNumber).to.equal(777);
+  });
+
+  it("setAndVerifyTokenConfig_retries_block_lag_then_succeeds_pinned", async function () {
+    const config = { supported: true, allowSellOrders: true, allowBuyOrders: true, decimals: 6, tierMaxAmountsBaseUnit: [150n, 1500n, 7500n, 30000n] };
+    let calls = 0;
+    const tags = [];
+    const fakeEscrow = {
+      setTokenConfig: async () => ({ wait: async () => ({ hash: "0xabc", blockNumber: 9 }) }),
+      getTokenConfig: async (_a, o) => {
+        tags.push(o.blockTag);
+        if (++calls < 2) throw new Error("header not found");
+        return config;
+      },
+    };
+    await setAndVerifyTokenConfig(fakeEscrow, "0x1111111111111111111111111111111111111111", "USDT", config);
+    expect(calls).to.equal(2);
+    expect(tags).to.deep.equal([9, 9]);
+  });
+
+  it("setAndVerifyTokenConfig_pinned_read_mismatch_still_throws_without_retry", async function () {
+    const config = { supported: true, allowSellOrders: true, allowBuyOrders: true, decimals: 6, tierMaxAmountsBaseUnit: [150n, 1500n, 7500n, 30000n] };
+    let calls = 0;
+    const fakeEscrow = {
+      setTokenConfig: async () => ({ wait: async () => ({ hash: "0xabc", blockNumber: 5 }) }),
+      getTokenConfig: async () => {
+        calls++;
+        return { supported: false, allowSellOrders: false, allowBuyOrders: false, decimals: 0, tierMaxAmountsBaseUnit: [0n, 0n, 0n, 0n] };
+      },
+    };
+    await expect(
+      setAndVerifyTokenConfig(fakeEscrow, "0x1111111111111111111111111111111111111111", "USDT", config)
+    ).to.be.rejectedWith(/doğrulaması başarısız/);
+    expect(calls).to.equal(1);
+  });
+
+  it("getTokenConfigSnapshot_without_blockTag_passes_no_override", async function () {
+    const seen = [];
+    const fakeEscrow = {
+      getTokenConfig: async (...args) => { seen.push(args); return { supported: true, allowSellOrders: true, allowBuyOrders: true, decimals: 6, tierMaxAmountsBaseUnit: [1n, 2n, 3n, 4n] }; },
+    };
+    await getTokenConfigSnapshot(fakeEscrow, "0x1111111111111111111111111111111111111111");
+    expect(seen[0]).to.have.length(1);
+  });
+
   it("security_deploy_source_does_not_reintroduce_frontend_abi_generation_or_artifactPathSync", function () {
     const source = fs.readFileSync(path.resolve(__dirname, "../../contracts/scripts/deploy.js"), "utf8");
     expect(source).not.to.contain("syncAbiToFrontend");
