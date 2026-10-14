@@ -5,15 +5,15 @@ import { fmtCompact, fmtInt, fmtNumber } from './format';
 import ReferenceRateTicker from '../components/ReferenceRateTicker';
 import SettlementProposalCard from '../components/SettlementProposalCard';
 import { normalizeSettlementState } from './contexts/settlement/settlementActionModel';
-import PaymentRiskBadge from '../components/PaymentRiskBadge';
 import { buildGoToTradeRoomAction } from './actions/tradeNavigationActions';
 import OperationTradeCard from './contexts/operations/OperationTradeCard';
 import { SettlementQueueCard } from './contexts/operations/OperationsPanels';
 import OperationsCenterPage from './contexts/operations/OperationsCenterPage';
 import ProfileContextPage from './contexts/profile/ProfileContextPage';
-import { getOrderSideCopy } from './orderUiModel';
 import { countActiveMarketFilters, MARKET_FILTER_DEFAULTS } from './contexts/marketplace/marketFilters';
 import MarketFilters, { MarketEmpty } from './contexts/marketplace/MarketFilters';
+import MarketOrderCard from './contexts/marketplace/MarketOrderCard';
+import { marketGateLabel } from './contexts/marketplace/marketGateLabel';
 import { mapResolutionTypeLabel } from './useAppSessionData';
 import TradeRoomPage from './contexts/trade-room/TradeRoomPage';
 import ThemeToggle from './shell/ThemeToggle';
@@ -24,7 +24,7 @@ import { deriveTradeTimeline } from './contexts/trade-room/tradeTimeline';
 import { isViewInNav, NAV_ORDER, VIEW_REGISTRY } from './viewRegistry';
 import {
   Banknote, ChevronDown, CircleCheck, CirclePause, Clock, Droplets, Flame, Handshake, History, Hourglass, Layers, ListPlus, LoaderCircle, Lock, Menu, Paperclip, Plus, Settings, Store, Swords,
-  TriangleAlert, Undo2, Unplug, Wallet, X, Info, Maximize2, Minimize2, Download, Share, MessageSquare,
+  TriangleAlert, Undo2, Unplug, Wallet, X, Maximize2, Minimize2, Download, Share, MessageSquare,
 } from 'lucide-react';
 import { buildTradeRoomPanelCallbacks, getBurnExpiredDeadlinePassed, getPaymentWindowExpired } from './contexts/trade-room/tradeRoomPanelActions';
 
@@ -540,14 +540,14 @@ export const buildAppViews = (ctx) => {
     </div>
   );
 
-  // [TR] Pazar yeri — side-aware order listesi, filtreler, test faucet butonları
-  // [EN] Marketplace — side-aware order list, filters, test faucet buttons
-  // [TR] Pazar — P2P borsalarındaki gibi sıkı satırlar: fiyat öne çıkar, aksiyon sağda, detay dokununca açılır.
-  //      "Al" sekmesi kripto satan emirleri (SELL_CRYPTO), "Sat" sekmesi kripto alan emirleri (BUY_CRYPTO) listeler.
-  // [EN] Market — dense P2P rows: price first, action on the right, details on tap.
+  // [TR] Pazar — modern, az metinli P2P ekranı: başlık + kapalıysa neden rozeti, referans kur şeridi, tek satır chip
+  //      filtreleri, emir kartları (büyük kur ve miktar, token işareti, yöntem/kademe rozetleri, itibar halkası, net
+  //      Al/Sat aksiyonu). "Al" sekmesi kripto satan emirleri (SELL_CRYPTO), "Sat" sekmesi kripto alan emirleri
+  //      (BUY_CRYPTO) listeler. Kilit mantığı (txGate, tier, profil, ban, sybil) burada aynen hesaplanır; kart yalnız gösterir.
+  // [EN] Market — modern, low-text P2P screen. Lock logic (txGate, tier, profile, ban, sybil) is computed here unchanged;
+  //      the card only renders it.
   const renderMarket = () => {
     const tr = lang === 'TR';
-    const fmt = (n, digits = 2) => fmtNum(n, lang, digits);
     const filters = { ...MARKET_FILTER_DEFAULTS, ...marketFilters };
     const side = filters.side;
     const setFilter = (key, value) => setMarketFilter?.(key, value);
@@ -558,30 +558,45 @@ export const buildAppViews = (ctx) => {
     // [TR] Taraf seçili değilken "en iyi kur" anlamsızdır (alış/satış kurları ters yönlü); varsayılan en yüksek miktardır.
     // [EN] Without a side "best rate" is ambiguous (buy/sell rates point opposite ways); the default is largest amount.
     const sortOptions = side !== 'ALL'
-      ? [{ value: 'AUTO', label: tr ? 'En iyi kur' : 'Best rate' }, { value: 'AMOUNT', label: tr ? 'En yüksek miktar' : 'Largest amount' }, { value: 'NEWEST', label: tr ? 'En yeni' : 'Newest' }]
-      : [{ value: 'AUTO', label: tr ? 'En yüksek miktar' : 'Largest amount' }, { value: 'NEWEST', label: tr ? 'En yeni' : 'Newest' }];
+      ? [{ value: 'AUTO', label: tr ? 'En iyi kur' : 'Best rate' }, { value: 'AMOUNT', label: tr ? 'En yüksek miktar' : 'Largest amount', short: tr ? 'Miktar' : 'Amount' }, { value: 'NEWEST', label: tr ? 'En yeni' : 'Newest' }]
+      : [{ value: 'AUTO', label: tr ? 'En yüksek miktar' : 'Largest amount', short: tr ? 'Miktar' : 'Amount' }, { value: 'NEWEST', label: tr ? 'En yeni' : 'Newest' }];
     const sortValue = side === 'ALL' && filters.sort === 'AMOUNT' ? 'AUTO' : filters.sort;
     const shownCount = visibleOrders.length;
     // [TR] İlk sayfa 50 emirle sınırlı; sunucu toplamı daha büyükse ayrıca gösterilir. [EN] Show the server total when it exceeds the first page.
     const loadedCount = (orders || []).length;
     const totalCount = Number.isFinite(marketOrdersTotal) ? marketOrdersTotal : loadedCount;
+    // [TR] Kapalı "Emir oluştur" butonunun yanında kısa neden rozeti; tam açıklama title'da. Kilit davranışı değişmez.
+    // [EN] Short reason badge next to the disabled "Create order" button; full text in the title. Lock behaviour unchanged.
+    const gateLabel = newTxBlocked ? marketGateLabel({ isPaused, txGate, lang }) : null;
+    const gateMessage = txGate?.message || (isPaused ? (tr ? 'Sistem şu an bakım modundadır. Yeni işlem açılamaz.' : 'System is paused. New trades cannot be opened.') : '');
     const marketHeader = (
-        <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="mb-3 flex items-center justify-between gap-3">
           <h2 className="text-xl font-bold text-textPrimary">{tr ? 'Pazar' : 'Market'}</h2>
-          <button onClick={openCreateOrder} disabled={newTxBlocked} className="inline-flex items-center gap-1.5 h-11 md:h-9 px-3 md:px-4 rounded-lg bg-brand text-black text-sm font-semibold hover:opacity-90 disabled:opacity-50">
-            <Plus className="w-4 h-4" strokeWidth={2} aria-hidden="true" />{tr ? 'Emir oluştur' : 'Create order'}
-          </button>
+          <div className="flex min-w-0 items-center gap-2">
+            {newTxBlocked && (
+              <span id="market-create-gate" data-testid="market-create-gate" role="note" title={gateMessage} className="inline-flex h-7 min-w-0 items-center gap-1 rounded-full border border-borderSubtle bg-elevated px-2.5 text-[11px] font-semibold text-textSecondary">
+                {txGate?.reason === 'checking'
+                  ? <LoaderCircle className="h-3.5 w-3.5 shrink-0 animate-spin" strokeWidth={2} aria-hidden="true" />
+                  : <Lock className="h-3.5 w-3.5 shrink-0 text-warning" strokeWidth={2.2} aria-hidden="true" />}
+                <span className="truncate">{gateLabel}</span>
+              </span>
+            )}
+            <button onClick={openCreateOrder} disabled={newTxBlocked} aria-describedby={newTxBlocked ? 'market-create-gate' : undefined} className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-full bg-brand px-4 text-sm font-bold text-black transition hover:opacity-90 disabled:cursor-not-allowed disabled:border disabled:border-borderSubtle disabled:bg-elevated disabled:text-textMuted disabled:hover:opacity-100">
+              <Plus className="w-4 h-4" strokeWidth={2.4} aria-hidden="true" />{tr ? 'Emir oluştur' : 'Create order'}
+            </button>
+          </div>
         </div>
     );
     const referenceTicker = <ReferenceRateTicker lang={lang} />;
+    // [TR] Test token: yalnız testnet (isFaucetEnabled kuralı aynen). Damla ikonlu küçük chip grubu.
+    // [EN] Test tokens: testnet only (same isFaucetEnabled rule). Small drop-icon chip group.
     const faucetRow = isFaucetEnabled && (
-          <div className="mb-3 flex items-center gap-2 text-xs text-textMuted">
-            <Droplets className="w-3.5 h-3.5" strokeWidth={1.8} aria-hidden="true" />
-            <span>{tr ? 'Test token:' : 'Test tokens:'}</span>
+          <div role="group" aria-label={tr ? 'Test token al' : 'Get test tokens'} title={tr ? 'Test token al' : 'Get test tokens'} className="inline-flex h-8 items-center gap-0.5 rounded-full border border-dashed border-borderStrong bg-surface pl-2 pr-0.5">
+            <Droplets className="h-3.5 w-3.5 text-info" strokeWidth={2} aria-hidden="true" />
             {['USDT', 'USDC'].map((sym) => (
-              <button key={sym} onClick={() => handleMint(sym)} disabled={isContractLoading} className="relative inline-flex items-center gap-1 h-7 px-2.5 rounded-md border border-borderSubtle bg-surface font-semibold text-textSecondary hover:text-textPrimary hover:bg-elevated disabled:opacity-50 after:absolute after:-inset-y-2 after:inset-x-0 after:content-['']">
-                {isContractLoading && loadingText.includes(sym) ? <LoaderCircle className="w-3.5 h-3.5 animate-spin" strokeWidth={1.8} aria-hidden="true" /> : null}
-                {tr ? `${sym} al` : `Get ${sym}`}
+              <button key={sym} type="button" onClick={() => handleMint(sym)} disabled={isContractLoading} aria-label={tr ? `Test ${sym} al` : `Get test ${sym}`} className="relative inline-flex h-7 items-center gap-1 rounded-full px-2 text-[11px] font-bold text-textSecondary transition hover:bg-elevated hover:text-textPrimary disabled:opacity-50 after:absolute after:-inset-y-2 after:inset-x-0 after:content-['']">
+                {isContractLoading && loadingText.includes(sym) ? <LoaderCircle className="h-3 w-3 animate-spin" strokeWidth={2} aria-hidden="true" /> : null}
+                {sym}
               </button>
             ))}
           </div>
@@ -600,14 +615,14 @@ export const buildAppViews = (ctx) => {
         onCreate={openCreateOrder}
       />
     );
-    const orderList = (
-        <div className="space-y-2">
-          {loading ? (
-            <div className="space-y-2" aria-busy="true">
-              {[0, 1, 2].map((i) => <div key={i} className="h-28 rounded-xl bg-surface border border-borderSubtle animate-pulse" />)}
-            </div>
-          ) : visibleOrders.length > 0 ? (
-            visibleOrders.map((order) => {
+    const noteCls = 'mt-2 text-[11px] leading-tight';
+    const orderList = loading ? (
+        <div className="grid gap-2 md:gap-3 xl:grid-cols-2" aria-busy="true" data-testid="market-order-list">
+          {[0, 1, 2].map((i) => <div key={i} className="h-40 rounded-2xl bg-surface border border-borderSubtle animate-pulse" />)}
+        </div>
+      ) : visibleOrders.length > 0 ? (
+        <div className="grid gap-2 md:gap-3 xl:grid-cols-2" data-testid="market-order-list">
+          {visibleOrders.map((order) => {
               const effectiveUserTier = userReputation?.effectiveTier ?? 0;
               const isMyOwnAd    = address && order.makerFull?.toLowerCase() === address.toLowerCase();
               const isTierLocked = isConnected && isAuthenticated && order.tier > effectiveUserTier;
@@ -634,11 +649,6 @@ export const buildAppViews = (ctx) => {
               // [TR] Emir sahibinin profil rail'i admin tarafından kapatıldıysa yeni doldurma kapalı (aktif işlemler etkilenmez).
               const ownerRailDisabled = isOwnerRailDisabled(order);
               const finalCanTakeOrder = canTakeOrder && !needsOwnProfile && !ownerProfileMissing && !ownerRailDisabled && !isOwnerBanned && isCooldownOk && isFunded && isAged && !newTxBlocked && isTokenConfigured && isCorrectChain;
-              // [TR] Renk kullanıcının yapacağı işi anlatır: "Satın Al" yeşil, "Sat" kırmızı. Emir yönü rozeti nötrdür;
-              //      renkli rozet (ör. yeşil "Satış emri") yanındaki butonla çelişiyordu.
-              // [EN] Colour follows the viewer's action (buy green, sell red); the order-side badge stays neutral.
-              const sideBadgeClass = 'text-textSecondary border-borderSubtle bg-elevated';
-              const sideLabel = order.sideLabel || getOrderSideCopy(order.side, 'order', lang) || order.side;
               // [TR] Oturum yoksa buton pasif "Kilitli" yerine giriş akışını başlatır.
               const needsSignIn = !isConnected || !isAuthenticated;
               const isDisabled = needsSignIn ? false : (!finalCanTakeOrder || isContractLoading);
@@ -647,7 +657,7 @@ export const buildAppViews = (ctx) => {
                 // Signed out: keep the action label and colour; the click starts sign-in.
                 needsSignIn         ? <>{order.ctaLabel || (tr ? 'İşlem yap' : 'Trade')}</> :
                 isPaused            ? <>{icon(CirclePause)} {tr ? 'Bakımda' : 'Paused'}</> :
-                newTxBlocked        ? <>{icon(LoaderCircle, txGate?.reason === 'checking')} {txGate?.reason === 'checking' ? (tr ? 'Kontrol ediliyor…' : 'Checking…') : (tr ? 'Doğrulanamıyor' : 'Unverified')}</> :
+                newTxBlocked        ? <>{icon(txGate?.reason === 'checking' ? LoaderCircle : Lock, txGate?.reason === 'checking')} {marketGateLabel({ txGate, lang })}</> :
                 !isCorrectChain     ? <>{icon(Unplug)} {tr ? 'Yanlış ağ' : 'Wrong network'}</> :
                 !isTokenConfigured  ? <>{icon(Settings)} {tr ? 'Token ayarlanmadı' : 'Token not set'}</> :
                 isMyOwnAd           ? <>{tr ? 'Sizin emriniz' : 'Your order'}</> :
@@ -662,93 +672,53 @@ export const buildAppViews = (ctx) => {
                 !isCooldownOk       ? <>{icon(Hourglass)} {sybilStatus?.cooldownUnknown ? (tr ? 'Bekleme bilinmiyor' : 'Cooldown unknown') : (tr ? `${Math.ceil((sybilStatus?.cooldownRemaining || 0) / 60)} dk` : `${Math.ceil((sybilStatus?.cooldownRemaining || 0) / 60)} min`)}</> :
                 isContractLoading   ? <>{icon(LoaderCircle, true)}{loadingText || (tr ? 'İşleniyor…' : 'Processing…')}</> :
                 (order.ctaLabel || (tr ? 'İşlem yap' : 'Trade'));
+              // [TR] Renk kullanıcının yapacağı işi anlatır: "Satın Al" yeşil, "Sat" kırmızı.
+              // [EN] Colour follows the viewer's action (buy green, sell red).
               const ctaTone = isDisabled
                 ? 'bg-elevated text-textMuted border border-borderSubtle cursor-not-allowed'
                 : isSellSide ? 'bg-brand text-black hover:opacity-90' : 'bg-danger text-[color:var(--color-on-danger)] hover:opacity-90';
-              const bondText = Number(order.tier) === 0
-                ? (tr ? 'teminatsız' : 'no bond')
-                : (order.bondLabel && order.bondLabel !== '—' ? `${order.bondLabel} ${tr ? 'teminat' : 'bond'}` : null);
-
-              return (
-                <article key={order.id} className="min-w-0 bg-surface border border-borderSubtle rounded-xl p-3 md:p-4 transition-colors hover:border-borderStrong">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex min-w-0 items-center gap-1.5 text-xs text-textSecondary">
-                        <span className={`w-4 h-4 shrink-0 rounded-full text-[9px] font-bold text-white flex items-center justify-center ${order.crypto === 'USDC' ? 'bg-blue-600' : 'bg-emerald-600'}`} aria-hidden="true">{order.crypto === 'USDC' ? 'C' : 'T'}</span>
-                        <span className="font-mono truncate">{order.maker}</span>
-                        <span className="shrink-0 px-1.5 rounded bg-elevated text-[10px] font-semibold text-textSecondary">T{order.tier}</span>
-                        {order.successRate != null && <span className="shrink-0 text-[11px] text-textMuted">{fmtPct(order.successRate, lang)}</span>}
-                      </div>
-                      <p className="mt-1.5 text-xl font-bold text-textPrimary tabular-nums leading-tight">
-                        {order.hasPrice === false
-                          ? <span className="text-sm font-medium text-textMuted">{tr ? 'Kur belirtilmedi' : 'No rate set'}</span>
-                          : <>{fmt(order.rate, 4)} <span className="text-xs font-medium text-textMuted">{order.fiat}</span></>}
-                      </p>
-                      <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-2 text-xs">
-                        <dt className="text-textMuted">{tr ? 'Miktar' : 'Available'}</dt>
-                        <dd className="text-textPrimary font-medium tabular-nums truncate">{fmt(order.remainingAmount)} {order.crypto}</dd>
-                        <dt className="text-textMuted">Limit</dt>
-                        <dd className="text-textSecondary tabular-nums truncate">Min {fmt(order.minFillAmount)} {order.crypto}{bondText ? ` · ${bondText}` : ''}</dd>
-                      </dl>
-                    </div>
-                    <div className="shrink-0 flex flex-col items-end gap-2">
-                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${sideBadgeClass}`}>{sideLabel}</span>
-                      <button onClick={() => (needsSignIn ? handleAuthAction() : handleStartTrade(order))} disabled={isDisabled} title={needsSignIn ? (tr ? 'Önce cüzdanınızı bağlayıp giriş yapın' : 'Connect your wallet and sign in first') : undefined} className={`h-11 md:h-9 min-w-[5.5rem] px-4 rounded-lg text-sm font-semibold transition inline-flex items-center justify-center gap-1.5 ${ctaTone}`}>
-                        {ctaContent}
-                      </button>
-                      {needsOwnProfile && (
-                        <button type="button" data-testid="fill-needs-profile" onClick={() => openProfilePage?.('account')} className="max-w-[10rem] text-right text-[11px] leading-tight text-brand underline">
-                          {profileRequiredMessage(lang)}
-                        </button>
-                      )}
-                      {!needsOwnProfile && !ownerProfileMissing && ownerRailDisabled && (
-                        <p data-testid="fill-owner-rail-closed" className="max-w-[10rem] text-right text-[11px] leading-tight text-danger">{ownerRailDisabledMessage(lang)}</p>
-                      )}
-                      {!needsOwnProfile && ownerProfileMissing && (
-                        <p data-testid="fill-owner-no-profile" className="max-w-[10rem] text-right text-[11px] leading-tight text-danger">{ownerProfileMissingMessage(lang)}</p>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="mt-2 pt-2 border-t border-borderSubtle flex min-w-0 flex-wrap items-center gap-2">
-                    <span className="text-[10px] px-2 py-0.5 rounded border border-borderSubtle text-textMuted">{order.statusLabel || order.status}</span>
-                    {order.paymentRiskSignal && <PaymentRiskBadge lang={lang} riskEntry={order.paymentRiskSignal} compact />}
-                    {/* [TR] Hover yerine dokunmatik uyumlu açılır özet; mobilde de çalışır. */}
-                    <details className="group ml-auto min-w-0 text-xs">
-                      <summary className="relative cursor-pointer list-none text-textMuted hover:text-textPrimary inline-flex items-center gap-1 after:absolute after:-inset-x-3 after:-inset-y-3 after:content-['']">
-                        <Info className="w-3.5 h-3.5" strokeWidth={1.8} aria-hidden="true" />{tr ? 'Özet' : 'Summary'}
-                      </summary>
-                      <div className="mt-2 rounded-lg border border-borderSubtle bg-elevated p-3 w-[min(18rem,calc(100vw_-_3rem))]">
-                        <p className="text-[10px] text-textMuted mb-1 tracking-widest">{tr ? 'İŞLEM SAHİBİ ÖZETİ' : 'ORDER OWNER SUMMARY'}</p>
-                        <p className="text-[11px] text-textMuted mb-2">{order.ownerSideHint || (tr ? 'Emir sahibi taraf bilgisi' : 'Order owner side context')}</p>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div><p className="text-[10px] text-textMuted">{tr ? 'Başarı' : 'Success'}</p><p className="font-semibold text-emerald-500">{order.successRate != null ? `${order.successRate}%` : '—'}</p></div>
-                          <div><p className="text-[10px] text-textMuted">{tr ? 'Toplam işlem' : 'Total trades'}</p><p className="font-mono text-textPrimary">{order.totalTrades ?? order.txCount ?? '—'}</p></div>
-                        </div>
-                        <div className="mt-2 flex items-center justify-between gap-2">
-                          <p className="text-[10px] text-textMuted">{tr ? 'Güven Görünürlüğü' : 'Trust Visibility'}</p>
-                          <span className={`text-[10px] px-2 py-0.5 rounded border ${order?.trustSummary?.chipClass || 'text-textMuted border-borderSubtle bg-elevated'}`}>
-                            {order?.trustSummary?.band ? `${order.trustSummary.band} · ${order.trustSummary.label}` : (order?.trustSummary?.label || (tr ? 'Sinyal yok' : 'Signal unavailable'))}
-                          </span>
-                        </div>
-                        <p className="text-[10px] text-textMuted mt-1">{tr ? 'Bilgilendirme amaçlıdır.' : 'Informational only.'}</p>
-                      </div>
-                    </details>
-                  </div>
-                  {!isFunded && isConnected && canTakeOrder && !newTxBlocked && (
-                    <p className="mt-2 text-xs text-danger">{tr ? 'En az 0.001 ETH gerekli.' : 'Needs at least 0.001 ETH.'}</p>
+              const notes = (
+                <>
+                  {needsOwnProfile && (
+                    <button type="button" data-testid="fill-needs-profile" onClick={() => openProfilePage?.('account')} className={`${noteCls} block text-brand underline`}>
+                      {profileRequiredMessage(lang)}
+                    </button>
                   )}
-                </article>
+                  {!needsOwnProfile && !ownerProfileMissing && ownerRailDisabled && (
+                    <p data-testid="fill-owner-rail-closed" className={`${noteCls} text-danger`}>{ownerRailDisabledMessage(lang)}</p>
+                  )}
+                  {!needsOwnProfile && ownerProfileMissing && (
+                    <p data-testid="fill-owner-no-profile" className={`${noteCls} text-danger`}>{ownerProfileMissingMessage(lang)}</p>
+                  )}
+                </>
               );
-            })
-          ) : (
-            emptyState
-          )}
+              return (
+                <MarketOrderCard
+                  key={order.id}
+                  order={order}
+                  lang={lang}
+                  cta={{
+                    content: ctaContent,
+                    disabled: isDisabled,
+                    toneClass: ctaTone,
+                    onClick: () => (needsSignIn ? handleAuthAction() : handleStartTrade(order)),
+                    title: needsSignIn ? (tr ? 'Önce cüzdanınızı bağlayıp giriş yapın' : 'Connect your wallet and sign in first') : undefined,
+                  }}
+                  notes={notes}
+                  footnote={!isFunded && isConnected && canTakeOrder && !newTxBlocked
+                    ? <p className={`${noteCls} text-danger`}>{tr ? 'En az 0.001 ETH gerekli.' : 'Needs at least 0.001 ETH.'}</p>
+                    : null}
+                />
+              );
+            })}
         </div>
-    );
+      ) : (
+        emptyState
+      );
     return (
       <div className="w-full max-w-[1200px] min-w-0 p-4 md:p-8">
         {marketHeader}
+        {referenceTicker}
         <MarketFilters
           lang={lang}
           filters={filters}
@@ -761,9 +731,8 @@ export const buildAppViews = (ctx) => {
           canHideOwn={Boolean(address)}
           result={{ loading, error: ordersFeedError, shown: shownCount, total: totalCount, loaded: loadedCount }}
           closedRailCount={visibleOrders.filter(isOwnerRailDisabled).length}
+          trailing={faucetRow || null}
         >
-          {faucetRow}
-          {referenceTicker}
           {orderList}
         </MarketFilters>
       </div>

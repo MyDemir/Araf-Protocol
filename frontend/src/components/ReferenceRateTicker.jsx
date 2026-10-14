@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchWithTimeout } from '../app/fetchWithTimeout';
 import { buildApiUrl } from '../app/apiConfig';
+import { Activity, CloudOff, Info, RotateCw, TriangleAlert } from 'lucide-react';
 
 const POLL_MS = 60_000;
 
@@ -83,13 +84,14 @@ export default function ReferenceRateTicker({ lang = 'TR' }) {
 
   if (!items.length) {
     if (status === 'loading') {
-      return <div className="mb-4 h-10 rounded-xl border border-borderSubtle bg-surface animate-pulse" aria-hidden="true" data-testid="reference-rate-ticker-loading" />;
+      return <div className="mb-3 h-9 rounded-full border border-borderSubtle bg-surface animate-pulse" aria-hidden="true" data-testid="reference-rate-ticker-loading" />;
     }
     return (
-      <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-borderSubtle bg-surface px-3 py-2 text-xs text-textMuted" data-testid="reference-rate-ticker-unavailable">
-        <span>{lang === 'TR' ? 'Referans kurlar şu an alınamıyor.' : 'Reference rates are unavailable right now.'}</span>
-        <button type="button" onClick={() => { setStatus('loading'); fetchTicker(); }} className="shrink-0 font-semibold text-brand hover:underline">
-          {lang === 'TR' ? 'Yeniden dene' : 'Retry'}
+      <div className="mb-3 flex h-9 min-w-0 items-center gap-2 rounded-full border border-borderSubtle bg-surface pl-3 pr-1 text-xs text-textMuted" data-testid="reference-rate-ticker-unavailable">
+        <CloudOff className="h-3.5 w-3.5 shrink-0" strokeWidth={2} aria-hidden="true" />
+        <span className="min-w-0 flex-1 truncate">{lang === 'TR' ? 'Referans kurlar şu an alınamıyor.' : 'Reference rates are unavailable right now.'}</span>
+        <button type="button" onClick={() => { setStatus('loading'); fetchTicker(); }} className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full px-2.5 font-semibold text-textPrimary hover:bg-elevated">
+          <RotateCw className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />{lang === 'TR' ? 'Yeniden dene' : 'Retry'}
         </button>
       </div>
     );
@@ -99,41 +101,65 @@ export default function ReferenceRateTicker({ lang = 'TR' }) {
   //      settlement/dispute/reputation/risk otoritesi değildir.
   // [EN] UI only reflects informational semantics and is never authoritative.
   const informationalOnly = payload?.informationalOnly === true;
+  const tr = lang === 'TR';
 
+  // [TR] Tek satır şerit: kayan kurlar iki kenarda maske ile soluklaşır (kesik metin görünmez). Kaynak etiketi her
+  //      çipin title'ında ve ekran okuyucu metninde; açıklama cümlesi sağdaki "i" düğmesinin arkasında.
+  // [EN] Single-line strip: scrolling rates fade out at both edges (no hard-cut text). Source label lives in each
+  //      chip's title and screen-reader text; the disclaimer sits behind the "i" button on the right.
   return (
     <section
-      className="mb-4 rounded-xl border border-borderSubtle bg-surface px-3 py-2 overflow-hidden"
-      aria-label={lang === 'TR' ? 'Referans kur şeridi' : 'Reference rate ticker'}
+      className="relative mb-3 flex h-9 min-w-0 items-center gap-1 rounded-full border border-borderSubtle bg-surface pl-1 pr-0.5"
+      aria-label={tr ? 'Referans kur şeridi' : 'Reference rate ticker'}
       data-testid="reference-rate-ticker"
     >
-      <div className="reference-ticker-track-wrap group focus-within:[&_.reference-ticker-track]:[animation-play-state:paused] hover:[&_.reference-ticker-track]:[animation-play-state:paused]">
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand/[0.12] text-brand" aria-hidden="true">
+        <Activity className="h-3.5 w-3.5" strokeWidth={2.4} />
+      </span>
+      <div className="reference-ticker-track-wrap min-w-0 flex-1 [-webkit-mask-image:linear-gradient(to_right,transparent,#000_1.5rem,#000_calc(100%_-_2rem),transparent)] [mask-image:linear-gradient(to_right,transparent,#000_1.5rem,#000_calc(100%_-_2rem),transparent)] focus-within:[&_.reference-ticker-track]:[animation-play-state:paused] hover:[&_.reference-ticker-track]:[animation-play-state:paused]">
         <div className="reference-ticker-track">
           {[...items, ...items].map((item, idx) => (
             <div
               key={`${item.symbol}-${idx}`}
-              className="inline-flex min-h-8 shrink-0 items-center gap-2 rounded-full border border-borderSubtle bg-elevated px-3 py-1 text-xs text-textPrimary"
+              title={sourceLabel(item, lang)}
+              aria-hidden={idx >= items.length ? 'true' : undefined}
+              className="inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 text-xs"
             >
-              <span className="rounded-md bg-surface px-1.5 py-0.5 text-[10px] font-semibold text-textSecondary">{item.symbol}</span>
-              <span className="font-mono text-brand">{formatRate(item.rate)}</span>
-              <span className="text-[10px] text-textMuted">{sourceLabel(item, lang)}</span>
+              <span className="font-semibold text-textSecondary">{item.symbol}</span>
+              <span className="font-mono font-semibold tabular-nums text-textPrimary">{formatRate(item.rate)}</span>
+              <span className="sr-only">{sourceLabel(item, lang)}</span>
               {item.stale && (
-                <span className="rounded border border-warning/40 bg-warning/10 px-1.5 py-0.5 text-[10px] text-warning">
-                  {lang === 'TR' ? 'gecikmiş' : 'stale'}
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-warning">
+                  <span className="h-1.5 w-1.5 rounded-full bg-warning" aria-hidden="true" />{tr ? 'gecikmiş' : 'stale'}
                 </span>
               )}
+              <span className="ml-1 h-3 w-px bg-borderSubtle" aria-hidden="true" />
             </div>
           ))}
         </div>
       </div>
-
-      <p className="mt-2 text-[10px] text-textMuted">
-        {lang === 'TR'
-          ? 'Referans kurlar bilgilendirme amaçlıdır; escrow sonucunu etkilemez.'
-          : 'Reference rates are informational only and do not affect escrow settlement.'}
-      </p>
       {!informationalOnly && (
-        <p className="mt-1 text-[10px] text-warning">{lang === 'TR' ? 'Bilgilendirme bayrağı doğrulanamadı.' : 'Informational flag could not be verified.'}</p>
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center text-warning" title={tr ? 'Bilgilendirme bayrağı doğrulanamadı.' : 'Informational flag could not be verified.'}>
+          <TriangleAlert className="h-3.5 w-3.5" strokeWidth={2.2} aria-hidden="true" />
+          <span className="sr-only">{tr ? 'Bilgilendirme bayrağı doğrulanamadı.' : 'Informational flag could not be verified.'}</span>
+        </span>
       )}
+      <details className="group relative shrink-0">
+        <summary className="relative flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-full text-textMuted transition hover:bg-elevated hover:text-textPrimary after:absolute after:-inset-1.5 after:content-[''] group-open:bg-elevated group-open:text-textPrimary [&::-webkit-details-marker]:hidden">
+          <Info className="h-4 w-4" strokeWidth={2} aria-hidden="true" />
+          <span className="sr-only">{tr ? 'Referans kurlar hakkında' : 'About reference rates'}</span>
+        </summary>
+        <div className="absolute right-0 top-full z-30 mt-2 w-[min(17rem,calc(100vw_-_2.5rem))] rounded-xl border border-borderSubtle bg-surface p-3 text-[11px] leading-snug text-textSecondary shadow-xl">
+          <p>
+            {tr
+              ? 'Referans kurlar bilgilendirme amaçlıdır; escrow sonucunu etkilemez.'
+              : 'Reference rates are informational only and do not affect escrow settlement.'}
+          </p>
+          {!informationalOnly && (
+            <p className="mt-1.5 text-warning">{tr ? 'Bilgilendirme bayrağı doğrulanamadı.' : 'Informational flag could not be verified.'}</p>
+          )}
+        </div>
+      </details>
     </section>
   );
 }
