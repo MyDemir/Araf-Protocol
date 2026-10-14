@@ -34,7 +34,7 @@ function run(env = process.env) {
     sock.on(plainOk ? 'connect' : 'secureConnect', () => sock.write(cmds.map(resp).join('')));
     sock.on('data', (d) => {
       buf += d.toString('utf8');
-      const lines = buf.split('\r\n');
+      const lines = buf.split('\r\n').slice(0, -1); // yalnız \r\n ile biten tam satırlar
       const replies = lines.filter((l) => /^[+\-:]/.test(l));
       if (replies.some((l) => l[0] === '-')) return finish(new Error('Redis rejected a command'));
       if (replies.length >= expected) {
@@ -49,6 +49,9 @@ function run(env = process.env) {
 module.exports = { run, KEYS };
 
 if (require.main === module) {
-  run().then((n) => console.log(`worker checkpoint keys deleted: ${n}`))
+  run().then((n) => {
+    console.log(`worker checkpoint keys deleted: ${n}`);
+    if (n === 0) console.log('::notice::No checkpoint keys existed (nothing to delete).');
+  })
     .catch((e) => { console.error(`::error::${e.message}`); process.exit(1); });
 }

@@ -10,16 +10,19 @@ const yaml = require('js-yaml');
 
 const ROOT = path.resolve(__dirname, '../..');
 const SCRIPT = path.join(ROOT, '.github/scripts/reset-worker-checkpoint.sh');
+const deleter = require('../../.github/scripts/delete-worker-checkpoint.js');
 const PASS = 'sup3rSecretPass';
 
-function fakeRedis() {
+// onDel(n): n. DEL çağrısında (1 tabanlı) yan etki (ör. proxy makineyi başlatır) — yanıttan ÖNCE çalışır.
+function fakeRedis(onDel = () => {}) {
   const cmds = [];
+  let dels = 0;
   const server = net.createServer((s) => {
     s.on('data', (d) => {
-      const t = d.toString();
-      for (const m of t.matchAll(/\*\d+\r\n((?:\$\d+\r\n.*\r\n)+)/g)) {
+      for (const m of d.toString().matchAll(/\*\d+\r\n((?:\$\d+\r\n.*\r\n)+)/g)) {
         const args = m[1].split('\r\n').filter((l, i) => i % 2 === 1);
         cmds.push(args);
+        if (args[0] === 'DEL') { dels += 1; onDel(dels); }
         s.write(args[0] === 'DEL' ? `:${args.length - 1}\r\n` : '+OK\r\n');
       }
     });
@@ -27,19 +30,26 @@ function fakeRedis() {
   return new Promise((r) => server.listen(0, '127.0.0.1', () => r({ server, cmds, port: server.address().port })));
 }
 
-function setup({ failStopId } = {}) {
+// Makine başına durum dosyası; "list" çağrı sayacı. autostartOnList: o list çağrısında m1 started olur.
+function setup({ failStopId, states = { m1: 'started', m2: 'started' }, autostartOnList } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rwc-'));
   const log = path.join(dir, 'calls.log');
-  const state = path.join(dir, 'state');
-  fs.writeFileSync(state, 'started');
+  for (const [id, st] of Object.entries(states)) fs.writeFileSync(path.join(dir, `s_${id}`), st);
+  fs.writeFileSync(path.join(dir, 'listcount'), '0');
+  const ids = Object.keys(states);
   fs.writeFileSync(path.join(dir, 'flyctl'), `#!/usr/bin/env bash
 echo "$*" >> "${log}"
+D="${dir}"
 if [ "$1 $2" = "machine list" ]; then
-  s=$(cat "${state}"); echo "[{\\"id\\":\\"m1\\",\\"state\\":\\"$s\\"},{\\"id\\":\\"m2\\",\\"state\\":\\"$s\\"}]"
+  n=$(( $(cat "$D/listcount") + 1 )); echo $n > "$D/listcount"
+  ${autostartOnList ? `[ "$n" = "${autostartOnList}" ] && echo started > "$D/s_m1"` : ':'}
+  out=""
+  ${ids.map((id) => `out="$out{\\"id\\":\\"${id}\\",\\"state\\":\\"$(cat "$D/s_${id}")\\"},"`).join('\n  ')}
+  echo "[\${out%,}]"
 elif [ "$1 $2" = "machine stop" ]; then
   ${failStopId ? `[ "$3" = "${failStopId}" ] && exit 1` : ':'}
-  echo stopped > "${state}"
-elif [ "$1 $2" = "machine start" ]; then echo started > "${state}"; fi
+  echo stopped > "$D/s_$3"
+elif [ "$1 $2" = "machine start" ]; then echo started > "$D/s_$3"; fi
 exit 0
 `, { mode: 0o755 });
   return { dir, log };
@@ -54,14 +64,17 @@ function run(env) {
 }
 
 describe('reset-worker-checkpoint.sh', function () {
+  this.timeout(30000);
   let redis;
-  beforeEach(async () => { redis = await fakeRedis(); });
+  const startRedis = async (onDel) => { redis = await fakeRedis(onDel); };
+  beforeEach(async () => { await startRedis(); });
   afterEach(() => redis.server.close());
   const envFor = (dir, extra = {}) => ({
     PATH: `${dir}:${process.env.PATH}`, FLY_APP_NAME: 'app', FLY_API_TOKEN: 'tok_secret_1',
     REDIS_URL: `redis://default:${PASS}@127.0.0.1:${redis.port}`, ALLOW_PLAIN_REDIS_FOR_TEST: '1',
-    DEPLOY_BLOCK: '48101694', WAIT_INTERVAL_S: '0', WAIT_TIMEOUT_S: '2', ...extra,
+    DEPLOY_BLOCK: '48101694', WAIT_INTERVAL_S: '0', WAIT_TIMEOUT_S: '1', ...extra,
   });
+  const dels = () => redis.cmds.filter((c) => c[0] === 'DEL');
 
   it('fails without DEPLOY_BLOCK (or invalid) and touches nothing', async function () {
     for (const bad of ['', '0', 'abc', '12x']) {
@@ -83,8 +96,7 @@ describe('reset-worker-checkpoint.sh', function () {
     expect(calls.filter((c) => c.startsWith('machine stop'))).to.have.length(2);
     expect(calls.filter((c) => c.startsWith('machine start'))).to.have.length(2);
     expect(last('machine stop')).to.be.lessThan(first('machine start'));
-    const del = redis.cmds.filter((c) => c[0] !== 'AUTH');
-    expect(del).to.deep.equal([['DEL', 'worker:last_block', 'worker:last_safe_block']]);
+    expect(redis.cmds.filter((c) => c[0] !== 'AUTH')).to.deep.equal([['DEL', 'worker:last_block', 'worker:last_safe_block']]);
     expect(r.out).to.match(/keys deleted: 2/);
     for (const s of [PASS, 'tok_secret_1', `127.0.0.1:${redis.port}`]) expect(r.out).to.not.include(s);
   });
@@ -101,6 +113,68 @@ describe('reset-worker-checkpoint.sh', function () {
     const { dir } = setup();
     const r = await run(envFor(dir, { ALLOW_PLAIN_REDIS_FOR_TEST: '' }));
     expect(r.status).to.not.equal(0);
+  });
+
+  it('machine auto-started just BEFORE the delete: loop repeats, no delete until all stopped', async function () {
+    // list çağrıları: 1 ilk, 2 stop_running, 3 wait, 4 DEL-öncesi doğrulama
+    const { dir } = setup({ autostartOnList: 4 });
+    const r = await run(envFor(dir));
+    expect(r.status).to.equal(0, r.out);
+    expect(dels()).to.have.length(1);
+    expect(r.out).to.include('Attempt 1/3');
+  });
+
+  it('machine auto-started just AFTER the delete: loop repeats and deletes again', async function () {
+    await new Promise((res) => redis.server.close(res));
+    let dirRef;
+    await startRedis((n) => { if (n === 1) fs.writeFileSync(path.join(dirRef, 's_m1'), 'started'); });
+    const { dir } = setup();
+    dirRef = dir;
+    const r = await run(envFor(dir));
+    expect(r.status).to.equal(0, r.out);
+    expect(dels()).to.have.length(2);
+  });
+
+  it('fails after 3 attempts when a machine keeps starting; still restarts machines', async function () {
+    await new Promise((res) => redis.server.close(res));
+    let dirRef;
+    await startRedis(() => fs.writeFileSync(path.join(dirRef, 's_m1'), 'started'));
+    const { dir, log } = setup();
+    dirRef = dir;
+    const r = await run(envFor(dir));
+    expect(r.status).to.not.equal(0);
+    expect(dels()).to.have.length(3);
+    expect(r.out).to.match(/after 3 attempts/);
+    expect(fs.readFileSync(log, 'utf8')).to.match(/machine start m1/);
+  });
+
+  it('does not start machines that were already stopped at the beginning', async function () {
+    const { dir, log } = setup({ states: { m1: 'started', m2: 'stopped' } });
+    const r = await run(envFor(dir));
+    expect(r.status).to.equal(0, r.out);
+    const calls = fs.readFileSync(log, 'utf8');
+    expect(calls).to.match(/machine start m1/);
+    expect(calls).to.not.match(/machine start m2/);
+    expect(calls).to.not.match(/machine stop m2/);
+  });
+});
+
+describe('delete-worker-checkpoint.js reply parsing', function () {
+  it('waits for complete \\r\\n-terminated lines (chunked replies)', async function () {
+    const server = net.createServer((s) => {
+      s.once('data', () => {
+        s.write('+OK\r\n:');
+        setTimeout(() => s.write('2'), 30);
+        setTimeout(() => s.write('\r\n'), 60);
+      });
+    });
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    try {
+      const n = await deleter.run({
+        REDIS_URL: `redis://default:x@127.0.0.1:${server.address().port}`, ALLOW_PLAIN_REDIS_FOR_TEST: '1',
+      });
+      expect(n).to.equal(2);
+    } finally { server.close(); }
   });
 });
 
