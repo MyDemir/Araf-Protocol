@@ -21,6 +21,7 @@ const { buildBankProfileRisk, buildTradeHealthSignals } = require("./tradeRisk")
 const { isAdminWallet } = require("../utils/adminWallets");
 const paymentRails = require("../services/paymentRails");
 const runtimeSettings = require("../services/runtimeSettings");
+const socialLinks = require("../services/socialLinks");
 const { hmacDigest } = require("../services/encryption");
 
 const router = express.Router();
@@ -826,6 +827,56 @@ router.put("/runtime-settings/:key", adminWriteLimiter, async (req, res, next) =
     if (err.code === "SETTING_AUDIT_FAILED") {
       return res.status(500).json({ error: err.message, code: "RUNTIME_SETTING_AUDIT_FAILED" });
     }
+    return next(err);
+  }
+});
+
+// ─── Footer sosyal linkleri ──────────────────────────────────────────────────
+// [TR] Aynı yetki zinciri (router.use) + adminWriteLimiter. Doğrulama sunucuda tek kaynak (utils/socialLinks.js):
+//      yalnız https, userinfo yok, kod/env allowlist'i (admin değiştiremez), IDN/punycode red, en fazla 8 link.
+// [EN] Same auth chain + write limiter. Strict server-side validation; allowlist is code/env-only.
+const SOCIAL_LINKS_PUT_SCHEMA = Joi.object({
+  links: Joi.array().max(8).required(),
+  expectedVersion: Joi.number().integer().min(0).strict().required(),
+  reason: Joi.string().trim().max(300).allow("").optional(),
+}).required();
+
+router.get("/social-links", async (_req, res, next) => {
+  try {
+    return res.json(await socialLinks.getAdminState());
+  } catch (err) {
+    if (err.code === "DB_UNAVAILABLE") return res.status(503).json({ error: err.message, code: "DB_UNAVAILABLE" });
+    return next(err);
+  }
+});
+
+router.get("/social-links/audit", async (req, res, next) => {
+  try {
+    const { error, value } = AUDIT_QUERY_SCHEMA.validate(req.query || {});
+    if (error) return res.status(400).json({ error: error.message });
+    return res.json(await socialLinks.listAudit(value));
+  } catch (err) {
+    return next(err);
+  }
+});
+
+router.put("/social-links", adminWriteLimiter, async (req, res, next) => {
+  try {
+    const { error, value } = SOCIAL_LINKS_PUT_SCHEMA.validate(req.body);
+    if (error) return res.status(400).json({ error: error.message, code: "SOCIAL_LINKS_INVALID" });
+    const ipHash = await hmacDigest("admin-audit-ip", req.ip || "");
+    const result = await socialLinks.replaceLinks(value.links, {
+      wallet: req.wallet,
+      reason: value.reason || "",
+      ipHash,
+      expectedVersion: value.expectedVersion,
+    });
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    if (err.code === "DB_UNAVAILABLE") return res.status(503).json({ error: err.message, code: "DB_UNAVAILABLE" });
+    if (err.code === "SOCIAL_LINKS_CONFLICT") return res.status(409).json({ error: err.message, code: "SOCIAL_LINKS_CONFLICT" });
+    if (err.code === "SOCIAL_LINKS_INVALID") return res.status(400).json({ error: err.message, code: "SOCIAL_LINKS_INVALID" });
+    if (err.code === "SOCIAL_LINKS_AUDIT_FAILED") return res.status(500).json({ error: err.message, code: "SOCIAL_LINKS_AUDIT_FAILED" });
     return next(err);
   }
 });

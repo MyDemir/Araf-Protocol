@@ -22,6 +22,7 @@ const DEGRADED_ALLOWLIST = Object.freeze([
   { method: "GET", path: /^\/stats\/?$/ },
   { method: "GET", path: /^\/reference-rates\/ticker\/?$/ },
   { method: "GET", path: /^\/rewards\/.+$/ },
+  { method: "GET", path: /^\/social-links\/?$/ },
   // İstemci hata günlüğü (yalnız log)
   { method: "POST", path: /^\/logs\/client-error\/?$/ },
   // Auth (SIWE doğrulaması çevrimdışı imza kontrolüdür; RPC/KMS gerektirmez)
