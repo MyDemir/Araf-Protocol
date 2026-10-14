@@ -1,6 +1,7 @@
 // [TR] Frontend zincir/faucet politikası tek authority noktası.
 // [EN] Single authority point for frontend chain/faucet policy.
 
+import { getAddress, isAddress, zeroAddress } from 'viem';
 import { ENV_ERROR_CODES, envError } from './envErrorCodes';
 
 export const BASE_MAINNET_CHAIN_ID = 8453;
@@ -82,6 +83,24 @@ export const isConfiguredTestToken = (address, env = import.meta.env) => {
     .some((c) => String(c || '').toLowerCase() === a);
 };
 
+
+const EXPLORER_BASE_BY_TARGET = {
+  [TARGET_CHAIN_BASE]: 'https://basescan.org',
+  [TARGET_CHAIN_BASE_SEPOLIA]: 'https://sepolia.basescan.org',
+};
+
+// [TR] Escrow kontratının explorer URL'i. Geçersiz/sıfır adres ya da bilinmeyen zincir (hardhat vb.) -> null.
+// [EN] Escrow explorer URL. Invalid/zero address or unknown chain (hardhat etc.) -> null.
+export const getEscrowExplorerUrl = ({ address, targetChain } = {}) => {
+  const base = Object.prototype.hasOwnProperty.call(EXPLORER_BASE_BY_TARGET, targetChain)
+    ? EXPLORER_BASE_BY_TARGET[targetChain]
+    : null;
+  const raw = String(address ?? '').trim();
+  if (!base || !raw || !isAddress(raw, { strict: false })) return null;
+  const checksummed = getAddress(raw);
+  if (checksummed === zeroAddress) return null;
+  return `${base}/address/${checksummed}`;
+};
 
 // [TR] Deploy uyumu: frontend ile backend aynı escrow kontratına ve desteklenen bir zincire bakmalı.
 //      Backend değerleri /api/orders/config -> deployment alanından gelir. Uyumsuzlukta uyarı metinleri döner.
