@@ -724,6 +724,8 @@ export function useAppSessionData({
   useEffect(() => installInfraRevalidation(async () => {
     const r = await fetchWithTimeout(() => buildApiUrl('orders/config'), { credentials: 'include', infra: 'backend', timeoutMs: 8000 });
     if (!r.ok) return;
+    // [TR] 200 = escrow kaydı uyumlu; açık escrowMismatch bayrağı odak/görünürlükte de kalkar (503 ESCROW_MISMATCH !ok → bayrak kalır).
+    markInfraOk('escrowMismatch');
     if (r.headers?.get?.('x-araf-degraded') === 'true') markInfraFailure('degraded');
     else markInfraOk('degraded');
     const body = await r.json().catch(() => null);
