@@ -154,7 +154,12 @@ cmd_vercel_build_env() {
   # Farcaster / Base mini app (opsiyonel; imza FRONTEND_DOMAIN'e bağlıdır, docs/*/DEPLOY_BASE_SEPOLIA.md)
   if [ -n "$(val VITE_BASE_APP_ID)" ]; then echo "VITE_BASE_APP_ID=$VITE_BASE_APP_ID"; fi
   # WalletConnect / Reown proje kimliği (public; boşsa yazılmaz → frontend WalletConnect'i hiç yüklemez)
-  if [ -n "$(val VITE_WALLETCONNECT_PROJECT_ID)" ]; then echo "VITE_WALLETCONNECT_PROJECT_ID=$VITE_WALLETCONNECT_PROJECT_ID"; fi
+  if [ -n "$(val VITE_WALLETCONNECT_PROJECT_ID)" ]; then
+    echo "VITE_WALLETCONNECT_PROJECT_ID=$VITE_WALLETCONNECT_PROJECT_ID"
+  else
+    # stdout --build-env satırlarıdır; uyarı stderr'e (değer yazdırılmaz).
+    echo "::warning::VITE_WALLETCONNECT_PROJECT_ID boş: WalletConnect kapalı olacak. GitHub > Settings > Secrets and variables > Actions > Variables sekmesine repository variable olarak ekleyin (secret değil)." >&2
+  fi
   if [ -n "$(val FARCASTER_ACCOUNT_ASSOCIATION_HEADER)" ] && [ -n "$(val FARCASTER_ACCOUNT_ASSOCIATION_PAYLOAD)" ] && [ -n "$(val FARCASTER_ACCOUNT_ASSOCIATION_SIGNATURE)" ]; then
     echo "FARCASTER_ACCOUNT_ASSOCIATION_HEADER=$FARCASTER_ACCOUNT_ASSOCIATION_HEADER"
     echo "FARCASTER_ACCOUNT_ASSOCIATION_PAYLOAD=$FARCASTER_ACCOUNT_ASSOCIATION_PAYLOAD"
