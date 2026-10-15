@@ -100,6 +100,35 @@ describe('wallet registration read', () => {
   });
 });
 
+describe('registered lock', () => {
+  it('stays true when a post-registration read returns 0n, then fills days on a later read', async () => {
+    const read = vi.fn().mockResolvedValueOnce(0n).mockResolvedValueOnce(0n).mockResolvedValue(BigInt(nowSec()));
+    const { result } = mount(read);
+    await flush(0);
+    expect(result.current.isWalletRegistered).toBe(false);
+    await act(async () => { result.current.setIsWalletRegistered(true); });
+    await flush(0);
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(result.current.isWalletRegistered).toBe(true);
+    expect(result.current.walletAgeRemainingDays).toBeNull();
+    await flush(5000);
+    expect(result.current.isWalletRegistered).toBe(true);
+    expect(result.current.walletAgeRemainingDays).toBeGreaterThan(0);
+  });
+
+  it('resets the lock when the address changes', async () => {
+    const read = vi.fn().mockResolvedValue(0n);
+    const { result, rerender } = renderHook((p) => useAppSessionData({ ...baseProps, ...p, getWalletRegisteredAt: read }), { initialProps: {} });
+    await flush(0);
+    await act(async () => { result.current.setIsWalletRegistered(true); });
+    await flush(0);
+    expect(result.current.isWalletRegistered).toBe(true);
+    rerender({ address: '0xdef0000000000000000000000000000000000000', connectedWallet: '0xdef0000000000000000000000000000000000000' });
+    await flush(0);
+    expect(result.current.isWalletRegistered).toBe(false);
+  });
+});
+
 describe('AccountPanel retry button', () => {
   const sybil = { aged: false, funded: true, cooldownOk: true, cooldownRemaining: 0 };
   it('shows Retry only when unknown, fires callback, and never a register button', () => {

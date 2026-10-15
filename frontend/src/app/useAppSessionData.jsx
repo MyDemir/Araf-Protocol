@@ -1020,6 +1020,9 @@ export function useAppSessionData({
   const [walletRegNonce, setWalletRegNonce] = useState(0);
   const refreshWalletRegistration = React.useCallback(() => setWalletRegNonce((n) => n + 1), []);
   const walletRegKeyRef = React.useRef(null);
+  // [TR] Zincirde walletRegisteredAt sıfırlanamaz: aynı adres için bir kez true olduysa 0n okuması true'yu düşürmez.
+  const walletRegLockedRef = React.useRef(false);
+  walletRegLockedRef.current = isWalletRegistered === true;
   useEffect(() => {
     if (!isConnected || !address || !getWalletRegisteredAt) {
       walletRegKeyRef.current = null;
@@ -1029,6 +1032,7 @@ export function useAppSessionData({
     }
     if (walletRegKeyRef.current !== address) {
       walletRegKeyRef.current = address;
+      walletRegLockedRef.current = false;
       setIsWalletRegistered(null);
       setWalletAgeRemainingDays(null);
     }
@@ -1041,6 +1045,13 @@ export function useAppSessionData({
       try {
         const regAt = await getWalletRegisteredAt(address);
         if (cancelled) return;
+        if (regAt === 0n && walletRegLockedRef.current) {
+          // [TR] Kayıt görüldü ama okuma geride (RPC gecikmesi): true kalır, gün sayısı için yeniden dene.
+          nextMs = Math.min(60000, 5000 * 2 ** failures);
+          failures += 1;
+          schedule(nextMs);
+          return;
+        }
         failures = 0;
         setIsWalletRegistered(regAt > 0n);
         if (regAt > 0n) {
