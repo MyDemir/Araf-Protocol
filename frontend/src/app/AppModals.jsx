@@ -6,8 +6,7 @@ import { TERMS_ACKNOWLEDGEMENTS, TERMS_SECTIONS, TERMS_VERSION } from './legal/t
 import PaymentRiskBadge from '../components/PaymentRiskBadge';
 import BottomSheet from '../components/BottomSheet';
 import FillConfirmSheet from '../components/FillConfirmSheet';
-import MobileWalletPicker, { WalletOption } from '../components/MobileWalletPicker';
-import { ConnectorIcon } from '../components/wallet-icons';
+import MobileWalletPicker, { WalletChoices } from '../components/MobileWalletPicker';
 import { isWalletProviderDisconnectedError, walletDisconnectedToast } from './walletDisconnect';
 import { describeConnectError, shouldShowMobileWalletPicker } from './mobileWallet';
 import { fmtBps, isKnownNumber, fmtNum } from './copy';
@@ -187,9 +186,6 @@ export const buildAppModals = (ctx) => {
     if (!showWalletModal) return null;
     const mobilePicker = typeof window !== 'undefined' && shouldShowMobileWalletPicker(window.navigator, window);
     const tr = lang === 'TR';
-    // [TR] Genel "Injected" bağlayıcı adı teknik jargon; kullanıcıya "Tarayıcı cüzdanı" olarak gösterilir.
-    // [EN] The generic "Injected" connector name is jargon; shown to users as "Browser wallet".
-    const connectorLabel = (c) => (c.id === 'injected' && c.name === 'Injected' ? (tr ? 'Tarayıcı cüzdanı' : 'Browser wallet') : c.name);
     return (
       <WalletSheet
         title={tr ? 'Cüzdan bağla' : 'Connect wallet'}
@@ -200,21 +196,13 @@ export const buildAppModals = (ctx) => {
         {mobilePicker ? (
           <MobileWalletPicker lang={lang} location={window.location} connectors={connectors} onConnect={connectWith} />
         ) : (
-          <div className="space-y-2.5">
-            {connectors.length === 0 && (
-              <p className="rounded-2xl border border-borderSubtle bg-elevated p-4 text-sm text-textSecondary">{tr ? 'Tarayıcıda cüzdan bulunamadı. MetaMask, Coinbase Wallet veya Rabby kurun.' : 'No wallet found in this browser. Install MetaMask, Coinbase Wallet or Rabby.'}</p>
-            )}
-            {connectors.map((connector) => (
-              <WalletOption
-                key={connector.uid}
-                onClick={() => connectWith(connector)}
-                icon={connector.icon
-                  ? <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-[28%]">{getWalletIcon(connector)}</span>
-                  : <ConnectorIcon connector={connector} />}
-                label={connectorLabel(connector)}
-              />
-            ))}
-          </div>
+          <WalletChoices
+            lang={lang}
+            connectors={connectors}
+            onConnect={connectWith}
+            win={typeof window !== 'undefined' ? window : null}
+            renderIcon={getWalletIcon}
+          />
         )}
       </WalletSheet>
     );

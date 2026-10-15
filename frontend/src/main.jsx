@@ -8,6 +8,7 @@ import { WagmiProvider, createConfig, http } from 'wagmi'
 import { base, baseSepolia, hardhat } from 'wagmi/chains'
 import { buildRpcTransport } from './app/rpcTransport'
 import { loadConnectorsSafely, renderFatalReload } from './app/connectorsLoader'
+import { resolveWalletConnectOptions } from './app/walletConnectConfig'
 import { isInMiniApp, scheduleMiniAppReady } from './app/miniapp'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import {
@@ -54,7 +55,8 @@ const wagmiChains = getSupportedChainIds().map((id) => CHAIN_BY_ID[id]).filter(B
 
 // [TR] P5 — Bağlayıcılar (coinbaseWallet dahil) ayrı chunk'tan yüklenir; ana paket küçülür.
 // [EN] P5 — Connectors (incl. coinbaseWallet) load from a separate chunk to keep the main bundle small.
-// [TR] WalletConnect geçici olarak kapalı (Reown 403 hatasını engellemek için). Yükleme hatası connectorsLoader'da yönetilir.
+// [TR] WalletConnect yalnız geçerli VITE_WALLETCONNECT_PROJECT_ID ile eklenir (walletConnectConfig.js); yoksa hiç yüklenmez.
+//      Yükleme hatası connectorsLoader'da yönetilir.
 const loadConnectors = async () => {
   // [TR] Farcaster connector yalnız mini app içinde eklenir; normal tarayıcıda liste değişmez.
   const inMiniApp = await isInMiniApp()
@@ -62,6 +64,7 @@ const loadConnectors = async () => {
     () => import('wagmi/connectors'),
     console,
     inMiniApp ? () => import('@farcaster/miniapp-wagmi-connector') : null,
+    resolveWalletConnectOptions(import.meta.env),
   )
 }
 

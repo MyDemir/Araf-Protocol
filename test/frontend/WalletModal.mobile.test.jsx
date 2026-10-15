@@ -84,6 +84,7 @@ describe('wallet modal on mobile', () => {
 
   it('surfaces connect errors instead of failing silently', async () => {
     setUa(DESKTOP);
+    window.ethereum = {};
     const connect = vi.fn((_v, opts) => opts.onError({ name: 'ProviderNotFoundError' }));
     const ctx = renderModal({ connect });
     await userEvent.click(screen.getByText('Browser wallet'));
