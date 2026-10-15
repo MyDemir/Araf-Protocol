@@ -1,4 +1,4 @@
-import { Wallet } from 'lucide-react';
+import { QrCode, Wallet } from 'lucide-react';
 
 // [TR] Cüzdan rozetleri. Hepsi yerel SVG; dış URL'den resim yüklenmez.
 //      - Coinbase: @coinbase/wallet-sdk paketindeki resmi logodan (dist/assets/wallet-logo.js, Apache-2.0) alınmıştır.
@@ -67,6 +67,16 @@ export function BrowserWalletBadge({ className = 'w-10 h-10' }) {
   );
 }
 
+// [TR] WalletConnect rozeti: mavi zemin üstünde QR simgesi (resmi logonun kopyası değil).
+// [EN] WalletConnect badge: QR glyph on blue (not a replica of the official logo).
+export function WalletConnectBadge({ className = 'w-10 h-10' }) {
+  return (
+    <span className={`${base(className)} flex items-center justify-center bg-[#3B99FC] shadow-sm`} aria-hidden="true">
+      <QrCode className="w-[55%] h-[55%] text-white" strokeWidth={2} />
+    </span>
+  );
+}
+
 const BY_LINK_ID = { metamask: MetaMaskBadge, okx: OkxBadge, trust: TrustBadge, coinbase: CoinbaseIcon };
 
 // [TR] Deeplink kimliğine (mobileWallet.js) göre rozet; bilinmeyen kimlikte genel rozet.
@@ -79,6 +89,7 @@ export function WalletLinkIcon({ id, className }) {
 // [TR] wagmi bağlayıcısı için rozet: Coinbase SDK ise resmi logo, diğerlerinde genel rozet.
 // [EN] Badge for a wagmi connector: official logo for the Coinbase SDK, generic badge otherwise.
 export function ConnectorIcon({ connector, className }) {
+  if (connector?.id === 'walletConnect' || connector?.type === 'walletConnect') return <WalletConnectBadge className={className} />;
   if (connector?.id === 'coinbaseWalletSDK' || connector?.type === 'coinbaseWallet') return <CoinbaseIcon className={className} />;
   return <BrowserWalletBadge className={className} />;
 }

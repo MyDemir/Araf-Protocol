@@ -131,6 +131,24 @@ describe('workflow scripts: stage-runtime-env.sh', function () {
     expect(r.stdout).to.not.match(/MONGODB|JWT|MASTER_ENCRYPTION/);
   });
 
+  it('vercel-build-env: VITE_WALLETCONNECT_PROJECT_ID is written only when set', function () {
+    const id = 'ab12cd34'.repeat(4);
+    const empty = runStage('vercel-build-env', { ...BASE_ENV, VITE_WALLETCONNECT_PROJECT_ID: '' });
+    expect(empty.status, empty.stderr).to.equal(0);
+    expect(empty.stdout).to.not.match(/VITE_WALLETCONNECT_PROJECT_ID/);
+    const unset = runStage('vercel-build-env', BASE_ENV);
+    expect(unset.stdout).to.not.match(/VITE_WALLETCONNECT_PROJECT_ID/);
+    const set = runStage('vercel-build-env', { ...BASE_ENV, VITE_WALLETCONNECT_PROJECT_ID: id });
+    expect(set.stdout.split('\n')).to.include(`VITE_WALLETCONNECT_PROJECT_ID=${id}`);
+  });
+
+  it('both Vercel deploy workflows pass VITE_WALLETCONNECT_PROJECT_ID from repo variables', function () {
+    for (const f of ['deploy-base-sepolia.yml', 'deploy-runtime-base-sepolia.yml']) {
+      const y = fs.readFileSync(path.resolve(__dirname, '../../.github/workflows', f), 'utf8');
+      expect(y).to.include('VITE_WALLETCONNECT_PROJECT_ID: ${{ vars.VITE_WALLETCONNECT_PROJECT_ID }}');
+    }
+  });
+
   it('validate: rejects out-of-range/invalid optional vars and half-set vault/rewards', function () {
     expect(runStage('validate', BASE_ENV).status).to.equal(0);
     const cases = [
