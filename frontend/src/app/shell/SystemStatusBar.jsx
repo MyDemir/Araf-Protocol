@@ -32,6 +32,8 @@ export const resolveSystemStatuses = ({
   rpcUnreachable = false,
   serviceDegraded = false,
   configStale = false,
+  escrowMismatch = false,
+  escrowMismatchReason = null,
   lang = 'EN',
 }) => {
   const statuses = [];
@@ -117,7 +119,25 @@ export const resolveSystemStatuses = ({
     });
   }
 
-  if (backendUnreachable) {
+  // [TR] Backend escrow kaydı uyumsuz (503 ESCROW_MISMATCH): KAPATILAMAZ. Açık işlemler kontratta güvende; çıkış eylemleri kapalı değil.
+  if (escrowMismatch) {
+    const rotating = escrowMismatchReason === 'rotating';
+    statuses.push({
+      key: 'backend_escrow_mismatch',
+      tone: 'danger',
+      title: rotating
+        ? t(lang, 'Sistem bakımda: kontrat geçişi', 'System under maintenance: contract migration')
+        : t(lang, 'Sunucu bu kontrata hizmet vermiyor', 'The server is not serving this contract'),
+      message: t(
+        lang,
+        'Yeni işlem açılamaz. Açık işlemleriniz kontratta güvende; çıkış işlemleri kontrata doğrudan gider.',
+        'New trades cannot be opened. Your open trades are safe on the contract; exit actions go directly to the contract.',
+      ),
+      details: [envError(ENV_ERROR_CODES.BACKEND_ESCROW_MISMATCH, `Backend escrow registry mismatch (503 ESCROW_MISMATCH, reason: ${escrowMismatchReason || 'unknown'})`)],
+    });
+  }
+
+  if (backendUnreachable && !escrowMismatch) {
     statuses.push({
       key: 'backend_unreachable',
       tone: 'warning',
@@ -128,7 +148,7 @@ export const resolveSystemStatuses = ({
   }
 
   // [TR] Kısıtlı mod: backend ayakta ama bazı uçlar kapalı. Tam erişilemezlik bandı varsa o yeterlidir.
-  if (serviceDegraded && !backendUnreachable) {
+  if (serviceDegraded && !backendUnreachable && !escrowMismatch) {
     statuses.push({
       key: 'service_degraded',
       tone: 'info',
@@ -165,7 +185,7 @@ export const resolveSystemStatuses = ({
     });
   }
 
-  if (ordersFeedError && !backendUnreachable) {
+  if (ordersFeedError && !backendUnreachable && !escrowMismatch) {
     statuses.push({
       key: 'orders_feed_unavailable',
       tone: 'warning',
@@ -195,6 +215,8 @@ export const SystemStatusBar = ({
   rpcUnreachable: rpcUnreachableProp,
   serviceDegraded: serviceDegradedProp,
   configStale: configStaleProp,
+  escrowMismatch: escrowMismatchProp,
+  escrowMismatchReason: escrowMismatchReasonProp,
   envErrors = [],
   isPaused = false,
   isConnected = false,
@@ -221,7 +243,11 @@ export const SystemStatusBar = ({
   const rpcUnreachable = rpcUnreachableProp ?? infra.rpc;
   const serviceDegraded = serviceDegradedProp ?? infra.degraded;
   const configStale = configStaleProp ?? infra.configStale;
+  const escrowMismatch = escrowMismatchProp ?? infra.escrowMismatch;
+  const escrowMismatchReason = escrowMismatchReasonProp ?? infra.escrowMismatchReason;
   const statuses = resolveSystemStatuses({
+    escrowMismatch,
+    escrowMismatchReason,
     backendUnreachable,
     rpcUnreachable,
     serviceDegraded,

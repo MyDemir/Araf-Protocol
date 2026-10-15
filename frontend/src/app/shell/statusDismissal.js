@@ -15,7 +15,7 @@ export const STATUS_DISMISS_STORAGE_KEY = 'araf_dismissed_statuses_v1';
 //      - env_error içinde kritik kodlu bir hata (CRITICAL_ENV_ERROR_CODES): escrow adresi/zincir uyuşmazlığı,
 //        eksik escrow adresi, API taban URL politikası ihlali.
 // [EN] User safety: never dismissible — wrong network, protocol paused, and env errors carrying a critical code.
-export const NON_DISMISSABLE_STATUS_KEYS = ['unsupported_chain', 'paused'];
+export const NON_DISMISSABLE_STATUS_KEYS = ['unsupported_chain', 'paused', 'backend_escrow_mismatch'];
 
 // [TR] Yalnız geriye dönük yedek: kodsuz (düz metin) eski girdiler için. Asıl karar koddan verilir.
 // [EN] Legacy fallback only, for code-less plain-string entries. The code is the primary signal.
