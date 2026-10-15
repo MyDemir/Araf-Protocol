@@ -39,41 +39,55 @@ const { runtimeValue } = require("../utils/runtimeValue");
 let relayerWallet = null;
 let decayContract = null;
 
+// [TR] Anahtar bilinçli tanımsızsa görev pasiftir; uyarı süreç başına yalnız bir kez yazılır.
+// [EN] A deliberately absent key makes the job passive; the warning is logged once per process.
+let passiveWarned = false;
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
 function getRelayer() {
   if (relayerWallet) return relayerWallet;
 
-  const rpcUrl = process.env.BASE_RPC_URL;
-  const privateKey = process.env.RELAYER_PRIVATE_KEY;
-
-  if (!rpcUrl || !privateKey) {
-    logger.error("[DecayJob] RELAYER_PRIVATE_KEY veya BASE_RPC_URL tanımsız. Görev çalıştırılamıyor.");
-    return null;
-  }
-
   const provider = getSharedProvider();
-  relayerWallet = new ethers.Wallet(privateKey, provider);
+  relayerWallet = new ethers.Wallet(process.env.RELAYER_PRIVATE_KEY, provider);
   logger.info(`[DecayJob] Relayer cüzdanı yüklendi: ${relayerWallet.address}`);
   return relayerWallet;
 }
 
+// [TR] Dönüş: { contract } | { passive:true } | { error:true }
 function getDecayContract() {
-  if (decayContract) return decayContract;
+  if (decayContract) return { contract: decayContract };
 
   const contractAddress = process.env.ARAF_ESCROW_ADDRESS;
-  const relayer = getRelayer();
-  if (!contractAddress || !relayer || contractAddress === "0x0000000000000000000000000000000000000000") {
-    logger.error("[DecayJob] ARAF_ESCROW_ADDRESS tanımsız veya geçersiz.");
-    return null;
+  if (!contractAddress) {
+    logger.error("[DecayJob] ARAF_ESCROW_ADDRESS tanımsız.");
+    return { error: true };
+  }
+  if (contractAddress.toLowerCase() === ZERO_ADDRESS) {
+    logger.error("[DecayJob] ARAF_ESCROW_ADDRESS sıfır adres; geçersiz.");
+    return { error: true };
+  }
+  if (!process.env.BASE_RPC_URL) {
+    logger.error("[DecayJob] BASE_RPC_URL tanımsız. Görev çalıştırılamıyor.");
+    return { error: true };
+  }
+  if (!process.env.RELAYER_PRIVATE_KEY) {
+    if (!passiveWarned) {
+      passiveWarned = true;
+      logger.warn("[DecayJob] RELAYER_PRIVATE_KEY tanımsız; görev pasif (decayReputation herkes tarafından çağrılabilir).");
+    }
+    return { passive: true };
   }
 
-  decayContract = new ethers.Contract(contractAddress, DECAY_ABI, relayer);
-  return decayContract;
+  decayContract = new ethers.Contract(contractAddress, DECAY_ABI, getRelayer());
+  return { contract: decayContract };
 }
 
 async function runReputationDecay() {
   logger.info("[DecayJob] V3 itibar temizleme görevi başlatıldı...");
 
-  const contract = getDecayContract();
+  const resolved = getDecayContract();
+  if (resolved.passive) return { success: true, skipped: "relayer_not_configured" };
+  const contract = resolved.contract;
   if (!contract) return { success: false, reason: "contract_unavailable" };
 
   let cleanPeriodMs = CLEAN_SLATE_DAYS * 24 * 3600 * 1000;
