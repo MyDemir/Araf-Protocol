@@ -4,6 +4,7 @@ import React from 'react';
 // [EN] Build the SIWE message with viem; the siwe package pulled ethers + an ABNF parser into the bundle.
 import { createSiweMessage } from 'viem/siwe';
 import { isWalletProviderDisconnectedError, walletDisconnectedToast } from '../walletDisconnect';
+import { signInWrongNetworkMessage } from '../switchNetwork';
 import { buildApiUrl } from '../apiConfig';
 import { buildTermsStatement, isTermsAcceptedLocally, markTermsAcceptedLocally, TERMS_VERSION } from '../legal/terms';
 
@@ -11,6 +12,7 @@ export const createSessionActions = ({
   address,
   connectedWallet,
   chainId,
+  isSupportedChain,
   isConnected,
   isAuthenticated,
   authenticatedWallet,
@@ -64,6 +66,12 @@ export const createSessionActions = ({
 
   const loginWithSIWE = async () => {
     if (!address) return;
+    // [TR] Yanlış ağda imza İSTEME: backend chainId uyuşmazlığını zaten reddeder. Bilinmiyorsa (null) akış korunur.
+    // [EN] Never ask for a signature on a wrong network. Unknown (null/undefined) keeps the old flow.
+    if (isSupportedChain === false) {
+      showToast(signInWrongNetworkMessage(lang), 'info');
+      return;
+    }
     // [TR] Bu cihazda koşullar kabul edildiyse giriş mesajı kabul beyanını içerir (imza = kanıt). Değilse düz
     //      giriş imzası istenir; backend, imza doğrulandıktan sonra cüzdanın saklı kabulüne bakar. Kabul yoksa
     //      modal açılır (cüzdan başına tek sefer). Kabul durumu hiçbir zaman imzasız sorgulanamaz.

@@ -1,12 +1,13 @@
 import { CircleCheck, Info, MessageSquare, TriangleAlert, Wallet, X } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 import { isWalletProviderDisconnectedError, walletDisconnectedToast } from './app/walletDisconnect';
-import { useAccount, useConnect, useDisconnect, useSignMessage, useChainId, usePublicClient } from 'wagmi';
+import { useAccount, useConnect, useDisconnect, useSignMessage, useSwitchChain, useChainId, usePublicClient } from 'wagmi';
 import { canonicalizePayoutProfileDraft, formatTokenAmount as formatTokenAmountFromRaw, tokenToNumber as rawTokenToDisplayNumber } from './app/orderUiModel';
 import { useArafContract } from './hooks/useArafContract';
 import { buildAppViews } from './app/AppViews';
 import { buildAppModals } from './app/AppModals';
 import AppShell from './app/shell/AppShell';
+import { switchToExpectedChain } from './app/switchNetwork';
 import { useSessionActions } from './app/providers/SessionProvider';
 import { useAppSessionData } from './app/useAppSessionData';
 // [TR] Admin paneli yalnız yöneticiler içindir; ayrı chunk olarak ilk ihtiyaçta yüklenir.
@@ -158,6 +159,7 @@ function App() {
   const { connect, connectors } = useConnect();
   const { disconnect } = useDisconnect();
   const { signMessageAsync } = useSignMessage();
+  const { switchChainAsync, isPending: isSwitchingChain } = useSwitchChain();
   const configChainId = useChainId();
   // [TR] Ağ kontrolü cüzdanın gerçek zincirine (useAccount().chainId) bakar; useChainId() config zinciridir (F11).
   const chainId = walletChainId ?? configChainId;
@@ -547,6 +549,7 @@ function App() {
     address,
     connectedWallet,
     chainId,
+    isSupportedChain,
     isConnected,
     isAuthenticated,
     authenticatedWallet,
@@ -892,6 +895,11 @@ function App() {
     ...checkDeploymentAlignment({ frontendEscrowAddress: import.meta.env.VITE_ESCROW_ADDRESS, backendDeployment }),
   ], [backendDeployment]);
 
+  const handleSwitchChain = React.useCallback(
+    () => switchToExpectedChain({ switchChainAsync, lang, showToast }),
+    [switchChainAsync, lang, showToast],
+  );
+
   const systemStatus = React.useMemo(() => ({
     envErrors,
     isPaused,
@@ -904,12 +912,14 @@ function App() {
     isWalletRegistered,
     isRegisteringWallet,
     onRegisterWallet: handleRegisterWallet,
+    isSwitchingChain,
+    onSwitchChain: handleSwitchChain,
     sybilStatus,
     walletAgeRemainingDays,
     activeTrade,
     ordersFeedError,
     lang,
-  }), [envErrors, ordersFeedError, isPaused, isConnected, isAuthenticated, authChecked, chainId, isSupportedChain, supportedChains, isWalletRegistered, isRegisteringWallet, handleRegisterWallet, sybilStatus, walletAgeRemainingDays, activeTrade, lang]);
+  }), [envErrors, ordersFeedError, isPaused, isConnected, isAuthenticated, authChecked, chainId, isSupportedChain, supportedChains, isWalletRegistered, isRegisteringWallet, handleRegisterWallet, isSwitchingChain, handleSwitchChain, sybilStatus, walletAgeRemainingDays, activeTrade, lang]);
 
   // [TR] decayReputation sonrası itibar/ban/tier yeniden okunur (F9).
   const decayReputationAndRefresh = React.useCallback(async (...args) => {
