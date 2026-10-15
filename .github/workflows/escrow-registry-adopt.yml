@@ -1,0 +1,61 @@
+name: Escrow Registry Adopt
+
+# Tek seferlik ilk kayıt: MEVCUT canlı escrow'u (repo variable ARAF_ESCROW_ADDRESS / ARAF_DEPLOYMENT_BLOCK) Mongo
+# `escrow_registry` içinde `_id:"active"` olarak yazar. Backend bu kaydı yalnız OKUR (ESCROW_REGISTRY_GUARD_MODE).
+# Varsayılan DRY-RUN: ne yazılacağını gösterir, yazmaz. Yazmak için dry_run=false. Mevcut active BAŞKA bir escrow
+# gösteriyorsa betik durur (--force-switch bu workflow'da KULLANILMAZ; kontrat deploy workflow'u kullanır).
+# Sıra: docs/*/DEPLOYMENT_GUIDE.md "Escrow registry" bölümü. deploy-runtime workflow'una dokunmaz.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry-run (default true): only print what would be written. Set false to write the active document."
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+# Kontrat deploy workflow'u ile aynı grup: aynı anda iki yazar olmaz.
+concurrency:
+  group: deploy-base-sepolia
+  cancel-in-progress: false
+
+jobs:
+  adopt:
+    name: Adopt live escrow into escrow_registry
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      # Mongo sürücüsü backend bağımlılığıdır (yeni paket değil); betik onu backend/node_modules'tan yükler.
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci --omit=dev --ignore-scripts
+
+      - name: Adopt escrow registry
+        shell: bash
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          ARAF_ESCROW_ADDRESS: ${{ vars.ARAF_ESCROW_ADDRESS }}
+          ARAF_DEPLOYMENT_BLOCK: ${{ vars.ARAF_DEPLOYMENT_BLOCK }}
+          EXPECTED_CHAIN_ID: "84532"
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          test -n "$MONGODB_URI" || { echo "::error::MONGODB_URI secret is required."; exit 1; }
+          if [ "$DRY_RUN" = "false" ]; then
+            node .github/scripts/escrow-registry.js --adopt --apply
+          else
+            node .github/scripts/escrow-registry.js --adopt
+          fi

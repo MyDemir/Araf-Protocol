@@ -5,6 +5,7 @@ const crypto = require("crypto");
 const mongoose = require("mongoose");
 const { isReady: isRedisReady, getRedisClient } = require("../config/redis");
 const serviceMode = require("./serviceMode");
+const escrowRegistryGuard = require("./escrowRegistryGuard");
 const { EXPECTED_CHAIN_ENV, resolveExpectedChainIdOrThrow } = require("./expectedChain");
 
 const CHECKPOINT_KEY = "worker:last_block";
@@ -233,8 +234,19 @@ async function getReadiness({ worker, provider } = {}) {
   // [TR] Worker RPC 429/kapasite geri çekilmesinde: hizmet sürer ama gecikmeli olabilir (readiness'i düşürmez).
   if (worker?._rpcRateLimited) degradedReasons.push("rpc_rate_limited");
 
+  // [TR] Escrow bekçisi: warn/off'ta yalnız bilgi (ok'u etkilemez); enforce + uyumsuzda /ready 503 + reason.
+  const guardStatus = escrowRegistryGuard.getStatus();
+  const escrowRegistryBlocking = guardStatus.blocking;
+  const escrowRegistry = {
+    mode: guardStatus.mode,
+    checked: guardStatus.checked,
+    ok: guardStatus.ok,
+    reason: guardStatus.reason,
+  };
+
   return {
     ok:
+      !escrowRegistryBlocking &&
       fullService &&
       mongoReady &&
       redisReady &&
@@ -244,7 +256,10 @@ async function getReadiness({ worker, provider } = {}) {
       replayBootstrapReady &&
       workerReady,
 
+    escrowRegistry,
+
     checks: {
+      escrowRegistry: !escrowRegistryBlocking,
       fullService,
       configStale: serviceMode.isConfigStale(),
       mongo: mongoReady,
@@ -355,6 +370,7 @@ function toPublicReadiness(readiness) {
       replaying: readiness.worker?.state === "replaying",
       lagBlocks: readiness.worker?.lagBlocks ?? null,
     },
+    escrowRegistry: readiness.escrowRegistry,
     configIssueCount: Array.isArray(readiness.missingConfig) ? readiness.missingConfig.length : 0,
     degraded: readiness.degraded,
     degradedReasons: readiness.degradedReasons,

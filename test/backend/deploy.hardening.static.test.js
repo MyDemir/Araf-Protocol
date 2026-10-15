@@ -19,4 +19,33 @@ describe("deploy hardening static guards", () => {
     expect(en).toContain("VITE_*");
     expect(en).toContain("REDIS_TLS_SKIP_VERIFY=true");
   });
+
+  it("escrow registry adopt step runs after contract deploy + checkpoint reset and before the health check", () => {
+    const wf = fs.readFileSync(path.resolve(process.cwd(), "../.github/workflows/deploy-base-sepolia.yml"), "utf8");
+    const at = (needle) => wf.indexOf(`- name: ${needle}`);
+    const deploy = at("Deploy contracts to Base Sepolia");
+    const flyDeploy = at("Deploy backend to Fly");
+    const reset = at("Reset worker checkpoint for new deployment");
+    const registry = at("Write active escrow registry");
+    const health = at("Check backend health");
+    for (const n of [deploy, flyDeploy, reset, registry, health]) expect(n).toBeGreaterThan(-1);
+    expect(deploy).toBeLessThan(flyDeploy);
+    expect(reset).toBeLessThan(registry);
+    expect(registry).toBeLessThan(health);
+    const step = wf.slice(registry, health);
+    expect(step).toContain("escrow-registry.js --adopt --apply --force-switch");
+    expect(step).toContain("MONGODB_URI: ${{ secrets.MONGODB_URI }}");
+    // runtime deploy escrow'u değiştirmez: registry yazmaz
+    const runtime = fs.readFileSync(path.resolve(process.cwd(), "../.github/workflows/deploy-runtime-base-sepolia.yml"), "utf8");
+    expect(runtime).not.toContain("escrow-registry");
+  });
+
+  it("escrow-registry-adopt workflow is manual, dry-run by default, never force-switches", () => {
+    const wf = fs.readFileSync(path.resolve(process.cwd(), "../.github/workflows/escrow-registry-adopt.yml"), "utf8");
+    expect(wf).toContain("workflow_dispatch:");
+    expect(wf).toMatch(/dry_run:[\s\S]*?default: true/);
+    expect(wf).toContain("escrow-registry.js --adopt");
+    expect(wf.replace(/#.*$/gm, "")).not.toContain("--force-switch");
+    expect(wf).toContain("MONGODB_URI: ${{ secrets.MONGODB_URI }}");
+  });
 });
