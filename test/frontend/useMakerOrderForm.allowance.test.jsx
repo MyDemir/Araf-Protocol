@@ -32,6 +32,7 @@ const run = async (extra) => {
     payoutProfileDraft: {},
     paymentRiskConfig: { TR: { TR_IBAN: { riskLevel: 'MEDIUM', enabled: true } } },
     hasPayoutProfile: true,
+    effectiveTier: 1,
     ...extra,
   };
   const H = () => { latest = useMakerOrderForm(deps); return null; };
@@ -56,5 +57,38 @@ describe('item 7: useMakerOrderForm forwards bondMap and getReputation', () => {
     const approve = await run({});
     const [, amount] = approve.mock.calls[0];
     expect(amount).toBeGreaterThan(107_000_000n);
+  });
+});
+
+describe('useMakerOrderForm clamps the selected tier to the effective tier', () => {
+  const mk = (effectiveTier) => ({
+    isPaused: false, requireSignedSessionForActiveWallet: () => true, setShowMakerModal: vi.fn(), showToast: vi.fn(),
+    supportedTokens: { USDT: { address: '0x0000000000000000000000000000000000000001', decimalsRequired: true } },
+    address: '0xabc0000000000000000000000000000000000000', lang: 'EN', isContractLoading: false,
+    setIsContractLoading: vi.fn(), setLoadingText: vi.fn(), getTokenDecimals: async () => 6, getAllowance: async () => 0n,
+    approveToken: vi.fn(), createSellOrder: vi.fn(), createBuyOrder: vi.fn(), fillSellOrder: vi.fn(), fillBuyOrder: vi.fn(),
+    cancelSellOrder: vi.fn(), cancelBuyOrder: vi.fn(), canonicalizePayoutProfileDraft: () => ({}), payoutProfileDraft: {},
+    paymentRiskConfig: {}, hasPayoutProfile: true, effectiveTier,
+  });
+
+  it('lowers the selected tier when the effective tier drops', async () => {
+    let latest;
+    const H = ({ tier }) => { latest = useMakerOrderForm(mk(tier)); return null; };
+    const { rerender } = render(React.createElement(H, { tier: 3 }));
+    await act(async () => { latest.setMakerTier(3); });
+    expect(latest.makerTier).toBe(3);
+    rerender(React.createElement(H, { tier: 1 }));
+    await act(async () => {});
+    expect(latest.makerTier).toBe(1);
+  });
+
+  it('defaults to tier 0 and never exceeds an unknown (0) effective tier', async () => {
+    let latest;
+    const H = () => { latest = useMakerOrderForm(mk(undefined)); return null; };
+    render(React.createElement(H));
+    expect(latest.makerTier).toBe(0);
+    await act(async () => { latest.setMakerTier(1); });
+    await act(async () => {});
+    expect(latest.makerTier).toBe(0);
   });
 });

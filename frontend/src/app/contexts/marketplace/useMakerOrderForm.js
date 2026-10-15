@@ -42,6 +42,8 @@ export const useMakerOrderForm = ({
   // [TR] Backend'deki kayıtlı ödeme profili durumu (true/false/null) ve profil sayfasına yönlendirme.
   hasPayoutProfile = null,
   openProfilePage = null,
+  // [TR] Cüzdanın kontrattaki efektif tier'ı (userReputation.effectiveTier); okunamazsa 0.
+  effectiveTier: effectiveTierProp = 0,
 }) => {
   const [makerTier, setMakerTier] = React.useState(MAKER_ORDER_DEFAULTS.makerTier);
   const [makerAmount, setMakerAmount] = React.useState(MAKER_ORDER_DEFAULTS.makerAmount);
@@ -50,6 +52,13 @@ export const useMakerOrderForm = ({
   const [makerFiat, setMakerFiat] = React.useState(MAKER_ORDER_DEFAULTS.makerFiat);
   const [makerToken, setMakerToken] = React.useState(MAKER_ORDER_DEFAULTS.makerToken);
   const [makerSide, setMakerSide] = React.useState(MAKER_ORDER_DEFAULTS.makerSide);
+
+  const effectiveTier = Number.isFinite(Number(effectiveTierProp)) ? Number(effectiveTierProp) : 0;
+
+  // [TR] Seçili tier efektif tier'ı aşıyorsa otomatik düşür (kilitli tier seçili kalmasın).
+  React.useEffect(() => {
+    if (makerTier > effectiveTier) setMakerTier(effectiveTier);
+  }, [effectiveTier, makerTier]);
 
   const formState = React.useMemo(() => ({
     makerTier,
@@ -80,8 +89,8 @@ export const useMakerOrderForm = ({
   const tierMaxAmounts = React.useMemo(() => resolveTierMaxAmounts(tokenPolicy), [tokenPolicy]);
 
   const validationError = React.useMemo(
-    () => getMakerOrderValidationError({ ...formState, tierMaxAmounts, tokenPolicy, lang }),
-    [formState, tierMaxAmounts, tokenPolicy, lang],
+    () => getMakerOrderValidationError({ ...formState, tierMaxAmounts, tokenPolicy, effectiveTier, lang }),
+    [formState, tierMaxAmounts, tokenPolicy, effectiveTier, lang],
   );
 
   const canonicalPayoutProfile = React.useMemo(
@@ -129,6 +138,7 @@ export const useMakerOrderForm = ({
     hasPayoutProfile,
     openProfilePage,
     txGate,
+    effectiveTier,
   }), [
     getFormState,
     resetMakerOrderForm,
@@ -161,6 +171,7 @@ export const useMakerOrderForm = ({
     hasPayoutProfile,
     openProfilePage,
     txGate,
+    effectiveTier,
   ]);
 
   const handleOpenMakerModal = React.useCallback(() => {
