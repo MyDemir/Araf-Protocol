@@ -247,7 +247,14 @@ export function useAppSessionData({
   const adminResolvedWalletRef = React.useRef(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [authenticatedWallet, setAuthenticatedWallet] = useState(null);
-  const [isWalletRegistered, setIsWalletRegistered] = useState(null);
+  const [isWalletRegistered, setIsWalletRegisteredRaw] = useState(null);
+  // [TR] Zincirde walletRegisteredAt sıfırlanamaz. Kilit state'ten türetilmez; yalnız (a) okuma regAt>0n döndüğünde
+  //      ya da (b) kayıt başarılı olup dışarıdan true set edildiğinde açılır; yalnız adres değişince kapanır.
+  const walletRegLockedRef = React.useRef(false);
+  const setIsWalletRegistered = React.useCallback((v) => {
+    if (v === true) walletRegLockedRef.current = true;
+    setIsWalletRegisteredRaw(v);
+  }, []);
   const [isRegisteringWallet, setIsRegisteringWallet] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
@@ -1020,20 +1027,17 @@ export function useAppSessionData({
   const [walletRegNonce, setWalletRegNonce] = useState(0);
   const refreshWalletRegistration = React.useCallback(() => setWalletRegNonce((n) => n + 1), []);
   const walletRegKeyRef = React.useRef(null);
-  // [TR] Zincirde walletRegisteredAt sıfırlanamaz: aynı adres için bir kez true olduysa 0n okuması true'yu düşürmez.
-  const walletRegLockedRef = React.useRef(false);
-  walletRegLockedRef.current = isWalletRegistered === true;
   useEffect(() => {
     if (!isConnected || !address || !getWalletRegisteredAt) {
       walletRegKeyRef.current = null;
-      setIsWalletRegistered(null);
+      setIsWalletRegisteredRaw(null);
       setWalletAgeRemainingDays(null);
       return undefined;
     }
     if (walletRegKeyRef.current !== address) {
       walletRegKeyRef.current = address;
       walletRegLockedRef.current = false;
-      setIsWalletRegistered(null);
+      setIsWalletRegisteredRaw(null);
       setWalletAgeRemainingDays(null);
     }
     let cancelled = false;
@@ -1053,7 +1057,8 @@ export function useAppSessionData({
           return;
         }
         failures = 0;
-        setIsWalletRegistered(regAt > 0n);
+        if (regAt > 0n) walletRegLockedRef.current = true;
+        setIsWalletRegisteredRaw(regAt > 0n);
         if (regAt > 0n) {
           const nowSec = Math.floor(Date.now() / 1000);
           const remainingSec = Math.max(0, Number(regAt) + WALLET_AGE_MIN_SEC - nowSec);
@@ -1065,7 +1070,8 @@ export function useAppSessionData({
       } catch {
         // [TR] Okunamadı = bilinmiyor (null); "kayıtsız" sanılmaz (F20).
         if (cancelled) return;
-        setIsWalletRegistered(null);
+        // [TR] Kilitliyse kayıt durumu true kalır (zincirde geri alınamaz); yalnız gün sayısı bilinmez.
+        if (!walletRegLockedRef.current) setIsWalletRegisteredRaw(null);
         setWalletAgeRemainingDays(null);
         nextMs = Math.min(60000, 5000 * 2 ** failures);
         failures += 1;

@@ -116,6 +116,22 @@ describe('registered lock', () => {
     expect(result.current.walletAgeRemainingDays).toBeGreaterThan(0);
   });
 
+  it('stays true through true -> read error -> 0n (register button condition never met)', async () => {
+    const read = vi.fn().mockResolvedValueOnce(0n).mockRejectedValueOnce(new Error('rpc')).mockResolvedValueOnce(0n).mockResolvedValue(BigInt(nowSec()));
+    const { result } = mount(read);
+    await flush(0);
+    await act(async () => { result.current.setIsWalletRegistered(true); });
+    await flush(0);
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(result.current.isWalletRegistered).toBe(true);
+    await flush(5000);
+    expect(read).toHaveBeenCalledTimes(3);
+    expect(result.current.isWalletRegistered).toBe(true);
+    await flush(10000);
+    expect(result.current.isWalletRegistered).toBe(true);
+    expect(result.current.walletAgeRemainingDays).toBeGreaterThan(0);
+  });
+
   it('resets the lock when the address changes', async () => {
     const read = vi.fn().mockResolvedValue(0n);
     const { result, rerender } = renderHook((p) => useAppSessionData({ ...baseProps, ...p, getWalletRegisteredAt: read }), { initialProps: {} });
