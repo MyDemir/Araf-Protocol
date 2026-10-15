@@ -94,7 +94,6 @@ function globalErrorHandler(err, req, res, next) {
     message: err.message,
     path: req.path,
     method: req.method,
-    ip: req.ip,
     wallet: req.wallet || "anon",
     // ORTA-09 Fix: Her ortamda scrub — plaintext PII loglanmaz
     body: scrubBody(req.body),
