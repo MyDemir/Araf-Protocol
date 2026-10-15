@@ -95,7 +95,6 @@ export const ChainFallbackTradesPanel = ({ lang = 'EN', chainFallback, compact =
             id="chain-fallback-trade-id"
             type="text"
             inputMode="numeric"
-            pattern="[0-9]*"
             autoComplete="off"
             maxLength={78}
             value={input}
