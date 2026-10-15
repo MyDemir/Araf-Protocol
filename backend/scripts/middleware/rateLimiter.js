@@ -81,7 +81,7 @@ function makeSkipFn() {
 
 function onLimitReached(req) {
   logger.warn(
-    `[RateLimit] Engellendi: ${req.ip} | ${req.path} | wallet: ${req.wallet || "anon"}`
+    `[RateLimit] Engellendi: ${req.path} | wallet: ${req.wallet || "anon"}`
   );
 }
 
