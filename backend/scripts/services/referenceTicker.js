@@ -498,9 +498,25 @@ async function getReferenceTickerPayload() {
   return refreshReferenceTicker();
 }
 
+/**
+ * [TR] Scheduler sarmalayıcısı: başarı sözleşmesi ({ success }) döner; payload şekli değişmez.
+ * [EN] Scheduler wrapper returning the { success } contract; payload shape of the refresh is unchanged.
+ */
+async function runReferenceTickerJob() {
+  try {
+    const payload = await refreshReferenceTicker();
+    return { success: true, items: Array.isArray(payload?.items) ? payload.items.length : 0 };
+  } catch (err) {
+    logger.warn(`[ReferenceTicker] Scheduled refresh failed: ${err?.message}`);
+    const safeMsg = String(err?.message || "unknown").replace(/https?:\/\/\S+/gi, "[url]").slice(0, 120);
+    return { success: false, error: safeMsg };
+  }
+}
+
 module.exports = {
   CACHE_KEYS,
   refreshReferenceTicker,
+  runReferenceTickerJob,
   getReferenceTickerPayload,
   _mergeWithLastGood: mergeWithLastGood,
   get MAX_STALE_SECONDS() { return maxStaleSeconds(); },
