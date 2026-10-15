@@ -1147,6 +1147,7 @@ export const buildAppViews = (ctx) => {
         sybilStatus={lp ? lp.sybilStatus : sybilStatus}
         walletAgeRemainingDays={lp ? lp.walletAgeRemainingDays : walletAgeRemainingDays}
         isWalletRegistered={lp ? (lp.isWalletRegistered ?? true) : ctx.isWalletRegistered}
+        onRetryWalletRegistration={lp ? undefined : ctx.refreshWalletRegistration}
         isBanned={lp ? lp.isBanned : Boolean(ctx.isBanned)}
         decayReputation={ctx.decayReputation}
         myOrders={lp ? lp.myOrders : (ctx.myOrders || [])}

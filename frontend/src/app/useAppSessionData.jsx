@@ -1015,22 +1015,39 @@ export function useAppSessionData({
 
   useEffect(() => { fetchStats(); }, [fetchStats, infraEpoch]);
 
+  // [TR] Kayıt okuması: hata = bilinmiyor (null, F20: asla "kayıtsız" sayılmaz) ve geri çekilmeyle yeniden denenir
+  //      (5/10/20/40/60 sn); okununca 60 sn; kayıtlı + yaşı dolmuşsa durur. Gizli sekmede istek yok.
+  const [walletRegNonce, setWalletRegNonce] = useState(0);
+  const refreshWalletRegistration = React.useCallback(() => setWalletRegNonce((n) => n + 1), []);
+  const walletRegKeyRef = React.useRef(null);
   useEffect(() => {
     if (!isConnected || !address || !getWalletRegisteredAt) {
+      walletRegKeyRef.current = null;
       setIsWalletRegistered(null);
       setWalletAgeRemainingDays(null);
-      return;
+      return undefined;
+    }
+    if (walletRegKeyRef.current !== address) {
+      walletRegKeyRef.current = address;
+      setIsWalletRegistered(null);
+      setWalletAgeRemainingDays(null);
     }
     let cancelled = false;
+    let timer = null;
+    let failures = 0;
+    const schedule = (ms) => { if (!cancelled) timer = setTimeout(tick, ms); };
     const checkRegistration = async () => {
+      let nextMs = 60000;
       try {
         const regAt = await getWalletRegisteredAt(address);
         if (cancelled) return;
+        failures = 0;
         setIsWalletRegistered(regAt > 0n);
         if (regAt > 0n) {
           const nowSec = Math.floor(Date.now() / 1000);
           const remainingSec = Math.max(0, Number(regAt) + WALLET_AGE_MIN_SEC - nowSec);
           setWalletAgeRemainingDays(Math.ceil(remainingSec / (24 * 3600)));
+          if (remainingSec === 0) return; // aged: no more refresh
         } else {
           setWalletAgeRemainingDays(null);
         }
@@ -1039,11 +1056,23 @@ export function useAppSessionData({
         if (cancelled) return;
         setIsWalletRegistered(null);
         setWalletAgeRemainingDays(null);
+        nextMs = Math.min(60000, 5000 * 2 ** failures);
+        failures += 1;
       }
+      schedule(nextMs);
+    };
+    const tick = () => {
+      if (typeof document !== 'undefined' && document.hidden) { schedule(failures > 0 ? Math.min(60000, 5000 * 2 ** (failures - 1)) : 60000); return; }
+      checkRegistration();
     };
     checkRegistration();
-    return () => { cancelled = true; };
-  }, [isConnected, address, getWalletRegisteredAt]);
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
+  }, [isConnected, address, getWalletRegisteredAt, walletRegNonce]);
+
+  // [TR] Kayıt sonrası (true ama gün sayısı yok) bir okuma tetiklenir; gün sayısı hesaplanır.
+  useEffect(() => {
+    if (isWalletRegistered === true && walletAgeRemainingDays === null) refreshWalletRegistration();
+  }, [isWalletRegistered, walletAgeRemainingDays, refreshWalletRegistration]);
 
   // [TR] İtibar/ban/tier yalnız cüzdan değişiminde değil; trade bitince, decayReputation sonrası ve ban süresi
   //      dolunca da yeniden okunur (F9).
@@ -1511,6 +1540,7 @@ export function useAppSessionData({
     setPaymentIpfsHash,
     sybilStatus,
     walletAgeRemainingDays,
+    refreshWalletRegistration,
     takerName,
     isPaused,
     rpcChecked,
