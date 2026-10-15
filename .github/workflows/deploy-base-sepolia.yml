@@ -143,6 +143,11 @@ jobs:
         working-directory: contracts
         run: npm ci
 
+      # Escrow registry yazarı (escrow-registry.js) Mongo sürücüsünü backend/node_modules'tan yükler (yeni paket değil).
+      - name: Install backend dependencies (escrow registry writer)
+        working-directory: backend
+        run: npm ci --omit=dev --ignore-scripts
+
       - name: Compile contracts
         working-directory: contracts
         run: npx hardhat compile
@@ -378,6 +383,18 @@ jobs:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           REDIS_URL: ${{ secrets.REDIS_URL }}
         run: bash .github/scripts/reset-worker-checkpoint.sh
+
+      # Yeni escrow'u Mongo `escrow_registry` içinde `_id:"active"` olarak yazar (backend bekçisi yalnız OKUR; tek yazar bu betik).
+      # Eski kayıt başka bir escrow'u gösterdiği için --force-switch gerekir (rotasyonu Faz 2 yönetecek). Checkpoint sıfırlamadan
+      # sonra, health kontrolünden önce. Mongo sürücüsü backend bağımlılığıdır ("Install backend dependencies" adımı). Secret/URI basılmaz.
+      - name: Write active escrow registry
+        shell: bash
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          ARAF_ESCROW_ADDRESS: ${{ env.ESCROW }}
+          ARAF_DEPLOYMENT_BLOCK: ${{ env.DEPLOY_BLOCK }}
+          EXPECTED_CHAIN_ID: "84532"
+        run: node .github/scripts/escrow-registry.js --adopt --apply --force-switch
 
       # /health 200 zorunlu; /ready 503 degraded:true ise yalnız ::warning:: (deploy başarılı sayılır).
       - name: Check backend health

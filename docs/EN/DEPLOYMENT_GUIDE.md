@@ -736,6 +736,22 @@ Production runs a KMS self-test at startup (`runProductionKmsStartupSelfTest`). 
 | `PII_IDENTITY_NORMALIZATION_GUARD` | no | falls back to the variable above, then `enforce` | Mode used lazily by the PII routes (`503 IDENTITY_NORMALIZATION_REQUIRED`). |
 | `IDENTITY_MIGRATION_BATCH_SIZE` | no | `1000` | `migrate:identity` batch size. |
 
+### 6.6a Backend — escrow registry guard
+
+The `escrow_registry` Mongo collection holds one document, `_id: "active"`: `escrow_address` (lowercase), `chain_id`, `deploy_block`, `state` (`ACTIVE` | `ROTATING`), `since`, `updated_by` (GitHub run id). **Only the deploy workflow writes it** (`.github/scripts/escrow-registry.js`); the backend only reads it, and no admin route or panel can change it. The guard compares it with `ARAF_ESCROW_ADDRESS` and `EXPECTED_CHAIN_ID` at startup and every 60 s (one Mongo read) and reports a mismatch reason: `registry_missing`, `escrow_mismatch`, `chain_mismatch`, `rotating` (or `registry_unreadable` when the read fails).
+
+| Variable | Required | Default | Notes |
+|---|---|---|---|
+| `ESCROW_REGISTRY_GUARD_MODE` | no | `warn` | `off` · `warn` · `enforce`. Invalid value = `warn` plus a warning log. `warn`: log only (once and on change) and an `escrowRegistry` info field in `/ready`; nothing is closed and no HTTP status changes. `enforce`: on a mismatch (or an unreadable registry, fail-closed) the worker is not started (or is stopped), chain-bound scheduled jobs are skipped, and escrow-bound routes (orders, trades, pii, receipts, stats, rewards, admin) return `503 ESCROW_MISMATCH` with the reason. Auth, client logs, social links, reference ticker, feedback and `/health` stay open; `/ready` returns 503 with the reason. Exits are not blocked: users send exit transactions straight to the contract. |
+| `ESCROW_REGISTRY_GUARD_INTERVAL_MS` | no | `60000` | Re-check interval. |
+
+**First-time setup order**
+1. Deploy the guard code with `deploy-runtime` while the mode is still `warn` (the default). Nothing is closed.
+2. Run the **Escrow Registry Adopt** workflow (`escrow-registry-adopt.yml`) with `dry_run=true` and read the output, then run it again with `dry_run=false`. It writes the live escrow (`ARAF_ESCROW_ADDRESS` / `ARAF_DEPLOYMENT_BLOCK` repository variables, chain 84532) as `active`.
+3. If the backend log shows no `[EscrowRegistryGuard] UYUMSUZ` line and `/ready` reports `escrowRegistry.ok: true`, switch on enforcement: `flyctl secrets set ESCROW_REGISTRY_GUARD_MODE=enforce -a <app>`.
+
+A full contract deploy (`deploy-base-sepolia.yml`) writes the new escrow itself in the "Write active escrow registry" step (after the checkpoint reset, before the health check, with `--force-switch`). The runtime deploy does not change the escrow and never writes the registry; if its `araf_escrow_address` override differs from the registry, the guard reports `escrow_mismatch`. Archiving and rotation are not part of this phase.
+
 ### 6.7 Backend — scheduled jobs (all in ms unless noted; max 2 147 483 647)
 
 | Variable | Default |

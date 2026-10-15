@@ -4,7 +4,7 @@ import { buildApiUrl } from '../apiConfig';
 import { resolveValidatedFillAmountRaw } from '../fillAmountPolicy';
 import { normalizeOrderSide, removeOrderByOnchainId, resolveOrderActionFns } from '../orderUiModel';
 import { WALLET_AGE_MIN_DAYS } from '../walletAge';
-import { mapChainTradeState, resolveConfirmedState } from '../tradeStateSync';
+import { isTerminalTradeState, mapChainTradeState, resolveConfirmedState } from '../tradeStateSync';
 import { computeFillAllowance } from './allowanceMath';
 import { checkTokenBalance } from './balanceGuard';
 import { buildFillConfirmSummary } from '../fillConfirmSummary';
@@ -525,6 +525,8 @@ export const buildTradeRoomActions = ({
   // [TR] Tx sonrası durumu kontrattan okumak (getTrade) ve backend aynası yetişene kadar pin'lemek için.
   getTrade = null,
   pinTradeState = null,
+  // [TR] P4: kapanan işlem bilinen işlemler kaydından çıkarılır (yedek görünüm onu bir daha okumaz).
+  onTradeFinished = null,
   fetchFn = fetch,
 }) => {
   // [TR] fetchMyTrades hatası, zincirde başarılı olmuş bir tx'i "başarısız" gösterdiği için ayrı korunur.
@@ -554,6 +556,9 @@ export const buildTradeRoomActions = ({
 
   const finishTrade = async (state, onchainId = activeTrade?.onchainId) => {
     const confirmed = await confirmTradeState(onchainId, state);
+    if (typeof onTradeFinished === 'function' && isTerminalTradeState(confirmed)) {
+      try { onTradeFinished(onchainId, confirmed); } catch (_) { /* kayıt hatası tx sonucunu etkilemez */ }
+    }
     // [TR] Oda yalnız biten trade açıksa kapatılır; başka bir trade'in odası ezilmez.
     if (!isSameTrade(activeTrade, onchainId)) return confirmed;
     setTradeState(confirmed);

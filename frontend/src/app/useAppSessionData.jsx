@@ -10,6 +10,7 @@ import { fetchWithTimeout, isTimeoutError, DEFAULT_FETCH_TIMEOUT_MS, WRITE_FETCH
 import { installInfraRevalidation, markInfraFailure, markInfraOk, registerInfraProbe, useInfraHealth } from './infraHealth';
 import { WALLET_AGE_MIN_SEC } from './walletAge';
 import { applyStatePin, createStatePin, isTerminalTradeState } from './tradeStateSync';
+import { addKnownTradeIds } from './knownTrades';
 
 // [TR] İçerik değişmediyse eski referans korunur (gereksiz render/effect zincirini önler).
 export const deepEqual = (a, b) => {
@@ -348,6 +349,11 @@ export function useAppSessionData({
     });
   }, []);
   const [loading, setLoading] = useState(true);
+  // [TR] P4: backend'in işlem listesi (trades/my) alınamadı mı? Yalnız bu true iken zincir yedek görünümü açılır.
+  //      Kaynaklar: trades/my hatası (ağ/5xx/503 degraded/şema) ya da oturum doğrulamasının backend arızasıyla
+  //      yapılamaması (/auth/me 5xx veya ağ hatası → liste zaten istenemez). Başarılı trades/my yanıtı kapatır.
+  // [EN] P4: was the backend trade list unavailable? Only then does the chain fallback open.
+  const [tradesBackendUnavailable, setTradesBackendUnavailable] = useState(false);
 
   const authenticatedWalletRef = React.useRef(null);
   const pendingTxCheckedRef = React.useRef(false);
@@ -393,6 +399,7 @@ export function useAppSessionData({
     setCancelStatus(null);
     setChargebackAccepted(false);
     setIsLoggingIn(false);
+    setTradesBackendUnavailable(false);
     pendingTxCheckedRef.current = false;
     autoTradeResumeRef.current = false;
     setPaymentIpfsHashState((prev) => (prev.onchainId === null && prev.hash === '' ? prev : { onchainId: null, hash: '' }));
@@ -522,6 +529,9 @@ export function useAppSessionData({
   }, [isAuthenticated]);
 
   const formatAddress = shortAddress;
+  // [TR] P4: kayıt anahtarındaki zincir ref'ten okunur; zincir değişimi fazladan /trades/my isteği tetiklemez.
+  const chainIdRef = React.useRef(chainId);
+  chainIdRef.current = chainId;
 
   const fetchStats = React.useCallback(async () => {
     try {
@@ -566,6 +576,13 @@ export function useAppSessionData({
         endpointLabel: 'trades/my',
       });
       if (isStale()) return;
+
+      setTradesBackendUnavailable(false);
+      // [TR] P4: başarılı listedeki onchain id'ler yedek görünüm için kaydedilir (yalnız sayılar).
+      addKnownTradeIds(
+        { wallet: address, escrow: import.meta.env.VITE_ESCROW_ADDRESS, chainId: chainIdRef.current },
+        fetchedTrades.map((t) => t?.onchain_escrow_id),
+      );
 
       const pinned = applyStatePin(fetchedTrades, statePinRef.current);
       statePinRef.current = pinned.pin;
@@ -679,6 +696,8 @@ export function useAppSessionData({
       });
     } catch (err) {
       console.error('Trades fetch error:', err);
+      // [TR] P4: eski/başka oturuma ait istek bayrağı açmaz (oturum düşüşü backend arızası değildir).
+      if (!isStale()) setTradesBackendUnavailable(true);
     }
   }, [devScenarioActive, isAuthenticated, isConnected, address, lang, authenticatedFetch, tokenDecimalsMap, showToast, setActiveEscrows, setActiveTrade, formatAddress]);
 
@@ -705,6 +724,8 @@ export function useAppSessionData({
   useEffect(() => installInfraRevalidation(async () => {
     const r = await fetchWithTimeout(() => buildApiUrl('orders/config'), { credentials: 'include', infra: 'backend', timeoutMs: 8000 });
     if (!r.ok) return;
+    // [TR] 200 = escrow kaydı uyumlu; açık escrowMismatch bayrağı odak/görünürlükte de kalkar (503 ESCROW_MISMATCH !ok → bayrak kalır).
+    markInfraOk('escrowMismatch');
     if (r.headers?.get?.('x-araf-degraded') === 'true') markInfraFailure('degraded');
     else markInfraOk('degraded');
     const body = await r.json().catch(() => null);
@@ -793,11 +814,14 @@ export function useAppSessionData({
     ? bleedingState.value
     : null;
 
-  // [TR] Cüzdan değişince uçuştaki yanıtlar geçersiz sayılır.
+  // [TR] Cüzdan değişince uçuştaki yanıtlar geçersiz sayılır. P4: backend 5xx iken oturum temizliği çalışmaz;
+  //      önceki cüzdanın işlem listesi ve iptal durumu yeni cüzdana taşınmasın diye burada temizlenir.
   useEffect(() => {
     sessionEpochRef.current += 1;
     tradesSeqRef.current += 1;
-  }, [connectedWallet]);
+    setActiveEscrows([]);
+    setCancelStatus(null);
+  }, [connectedWallet, setActiveEscrows]);
 
   useEffect(() => {
     if (!isConnected || !connectedWallet) {
@@ -837,7 +861,11 @@ export function useAppSessionData({
 
         // [TR] 5xx = sunucu arızası: oturum durumu BİLİNMİYOR, yerel oturum silinmez (infra bayrağı toparlanınca
         //      efekt yeniden çalışır). Gerçek 401/403 aşağıda eskisi gibi oturumu temizler.
-        if (res.status >= 500) return;
+        if (res.status >= 500) {
+          // [TR] P4: oturum doğrulanamıyor → işlem listesi de istenemez; zincir yedek görünümü açılabilir.
+          setTradesBackendUnavailable(true);
+          return;
+        }
         if (!res.ok) {
           clearLocalSessionState({ navigateHome: false, closeModals: true });
           setAuthChecked(true);
@@ -879,6 +907,8 @@ export function useAppSessionData({
         setAuthChecked(true);
       })
       .catch(() => {
+        // [TR] P4: backend'e ulaşılamıyor → işlem listesi alınamaz; zincir yedek görünümü açılabilir.
+        if (!cancelled) setTradesBackendUnavailable(true);
         // [TR] Ağ hatası / zaman aşımı: oturum "bilinmiyor" kalır (silinmez, authChecked false). Backend bayrağı
         //      fetchWithTimeout içinde işaretlendi; toparlanınca (infraEpoch) bu doğrulama yeniden yapılır.
         // [EN] Network error / timeout: session stays "unknown" — never wiped; re-validated on backend recovery.
@@ -1587,6 +1617,7 @@ export function useAppSessionData({
     authenticatedFetch,
     fetchStats,
     fetchMyTrades,
+    tradesBackendUnavailable,
     tradeState,
     setTradeState,
     userRole,

@@ -12,17 +12,21 @@ export const INFRA_BACKOFF_MAX_MS = 60000;
 // [TR] degraded: backend KISITLI modda (503 SERVICE_DEGRADED / X-Araf-Degraded) — ulaşılamıyor DEĞİL, sakin bant.
 //      configStale: /orders/config son bilinen değerlerden geliyor; yeni emir kapısını kapatır. İkisi de yoklamayla kalkar.
 // [EN] degraded = backend in restricted mode (reachable, calm banner); configStale = protocol config served from cache.
-const KINDS = ['backend', 'rpc', 'degraded', 'configStale'];
-let state = { backend: false, rpc: false, degraded: false, configStale: false, epoch: 0 };
+// [TR] escrowMismatch: backend enforce modunda escrow kaydı uyumsuz (503 ESCROW_MISMATCH); escrowMismatchReason izinli değerlerden biri.
+const KINDS = ['backend', 'rpc', 'degraded', 'configStale', 'escrowMismatch'];
+export const ESCROW_MISMATCH_REASONS = Object.freeze(['registry_missing', 'rotating', 'escrow_mismatch', 'chain_mismatch', 'registry_unreadable']);
+export const normalizeEscrowMismatchReason = (r) => (ESCROW_MISMATCH_REASONS.includes(r) ? r : 'unknown');
+const initialState = () => ({ backend: false, rpc: false, degraded: false, configStale: false, escrowMismatch: false, escrowMismatchReason: null, epoch: 0 });
+let state = initialState();
 const listeners = new Set();
 const probes = {};
 const timers = {};
-const attempts = { backend: 0, rpc: 0, degraded: 0, configStale: 0 };
+const attempts = { backend: 0, rpc: 0, degraded: 0, configStale: 0, escrowMismatch: 0 };
 // [TR] Histerezis: sıradan (başka uç noktalara giden) başarılı çağrılar bayrağı KALDIRMAZ; yalnız yoklama başarısı kaldırır.
 //      Aksi halde bir uç nokta bozukken diğerlerinin başarısı bayrağı sürekli açıp kapatır (titreme + istek seli).
 //      Toparlanmadan hemen sonra yeniden arıza gelirse geri çekilme sıfırlanmaz.
 const RECENT_RECOVERY_MS = 30000;
-const lastRecoveryAt = { backend: 0, rpc: 0, degraded: 0, configStale: 0 };
+const lastRecoveryAt = { backend: 0, rpc: 0, degraded: 0, configStale: 0, escrowMismatch: 0 };
 
 const emit = (patch) => {
   state = { ...state, ...patch };
@@ -42,7 +46,7 @@ export const markInfraOk = (kind) => {
   if (!state[kind]) return;
   clearTimer(kind);
   lastRecoveryAt[kind] = Date.now();
-  emit({ [kind]: false, epoch: state.epoch + 1 });
+  emit({ [kind]: false, ...(kind === 'escrowMismatch' ? { escrowMismatchReason: null } : {}), epoch: state.epoch + 1 });
 };
 
 const schedule = (kind) => {
@@ -65,6 +69,15 @@ export const markInfraFailure = (kind) => {
   if (Date.now() - lastRecoveryAt[kind] > RECENT_RECOVERY_MS) attempts[kind] = 0;
   emit({ [kind]: true });
   schedule(kind);
+};
+
+// [TR] 503 ESCROW_MISMATCH: reason'ı sakla (izinli değilse 'unknown') ve bayrağı kaldır-kurulum yoklamasını başlat.
+export const markEscrowMismatch = (reason) => {
+  const r = normalizeEscrowMismatchReason(reason);
+  if (state.escrowMismatch) { if (state.escrowMismatchReason !== r) emit({ escrowMismatchReason: r }); return; }
+  if (Date.now() - lastRecoveryAt.escrowMismatch > RECENT_RECOVERY_MS) attempts.escrowMismatch = 0;
+  emit({ escrowMismatch: true, escrowMismatchReason: r });
+  schedule('escrowMismatch');
 };
 
 // [TR] Yoklama kaydı: true dönerse altyapı geri gelmiştir. Kayıt silme fonksiyonu döner.
@@ -109,6 +122,6 @@ export const __resetInfraForTest = () => {
   Object.keys(timers).forEach(clearTimer);
   Object.keys(probes).forEach((k) => delete probes[k]);
   KINDS.forEach((k) => { attempts[k] = 0; lastRecoveryAt[k] = 0; });
-  state = { backend: false, rpc: false, degraded: false, configStale: false, epoch: 0 };
+  state = initialState();
   listeners.forEach((l) => l());
 };

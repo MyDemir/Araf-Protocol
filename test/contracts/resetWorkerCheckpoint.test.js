@@ -220,10 +220,13 @@ describe('deploy-base-sepolia.yml checkpoint reset step', function () {
     const names = wf.jobs.deploy.steps.map((s) => s.name);
     const a = names.indexOf('Deploy backend to Fly');
     const b = names.indexOf('Reset worker checkpoint for new deployment');
+    const r = names.indexOf('Write active escrow registry');
     const c = names.indexOf('Check backend health');
     expect(a).to.be.greaterThan(-1);
     expect(b).to.equal(a + 1);
-    expect(c).to.equal(b + 1);
+    // Arşiv Faz 1: registry yazımı checkpoint sıfırlamadan hemen sonra, health'ten önce.
+    expect(r).to.equal(b + 1);
+    expect(c).to.equal(r + 1);
     expect(fs.readFileSync(path.join(ROOT, '.github/workflows/deploy-runtime-base-sepolia.yml'), 'utf8')).to.not.include('reset-worker-checkpoint');
   });
 });

@@ -740,6 +740,22 @@ Production açılışta KMS self-test çalıştırır (`runProductionKmsStartupS
 | `PII_IDENTITY_NORMALIZATION_GUARD` | hayır | yukarıdaki değişkene, o da yoksa `enforce`'a düşer | PII route'larının tembel (lazy) kullandığı mod (`503 IDENTITY_NORMALIZATION_REQUIRED`). |
 | `IDENTITY_MIGRATION_BATCH_SIZE` | hayır | `1000` | `migrate:identity` batch boyutu. |
 
+### 6.6a Backend — escrow kayıt bekçisi
+
+`escrow_registry` Mongo koleksiyonu tek belge tutar, `_id: "active"`: `escrow_address` (küçük harf), `chain_id`, `deploy_block`, `state` (`ACTIVE` | `ROTATING`), `since`, `updated_by` (GitHub run id). **Yalnız deploy workflow'u yazar** (`.github/scripts/escrow-registry.js`); backend sadece okur, hiçbir admin route'u ya da paneli değiştiremez. Bekçi bu belgeyi açılışta ve her 60 sn'de (tek Mongo okuması) `ARAF_ESCROW_ADDRESS` ve `EXPECTED_CHAIN_ID` ile karşılaştırır; uyumsuzluk nedeni: `registry_missing`, `escrow_mismatch`, `chain_mismatch`, `rotating` (okuma başarısızsa `registry_unreadable`).
+
+| Değişken | Zorunlu | Varsayılan | Not |
+|---|---|---|---|
+| `ESCROW_REGISTRY_GUARD_MODE` | hayır | `warn` | `off` · `warn` · `enforce`. Geçersiz değer = `warn` + uyarı logu. `warn`: yalnız log (tek seferlik ve değişince) ve `/ready` içinde `escrowRegistry` bilgi alanı; hiçbir şey kapanmaz, HTTP kodu değişmez. `enforce`: uyumsuzlukta (ya da kayıt okunamazsa, fail-closed) worker başlatılmaz (çalışıyorsa durdurulur), zincire bağlı zamanlanmış işler atlanır, escrow'a bağlı route'lar (orders, trades, pii, receipts, stats, rewards, admin) nedenle birlikte `503 ESCROW_MISMATCH` döner. Auth, istemci logu, sosyal bağlantılar, referans ticker, feedback ve `/health` açık kalır; `/ready` nedenle birlikte 503 döner. Çıkışlar engellenmez: kullanıcılar çıkış işlemlerini doğrudan kontrata gönderir. |
+| `ESCROW_REGISTRY_GUARD_INTERVAL_MS` | hayır | `60000` | Yeniden kontrol aralığı. |
+
+**İlk kurulum sırası**
+1. Bekçi kodunu mod hâlâ `warn` (varsayılan) iken `deploy-runtime` ile yayınlayın. Hiçbir şey kapanmaz.
+2. **Escrow Registry Adopt** workflow'unu (`escrow-registry-adopt.yml`) önce `dry_run=true` ile çalıştırıp çıktıyı okuyun, sonra `dry_run=false` ile tekrar çalıştırın. Canlı escrow'u (`ARAF_ESCROW_ADDRESS` / `ARAF_DEPLOYMENT_BLOCK` repo variable'ları, zincir 84532) `active` olarak yazar.
+3. Backend logunda `[EscrowRegistryGuard] UYUMSUZ` satırı yoksa ve `/ready` `escrowRegistry.ok: true` diyorsa zorlamayı açın: `flyctl secrets set ESCROW_REGISTRY_GUARD_MODE=enforce -a <app>`.
+
+Tam kontrat deploy'u (`deploy-base-sepolia.yml`) yeni escrow'u "Write active escrow registry" adımında kendisi yazar (checkpoint sıfırlamadan sonra, health kontrolünden önce, `--force-switch` ile). Runtime deploy escrow'u değiştirmez ve registry'ye yazmaz; `araf_escrow_address` override'ı registry'den farklıysa bekçi `escrow_mismatch` bildirir. Arşivleme ve rotasyon bu fazın kapsamında değildir.
+
 ### 6.7 Backend — zamanlanmış işler (aksi belirtilmedikçe ms; en çok 2 147 483 647)
 
 | Değişken | Varsayılan |

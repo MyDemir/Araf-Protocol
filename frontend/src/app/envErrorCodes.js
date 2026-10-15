@@ -17,6 +17,9 @@ export const ENV_ERROR_CODES = Object.freeze({
   RPC_UNREACHABLE: 'RPC_UNREACHABLE',
   // [TR] Backend erişilebilir ama kısıtlı modda (503 SERVICE_DEGRADED): sakin, kapatılabilir; kritik listeye GİRMEZ.
   SERVICE_DEGRADED: 'SERVICE_DEGRADED',
+  // [TR] Backend (enforce) escrow kaydı uyumsuz: 503 ESCROW_MISMATCH. Bant kapatılamaz: statusDismissal'da
+  //      'backend_escrow_mismatch' anahtarı kapatılamaz listesinde. Frontend-env ESCROW_MISMATCH ile karışmasın diye ayrı ad.
+  BACKEND_ESCROW_MISMATCH: 'BACKEND_ESCROW_MISMATCH',
 });
 
 // [TR] Güvenlik kodları kritiktir. BACKEND_UNREACHABLE / RPC_UNREACHABLE bilgi amaçlıdır, kritik değildir.

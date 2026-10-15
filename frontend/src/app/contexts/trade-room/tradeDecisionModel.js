@@ -167,6 +167,8 @@ export function buildTradeDecisionModel({
   paymentWindowExpired = false,
   cancelStatus = null,
   nowMs = Date.now(),
+  // [TR] P4 yedek oda: backend'e bağlı adımlar (dekont, uzlaşma) yerine gerçek çıkış yolları anlatılır.
+  chainFallback = false,
 }) {
   const normalizedState = String(tradeState || trade?.state || 'LOCKED').toUpperCase();
   const normalizedRole = String(userRole || 'taker').toLowerCase();
@@ -200,7 +202,10 @@ export function buildTradeDecisionModel({
         requiresPaymentProof: !paymentIpfsHash,
       },
     );
-    if (!paymentIpfsHash) primaryDisabledReasons.push(t(lang, 'Dekont gerekli.', 'Payment proof is required.'));
+    if (chainFallback) primaryDisabledReasons.push(t(lang,
+      'Sunucuya ulaşılamadığı için ödeme bildirilemiyor (dekont sunucuya yüklenir). Ödeme penceresi dolmadan sunucu dönmezse: ödeme yaptıysanız karşı tarafla karşılıklı iptali birlikte onaylayın.',
+      'Payment cannot be reported while the server is unreachable (the receipt is uploaded to the server). If the server does not return before the payment window ends and you have paid, agree on a mutual cancel with the counterparty.'));
+    else if (!paymentIpfsHash) primaryDisabledReasons.push(t(lang, 'Dekont gerekli.', 'Payment proof is required.'));
   }
 
   if (normalizedState === 'LOCKED' && normalizedRole === 'maker') {
@@ -245,7 +250,11 @@ export function buildTradeDecisionModel({
     // [EN] The maker can still release at any time; the taker's path is the settlement card.
     primaryAction = normalizedRole === 'maker'
       ? action('contract', 'release_funds', t(lang, 'Ödemeyi Onayla', 'Release Funds'), null)
-      : action('settlement', 'settlement_guidance', t(lang, 'Uzlaşma teklifi', 'Settlement offer'), t(lang, 'Aşağıdaki uzlaşma kartından teklif verin veya yanıtlayın.', 'Propose or answer in the settlement card below.'));
+      : chainFallback
+        ? action('waiting', 'chain_fallback_exits', t(lang, 'Uzlaşma teklifleri şu an gösterilemiyor', 'Settlement offers cannot be shown right now'), t(lang,
+          'Sunucuya ulaşılamıyor. Kontrattaki çıkışlar açık: karşılıklı iptal teklif edebilirsiniz; satıcı her an serbest bırakabilir; 240 saatlik süre dolunca yakım herkes tarafından tetiklenebilir.',
+          'The server is unreachable. Contract exits remain open: you can propose a mutual cancel; the maker can release at any time; after 240 hours anyone can trigger the burn.'))
+        : action('settlement', 'settlement_guidance', t(lang, 'Uzlaşma teklifi', 'Settlement offer'), t(lang, 'Aşağıdaki uzlaşma kartından teklif verin veya yanıtlayın.', 'Propose or answer in the settlement card below.'));
   }
 
   if (normalizedState === 'LOCKED' && paymentWindowExpired) {
