@@ -65,8 +65,8 @@ describe('vercel.json CSP', () => {
   const cfg = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), 'vercel.json'), 'utf8'));
   const csp = cfg.headers.find((h) => h.source === '/(.*)').headers.find((i) => i.key === 'Content-Security-Policy').value;
   const dir = (n) => (csp.split(';').map((s) => s.trim()).find((s) => s.startsWith(`${n} `)) || '').split(/\s+/).slice(1);
-  it('allows only the proven Coinbase WalletLink socket', () => {
-    expect(dir('connect-src')).toEqual(["'self'", 'https:', 'wss://www.walletlink.org']);
+  it('allows only the proven WalletLink and WalletConnect relay sockets', () => {
+    expect(dir('connect-src')).toEqual(["'self'", 'https:', 'wss://www.walletlink.org', 'wss://relay.walletconnect.org']);
   });
   it('has no forbidden loosening', () => {
     expect(csp).not.toContain("'unsafe-eval'");

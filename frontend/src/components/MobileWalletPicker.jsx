@@ -161,7 +161,7 @@ export function BrowserWalletsRow({ lang = 'TR', wallets = [], onConnect, render
         disabled
         icon={<BrowserWalletBadge />}
         label={tr ? 'Tarayıcı cüzdanı' : 'Browser wallet'}
-        sublabel={tr ? 'Bu tarayıcıda cüzdan eklentisi yok' : 'No wallet extension in this browser'}
+        sublabel={tr ? 'Eklenti bulunamadı' : 'No extension found'}
         trailing={<span className="shrink-0 text-xs font-medium text-textMuted">{tr ? 'Kurulu değil' : 'Not installed'}</span>}
       />
     );
