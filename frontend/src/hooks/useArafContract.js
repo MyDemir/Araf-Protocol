@@ -23,6 +23,7 @@ import { resolveClientErrorLogUrl } from '../app/apiConfig';
 import { setMakerChallengeWindowMs } from '../app/contexts/trade-room/tradeTimeline';
 import { getSupportedChainsMap, isConfiguredTestToken, isFaucetChainId, isMintTokenEnabled } from '../app/chainPolicy';
 import { ARAF_CONTRACT_ERROR_ABI, decorateContractError } from '../app/contractErrors';
+import { diagnoseWriteError, applyDiagnosis, formatDiagnosisForLog, stripAddresses } from '../app/walletRpcDiagnosis';
 
 const ArafEscrowABI = parseAbi([
   'function registerWallet()',
@@ -352,10 +353,12 @@ export function useArafContract({ expectedChainId = null } = {}) {
     };
 
     let submittedHash = null;
+    let writeAttempted = false;
     try {
       // İşlem göndermeden önce tüm kontrolleri yap
       preflightChecks();
 
+      writeAttempted = true;
       const hash = await walletClient.writeContract({
         //Adresin geçerli ve checksum formatında olduğundan emin ol.
         address: getAddress(ESCROW_ADDRESS),
@@ -398,7 +401,21 @@ export function useArafContract({ expectedChainId = null } = {}) {
       }
       decorateContractError(error);
       //Revert hatalarını daha okunabilir hale getir
-      const errorMessage = error.shortMessage || error.reason || error.message || "Bilinmeyen Kontrat Hatası";
+      const rawMessage = error.shortMessage || error.reason || error.message || "Bilinmeyen Kontrat Hatası";
+      // [TR] Cüzdan hatası çözülemediyse (gönderim denemesi başarısız, kullanıcı reddi değil) bizim RPC'de bir kez
+      //      simüle edip kullanıcıya gösterilen shortMessage'ı zenginleştir. Yalnız teşhis; işlemi engellemez.
+      // [EN] Undecoded wallet failure: one simulation on our RPC to enrich the user-facing shortMessage.
+      let diag = { kind: 'unknown', selector: null, rpcCode: null };
+      if (writeAttempted && !submittedHash) {
+        try {
+          diag = await diagnoseWriteError({
+            error, publicClient, account: walletClient?.account?.address,
+            address: getAddress(ESCROW_ADDRESS), abi: ArafEscrowABI, functionName, args, chainId,
+          });
+          applyDiagnosis(error, diag);
+        } catch { /* teşhis asla asıl hatayı gölgelemez */ }
+      }
+      const errorMessage = stripAddresses(rawMessage) + formatDiagnosisForLog(diag);
       
       //Hatayı sessizce backend log dosyasına gönder (Kullanıcı arayüzünü dondurmaz)
       const logUrl = resolveClientErrorLogUrl();
