@@ -630,6 +630,9 @@ function App() {
     hasPayoutProfile,
     openProfilePage,
     effectiveTier: Number((labMaker ? labMaker.reputation : userReputation)?.effectiveTier ?? 0),
+    // [TR] Lab modunda gerçek cüzdan yaşı uygulanmaz (null = engel yok).
+    walletAged: !labMaker && typeof sybilStatus?.aged === 'boolean' ? sybilStatus.aged : null,
+    walletAgeRemainingDays: !labMaker ? walletAgeRemainingDays : null,
   });
 
   // [TR] Lab "Emir oluşturma": formu senaryo değerleriyle doldurup modalı açar (kontrat çağrısı yapılmaz).
