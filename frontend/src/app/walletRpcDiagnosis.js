@@ -35,6 +35,14 @@ export const buildWalletRpcMessage = (chainId, lang = readLang()) => {
     : `The transaction looks valid on-chain; the error comes from your wallet's network connection (RPC). Change the ${row.name} RPC in your wallet's network settings to ${row.url} and try again.`;
 };
 
+export const buildInsufficientGasMessage = (chainId, lang = readLang()) => {
+  const name = PUBLIC_RPC_BY_CHAIN[Number(chainId)]?.name;
+  const eth = name ? `${name} ETH` : 'ETH';
+  return lang === 'TR'
+    ? `Cüzdanınızda işlem ücreti (gas) için yeterli ETH yok. ${eth} ekleyip tekrar deneyin.`
+    : `Your wallet does not have enough ETH for the network fee (gas). Add ${eth} and try again.`;
+};
+
 const causeChain = (error) => {
   const out = [];
   let cur = error;
@@ -50,6 +58,11 @@ export const isUserRejection = (error) =>
     e.code === 4001 || e.code === 'ACTION_REJECTED' ||
     /UserRejected/i.test(String(e.name || '')) ||
     /user rejected|user denied|rejected the request/i.test(`${e.shortMessage || ''} ${e.message || ''}`));
+
+export const isInsufficientFunds = (error) =>
+  causeChain(error).some((e) =>
+    /InsufficientFunds/i.test(String(e.name || '')) ||
+    /insufficient funds/i.test(`${e.shortMessage || ''} ${e.message || ''}`));
 
 export const extractRpcCode = (error) => {
   for (const e of causeChain(error)) {
@@ -86,6 +99,9 @@ export async function diagnoseWriteError({
   if (!error || isUserRejection(error)) return base;
   const resolved = extractContractErrorName(error);
   if (resolved) return { ...base, kind: `contract-revert:${resolved}`, errorName: resolved };
+  if (isInsufficientFunds(error)) {
+    return { ...base, kind: 'wallet-insufficient-gas', message: buildInsufficientGasMessage(chainId, lang) };
+  }
   if (!publicClient?.simulateContract || !account) return base;
 
   try {

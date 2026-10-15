@@ -72,6 +72,16 @@ describe('cuzdan hatasi teshisi', () => {
     expect(buildWalletRpcMessage(8453, 'EN')).toContain('https://mainnet.base.org');
   });
 
+  it('yetersiz gas: simulasyon yok, gas mesaji', async () => {
+    writeContract.mockRejectedValue(Object.assign(new Error('insufficient funds for gas * price + value'), { name: 'InsufficientFundsError' }));
+    simulateContract.mockResolvedValue({});
+    const c = await load();
+    const err = await call(c).catch((e) => e);
+    expect(simulateContract).not.toHaveBeenCalled();
+    expect(err.shortMessage).toBe('Cüzdanınızda işlem ücreti (gas) için yeterli ETH yok. Base Sepolia ETH ekleyip tekrar deneyin.');
+    expect(logBody().message).toContain('diag=wallet-insufficient-gas');
+  });
+
   it('(c) kullanici reddi: simulasyon yok, mesaj degismez', async () => {
     writeContract.mockRejectedValue(Object.assign(new Error('User rejected the request.'), { code: 4001 }));
     const c = await load();
