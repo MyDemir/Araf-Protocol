@@ -629,6 +629,7 @@ function App() {
     getReputation,
     hasPayoutProfile,
     openProfilePage,
+    effectiveTier: Number((labMaker ? labMaker.reputation : userReputation)?.effectiveTier ?? 0),
   });
 
   // [TR] Lab "Emir oluşturma": formu senaryo değerleriyle doldurup modalı açar (kontrat çağrısı yapılmaz).

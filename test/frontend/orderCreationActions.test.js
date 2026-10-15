@@ -4,6 +4,7 @@ import path from 'node:path';
 import {
   buildCreateOrderAction,
   getMakerOrderValidationError,
+  MAKER_ORDER_DEFAULTS,
 } from '../../frontend/src/app/actions/orderCreationActions';
 
 const makeDeps = (overrides = {}) => {
@@ -42,11 +43,40 @@ const makeDeps = (overrides = {}) => {
     payoutProfileDraft: { rail: 'TR_IBAN', country: 'TR' },
     paymentRiskConfig: { TR: { TR_IBAN: { riskLevel: 'MEDIUM', enabled: true } } },
     hasPayoutProfile: true,
+    effectiveTier: 4,
     ...overrides,
   };
 };
 
 const runAction = async (deps) => buildCreateOrderAction(deps)();
+
+describe('maker tier vs effective tier (contract TierNotAllowed pre-check)', () => {
+  it('effectiveTier=0, makerTier=1: validation error, no approve, no create', async () => {
+    const form = { makerTier: 1, makerAmount: '100', makerRate: '34', makerMinLimit: '', makerFiat: 'TRY' };
+    expect(getMakerOrderValidationError({ ...form, effectiveTier: 0 })).toBe('Your reputation does not unlock Tier 1. Highest tier you can open: Tier 0.');
+    expect(getMakerOrderValidationError({ ...form, effectiveTier: 0, lang: 'TR' })).toBe('Tier 1 için itibarınız yetmiyor. Açabileceğiniz en yüksek seviye: Tier 0.');
+    const deps = makeDeps({ state: { makerTier: 1 }, effectiveTier: 0 });
+    await runAction(deps);
+    expect(deps.showToast).toHaveBeenCalledWith(expect.stringMatching(/does not unlock Tier 1/), 'error');
+    expect(deps.approveToken).not.toHaveBeenCalled();
+    expect(deps.createSellOrder).not.toHaveBeenCalled();
+  });
+
+  it('unknown effectiveTier in the action defaults to 0 (fail-closed)', async () => {
+    const deps = makeDeps({ state: { makerTier: 1 } });
+    delete deps.effectiveTier;
+    await runAction(deps);
+    expect(deps.approveToken).not.toHaveBeenCalled();
+  });
+
+  it('effectiveTier=2, makerTier=2: no error', () => {
+    expect(getMakerOrderValidationError({ makerTier: 2, makerAmount: '100', makerRate: '34', makerMinLimit: '', makerFiat: 'TRY', effectiveTier: 2 })).toBeNull();
+  });
+
+  it('default maker tier is 0', () => {
+    expect(MAKER_ORDER_DEFAULTS.makerTier).toBe(0);
+  });
+});
 
 describe('order creation actions', () => {
   it.each([[false], [null], [undefined]])('blocks order creation without a saved payout profile (hasPayoutProfile=%s), fail-closed', async (flag) => {
