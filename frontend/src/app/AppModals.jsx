@@ -430,10 +430,7 @@ export const buildAppModals = (ctx) => {
             </div>
 
             {payoutRiskEntry && (
-              <div className="space-y-2">
-                <p className="text-xs text-textMuted font-medium">{tr ? 'Ödeme yöntemi karmaşıklığı' : 'Payment method complexity'}</p>
-                <PaymentRiskBadge lang={lang} riskEntry={payoutRiskEntry} />
-              </div>
+              <PaymentRiskBadge lang={lang} riskEntry={payoutRiskEntry} compact showMainExplanation />
             )}
             {isCreateTemporarilyDisabledByRisk && (
               <p className="text-sm text-danger bg-danger/10 border border-danger/30 rounded-lg p-3 leading-relaxed">
