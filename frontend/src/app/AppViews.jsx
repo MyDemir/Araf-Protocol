@@ -16,6 +16,7 @@ import MarketOrderCard from './contexts/marketplace/MarketOrderCard';
 import { marketGateLabel } from './contexts/marketplace/marketGateLabel';
 import { mapResolutionTypeLabel } from './useAppSessionData';
 import TradeRoomPage from './contexts/trade-room/TradeRoomPage';
+import ChainFallbackTradesPanel, { ChainFallbackNotice } from './contexts/trade-room/ChainFallbackTradesPanel';
 import ThemeToggle from './shell/ThemeToggle';
 import NowBoundary from './shell/NowBoundary';
 import FooterSocialLinks from './shell/FooterSocialLinks';
@@ -190,7 +191,10 @@ export const buildAppViews = (ctx) => {
     authenticatedFetch,
     showToast,
     settlementContractFns,
+    // [TR] P4: backend listesi alınamadığında zincirden okunan yedek görünüm (yoksa/pasifse hiçbir şey değişmez).
+    chainFallback = null,
   } = ctx;
+  const chainFallbackActive = Boolean(chainFallback?.active);
   const newTxBlocked = Boolean(isPaused || txGate?.blocked);
 
   // [TR] Admin menü görünürlüğü yalnız UX katmanıdır; nihai yetki backend ADMIN_WALLETS + auth zincirindedir.
@@ -446,6 +450,8 @@ export const buildAppViews = (ctx) => {
           </button>
         </div>
       </div>
+
+      {chainFallbackActive && <ChainFallbackTradesPanel lang={lang} chainFallback={chainFallback} compact />}
 
       {(() => {
         const tr = lang === 'TR';
@@ -759,6 +765,13 @@ export const buildAppViews = (ctx) => {
     // [EN] activeTrade can be cleared after session invalidation.
     //      Instead of rendering a broken room with fallback values, show a
     //      deterministic empty-state with safe navigation actions.
+    if (!activeTrade && chainFallbackActive) {
+      return (
+        <div className="p-4 md:p-8 max-w-[900px] w-full mx-auto mt-6 md:mt-0">
+          <ChainFallbackTradesPanel lang={lang} chainFallback={chainFallback} />
+        </div>
+      );
+    }
     if (!activeTrade) {
       return (
         <div className="p-4 md:p-8 max-w-[900px] w-full mx-auto mt-6 md:mt-0">
@@ -813,6 +826,9 @@ export const buildAppViews = (ctx) => {
       );
     }
     const roomState = resolvedTradeState;
+    // [TR] P4 yedek oda: zincir verisiyle açılmış işlem + backend listesi hâlâ alınamıyor. Backend'e bağlı parçalar
+    //      (ödeme bilgisi, uzlaşma kartı, dekont, gönderen adı) gösterilmez; kontrat eylemleri aynı kurallarla çalışır.
+    const chainFallbackRoom = Boolean(activeTrade?._chainFallback) && chainFallbackActive;
     const isChallenged = roomState === 'CHALLENGED';
     const isTaker = userRole === 'taker';
     const isMaker = userRole === 'maker';
@@ -889,7 +905,8 @@ export const buildAppViews = (ctx) => {
       timers: tradeTimers,
       nowMs,
       isConnected,
-      isAuthenticated,
+      // [TR] Yedek odada kontrat eylemleri backend oturumu gerektirmez (cüzdan doğrudan kontrata imzalar).
+      isAuthenticated: isAuthenticated || chainFallbackRoom,
       isSupportedChain: isSupportedChainId(chainId),
       isPaused,
       lang,
@@ -964,7 +981,7 @@ export const buildAppViews = (ctx) => {
             const showTakerPii = isTaker && ['LOCKED', 'PAID'].includes(roomState);
             // [TR] Uzlaşma kartı yalnız itiraz aşamasında anlamlıdır ve itiraz özetinin hemen altında durur
             //      (eskiden sayaçların altındaydı; "aşağıdaki karta bakın" yönlendirmesi gereksizleşti).
-            const beforeActions = showTakerPii ? (
+            const beforeActions = chainFallbackRoom ? <ChainFallbackNotice lang={lang} /> : showTakerPii ? (
               <div className="mb-4">
                 <PIIDisplay key={activeTrade?.id} tradeId={activeTrade?.id} lang={lang} authenticatedFetch={authenticatedFetch} />
               </div>
@@ -989,7 +1006,19 @@ export const buildAppViews = (ctx) => {
             // [TR] Birincil aksiyonun girdileri: yalnız o adımda gereken alanlar, butonun hemen üstünde.
             // [EN] Primary action inputs: only what this step needs, right above the button.
             let primaryInput = null;
-            if (roomState === 'LOCKED' && isTaker) {
+            if (chainFallbackRoom && isMaker && roomState === 'PAID') {
+              // [TR] Yedek odada gönderen adı (backend) yok; yalnız ücret dökümü ve kullanıcının kendi onayı kalır.
+              primaryInput = (
+                <>
+                  <p className="text-[11px] font-mono text-textMuted text-center">{feeBreakdownText}</p>
+                  <label className="flex items-start gap-2 p-3 bg-elevated border border-borderSubtle rounded-lg cursor-pointer text-left">
+                    <input type="checkbox" checked={chargebackAccepted} onChange={(e) => handleChargebackAck(e.target.checked)} className="mt-0.5 w-4 h-4 accent-emerald-500" />
+                    <span className="text-xs text-textSecondary">{lang === 'TR' ? 'Parayı hesabımda gördüm, gönderen adını kendim kontrol ettim. Ters ibraz riskini anlıyorum.' : 'I see the funds in my account and checked the sender name myself. I understand the chargeback risk.'}</span>
+                  </label>
+                </>
+              );
+            } else if (!chainFallbackRoom && roomState === 'LOCKED' && isTaker) {
+              // [TR] Dekont yüklemesi backend'e gider; yedek odada gösterilmez (ödeme bildirimi dekont ister).
               primaryInput = (
                 <div>
                   <input type="file" onChange={handleFileUpload} accept="image/*,.pdf" className="hidden" id="receipt-upload" />
@@ -1000,7 +1029,7 @@ export const buildAppViews = (ctx) => {
                 </div>
               );
             }
-            if (isMaker && ['LOCKED', 'PAID'].includes(roomState)) {
+            if (!chainFallbackRoom && isMaker && ['LOCKED', 'PAID'].includes(roomState)) {
               primaryInput = (
                 <>
                   <div className="rounded-lg border border-warning/40 bg-warning/10 p-3">
@@ -1168,6 +1197,7 @@ export const buildAppViews = (ctx) => {
         activeTradesFilter={ctx.activeTradesFilter}
         setActiveTradesFilter={ctx.setActiveTradesFilter}
         activeEscrows={activeEscrows}
+        chainFallback={chainFallback}
         setActiveTrade={setActiveTrade}
         setUserRole={setUserRole}
         setTradeState={setTradeState}
