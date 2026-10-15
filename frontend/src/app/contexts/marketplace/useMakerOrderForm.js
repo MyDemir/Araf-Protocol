@@ -44,6 +44,9 @@ export const useMakerOrderForm = ({
   openProfilePage = null,
   // [TR] Cüzdanın kontrattaki efektif tier'ı (userReputation.effectiveTier); okunamazsa 0.
   effectiveTier: effectiveTierProp = 0,
+  // [TR] Cüzdan yaşı (true/false/null=bilinmiyor) ve kalan gün; false iken alış emri approve'dan önce engellenir.
+  walletAged = null,
+  walletAgeRemainingDays = null,
 }) => {
   const [makerTier, setMakerTier] = React.useState(MAKER_ORDER_DEFAULTS.makerTier);
   const [makerAmount, setMakerAmount] = React.useState(MAKER_ORDER_DEFAULTS.makerAmount);
@@ -89,8 +92,8 @@ export const useMakerOrderForm = ({
   const tierMaxAmounts = React.useMemo(() => resolveTierMaxAmounts(tokenPolicy), [tokenPolicy]);
 
   const validationError = React.useMemo(
-    () => getMakerOrderValidationError({ ...formState, tierMaxAmounts, tokenPolicy, effectiveTier, lang }),
-    [formState, tierMaxAmounts, tokenPolicy, effectiveTier, lang],
+    () => getMakerOrderValidationError({ ...formState, tierMaxAmounts, tokenPolicy, effectiveTier, walletAged, walletAgeRemainingDays, lang }),
+    [formState, tierMaxAmounts, tokenPolicy, effectiveTier, walletAged, walletAgeRemainingDays, lang],
   );
 
   const canonicalPayoutProfile = React.useMemo(
@@ -139,6 +142,8 @@ export const useMakerOrderForm = ({
     openProfilePage,
     txGate,
     effectiveTier,
+    walletAged,
+    walletAgeRemainingDays,
   }), [
     getFormState,
     resetMakerOrderForm,
@@ -172,6 +177,8 @@ export const useMakerOrderForm = ({
     openProfilePage,
     txGate,
     effectiveTier,
+    walletAged,
+    walletAgeRemainingDays,
   ]);
 
   const handleOpenMakerModal = React.useCallback(() => {
