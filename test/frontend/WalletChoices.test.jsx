@@ -98,6 +98,29 @@ describe('wallet modal: three options', () => {
   });
 });
 
+describe('mobile compact layout and naming', () => {
+  it('TR: first row is "Cüzdan uygulamasında aç"; with injected provider it stays "Tarayıcı cüzdanı"', () => {
+    setUa(IPHONE);
+    renderModal([generic, cb, wc], { lang: 'TR' });
+    expect(screen.getByText('Cüzdan uygulamasında aç')).toBeTruthy();
+    cleanup();
+    window.ethereum = {};
+    renderModal([generic, cb, wc], { lang: 'TR' });
+    expect(screen.getByText('Tarayıcı cüzdanı')).toBeTruthy();
+  });
+
+  it('deep links render as one compact chip row with >=44px touch targets, in focus order', async () => {
+    setUa(IPHONE);
+    renderModal([generic, cb, wc]);
+    await userEvent.click(screen.getByTestId('browser-wallet-toggle'));
+    const links = [...document.querySelectorAll('a[data-wallet-link]')];
+    expect(links.map((a) => a.getAttribute('data-wallet-link'))).toEqual(['metamask', 'okx', 'trust', 'coinbase']);
+    for (const a of links) expect(a.className).toMatch(/min-h-\[44px\]/);
+    expect(links[0].closest('ul').className).toMatch(/flex-nowrap/);
+    expect(links[0].closest('ul').className).not.toMatch(/grid/);
+  });
+});
+
 describe('wallet modal on mobile without injected provider', () => {
   it('first option opens the deep-link list; WalletConnect and Coinbase follow', async () => {
     setUa(IPHONE);

@@ -15,10 +15,10 @@ import { profileRequiredMessage } from './payoutProfileGate';
 // [TR] Cüzdan modalı: ortak BottomSheet kabuğu + güvenlik notu. [EN] Wallet modal: shared BottomSheet shell + safety note.
 function WalletSheet({ title, closeLabel, note, onClose, children }) {
   return (
-    <BottomSheet title={title} titleId="wallet-modal-title" closeLabel={closeLabel} onClose={onClose} testId="wallet-sheet">
+    <BottomSheet title={title} titleId="wallet-modal-title" closeLabel={closeLabel} onClose={onClose} testId="wallet-sheet" compact>
       {children}
-      <p className="mt-4 flex items-center gap-2.5 rounded-2xl bg-success/10 px-3.5 py-3 text-xs leading-snug text-textSecondary">
-        <ShieldCheck className="h-5 w-5 shrink-0 text-success" strokeWidth={2} aria-hidden="true" />
+      <p className="mt-2.5 flex items-center gap-1.5 text-[11px] leading-tight text-textSecondary sm:mt-3 sm:text-xs">
+        <ShieldCheck className="h-4 w-4 shrink-0 text-success" strokeWidth={2} aria-hidden="true" />
         <span>{note}</span>
       </p>
     </BottomSheet>
@@ -190,7 +190,7 @@ export const buildAppModals = (ctx) => {
       <WalletSheet
         title={tr ? 'Cüzdan bağla' : 'Connect wallet'}
         closeLabel={tr ? 'Kapat' : 'Close'}
-        note={tr ? 'Araf hiçbir zaman özel anahtar veya kurtarma ifadesi istemez.' : 'Araf never asks for private keys or seed phrases.'}
+        note={tr ? 'Araf asla anahtar veya kurtarma ifadesi istemez.' : 'Araf never asks for keys or seed phrases.'}
         onClose={() => setShowWalletModal(false)}
       >
         {mobilePicker ? (

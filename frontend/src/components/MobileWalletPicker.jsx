@@ -10,8 +10,10 @@ export const walletCardCls = (active = false) =>
   `overflow-hidden rounded-2xl border bg-elevated transition-colors duration-150 motion-reduce:transition-none ${
     active ? 'border-brand/50' : 'border-borderSubtle hover:border-brand/40'
   }`;
+// [TR] Mobilde 32px, sm+ 40px ikon. [EN] 32px icon on phones, 40px from sm.
+const ICON_CLS = 'h-8 w-8 sm:h-10 sm:w-10';
 export const walletRowCls =
-  'group flex w-full min-h-[64px] items-center gap-3 rounded-2xl px-3.5 py-3 text-left transition duration-150 hover:bg-brand/[0.06] active:bg-brand/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand motion-reduce:transition-none';
+  'group flex w-full min-h-[54px] items-center gap-3 rounded-2xl px-3 py-2 text-left sm:min-h-[64px] sm:px-3.5 sm:py-3 transition duration-150 hover:bg-brand/[0.06] active:bg-brand/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand motion-reduce:transition-none';
 
 export function WalletOption({ icon, label, sublabel, trailing, ...buttonProps }) {
   return (
@@ -51,7 +53,7 @@ export default function MobileWalletPicker({ lang = 'TR', location, connectors =
   const { walletConnect, coinbase } = groupWalletConnectors(connectors, null);
 
   return (
-    <div data-testid="mobile-wallet-picker" className="space-y-2.5">
+    <div data-testid="mobile-wallet-picker" className="space-y-1.5 sm:space-y-2.5">
       <div className={walletCardCls(open)}>
         <button
           type="button"
@@ -61,8 +63,8 @@ export default function MobileWalletPicker({ lang = 'TR', location, connectors =
           onClick={toggle}
           className={walletRowCls}
         >
-          <BrowserWalletBadge />
-          <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-textPrimary">{tr ? 'Cüzdan' : 'Browser wallet'}</span>
+          <BrowserWalletBadge className={ICON_CLS} />
+          <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-textPrimary">{tr ? 'Cüzdan uygulamasında aç' : 'Open in wallet app'}</span>
           {!open && (
             <span className="flex shrink-0 items-center -space-x-1" aria-hidden="true">
               {[MetaMaskBadge, OkxBadge, TrustBadge].map((Badge, i) => (
@@ -84,11 +86,8 @@ export default function MobileWalletPicker({ lang = 'TR', location, connectors =
             }`}
           >
             <div className="min-h-0 overflow-hidden">
-              <div className="border-t border-borderSubtle px-3.5 pb-3.5 pt-3">
-                <p className="mb-2.5 text-xs font-medium text-textSecondary">
-                  {tr ? 'Cüzdan uygulamasında aç' : 'Open in your wallet app'}
-                </p>
-                <ul className="grid grid-cols-2 gap-2">
+              <div className="border-t border-borderSubtle px-1.5 pb-2 pt-2">
+                <ul className="flex flex-nowrap gap-1 overflow-x-auto" aria-label={tr ? 'Cüzdan uygulamasında aç' : 'Open in wallet app'}>
                   {links.map((l) => (
                     <li key={l.id}>
                       <a
@@ -96,11 +95,11 @@ export default function MobileWalletPicker({ lang = 'TR', location, connectors =
                         rel="noopener noreferrer"
                         data-wallet-link={l.id}
                         aria-label={tr ? `${l.name} ile aç` : `Open in ${l.name}`}
-                        className="flex min-h-[56px] items-center gap-2.5 rounded-xl border border-borderSubtle bg-surface px-2.5 py-2 transition duration-150 hover:border-brand/40 hover:bg-brand/[0.06] active:bg-brand/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand motion-reduce:transition-none"
+                        className="flex min-h-[44px] items-center gap-1 whitespace-nowrap rounded-xl border border-borderSubtle bg-surface px-1 py-1 transition duration-150 hover:border-brand/40 hover:bg-brand/[0.06] active:bg-brand/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand motion-reduce:transition-none"
                       >
-                        <WalletLinkIcon id={l.id} className="h-8 w-8" />
-                        {/* [TR] Kutucukta kısa ad (simge zaten tanıtır); tam ad aria-label'da. [EN] Short name; full name in aria-label. */}
-                        <span className="min-w-0 truncate text-sm font-semibold text-textPrimary">{l.name.replace(/\s+Wallet$/, '')}</span>
+                        <WalletLinkIcon id={l.id} className="h-5 w-5" />
+                        {/* [TR] Kısa ad (simge zaten tanıtır); tam ad aria-label'da. [EN] Short name; full name in aria-label. */}
+                        <span className="text-xs font-semibold text-textPrimary">{l.name.replace(/\s+Wallet$/, '')}</span>
                       </a>
                     </li>
                   ))}
@@ -124,7 +123,7 @@ export function WalletConnectRow({ lang = 'TR', connector, onConnect }) {
     <WalletOption
       data-testid="wallet-option-walletconnect"
       onClick={() => onConnect(connector)}
-      icon={<ConnectorIcon connector={connector} />}
+      icon={<ConnectorIcon connector={connector} className={ICON_CLS} />}
       label="WalletConnect"
       sublabel={tr ? 'Mobil cüzdan uygulaması' : 'Mobile wallet app'}
     />
@@ -138,7 +137,7 @@ export function CoinbaseRow({ connector, onConnect }) {
     <WalletOption
       data-testid="wallet-option-coinbase"
       onClick={() => onConnect(connector)}
-      icon={<ConnectorIcon connector={connector} />}
+      icon={<ConnectorIcon connector={connector} className={ICON_CLS} />}
       label="Coinbase Wallet"
     />
   );
@@ -151,15 +150,15 @@ export function BrowserWalletsRow({ lang = 'TR', wallets = [], onConnect, render
   const tr = lang === 'TR';
   const [open, setOpen] = useState(false);
   const iconOf = (c) => (c.icon
-    ? <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-[28%]">{renderIcon ? renderIcon(c) : <img src={c.icon} alt="" className="h-7 w-7 rounded-md" />}</span>
-    : <BrowserWalletBadge />);
+    ? <span className={`flex ${ICON_CLS} shrink-0 items-center justify-center overflow-hidden rounded-[28%]`}>{renderIcon ? renderIcon(c) : <img src={c.icon} alt="" className="h-7 w-7 rounded-md" />}</span>
+    : <BrowserWalletBadge className={ICON_CLS} />);
   const nameOf = (c) => (c.id === 'injected' && c.name === 'Injected' ? (tr ? 'Tarayıcı cüzdanı' : 'Browser wallet') : c.name);
   if (wallets.length === 0) {
     return (
       <WalletOption
         data-testid="wallet-option-browser"
         disabled
-        icon={<BrowserWalletBadge />}
+        icon={<BrowserWalletBadge className={ICON_CLS} />}
         label={tr ? 'Tarayıcı cüzdanı' : 'Browser wallet'}
         sublabel={tr ? 'Eklenti bulunamadı' : 'No extension found'}
         trailing={<span className="shrink-0 text-xs font-medium text-textMuted">{tr ? 'Kurulu değil' : 'Not installed'}</span>}
@@ -188,7 +187,7 @@ export function BrowserWalletsRow({ lang = 'TR', wallets = [], onConnect, render
         onClick={() => setOpen((v) => !v)}
         className={walletRowCls}
       >
-        <BrowserWalletBadge />
+        <BrowserWalletBadge className={ICON_CLS} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[15px] font-semibold text-textPrimary">{tr ? 'Tarayıcı cüzdanı' : 'Browser wallet'}</span>
           <span className="block truncate text-xs text-textSecondary">{tr ? `${wallets.length} cüzdan bulundu` : `${wallets.length} wallets found`}</span>
@@ -222,7 +221,7 @@ export function BrowserWalletsRow({ lang = 'TR', wallets = [], onConnect, render
 export function WalletChoices({ lang = 'TR', connectors = [], onConnect, renderIcon, win }) {
   const { browser, walletConnect, coinbase } = groupWalletConnectors(connectors, win);
   return (
-    <div data-testid="wallet-choices" className="space-y-2.5">
+    <div data-testid="wallet-choices" className="space-y-1.5 sm:space-y-2.5">
       <BrowserWalletsRow lang={lang} wallets={browser} onConnect={onConnect} renderIcon={renderIcon} />
       <WalletConnectRow lang={lang} connector={walletConnect} onConnect={onConnect} />
       <CoinbaseRow connector={coinbase} onConnect={onConnect} />
