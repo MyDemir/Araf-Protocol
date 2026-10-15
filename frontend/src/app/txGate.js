@@ -10,12 +10,17 @@ export const TX_GATE_REASONS = Object.freeze({
   INFRA: 'infra',
   DEGRADED: 'degraded',
   CONFIG_STALE: 'config_stale',
+  ESCROW_MISMATCH: 'escrow_mismatch',
 });
 
-export const resolveNewTxGate = ({ isPaused = false, rpcChecked = true, backendUnreachable = false, rpcUnreachable = false, configStale = false, serviceDegraded = false, lang = 'EN' } = {}) => {
+export const resolveNewTxGate = ({ isPaused = false, rpcChecked = true, backendUnreachable = false, rpcUnreachable = false, configStale = false, serviceDegraded = false, escrowMismatch = false, lang = 'EN' } = {}) => {
   const tr = lang === 'TR';
   if (isPaused) {
     return { blocked: true, reason: TX_GATE_REASONS.PAUSED, message: tr ? 'Sistem şu an bakım modundadır. Yeni işlem açılamaz.' : 'System is paused. New trades cannot be opened.' };
+  }
+  // [TR] Backend escrow kaydı uyumsuz: sunucu bu kontrata hizmet vermiyor; yeni işlem kapalı. Çıkış eylemleri açık kalır.
+  if (escrowMismatch) {
+    return { blocked: true, reason: TX_GATE_REASONS.ESCROW_MISMATCH, message: tr ? 'Sunucu bu kontrata hizmet vermiyor; yeni işlem açılamaz.' : 'The server is not serving this contract; new trades cannot be opened.' };
   }
   if (backendUnreachable || rpcUnreachable) {
     return { blocked: true, reason: TX_GATE_REASONS.INFRA, message: tr ? 'Zincir/sunucu durumu doğrulanamıyor; yeni işlem şu an başlatılamaz.' : 'Chain/server status cannot be verified; new trades cannot be started right now.' };
