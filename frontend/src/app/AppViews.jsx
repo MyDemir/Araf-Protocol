@@ -203,16 +203,13 @@ export const buildAppViews = (ctx) => {
   const connectedWalletLower = typeof address === "string" ? address.toLowerCase() : null;
   const isLikelyAdminWallet = ctx.isAdmin === true;
   const canSeeAdminEntry = Boolean(isConnected && isAuthenticated && connectedWalletLower && isLikelyAdminWallet);
-  // [TR] Yalnız UX ipucu (görünür metin, mobilde de): hangi cüzdanların admin olduğu ASLA gösterilmez.
-  //      Bağlı ama imzasız → herkese "oturum aç". Oturum açık + isAdmin=false → ayar adı içeren ipucu YALNIZ geliştirmede.
-  // [EN] Visible UX hint only; never reveals admin wallets. The setting-name hint is shown in development only.
+  // [TR] Yalnız geliştirme ipucu: oturum açık + isAdmin=false iken ADMIN_WALLETS ayar adını gösterir.
+  //      Üretimde hiçbir ipucu render edilmez; oturum doğrulama uyarısı SystemStatusBar'da.
+  // [EN] Development-only hint: signed in + isAdmin=false shows the ADMIN_WALLETS setting name.
+  //      Nothing is rendered in production; the sign-in warning lives in SystemStatusBar.
   const renderAdminHint = () => {
     let text = null;
-    if (isConnected && !isAuthenticated && authChecked) {
-      text = lang === 'TR'
-        ? 'Cüzdan bağlı ama oturum açılmadı. Yönetim paneli için imzalayarak oturum açın.'
-        : 'Wallet connected but not signed in. Sign in to access the admin panel.';
-    } else if (isConnected && isAuthenticated && ctx.isAdmin === false && import.meta.env.DEV) {
+    if (isConnected && isAuthenticated && ctx.isAdmin === false && import.meta.env.DEV) {
       text = lang === 'TR'
         ? 'Geliştirme ipucu: bu cüzdan yönetici değil. Olması gerekiyorsa sunucudaki ADMIN_WALLETS ayarını kontrol edin.'
         : 'Dev hint: this wallet is not an admin. If it should be, check the server ADMIN_WALLETS setting.';
