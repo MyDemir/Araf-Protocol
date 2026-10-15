@@ -116,3 +116,37 @@ describe("startup order and deploy wiring (static)", () => {
     expect(fly).toMatch(/path\s*=\s*"\/health"/);
   });
 });
+
+describe("/ready relayer info field", () => {
+  const ORIGINAL_ENV = { ...process.env };
+  const worker = { isRunning: true, _state: "live", _lastSafeCheckpointBlock: 99, _runtimeConfig: { WORKER_FINALITY_DEPTH: 6 }, getDiagnostics: () => ({}) };
+  const KEY = "0x" + "ab".repeat(32);
+
+  async function call(env, headers = {}) {
+    jest.resetModules();
+    process.env = { ...ORIGINAL_ENV, NODE_ENV: "production", MONGODB_URI: "m", REDIS_URL: "r", JWT_SECRET: "s", SIWE_DOMAIN: "example.com", ...env };
+    delete process.env.READY_INTERNAL_TOKEN;
+    if (env.RELAYER_PRIVATE_KEY === undefined) delete process.env.RELAYER_PRIVATE_KEY;
+    const provider = { getBlockNumber: jest.fn().mockResolvedValue(100), getNetwork: jest.fn().mockResolvedValue({ chainId: 84532 }) };
+    const health = require("../../backend/scripts/services/health");
+    health._resetReadinessCacheForTests();
+    const res = fakeRes();
+    await health.createReadyHandler({ worker, getProvider: () => provider })({ headers }, res);
+    return res;
+  }
+  afterAll(() => { process.env = { ...ORIGINAL_ENV }; });
+
+  it("reports disabled/configured without changing status or leaking key/address", async () => {
+    const off = await call({});
+    const on = await call({ RELAYER_PRIVATE_KEY: KEY });
+    expect(off.body.relayer).toBe("disabled");
+    expect(on.body.relayer).toBe("configured");
+    expect(on.statusCode).toBe(off.statusCode);
+    const { relayer: _a, ...offRest } = off.body;
+    const { relayer: _b, ...onRest } = on.body;
+    expect(onRest).toEqual(offRest);
+    const text = JSON.stringify(on.body);
+    expect(text).not.toContain(KEY);
+    expect(text).not.toMatch(/0x[0-9a-fA-F]{40}/);
+  });
+});

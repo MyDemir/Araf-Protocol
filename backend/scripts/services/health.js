@@ -379,7 +379,9 @@ function createReadyHandler({ worker, getProvider }) {
     } catch (_err) {
       return res.status(503).json({ ok: false, error: "readiness_unavailable" });
     }
-    const body = _isInternalRequest(req) ? readiness : toPublicReadiness(readiness);
+    // [TR] Yalnız bilgi alanı: relayer anahtarı var mı (değer/adres yok); durum kodunu etkilemez.
+    const base = _isInternalRequest(req) ? readiness : toPublicReadiness(readiness);
+    const body = { ...base, relayer: process.env.RELAYER_PRIVATE_KEY ? "configured" : "disabled" };
     return res.status(readiness.ok ? 200 : 503).json(body);
   };
 }

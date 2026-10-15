@@ -1,5 +1,5 @@
 import PIIDisplay from '../components/PIIDisplay';
-import { getEscrowExplorerUrl, resolveTargetChain } from './chainPolicy';
+import { getEscrowExplorerUrl, getExternalFaucetUrl, resolveTargetChain } from './chainPolicy';
 import { fmtBps, isKnownNumber, fmtNum, fmtPct, getStateLabel } from './copy';
 import { fmtCompact, fmtInt, fmtNumber } from './format';
 import ReferenceRateTicker from '../components/ReferenceRateTicker';
@@ -23,7 +23,7 @@ import { isOwnerRailDisabled, ownerRailDisabledMessage, isOwnerPayoutProfileMiss
 import { deriveTradeTimeline } from './contexts/trade-room/tradeTimeline';
 import { isViewInNav, NAV_ORDER, VIEW_REGISTRY } from './viewRegistry';
 import {
-  Banknote, ChevronDown, CircleCheck, CirclePause, Clock, Droplets, Flame, Handshake, History, Hourglass, Layers, ListPlus, LoaderCircle, Lock, Menu, Paperclip, Plus, Settings, Store, Swords,
+  Banknote, ChevronDown, CircleCheck, CirclePause, Clock, Droplets, ExternalLink, Flame, Handshake, History, Hourglass, Layers, ListPlus, LoaderCircle, Lock, Menu, Paperclip, Plus, Settings, Store, Swords,
   TriangleAlert, Undo2, Unplug, Wallet, X, Maximize2, Minimize2, Download, Share, MessageSquare,
 } from 'lucide-react';
 import { buildTradeRoomPanelCallbacks, getBurnExpiredDeadlinePassed, getPaymentWindowExpired } from './contexts/trade-room/tradeRoomPanelActions';
@@ -590,12 +590,24 @@ export const buildAppViews = (ctx) => {
     const faucetRow = isFaucetEnabled && (
           <div role="group" aria-label={tr ? 'Test token al' : 'Get test tokens'} title={tr ? 'Test token al' : 'Get test tokens'} className="inline-flex h-8 items-center gap-0.5 rounded-full border border-dashed border-borderStrong bg-surface pl-2 pr-0.5">
             <Droplets className="h-3.5 w-3.5 text-info" strokeWidth={2} aria-hidden="true" />
-            {['USDT', 'USDC'].map((sym) => (
-              <button key={sym} type="button" onClick={() => handleMint(sym)} disabled={isContractLoading} aria-label={tr ? `Test ${sym} al` : `Get test ${sym}`} className="relative inline-flex h-7 items-center gap-1 rounded-full px-2 text-[11px] font-bold text-textSecondary transition hover:bg-elevated hover:text-textPrimary disabled:opacity-50 after:absolute after:-inset-y-2 after:inset-x-0 after:content-['']">
-                {isContractLoading && loadingText.includes(sym) ? <LoaderCircle className="h-3 w-3 animate-spin" strokeWidth={2} aria-hidden="true" /> : null}
-                {sym}
-              </button>
-            ))}
+            {['USDT', 'USDC'].map((sym) => {
+              const chipCls = "relative inline-flex h-7 items-center gap-1 rounded-full px-2 text-[11px] font-bold text-textSecondary transition hover:bg-elevated hover:text-textPrimary disabled:opacity-50 after:absolute after:-inset-y-2 after:inset-x-0 after:content-['']";
+              const faucetUrl = getExternalFaucetUrl(chainId, SUPPORTED_TOKEN_ADDRESSES?.[sym]);
+              if (faucetUrl) {
+                return (
+                  <a key={sym} href={faucetUrl} target="_blank" rel="noopener noreferrer" className={chipCls}>
+                    {tr ? `${sym} al (Circle)` : `Get ${sym} (Circle)`}
+                    <ExternalLink className="h-3 w-3" strokeWidth={2} aria-hidden="true" />
+                  </a>
+                );
+              }
+              return (
+                <button key={sym} type="button" onClick={() => handleMint(sym)} disabled={isContractLoading} aria-label={tr ? `Test ${sym} al` : `Get test ${sym}`} className={chipCls}>
+                  {isContractLoading && loadingText.includes(sym) ? <LoaderCircle className="h-3 w-3 animate-spin" strokeWidth={2} aria-hidden="true" /> : null}
+                  {sym}
+                </button>
+              );
+            })}
           </div>
         );
     const emptyState = (

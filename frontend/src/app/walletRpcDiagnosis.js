@@ -64,6 +64,23 @@ export const isInsufficientFunds = (error) =>
     /InsufficientFunds/i.test(String(e.name || '')) ||
     /insufficient funds/i.test(`${e.shortMessage || ''} ${e.message || ''}`));
 
+export const isGasIncludedUnsupported = (error) =>
+  causeChain(error).some((e) =>
+    /gas station|gas included|EIP-?7702/i.test(`${e.shortMessage || ''} ${e.message || ''} ${e.details || ''}`));
+
+export const isRpcLimit = (error, rpcCode) =>
+  rpcCode === -32005 ||
+  causeChain(error).some((e) =>
+    /exceeds defined limit|rate limit/i.test(`${e.shortMessage || ''} ${e.message || ''} ${e.details || ''}`));
+
+export const buildGasIncludedMessage = (chainId, lang = readLang()) => {
+  const name = PUBLIC_RPC_BY_CHAIN[Number(chainId)]?.name;
+  const eth = name ? `${name} ETH` : 'ETH';
+  return lang === 'TR'
+    ? `Cüzdanınız işlem ücretini token ile ödemeyi (gas station) denedi; bu ağda desteklenmiyor. Cüzdanınıza ${eth} ekleyip tekrar deneyin.`
+    : `Your wallet tried to pay the network fee with a token (gas station); this network does not support it. Add ${eth} to your wallet and try again.`;
+};
+
 export const extractRpcCode = (error) => {
   for (const e of causeChain(error)) {
     if (typeof e.code === 'number' && e.code !== 4001) return e.code;
@@ -101,6 +118,12 @@ export async function diagnoseWriteError({
   if (resolved) return { ...base, kind: `contract-revert:${resolved}`, errorName: resolved };
   if (isInsufficientFunds(error)) {
     return { ...base, kind: 'wallet-insufficient-gas', message: buildInsufficientGasMessage(chainId, lang) };
+  }
+  if (isGasIncludedUnsupported(error)) {
+    return { ...base, kind: 'wallet-gas-included', message: buildGasIncludedMessage(chainId, lang) };
+  }
+  if (isRpcLimit(error, base.rpcCode)) {
+    return { ...base, kind: 'wallet-rpc-limit', message: buildWalletRpcMessage(chainId, lang) };
   }
   if (!publicClient?.simulateContract || !account) return base;
 

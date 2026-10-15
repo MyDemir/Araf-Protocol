@@ -41,9 +41,12 @@ const FALLBACK_EPOCH_SECONDS = 30 * 24 * 3600;
 const FALLBACK_CLAIM_DELAY_SECONDS = 24 * 3600;
 
 let rewardsContract = null;
+let passiveWarned = false;
+let lastSkipReason = null;
 
 
 function getRewardsContract() {
+  lastSkipReason = null;
   if (rewardsContract) return rewardsContract;
 
   const rpcUrl = process.env.BASE_RPC_URL;
@@ -54,8 +57,17 @@ function getRewardsContract() {
     logger.info("[RewardRecorder] ARAF_REWARDS_ADDRESS tanımsız; görev pasif.");
     return null;
   }
-  if (!rpcUrl || !privateKey) {
-    logger.error("[RewardRecorder] RELAYER_PRIVATE_KEY veya BASE_RPC_URL tanımsız. Görev çalıştırılamıyor.");
+  if (!rpcUrl) {
+    logger.error("[RewardRecorder] BASE_RPC_URL tanımsız. Görev çalıştırılamıyor.");
+    return null;
+  }
+  if (!privateKey) {
+    // [TR] Anahtar bilinçli tanımsız: hata değil pasif; süreç başına tek uyarı.
+    lastSkipReason = "relayer_not_configured";
+    if (!passiveWarned) {
+      passiveWarned = true;
+      logger.warn("[RewardRecorder] RELAYER_PRIVATE_KEY tanımsız; Proof of Peace kaydı pasif.");
+    }
     return null;
   }
 
@@ -76,8 +88,13 @@ async function _readWindowSeconds(contract) {
   return FALLBACK_EPOCH_SECONDS + FALLBACK_CLAIM_DELAY_SECONDS;
 }
 
-async function runRewardOutcomeRecorder({ contract = getRewardsContract() } = {}) {
-  if (!contract) return { success: true, skipped: "rewards_not_configured", candidates: 0, recorded: 0 };
+async function runRewardOutcomeRecorder(opts = {}) {
+  const injected = Object.prototype.hasOwnProperty.call(opts || {}, "contract");
+  const contract = injected ? opts.contract : getRewardsContract();
+  if (!contract) {
+    const skipped = !injected && lastSkipReason ? lastSkipReason : "rewards_not_configured";
+    return { success: true, skipped, candidates: 0, recorded: 0 };
+  }
 
   // [TR] Bir trade en geç (bitiş epoch'unun sonu + claimDelay) anına kadar kaydedilebilir; bu süre en fazla
   //      epochDuration + claimDelay kadar geriye gider. Daha eski trade'ler zaten kontrat tarafından atlanır.

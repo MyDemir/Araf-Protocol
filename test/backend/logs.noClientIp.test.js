@@ -82,3 +82,50 @@ describe("client IP is never written to logs", () => {
     expect(res.status).toHaveBeenCalledWith(429);
   });
 });
+
+describe("client-error whitelisted diagnosis fields", () => {
+  let logger;
+  beforeEach(() => {
+    jest.resetModules();
+    logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() };
+    jest.doMock("../../backend/scripts/utils/logger", () => logger);
+    jest.doMock("../../backend/scripts/middleware/rateLimiter", () => ({
+      clientLogLimiter: (_req, _res, next) => next(),
+    }));
+  });
+  afterEach(() => {
+    jest.dontMock("../../backend/scripts/utils/logger");
+    jest.dontMock("../../backend/scripts/middleware/rateLimiter");
+  });
+  const post = async (body) => {
+    const app = express();
+    app.use(express.json());
+    app.use("/api/logs", require("../../backend/scripts/routes/logs"));
+    await request(app).post("/api/logs/client-error").send(body);
+    return logger.error.mock.calls[0][1];
+  };
+
+  it("valid diag/rpcCode/selector are logged unscrubbed", async () => {
+    const p = await post({ message: "m", diag: "contract-revert:TierNotAllowed", rpcCode: -32005, selector: "0xAbCdEf01" });
+    expect(p).toMatchObject({ diag: "contract-revert:TierNotAllowed", rpcCode: -32005, selector: "0xAbCdEf01" });
+    expect(p).not.toHaveProperty("ip");
+  });
+
+  it("invalid fields are dropped", async () => {
+    const p = await post({ message: "m", diag: "bad diag!", rpcCode: 123456, selector: "0x1234" });
+    expect(p).not.toHaveProperty("diag");
+    expect(p).not.toHaveProperty("rpcCode");
+    expect(p).not.toHaveProperty("selector");
+    const q = await post({ message: "m", rpcCode: "-32005", diag: "a".repeat(65), selector: "0x" + "a".repeat(40) });
+    expect(q.rpcCode).toBeUndefined();
+    expect(q.diag).toBeUndefined();
+    expect(q.selector).toBeUndefined();
+  });
+
+  it("message body is still scrubbed", async () => {
+    const p = await post({ message: `x 0x${"a".repeat(40)} 1234567 EIP 7702`, diag: "ok" });
+    expect(p.message).not.toMatch(/0x[a-f0-9]{40}/);
+    expect(p.message).not.toContain("1234567");
+    expect(p.message).not.toContain("7702");
+  });
+});
