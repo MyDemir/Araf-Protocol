@@ -1,0 +1,145 @@
+#!/usr/bin/env node
+// [TR] "Aktif escrow" kaydının TEK yazarı (backend bu kaydı yalnız okur; bkz. backend/scripts/services/escrowRegistryGuard.js).
+//      Mongo `escrow_registry` koleksiyonundaki `_id:"active"` belgesini oluşturur/günceller.
+//        node .github/scripts/escrow-registry.js --adopt [--apply] [--force-switch]
+//      VARSAYILAN dry-run: yalnız ne yazacağını yazdırır (mevcut belge OKUNUR, hiçbir şey yazılmaz). Yazma için açık --apply.
+//      Mevcut active BAŞKA bir escrow/zincir gösteriyorsa (veya state ROTATING ise) --force-switch olmadan DURUR
+//      (rotasyonu Faz 2 yönetecek). Girdiler yalnız env'den: MONGODB_URI ARAF_ESCROW_ADDRESS EXPECTED_CHAIN_ID
+//      ARAF_DEPLOYMENT_BLOCK GITHUB_RUN_ID (opsiyonel). MONGODB_URI / secret hiçbir koşulda yazdırılmaz.
+//      Mongo sürücüsü yeni bağımlılık değildir: backend/node_modules (npm ci --prefix backend) içinden yüklenir.
+// [EN] Sole writer of the "active escrow" registry document. Dry-run by default; --apply to write;
+//      --force-switch to replace a different active escrow. Never prints the URI.
+'use strict';
+const path = require('path');
+
+const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+const ZERO_ADDRESS = '0x' + '0'.repeat(40);
+const POSITIVE_INT_RE = /^[1-9][0-9]{0,15}$/;
+const RUN_ID_RE = /^[0-9]{1,20}$/;
+
+function parseArgs(argv) {
+  const flags = new Set(argv);
+  const known = new Set(['--adopt', '--apply', '--force-switch']);
+  const unknown = argv.filter((a) => !known.has(a));
+  return { adopt: flags.has('--adopt'), apply: flags.has('--apply'), forceSwitch: flags.has('--force-switch'), unknown };
+}
+
+function buildDesired(env) {
+  const address = String(env.ARAF_ESCROW_ADDRESS || '').trim();
+  if (!ADDRESS_RE.test(address) || address.toLowerCase() === ZERO_ADDRESS) {
+    throw new Error('ARAF_ESCROW_ADDRESS must be a non-zero 0x + 40 hex address.');
+  }
+  const chain = String(env.EXPECTED_CHAIN_ID || '').trim();
+  if (!POSITIVE_INT_RE.test(chain)) throw new Error('EXPECTED_CHAIN_ID must be a positive integer.');
+  const block = String(env.ARAF_DEPLOYMENT_BLOCK || '').trim();
+  if (!POSITIVE_INT_RE.test(block)) throw new Error('ARAF_DEPLOYMENT_BLOCK must be a positive integer.');
+  const runId = String(env.GITHUB_RUN_ID || '').trim();
+  if (runId && !RUN_ID_RE.test(runId)) throw new Error('GITHUB_RUN_ID must be numeric.');
+  return {
+    escrow_address: address.toLowerCase(),
+    chain_id: Number(chain),
+    deploy_block: Number(block),
+    state: 'ACTIVE',
+    updated_by: runId ? `github-run-${runId}` : 'manual',
+  };
+}
+
+// Mevcut belgenin istenenle aynı escrow/zincir/ACTIVE olup olmadığı.
+function sameTarget(existing, desired) {
+  return String(existing.escrow_address || '').toLowerCase() === desired.escrow_address
+    && Number(existing.chain_id) === desired.chain_id
+    && existing.state === 'ACTIVE';
+}
+
+function describe(doc) {
+  return `escrow=${doc.escrow_address} chain=${doc.chain_id} block=${doc.deploy_block} state=${doc.state}`;
+}
+
+function createMongoStore(uri) {
+  let driver;
+  try {
+    driver = require(require.resolve('mongodb', { paths: [path.resolve(__dirname, '../../backend')] }));
+  } catch {
+    const err = new Error('mongodb driver not found; run "npm ci --omit=dev --prefix backend" first.');
+    err.safe = true;
+    throw err;
+  }
+  const client = new driver.MongoClient(uri, { serverSelectionTimeoutMS: 15000, appName: 'araf-escrow-registry' });
+  let coll = null;
+  const open = async () => {
+    if (coll) return coll;
+    await client.connect();
+    coll = client.db().collection('escrow_registry');
+    return coll;
+  };
+  return {
+    async read() { return (await open()).findOne({ _id: 'active' }); },
+    async write(doc) { await (await open()).replaceOne({ _id: 'active' }, doc, { upsert: true }); },
+    async close() { await client.close().catch(() => {}); },
+  };
+}
+
+async function run({ argv = process.argv.slice(2), env = process.env, store, out = console.log, now = () => new Date() } = {}) {
+  const args = parseArgs(argv);
+  if (args.unknown.length || !args.adopt) {
+    out('usage: escrow-registry.js --adopt [--apply] [--force-switch]   (default: dry-run)');
+    return 2;
+  }
+
+  let desired;
+  try {
+    desired = buildDesired(env);
+  } catch (e) {
+    out(`::error::${e.message}`);
+    return 1;
+  }
+  if (!env.MONGODB_URI && !store) {
+    out('::error::MONGODB_URI is required.');
+    return 1;
+  }
+
+  let s = store;
+  try {
+    s = s || createMongoStore(env.MONGODB_URI);
+    const existing = await s.read();
+    let doc = { ...desired, since: now() };
+    let action = 'create';
+
+    if (existing) {
+      if (sameTarget(existing, desired)) {
+        action = 'update (same escrow)';
+        doc.since = existing.since || doc.since;
+      } else if (!args.forceSwitch) {
+        out(`::error::An active registry document already points at a different escrow/chain or is not ACTIVE (${describe(existing)}). Refusing to overwrite without --force-switch.`);
+        return 1;
+      } else {
+        action = 'SWITCH (force)';
+      }
+    }
+
+    out(`mode: ${args.apply ? 'APPLY' : 'DRY-RUN'}`);
+    out(`action: ${action}`);
+    out(`current: ${existing ? describe(existing) : '(none)'}`);
+    out(`desired: ${describe(doc)} updated_by=${doc.updated_by}`);
+
+    if (!args.apply) {
+      out('dry-run: nothing written. Re-run with --apply to write.');
+      return 0;
+    }
+    await s.write({ _id: 'active', ...doc });
+    out('escrow_registry active document written.');
+    return 0;
+  } catch (e) {
+    // Mongo hata metni host/URI içerebilir: yalnız hata adı basılır.
+    out(e && e.safe ? `::error::${e.message}` : `::error::registry operation failed (${(e && e.name) || 'Error'}).`);
+    return 1;
+  } finally {
+    if (s && !store) await s.close();
+  }
+}
+
+module.exports = { run, buildDesired, parseArgs, sameTarget, createMongoStore };
+
+if (require.main === module) {
+  run().then((code) => process.exit(code));
+}
