@@ -94,6 +94,7 @@ describe('live wiring regressions', () => {
       resetForm: vi.fn(),
       requireSignedSessionForActiveWallet: () => true,
       hasPayoutProfile: true,
+      effectiveTier: 1,
       supportedTokens: { USDT: { address: '0x0000000000000000000000000000000000000001', decimalsRequired: true } },
       address: '0xabc0000000000000000000000000000000000000',
       lang: 'EN',

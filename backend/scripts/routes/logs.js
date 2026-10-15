@@ -32,7 +32,6 @@ router.post("/client-error", clientLogLimiter, (req, res) => {
     stack: stack ? scrubClientErrorText(String(stack).slice(0, 2000)) : undefined,
     componentStack: componentStack ? scrubClientErrorText(String(componentStack).slice(0, 1000)) : undefined,
     userAgent: stripLogControlChars(req.headers["user-agent"]?.slice(0, 200)),
-    ip: req.ip,
   });
   res.status(204).end();
 });

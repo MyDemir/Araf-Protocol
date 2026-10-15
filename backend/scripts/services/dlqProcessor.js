@@ -145,7 +145,7 @@ async function processDLQ() {
     //      burn attempts.
     if (!eventWorker.isRunning || !eventWorker.contract) {
       logger.debug("[DLQ] Worker hazır değil; re-drive sonraki tura ertelendi.");
-      return;
+      return { success: true, skipped: "worker_not_ready" };
     }
 
     const redis = getRedisClient();
@@ -153,7 +153,7 @@ async function processDLQ() {
 
     if (length === 0) {
       logger.debug("[DLQ] Kuyruk temiz.");
-      return;
+      return { success: true, depth: 0 };
     }
 
     await archiveOverflow(redis, length);
@@ -163,6 +163,7 @@ async function processDLQ() {
     const entries = await redis.lRange(DLQ_KEY, 0, BATCH_SIZE - 1);
 
     let poisonCount = 0;
+    let processedCount = 0;
 
     for (const raw of entries) {
       let entry;
@@ -192,6 +193,7 @@ async function processDLQ() {
         logIndex: safeReplayLogIndex,
       });
 
+      processedCount += 1;
       if (result.success) {
         _redriveSuccess += 1;
         await redis.lRem(DLQ_KEY, 1, raw);
@@ -257,8 +259,13 @@ async function processDLQ() {
         logger.error(`[DLQ] ⚠ KRİTİK: DLQ'da ${newDepth} event birikti! Manuel müdahale gerekebilir.`);
       }
     }
+
+    return { success: true, depth: newDepth, processed: processedCount, poison: poisonCount };
   } catch (err) {
     logger.error(`[DLQ] Processor hatası: ${err.message}`, { stack: err.stack });
+    // [TR] Kısa, URL/secret içermeyen mesaj; ayrıntı yukarıda loglandı.
+    const safeMsg = String(err?.message || "unknown").replace(/https?:\/\/\S+/gi, "[url]").slice(0, 120);
+    return { success: false, error: safeMsg };
   }
 }
 

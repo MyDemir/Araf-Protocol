@@ -66,7 +66,7 @@ const Card = ({ title, action, children, className = '', testId }) => (
   </section>
 );
 
-const CheckRow = ({ ok, label, detail, pending }) => (
+const CheckRow = ({ ok, label, detail, pending, action }) => (
   <div className="flex items-center justify-between gap-3 py-2 text-sm">
     <span className="flex items-center gap-2 text-textSecondary">
       <span className={`w-5 h-5 rounded-full inline-flex items-center justify-center ${pending ? 'bg-elevated text-textMuted' : ok ? 'bg-success/15 text-success' : 'bg-warning/15 text-warning'}`}>
@@ -74,13 +74,16 @@ const CheckRow = ({ ok, label, detail, pending }) => (
       </span>
       {label}
     </span>
-    {detail && <span className={`text-xs text-right ${ok ? 'text-textMuted' : 'text-warning'}`}>{detail}</span>}
+    <span className="flex items-center gap-2">
+      {detail && <span className={`text-xs text-right ${ok ? 'text-textMuted' : 'text-warning'}`}>{detail}</span>}
+      {action}
+    </span>
   </div>
 );
 
 export const AccountPanel = ({
   lang = 'EN', address, isConnected, isAuthenticated, userReputation, reputationPolicy,
-  sybilStatus, walletAgeRemainingDays, isWalletRegistered = null, isBanned, activeEscrows = [], myOrders = [], onNavigateTab,
+  sybilStatus, walletAgeRemainingDays, isWalletRegistered = null, onRetryWalletRegistration, isBanned, activeEscrows = [], myOrders = [], onNavigateTab,
 }) => {
   const [copied, setCopied] = React.useState(false);
   const rep = deriveReputationView({ reputation: userReputation, policy: reputationPolicy });
@@ -139,6 +142,11 @@ export const AccountPanel = ({
         <p className="text-xs text-textMuted -mt-1 mb-1">{tx(lang, 'Kontratın emir doldurmadan önce kontrol ettiği koşullar.', 'Conditions the contract checks before you fill an order.')}</p>
         <div className="divide-y divide-borderSubtle">
           <CheckRow
+            action={sybilStatus && !sybilStatus.aged && isWalletRegistered === null && typeof onRetryWalletRegistration === 'function' ? (
+              <button type="button" onClick={onRetryWalletRegistration} data-testid="wallet-age-retry" className="px-2 py-0.5 rounded-md text-[11px] font-semibold border border-borderSubtle bg-elevated text-textSecondary hover:text-textPrimary hover:border-borderStrong">
+                {tx(lang, 'Tekrar kontrol et', 'Retry')}
+              </button>
+            ) : null}
             pending={!sybilStatus || (!sybilStatus.aged && isWalletRegistered === null)}
             ok={Boolean(sybilStatus?.aged)}
             label={tx(lang, `Cüzdan yaşı (${WALLET_AGE_MIN_DAYS} gün)`, `Wallet age (${WALLET_AGE_MIN_DAYS} days)`)}

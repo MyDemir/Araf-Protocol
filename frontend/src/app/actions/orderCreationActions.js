@@ -3,12 +3,14 @@ import { normalizeOrderSide, resolveOrderActionFns, resolvePaymentRiskEntry } fr
 import { buildApiUrl } from '../apiConfig';
 import { fmtNum } from '../copy';
 import { computeCreateAllowance } from './allowanceMath';
+import { checkTokenBalance } from './balanceGuard';
 import { computeMinFillRaw, parseDecimalToUnits } from './decimalUnits';
 import { isPayoutProfileSaved, profileRequiredMessage } from '../payoutProfileGate';
 import { enforceTxGate } from '../txGate';
+import { WALLET_AGE_MIN_DAYS } from '../walletAge';
 
 export const MAKER_ORDER_DEFAULTS = {
-  makerTier: 1,
+  makerTier: 0,
   makerAmount: '',
   makerRate: '',
   makerMinLimit: '',
@@ -54,6 +56,11 @@ export const getMakerOrderValidationError = ({
   makerToken = 'USDT',
   tokenPolicy = null,
   tierMaxAmounts = MAKER_TIER_MAX_AMOUNTS,
+  // [TR] Cüzdanın kontrattaki efektif tier'ı (_getEffectiveTier). null = kontrol yok (yalnız saf yardımcı çağrıları).
+  effectiveTier = null,
+  // [TR] Cüzdan yaşı (true/false/null=bilinmiyor). Yalnız false iken ALIŞ emri engellenir; null = engel yok (kontrat son söz sahibi).
+  walletAged = null,
+  walletAgeRemainingDays = null,
   lang = 'EN',
 }) => {
   const cryptoAmtNum = parseFloat(makerAmount) || 0;
@@ -67,6 +74,19 @@ export const getMakerOrderValidationError = ({
   if (tokenPolicy && tokenPolicy.supported === false) return lang === 'TR' ? `${makerToken} şu an kontratta desteklenmiyor.` : `${makerToken} is not supported by the contract right now.`;
   if (tokenPolicy && makerSide === 'SELL_CRYPTO' && tokenPolicy.allowSellOrders === false) return lang === 'TR' ? `${makerToken} için satış emri şu an kapalı.` : `Sell orders are closed for ${makerToken}.`;
   if (tokenPolicy && makerSide === 'BUY_CRYPTO' && tokenPolicy.allowBuyOrders === false) return lang === 'TR' ? `${makerToken} için alış emri şu an kapalı.` : `Buy orders are closed for ${makerToken}.`;
+  // [TR] Kontrat createBuyOrder → _enforceTakerEntry: yaş dolmamışsa WalletTooYoung. Satış emri yaş istemez.
+  if (makerSide === 'BUY_CRYPTO' && walletAged === false) {
+    const days = walletAgeRemainingDays ?? '?';
+    return lang === 'TR'
+      ? `Alış emri için cüzdan yaşı dolmadı (kayıttan sonra ${WALLET_AGE_MIN_DAYS} gün). Kalan: ~${days} gün. Satış emri açabilirsiniz.`
+      : `Wallet age requirement not met for buy orders (${WALLET_AGE_MIN_DAYS} days after registration). Remaining: ~${days} day(s). You can still open sell orders.`;
+  }
+  // [TR] Kontrat: _tier > _getEffectiveTier(msg.sender) → TierNotAllowed. Approve'dan önce ön kontrol (kontrat son söz sahibi).
+  if (effectiveTier !== null && effectiveTier !== undefined && makerTier > effectiveTier) {
+    return lang === 'TR'
+      ? `Tier ${makerTier} için itibarınız yetmiyor. Açabileceğiniz en yüksek seviye: Tier ${effectiveTier}.`
+      : `Your reputation does not unlock Tier ${makerTier}. Highest tier you can open: Tier ${effectiveTier}.`;
+  }
   if (!makerAmount || cryptoAmtNum <= 0) return lang === 'TR' ? 'Order miktarını giriniz.' : 'Enter order amount.';
   if (makerTier < 4 && Number.isFinite(tierMax) && cryptoAmtNum > tierMax) {
     const formatted = fmtNum(tierMax, lang);
@@ -109,6 +129,7 @@ export const buildCreateOrderAction = ({
   showToast,
   getTokenDecimals,
   getAllowance,
+  getTokenBalance,
   approveToken,
   createSellOrder,
   createBuyOrder,
@@ -130,6 +151,11 @@ export const buildCreateOrderAction = ({
   openProfilePage = null,
   // [TR] Fail-closed kapı (getter ya da nesne): approve/tx'ten ÖNCE değerlendirilir. Modal açıkken arıza başlarsa da reddeder.
   txGate = null,
+  // [TR] Efektif tier (okunamazsa 0). Tier uygun değilse approve'a hiç gidilmez.
+  effectiveTier = 0,
+  // [TR] Cüzdan yaşı durumu; false ise alış emri approve'dan önce engellenir. null = engel yok.
+  walletAged = null,
+  walletAgeRemainingDays = null,
 }) => async () => {
   if (txGate && !enforceTxGate(txGate, showToast)) return;
   if (!requireSignedSessionForActiveWallet()) return;
@@ -153,7 +179,7 @@ export const buildCreateOrderAction = ({
     makerFiat,
   } = formState;
 
-  const validationError = getMakerOrderValidationError({ ...formState, tierMaxAmounts, tokenPolicy, lang });
+  const validationError = getMakerOrderValidationError({ ...formState, tierMaxAmounts, tokenPolicy, effectiveTier, walletAged, walletAgeRemainingDays, lang });
   if (validationError) {
     showToast(validationError, 'error');
     return;
@@ -254,6 +280,22 @@ export const buildCreateOrderAction = ({
       bondMap,
       reputation,
     });
+
+    const balanceError = await checkTokenBalance({
+      getTokenBalance,
+      getTokenDecimals,
+      tokenAddress,
+      owner: address,
+      required: requiredAllowance,
+      symbol: makerToken,
+      lang,
+      detailTr: normalizedSide === 'BUY_CRYPTO' ? 'teminat' : 'tutar + teminat',
+      detailEn: normalizedSide === 'BUY_CRYPTO' ? 'bond' : 'amount + bond',
+    });
+    if (balanceError) {
+      showToast(balanceError, 'error');
+      return;
+    }
 
     const currentAllowance = await getAllowance(tokenAddress, address);
     if (currentAllowance < requiredAllowance) {

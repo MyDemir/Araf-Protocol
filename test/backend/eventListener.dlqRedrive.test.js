@@ -180,6 +180,51 @@ describe("DLQ namedArgs from real ethers events (B1)", () => {
     expect(mockUpdateFee).not.toHaveBeenCalled();
     expect(store.list).toEqual([before]);
   });
+
+  describe("processDLQ scheduler success contract", () => {
+    const { didScheduledJobSucceed } = require("../../backend/scripts/utils/schedulerSuccess");
+
+    afterEach(() => {
+      worker.isRunning = false;
+      worker.contract = null;
+    });
+
+    it("worker not ready => success + skipped", async () => {
+      worker.isRunning = false;
+      worker.contract = null;
+      const r = await processDLQ();
+      expect(r).toEqual({ success: true, skipped: "worker_not_ready" });
+      expect(didScheduledJobSucceed(r)).toBe(true);
+    });
+
+    it("empty queue => success depth 0", async () => {
+      worker.isRunning = true;
+      worker.contract = {};
+      const r = await processDLQ();
+      expect(r).toEqual({ success: true, depth: 0 });
+      expect(didScheduledJobSucceed(r)).toBe(true);
+    });
+
+    it("normal completion => success with depth/processed", async () => {
+      worker.isRunning = true;
+      worker.contract = {};
+      await worker._addToDLQ(makeEventLog("FeeConfigUpdated", [30n, 20n]), "boom");
+      const r = await processDLQ();
+      expect(r).toMatchObject({ success: true, depth: 0, processed: 1 });
+      expect(didScheduledJobSucceed(r)).toBe(true);
+    });
+
+    it("error path => logged, success:false, short message without URL", async () => {
+      worker.isRunning = true;
+      worker.contract = {};
+      mockRedis.lLen.mockRejectedValueOnce(new Error("connect failed https://user:pw@redis.example.com:6379/0"));
+      const r = await processDLQ();
+      expect(r.success).toBe(false);
+      expect(r.error).toContain("connect failed");
+      expect(r.error).not.toMatch(/https?:|pw@/);
+      expect(didScheduledJobSucceed(r)).toBe(false);
+    });
+  });
 });
 
 describe("config events reject missing/NaN payloads instead of writing NaN (B1)", () => {

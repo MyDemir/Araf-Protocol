@@ -12,7 +12,7 @@ import { X } from 'lucide-react';
 const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
 
 export default function BottomSheet({
-  title, titleId, closeLabel, onClose, children, testId, panelClassName = 'sm:max-w-[400px]',
+  title, titleId, closeLabel, onClose, children, testId, panelClassName = 'sm:max-w-[400px]', compact = false,
 }) {
   const [shown, setShown] = React.useState(false);
   const panelRef = React.useRef(null);
@@ -59,13 +59,13 @@ export default function BottomSheet({
         ref={panelRef}
         tabIndex={-1}
         data-testid={testId}
-        className={`w-full overflow-y-auto overflow-x-hidden overscroll-contain rounded-t-[1.75rem] border border-b-0 border-borderSubtle bg-surface pb-[calc(1.25rem_+_env(safe-area-inset-bottom))] pl-[max(1.25rem,env(safe-area-inset-left))] pr-[max(1.25rem,env(safe-area-inset-right))] shadow-2xl outline-none transition duration-300 ease-out max-h-[calc(100dvh_-_0.75rem_-_env(safe-area-inset-top))] motion-reduce:transition-none sm:max-h-[calc(100dvh_-_2rem)] sm:rounded-3xl sm:border-b sm:p-6 ${panelClassName} ${
+        className={`w-full overflow-y-auto overflow-x-hidden overscroll-contain rounded-t-[1.75rem] border border-b-0 border-borderSubtle bg-surface ${compact ? 'pb-[calc(0.75rem_+_env(safe-area-inset-bottom))]' : 'pb-[calc(1.25rem_+_env(safe-area-inset-bottom))]'} pl-[max(1.25rem,env(safe-area-inset-left))] pr-[max(1.25rem,env(safe-area-inset-right))] shadow-2xl outline-none transition duration-300 ease-out max-h-[calc(100dvh_-_0.75rem_-_env(safe-area-inset-top))] motion-reduce:transition-none sm:max-h-[calc(100dvh_-_2rem)] sm:rounded-3xl sm:border-b sm:p-6 ${panelClassName} ${
           shown ? 'translate-y-0 sm:scale-100 sm:opacity-100' : 'translate-y-full sm:translate-y-0 sm:scale-95 sm:opacity-0'
         }`}
       >
-        <div className="mx-auto mt-2.5 h-1.5 w-10 rounded-full bg-textMuted/40 sm:hidden" aria-hidden="true" />
-        <div className="flex items-center justify-between gap-3 pb-4 pt-2 sm:pt-0">
-          <h2 id={titleId} className="text-lg font-bold tracking-tight text-textPrimary">{title}</h2>
+        <div className={`mx-auto ${compact ? 'mt-2' : 'mt-2.5'} h-1.5 w-10 rounded-full bg-textMuted/40 sm:hidden`} aria-hidden="true" />
+        <div className={`flex items-center justify-between gap-3 ${compact ? 'pb-1 pt-0 sm:pb-4' : 'pb-4 pt-2'} sm:pt-0`}>
+          <h2 id={titleId} className={`${compact ? 'text-base sm:text-lg' : 'text-lg'} font-bold tracking-tight text-textPrimary`}>{title}</h2>
           <button
             type="button"
             onClick={onClose}

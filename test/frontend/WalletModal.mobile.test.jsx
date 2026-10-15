@@ -35,7 +35,8 @@ describe('wallet modal on mobile', () => {
     setUa(IPHONE);
     const ctx = renderModal();
     expect(screen.getByTestId('mobile-wallet-picker')).toBeTruthy();
-    expect(screen.getAllByText('Browser wallet')).toHaveLength(1); // injected connector is not listed next to the toggle
+    expect(screen.getAllByText('Open in wallet app')).toHaveLength(1); // mobile + no injected: row is renamed
+    expect(screen.queryByText('Browser wallet')).toBeNull();
     const toggle = screen.getByTestId('browser-wallet-toggle');
     expect(screen.getByText('Coinbase Wallet')).toBeTruthy();
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
@@ -84,6 +85,7 @@ describe('wallet modal on mobile', () => {
 
   it('surfaces connect errors instead of failing silently', async () => {
     setUa(DESKTOP);
+    window.ethereum = {};
     const connect = vi.fn((_v, opts) => opts.onError({ name: 'ProviderNotFoundError' }));
     const ctx = renderModal({ connect });
     await userEvent.click(screen.getByText('Browser wallet'));

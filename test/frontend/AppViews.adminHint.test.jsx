@@ -28,13 +28,17 @@ const renderHint = (over = {}) => {
 };
 
 describe('admin hint (visible text, UX only)', () => {
-  it('connected but not signed in: visible accessible sign-in hint for everyone, in production too', () => {
+  it('connected but not signed in: no admin hint in production (does not reveal admin panel)', () => {
     vi.stubEnv('DEV', false);
     renderHint();
-    const hint = screen.getByTestId('admin-hint');
-    expect(hint).toHaveAttribute('role', 'status');
-    expect(hint).toHaveTextContent(/not signed in/i);
-    expect(hint).not.toHaveAttribute('title');
+    expect(screen.queryByTestId('admin-hint')).toBeNull();
+    expect(document.body.textContent).not.toMatch(/admin panel|yönetim paneli|not signed in|oturum açıl/i);
+  });
+
+  it('connected but not signed in: no admin hint in development either', () => {
+    vi.stubEnv('DEV', true);
+    renderHint();
+    expect(screen.queryByTestId('admin-hint')).toBeNull();
   });
 
   it('signed in as non-admin: setting name is NOT shown in production', () => {

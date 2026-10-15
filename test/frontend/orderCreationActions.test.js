@@ -4,6 +4,7 @@ import path from 'node:path';
 import {
   buildCreateOrderAction,
   getMakerOrderValidationError,
+  MAKER_ORDER_DEFAULTS,
 } from '../../frontend/src/app/actions/orderCreationActions';
 
 const makeDeps = (overrides = {}) => {
@@ -42,11 +43,40 @@ const makeDeps = (overrides = {}) => {
     payoutProfileDraft: { rail: 'TR_IBAN', country: 'TR' },
     paymentRiskConfig: { TR: { TR_IBAN: { riskLevel: 'MEDIUM', enabled: true } } },
     hasPayoutProfile: true,
+    effectiveTier: 4,
     ...overrides,
   };
 };
 
 const runAction = async (deps) => buildCreateOrderAction(deps)();
+
+describe('maker tier vs effective tier (contract TierNotAllowed pre-check)', () => {
+  it('effectiveTier=0, makerTier=1: validation error, no approve, no create', async () => {
+    const form = { makerTier: 1, makerAmount: '100', makerRate: '34', makerMinLimit: '', makerFiat: 'TRY' };
+    expect(getMakerOrderValidationError({ ...form, effectiveTier: 0 })).toBe('Your reputation does not unlock Tier 1. Highest tier you can open: Tier 0.');
+    expect(getMakerOrderValidationError({ ...form, effectiveTier: 0, lang: 'TR' })).toBe('Tier 1 için itibarınız yetmiyor. Açabileceğiniz en yüksek seviye: Tier 0.');
+    const deps = makeDeps({ state: { makerTier: 1 }, effectiveTier: 0 });
+    await runAction(deps);
+    expect(deps.showToast).toHaveBeenCalledWith(expect.stringMatching(/does not unlock Tier 1/), 'error');
+    expect(deps.approveToken).not.toHaveBeenCalled();
+    expect(deps.createSellOrder).not.toHaveBeenCalled();
+  });
+
+  it('unknown effectiveTier in the action defaults to 0 (fail-closed)', async () => {
+    const deps = makeDeps({ state: { makerTier: 1 } });
+    delete deps.effectiveTier;
+    await runAction(deps);
+    expect(deps.approveToken).not.toHaveBeenCalled();
+  });
+
+  it('effectiveTier=2, makerTier=2: no error', () => {
+    expect(getMakerOrderValidationError({ makerTier: 2, makerAmount: '100', makerRate: '34', makerMinLimit: '', makerFiat: 'TRY', effectiveTier: 2 })).toBeNull();
+  });
+
+  it('default maker tier is 0', () => {
+    expect(MAKER_ORDER_DEFAULTS.makerTier).toBe(0);
+  });
+});
 
 describe('order creation actions', () => {
   it.each([[false], [null], [undefined]])('blocks order creation without a saved payout profile (hasPayoutProfile=%s), fail-closed', async (flag) => {
@@ -174,5 +204,33 @@ describe('order creation actions', () => {
     expect(appSource).toContain('} = useMakerOrderForm({');
     expect(appSource).not.toMatch(/const\s+\[maker(?:Tier|Amount|Rate|MinLimit|MaxLimit|Fiat|Token|Side)/);
     expect(appSource).not.toMatch(/const\s+handleCreateOrder\s*=\s*async/);
+  });
+});
+
+describe('wallet age pre-check for buy orders (contract WalletTooYoung)', () => {
+  const form = { makerTier: 0, makerAmount: '100', makerRate: '34', makerMinLimit: '', makerFiat: 'TRY' };
+
+  it('BUY + walletAged=false: TR error with remaining days; no approve, no createBuyOrder', async () => {
+    expect(getMakerOrderValidationError({ ...form, makerSide: 'BUY_CRYPTO', walletAged: false, walletAgeRemainingDays: 1, lang: 'TR' }))
+      .toBe('Alış emri için cüzdan yaşı dolmadı (kayıttan sonra 2 gün). Kalan: ~1 gün. Satış emri açabilirsiniz.');
+    expect(getMakerOrderValidationError({ ...form, makerSide: 'BUY_CRYPTO', walletAged: false }))
+      .toBe('Wallet age requirement not met for buy orders (2 days after registration). Remaining: ~? day(s). You can still open sell orders.');
+    const deps = makeDeps({ state: { makerTier: 0, makerSide: 'BUY_CRYPTO' }, walletAged: false, walletAgeRemainingDays: 1, lang: 'TR' });
+    await runAction(deps);
+    expect(deps.showToast).toHaveBeenCalledWith(expect.stringMatching(/cüzdan yaşı dolmadı/), 'error');
+    expect(deps.approveToken).not.toHaveBeenCalled();
+    expect(deps.createBuyOrder).not.toHaveBeenCalled();
+  });
+
+  it('SELL + walletAged=false: no age error', () => {
+    expect(getMakerOrderValidationError({ ...form, makerSide: 'SELL_CRYPTO', walletAged: false })).toBeNull();
+  });
+
+  it('BUY + walletAged=null: no age error', () => {
+    expect(getMakerOrderValidationError({ ...form, makerSide: 'BUY_CRYPTO', walletAged: null })).toBeNull();
+  });
+
+  it('BUY + walletAged=true: no age error', () => {
+    expect(getMakerOrderValidationError({ ...form, makerSide: 'BUY_CRYPTO', walletAged: true })).toBeNull();
   });
 });

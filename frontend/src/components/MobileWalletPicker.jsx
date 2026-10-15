@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { buildWalletDeepLinks } from '../app/mobileWallet';
+import { groupWalletConnectors } from '../app/walletOptions';
 import { BrowserWalletBadge, ConnectorIcon, MetaMaskBadge, OkxBadge, TrustBadge, WalletLinkIcon } from './wallet-icons';
 
 // [TR] Cüzdan seçeneği kartı ve içindeki dokunma alanı (≥44px). Masaüstü listesi de aynı stili kullanır.
@@ -9,15 +10,20 @@ export const walletCardCls = (active = false) =>
   `overflow-hidden rounded-2xl border bg-elevated transition-colors duration-150 motion-reduce:transition-none ${
     active ? 'border-brand/50' : 'border-borderSubtle hover:border-brand/40'
   }`;
+// [TR] Mobilde 32px, sm+ 40px ikon. [EN] 32px icon on phones, 40px from sm.
+const ICON_CLS = 'h-8 w-8 sm:h-10 sm:w-10';
 export const walletRowCls =
-  'group flex w-full min-h-[64px] items-center gap-3 rounded-2xl px-3.5 py-3 text-left transition duration-150 hover:bg-brand/[0.06] active:bg-brand/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand motion-reduce:transition-none';
+  'group flex w-full min-h-[54px] items-center gap-3 rounded-2xl px-3 py-2 text-left sm:min-h-[64px] sm:px-3.5 sm:py-3 transition duration-150 hover:bg-brand/[0.06] active:bg-brand/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand motion-reduce:transition-none';
 
-export function WalletOption({ icon, label, trailing, ...buttonProps }) {
+export function WalletOption({ icon, label, sublabel, trailing, ...buttonProps }) {
   return (
-    <div className={walletCardCls()}>
-      <button type="button" className={walletRowCls} {...buttonProps}>
+    <div className={`${walletCardCls()} ${buttonProps.disabled ? 'opacity-60' : ''}`}>
+      <button type="button" className={`${walletRowCls} ${buttonProps.disabled ? 'cursor-not-allowed' : ''}`} {...buttonProps}>
         {icon}
-        <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-textPrimary">{label}</span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[15px] font-semibold text-textPrimary">{label}</span>
+          {sublabel && <span className="block truncate text-xs text-textSecondary">{sublabel}</span>}
+        </span>
         {trailing ?? <ChevronRight className="h-5 w-5 shrink-0 text-textSecondary transition-transform duration-150 group-hover:translate-x-0.5 group-hover:text-textPrimary motion-reduce:transition-none" strokeWidth={2} aria-hidden="true" />}
       </button>
     </div>
@@ -44,10 +50,10 @@ export default function MobileWalletPicker({ lang = 'TR', location, connectors =
     setOpen((v) => !v);
   };
   const links = buildWalletDeepLinks(location);
-  const others = connectors.filter((c) => c.id !== 'injected');
+  const { walletConnect, coinbase } = groupWalletConnectors(connectors, null);
 
   return (
-    <div data-testid="mobile-wallet-picker" className="space-y-2.5">
+    <div data-testid="mobile-wallet-picker" className="space-y-1.5 sm:space-y-2.5">
       <div className={walletCardCls(open)}>
         <button
           type="button"
@@ -57,8 +63,8 @@ export default function MobileWalletPicker({ lang = 'TR', location, connectors =
           onClick={toggle}
           className={walletRowCls}
         >
-          <BrowserWalletBadge />
-          <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-textPrimary">{tr ? 'Cüzdan' : 'Browser wallet'}</span>
+          <BrowserWalletBadge className={ICON_CLS} />
+          <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-textPrimary">{tr ? 'Cüzdan uygulamasında aç' : 'Open in wallet app'}</span>
           {!open && (
             <span className="flex shrink-0 items-center -space-x-1" aria-hidden="true">
               {[MetaMaskBadge, OkxBadge, TrustBadge].map((Badge, i) => (
@@ -80,11 +86,8 @@ export default function MobileWalletPicker({ lang = 'TR', location, connectors =
             }`}
           >
             <div className="min-h-0 overflow-hidden">
-              <div className="border-t border-borderSubtle px-3.5 pb-3.5 pt-3">
-                <p className="mb-2.5 text-xs font-medium text-textSecondary">
-                  {tr ? 'Cüzdan uygulamasında aç' : 'Open in your wallet app'}
-                </p>
-                <ul className="grid grid-cols-2 gap-2">
+              <div className="border-t border-borderSubtle px-1.5 pb-2 pt-2">
+                <ul className="flex flex-nowrap gap-1 overflow-x-auto" aria-label={tr ? 'Cüzdan uygulamasında aç' : 'Open in wallet app'}>
                   {links.map((l) => (
                     <li key={l.id}>
                       <a
@@ -92,11 +95,11 @@ export default function MobileWalletPicker({ lang = 'TR', location, connectors =
                         rel="noopener noreferrer"
                         data-wallet-link={l.id}
                         aria-label={tr ? `${l.name} ile aç` : `Open in ${l.name}`}
-                        className="flex min-h-[56px] items-center gap-2.5 rounded-xl border border-borderSubtle bg-surface px-2.5 py-2 transition duration-150 hover:border-brand/40 hover:bg-brand/[0.06] active:bg-brand/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand motion-reduce:transition-none"
+                        className="flex min-h-[44px] items-center gap-1 whitespace-nowrap rounded-xl border border-borderSubtle bg-surface px-1 py-1 transition duration-150 hover:border-brand/40 hover:bg-brand/[0.06] active:bg-brand/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand motion-reduce:transition-none"
                       >
-                        <WalletLinkIcon id={l.id} className="h-8 w-8" />
-                        {/* [TR] Kutucukta kısa ad (simge zaten tanıtır); tam ad aria-label'da. [EN] Short name; full name in aria-label. */}
-                        <span className="min-w-0 truncate text-sm font-semibold text-textPrimary">{l.name.replace(/\s+Wallet$/, '')}</span>
+                        <WalletLinkIcon id={l.id} className="h-5 w-5" />
+                        {/* [TR] Kısa ad (simge zaten tanıtır); tam ad aria-label'da. [EN] Short name; full name in aria-label. */}
+                        <span className="text-xs font-semibold text-textPrimary">{l.name.replace(/\s+Wallet$/, '')}</span>
                       </a>
                     </li>
                   ))}
@@ -106,14 +109,122 @@ export default function MobileWalletPicker({ lang = 'TR', location, connectors =
           </div>
         )}
       </div>
-      {others.map((connector) => (
-        <WalletOption
-          key={connector.uid}
-          onClick={() => onConnect(connector)}
-          icon={<ConnectorIcon connector={connector} />}
-          label={connector.name}
-        />
-      ))}
+      <WalletConnectRow lang={lang} connector={walletConnect} onConnect={onConnect} />
+      <CoinbaseRow connector={coinbase} onConnect={onConnect} />
+    </div>
+  );
+}
+
+// [TR] 2. seçenek: WalletConnect bağlayıcısı yoksa (proje kimliği yok/geçersiz) satır HİÇ çizilmez.
+export function WalletConnectRow({ lang = 'TR', connector, onConnect }) {
+  if (!connector) return null;
+  const tr = lang === 'TR';
+  return (
+    <WalletOption
+      data-testid="wallet-option-walletconnect"
+      onClick={() => onConnect(connector)}
+      icon={<ConnectorIcon connector={connector} className={ICON_CLS} />}
+      label="WalletConnect"
+      sublabel={tr ? 'Mobil cüzdan uygulaması' : 'Mobile wallet app'}
+    />
+  );
+}
+
+// [TR] 3. seçenek: Coinbase Wallet.
+export function CoinbaseRow({ connector, onConnect }) {
+  if (!connector) return null;
+  return (
+    <WalletOption
+      data-testid="wallet-option-coinbase"
+      onClick={() => onConnect(connector)}
+      icon={<ConnectorIcon connector={connector} className={ICON_CLS} />}
+      label="Coinbase Wallet"
+    />
+  );
+}
+
+// [TR] 1. seçenek (masaüstü / cüzdanın kendi tarayıcısı): tek cüzdan → tek dokunuşla bağlan; birden çok → alt liste.
+//      Hiç yoksa satır pasif ("Kurulu değil").
+// [EN] Option 1 (desktop / in-wallet browser): one wallet connects in one tap; several open a sub-list; none = disabled row.
+export function BrowserWalletsRow({ lang = 'TR', wallets = [], onConnect, renderIcon }) {
+  const tr = lang === 'TR';
+  const [open, setOpen] = useState(false);
+  const iconOf = (c) => (c.icon
+    ? <span className={`flex ${ICON_CLS} shrink-0 items-center justify-center overflow-hidden rounded-[28%]`}>{renderIcon ? renderIcon(c) : <img src={c.icon} alt="" className="h-7 w-7 rounded-md" />}</span>
+    : <BrowserWalletBadge className={ICON_CLS} />);
+  const nameOf = (c) => (c.id === 'injected' && c.name === 'Injected' ? (tr ? 'Tarayıcı cüzdanı' : 'Browser wallet') : c.name);
+  if (wallets.length === 0) {
+    return (
+      <WalletOption
+        data-testid="wallet-option-browser"
+        disabled
+        icon={<BrowserWalletBadge className={ICON_CLS} />}
+        label={tr ? 'Tarayıcı cüzdanı' : 'Browser wallet'}
+        sublabel={tr ? 'Eklenti bulunamadı' : 'No extension found'}
+        trailing={<span className="shrink-0 text-xs font-medium text-textMuted">{tr ? 'Kurulu değil' : 'Not installed'}</span>}
+      />
+    );
+  }
+  if (wallets.length === 1) {
+    const only = wallets[0];
+    return (
+      <WalletOption
+        data-testid="wallet-option-browser"
+        onClick={() => onConnect(only)}
+        icon={iconOf(only)}
+        label={nameOf(only)}
+        sublabel={tr ? 'Bu tarayıcıdaki cüzdan' : 'Wallet in this browser'}
+      />
+    );
+  }
+  return (
+    <div className={walletCardCls(open)} data-testid="wallet-option-browser-group">
+      <button
+        type="button"
+        data-testid="wallet-option-browser"
+        aria-expanded={open}
+        aria-controls="browser-wallet-list"
+        onClick={() => setOpen((v) => !v)}
+        className={walletRowCls}
+      >
+        <BrowserWalletBadge className={ICON_CLS} />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[15px] font-semibold text-textPrimary">{tr ? 'Tarayıcı cüzdanı' : 'Browser wallet'}</span>
+          <span className="block truncate text-xs text-textSecondary">{tr ? `${wallets.length} cüzdan bulundu` : `${wallets.length} wallets found`}</span>
+        </span>
+        <ChevronDown className={`h-5 w-5 shrink-0 text-textSecondary transition-transform duration-200 group-hover:text-textPrimary motion-reduce:transition-none ${open ? 'rotate-180' : ''}`} strokeWidth={2} aria-hidden="true" />
+      </button>
+      {open && (
+        <ul id="browser-wallet-list" className="space-y-1.5 border-t border-borderSubtle px-3 pb-3 pt-3">
+          {wallets.map((c) => (
+            <li key={c.uid || c.id}>
+              <button
+                type="button"
+                data-wallet-connector={c.id}
+                onClick={() => onConnect(c)}
+                className="flex min-h-[56px] w-full items-center gap-3 rounded-xl border border-borderSubtle bg-surface px-3 py-2 text-left transition duration-150 hover:border-brand/40 hover:bg-brand/[0.06] active:bg-brand/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand motion-reduce:transition-none"
+              >
+                {c.icon
+                  ? <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-[28%]">{renderIcon ? renderIcon(c) : <img src={c.icon} alt="" className="h-6 w-6 rounded-md" />}</span>
+                  : <BrowserWalletBadge className="h-8 w-8" />}
+                <span className="min-w-0 flex-1 truncate text-sm font-semibold text-textPrimary">{nameOf(c)}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// [TR] Masaüstü ve cüzdan-içi tarayıcı: aynı üç satır.
+export function WalletChoices({ lang = 'TR', connectors = [], onConnect, renderIcon, win }) {
+  const { browser, walletConnect, coinbase } = groupWalletConnectors(connectors, win);
+  return (
+    <div data-testid="wallet-choices" className="space-y-1.5 sm:space-y-2.5">
+      <BrowserWalletsRow lang={lang} wallets={browser} onConnect={onConnect} renderIcon={renderIcon} />
+      <WalletConnectRow lang={lang} connector={walletConnect} onConnect={onConnect} />
+      <CoinbaseRow connector={coinbase} onConnect={onConnect} />
     </div>
   );
 }
