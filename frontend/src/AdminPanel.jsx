@@ -10,6 +10,15 @@ import AdminSocialLinksPanel from './app/contexts/admin/AdminSocialLinksPanel';
 // [TR] P5 — Zincir sekmesi yalnız açılınca yüklenir. [EN] Chain tab loads on first open.
 const AdminChainPanel = React.lazy(() => import('./app/contexts/admin/AdminChainPanel'));
 
+// Health Checklist: configStale ters anlamlı (true = Redis'ten bayat ayar, kötü); ws* öneri niteliğinde (hata değil).
+const INVERTED_CHECKS = new Set(['configStale']);
+const ADVISORY_CHECKS = new Set(['wsConfigured', 'wsRecommended']);
+function healthCheckTone(key, value) {
+  if (ADVISORY_CHECKS.has(key)) return 'text-warning';
+  const healthy = INVERTED_CHECKS.has(key) ? !value : !!value;
+  return healthy ? 'text-success' : 'text-danger';
+}
+
 const TAB_OVERVIEW = 'overview';
 const TAB_SYNC = 'sync';
 const TAB_FEEDBACK = 'feedback';
@@ -641,7 +650,7 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
               {Object.entries(checks).map(([key, value]) => (
                 <div key={key} className="flex items-center justify-between bg-elevated border border-borderSubtle rounded-lg px-3 py-2 text-sm">
                   <span className="text-textSecondary">{key}</span>
-                  <span className={value ? 'text-success font-semibold' : 'text-danger font-semibold'}>{String(value)}</span>
+                  <span className={`${healthCheckTone(key, value)} font-semibold`}>{String(value)}</span>
                 </div>
               ))}
               {Object.keys(checks).length === 0 && <div className="text-textMuted text-sm">—</div>}

@@ -142,6 +142,19 @@ describe('workflow scripts: stage-runtime-env.sh', function () {
     expect(set.stdout.split('\n')).to.include(`VITE_WALLETCONNECT_PROJECT_ID=${id}`);
   });
 
+  it('vercel-build-env: warns on stderr (no value, stdout unchanged) when WalletConnect id is empty', function () {
+    const empty = runStage('vercel-build-env', { ...BASE_ENV, VITE_WALLETCONNECT_PROJECT_ID: '' });
+    expect(empty.status).to.equal(0);
+    expect(empty.stderr).to.match(/::warning::VITE_WALLETCONNECT_PROJECT_ID boş/);
+    expect(empty.stdout).to.not.match(/::warning|WALLETCONNECT/);
+    const id = 'a'.repeat(32);
+    const set = runStage('vercel-build-env', { ...BASE_ENV, VITE_WALLETCONNECT_PROJECT_ID: id });
+    expect(set.stderr).to.not.match(/::warning::VITE_WALLETCONNECT/);
+    expect(set.stderr).to.not.include(id);
+    expect(set.stdout.split('\n')).to.include(`VITE_WALLETCONNECT_PROJECT_ID=${id}`);
+    expect(empty.stdout).to.equal(set.stdout.replace(`VITE_WALLETCONNECT_PROJECT_ID=${id}\n`, ''));
+  });
+
   it('both Vercel deploy workflows pass VITE_WALLETCONNECT_PROJECT_ID from repo variables', function () {
     for (const f of ['deploy-base-sepolia.yml', 'deploy-runtime-base-sepolia.yml']) {
       const y = fs.readFileSync(path.resolve(__dirname, '../../.github/workflows', f), 'utf8');
