@@ -49,7 +49,7 @@ async function boot({ selfTest, connectDB, loadConfig } = {}) {
   }));
   jest.doMock("../../backend/scripts/services/identityNormalizationGuard", () => ({ verifyIdentityNormalization: jest.fn(async () => true) }));
   jest.doMock("../../backend/scripts/services/dlqProcessor", () => ({ processDLQ: jest.fn() }));
-  jest.doMock("../../backend/scripts/services/referenceTicker", () => ({ refreshReferenceTicker: jest.fn(async () => ({ success: true })) }));
+  jest.doMock("../../backend/scripts/services/referenceTicker", () => ({ refreshReferenceTicker: jest.fn(async () => ({ success: true })), runReferenceTickerJob: jest.fn(async () => ({ success: true })) }));
   for (const j of ["reputationDecay", "rewardOutcomeRecorder", "statsSnapshot", "cleanupSensitiveData", "cleanupUserBankRiskMetadata"]) {
     jest.doMock(`../../backend/scripts/jobs/${j}`, () => new Proxy({}, { get: () => jest.fn(async () => ({ success: true })) }));
   }

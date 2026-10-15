@@ -67,7 +67,7 @@ const {
   runUserBankRiskMetadataCleanup,
 } = require("./jobs/cleanupUserBankRiskMetadata");
 
-const { refreshReferenceTicker } = require("./services/referenceTicker");
+const { runReferenceTickerJob } = require("./services/referenceTicker");
 const { createReadyHandler, createHealthHandler, invalidateReadinessCache } = require("./services/health");
 const { verifyIdentityNormalization } = require("./services/identityNormalizationGuard");
 const { parsePositiveTimerMs } = require("./utils/timeEnv");
@@ -585,12 +585,12 @@ async function bootstrap() {
 
     // [TR] Referans kur şeridi scheduler'ı bilgilendirme amaçlıdır; settlement akışını etkilemez.
     // [EN] Reference ticker scheduler is informational-only and isolated from settlement flows.
-    runScheduledJob("referenceTicker", refreshReferenceTicker, () => {
+    runScheduledJob("referenceTicker", runReferenceTickerJob, () => {
       app.locals.schedulerState.referenceTickerLastRunAt = new Date().toISOString();
     }).catch((err) => logger.warn(`[Scheduler] referenceTicker startup refresh failed: ${err.message}`));
 
     referenceTickerInterval = setInterval(() => {
-      runScheduledJob("referenceTicker", refreshReferenceTicker, () => {
+      runScheduledJob("referenceTicker", runReferenceTickerJob, () => {
         app.locals.schedulerState.referenceTickerLastRunAt = new Date().toISOString();
       });
     }, REFERENCE_TICKER_REFRESH_INTERVAL_MS);
