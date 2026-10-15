@@ -83,6 +83,20 @@ export const isConfiguredTestToken = (address, env = import.meta.env) => {
     .some((c) => String(c || '').toLowerCase() === a);
 };
 
+// [TR] Zincir başına harici faucet bağlantısı (yalnız Base Sepolia -> Circle).
+// [EN] Per-chain external faucet link (Base Sepolia -> Circle only).
+const EXTERNAL_FAUCET_URL_BY_CHAIN = {
+  [BASE_SEPOLIA_CHAIN_ID]: 'https://faucet.circle.com/',
+};
+
+// [TR] Token yapılandırılmış test token'ı değilse ve zincir için faucet varsa URL; aksi halde null (mint akışı).
+// [EN] URL when token is not a configured test token and the chain has a faucet; otherwise null (mint flow).
+export const getExternalFaucetUrl = (chainId, tokenAddress, env = import.meta.env) => {
+  const id = Number(chainId);
+  if (!Object.prototype.hasOwnProperty.call(EXTERNAL_FAUCET_URL_BY_CHAIN, id)) return null;
+  if (isConfiguredTestToken(tokenAddress, env)) return null;
+  return EXTERNAL_FAUCET_URL_BY_CHAIN[id];
+};
 
 const EXPLORER_BASE_BY_TARGET = {
   [TARGET_CHAIN_BASE]: 'https://basescan.org',

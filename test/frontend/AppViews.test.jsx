@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { buildAppViews } from '../../frontend/src/app/AppViews';
 import { resolveNewTxGate } from '../../frontend/src/app/txGate';
 
-afterEach(() => cleanup());
+afterEach(() => { cleanup(); vi.unstubAllEnvs(); });
 
 const baseCtx = {
   lang: 'EN',
@@ -105,6 +105,8 @@ describe('AppViews market side-aware rendering', () => {
   });
 
   it('testnet shows the drop-icon faucet chips and mints the tapped token', () => {
+    vi.stubEnv('VITE_USDT_ADDRESS', '0x1');
+    vi.stubEnv('VITE_USDC_ADDRESS', '0x2');
     const handleMint = vi.fn();
     const views = buildAppViews({ ...baseCtx, isFaucetEnabled: true, handleMint });
     render(<div>{views.renderMarket()}</div>);
