@@ -14,7 +14,7 @@ const AdminChainPanel = React.lazy(() => import('./app/contexts/admin/AdminChain
 const INVERTED_CHECKS = new Set(['configStale']);
 const ADVISORY_CHECKS = new Set(['wsConfigured', 'wsRecommended']);
 function healthCheckTone(key, value) {
-  if (ADVISORY_CHECKS.has(key)) return 'text-warning';
+  if (ADVISORY_CHECKS.has(key)) return value ? 'text-success' : 'text-warning';
   const healthy = INVERTED_CHECKS.has(key) ? !value : !!value;
   return healthy ? 'text-success' : 'text-danger';
 }

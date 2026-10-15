@@ -32,6 +32,13 @@ describe('AdminPanel Health Checklist colors', () => {
     expect(valueEl('wsConfigured')).not.toHaveClass('text-danger');
   });
 
+  it('wsConfigured=true is green', async () => {
+    renderWithChecks({ wsConfigured: true });
+    await waitFor(() => expect(screen.getAllByText('wsConfigured').length).toBeGreaterThan(0));
+    expect(valueEl('wsConfigured')).toHaveTextContent('true');
+    expect(valueEl('wsConfigured')).toHaveClass('text-success');
+  });
+
   it('configStale=true is red', async () => {
     renderWithChecks({ configStale: true });
     await waitFor(() => expect(screen.getAllByText('configStale').length).toBeGreaterThan(0));
