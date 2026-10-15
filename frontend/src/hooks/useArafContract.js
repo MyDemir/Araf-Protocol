@@ -24,6 +24,7 @@ import { setMakerChallengeWindowMs } from '../app/contexts/trade-room/tradeTimel
 import { getSupportedChainsMap, isConfiguredTestToken, isFaucetChainId, isMintTokenEnabled } from '../app/chainPolicy';
 import { ARAF_CONTRACT_ERROR_ABI, decorateContractError } from '../app/contractErrors';
 import { diagnoseWriteError, applyDiagnosis, stripAddresses } from '../app/walletRpcDiagnosis';
+import { addKnownTradeIds } from '../app/knownTrades';
 
 const ArafEscrowABI = parseAbi([
   'function registerWallet()',
@@ -293,6 +294,33 @@ export function resolveChainMismatch({ walletChainId, expectedChainId = null, su
  * [TR] Okuma hataları varsayılan değerle maskelenmez: bilinmeyen durum çağırana hata olarak iletilir.
  * [EN] Read failures are surfaced to the caller instead of being masked by defaults.
  */
+// [TR] Yedek görünüm için toplu getTrade okuması: Multicall3 olan zincirde tek eth_call (allowFailure: tek id
+//      hatası diğerlerini düşürmez). Multicall yoksa null döner; çağıran sınırlı eşzamanlılıkla tek tek okur.
+// [EN] Batched getTrade for the chain fallback; null when multicall is unavailable (caller reads one by one).
+const supportsMulticall = (publicClient) =>
+  typeof publicClient?.multicall === 'function'
+  && (publicClient.chain === undefined || publicClient.chain?.contracts?.multicall3 !== undefined);
+
+export async function readTradesBatch(publicClient, tradeIds, escrowAddress = ESCROW_ADDRESS) {
+  if (!Array.isArray(tradeIds) || tradeIds.length === 0) return [];
+  if (!escrowAddress || !supportsMulticall(publicClient)) return null;
+  const address = getAddress(escrowAddress);
+  const results = await publicClient.multicall({
+    contracts: tradeIds.map((id) => ({ address, abi: ArafEscrowABI, functionName: 'getTrade', args: [BigInt(id)] })),
+    allowFailure: true,
+  });
+  return results.map((r) => (r?.status === 'success' ? r.result : null));
+}
+
+// [TR] Fill receipt'inden çıkan tradeId bilinen işlemler kaydına yazılır (cüzdan+escrow+zincir anahtarlı). Kayıt
+//      hatası fill akışını asla bozmaz.
+export function rememberFilledTradeId({ wallet, chainId, tradeId, escrowAddress = ESCROW_ADDRESS, storage } = {}) {
+  if (tradeId === null || tradeId === undefined) return;
+  try {
+    addKnownTradeIds({ wallet, escrow: escrowAddress, chainId }, [tradeId], storage);
+  } catch { /* depolama yok: yedek görünüm bu id'yi bilmez, akış sürer */ }
+}
+
 const requireEscrowConfigured = () => {
   if (!_isValidAddress) throw new Error('VITE_ESCROW_ADDRESS tanımlı değil.');
 };
@@ -305,6 +333,9 @@ export function useArafContract({ expectedChainId = null } = {}) {
   // [TR] Cüzdan bağlı değilse (chainId yok) config zincirine düşülür; yazma zaten walletClient ister.
   const chainId = account?.chainId ?? configChainId;
   const supportedChains = getSupportedChainsMap();
+  // [TR] Bilinen işlem kaydının zincir anahtarı: tx'in gönderildiği cüzdan zinciri (App/useAppSessionData ile aynı kaynak).
+  const knownTradesChainId = chainId;
+  const accountAddress = account?.address ?? null;
 
   // [TR] MAKER_CHALLENGE_WINDOW bir kez okunur; okunamazsa timeline 24 saat yedeğini kullanır.
   // [EN] Read MAKER_CHALLENGE_WINDOW once; on failure the timeline keeps its 24h fallback.
@@ -453,12 +484,14 @@ export function useArafContract({ expectedChainId = null } = {}) {
     async (orderId, fillAmount, childTradeRef) => {
       const receipt = await writeContract("fillSellOrder", [orderId, fillAmount, childTradeRef]);
       const args = extractOrderFilledArgs(receipt, orderId, ESCROW_ADDRESS);
+      const tradeId = args?.tradeId ? BigInt(args.tradeId) : null;
+      rememberFilledTradeId({ wallet: accountAddress, chainId: knownTradesChainId, tradeId });
       return {
         receipt,
-        tradeId: args?.tradeId ? BigInt(args.tradeId) : null,
+        tradeId,
       };
     },
-    [writeContract]
+    [writeContract, accountAddress, knownTradesChainId]
   );
 
   const cancelSellOrder = useCallback(
@@ -476,12 +509,14 @@ export function useArafContract({ expectedChainId = null } = {}) {
     async (orderId, fillAmount, childTradeRef) => {
       const receipt = await writeContract("fillBuyOrder", [orderId, fillAmount, childTradeRef]);
       const args = extractOrderFilledArgs(receipt, orderId, ESCROW_ADDRESS);
+      const tradeId = args?.tradeId ? BigInt(args.tradeId) : null;
+      rememberFilledTradeId({ wallet: accountAddress, chainId: knownTradesChainId, tradeId });
       return {
         receipt,
-        tradeId: args?.tradeId ? BigInt(args.tradeId) : null,
+        tradeId,
       };
     },
-    [writeContract]
+    [writeContract, accountAddress, knownTradesChainId]
   );
 
   const cancelBuyOrder = useCallback(
@@ -926,6 +961,19 @@ export function useArafContract({ expectedChainId = null } = {}) {
           });
         } catch (err) {
           console.error('[ArafContract] getTrade hatası:', err.message);
+          return null;
+        }
+      },
+      [publicClient]
+    ),
+    // [TR] Yedek görünüm toplu okuyucusu; multicall yoksa null (çağıran tek tek okur).
+    getTradesBatch: useCallback(
+      async (tradeIds) => {
+        if (!_isValidAddress) return null;
+        try {
+          return await readTradesBatch(publicClient, tradeIds);
+        } catch (err) {
+          console.error('[ArafContract] getTradesBatch hatası:', err.message);
           return null;
         }
       },

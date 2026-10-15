@@ -1,6 +1,7 @@
 import { buildGoToTradeRoomAction } from '../../actions/tradeNavigationActions';
 import { getStateLabel } from '../../copy/states';
 import OperationTradeCard, { compareActiveTradePriority } from '../operations/OperationTradeCard';
+import ChainFallbackTradesPanel from '../trade-room/ChainFallbackTradesPanel';
 
 const ACTIVE_TRADE_FILTERS = ['ALL', 'LOCKED', 'PAID', 'CHALLENGED'];
 
@@ -15,7 +16,10 @@ export const ActiveTradesPanel = ({
   setChargebackAccepted,
   setCurrentView,
   setShowProfileModal,
+  chainFallback = null,
 }) => {
+  // [TR] P4: backend listesi alınamadıysa liste zincirden gelir (elle numara girişiyle birlikte).
+  if (chainFallback?.active) return <ChainFallbackTradesPanel lang={lang} chainFallback={chainFallback} />;
   const filteredEscrows = (activeTradesFilter === 'ALL' ? activeEscrows : activeEscrows.filter((e) => e.state === activeTradesFilter))
     .slice()
     .sort(compareActiveTradePriority);

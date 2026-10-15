@@ -2,6 +2,7 @@ import { Wallet } from 'lucide-react';
 import React from 'react';
 import { ProfileNav } from './ProfilePanels';
 import ProfileContextPanel from './ProfileContextPanel';
+import ChainFallbackTradesPanel from '../trade-room/ChainFallbackTradesPanel';
 
 export const ProfileContextPage = (props) => {
   const { lang = 'EN', initialActiveTab = 'account', setInitialActiveTab } = props;
@@ -16,6 +17,15 @@ export const ProfileContextPage = (props) => {
 
   // [TR] Oturum yokken 8 sekme boş "—" gösteriyordu; tek bir bağlan kartı yeterli.
   // [EN] Without a session the 8 tabs only showed "—"; a single connect card is enough.
+  // [TR] P4: backend oturumu doğrulanamıyorken (sunucu yok) bağlı cüzdanın işlemleri zincirden gösterilir.
+  if (props.isConnected && !props.isAuthenticated && props.chainFallback?.active) {
+    return (
+      <div className="w-full max-w-[1200px] px-4 md:px-8">
+        <h1 className="text-2xl font-bold text-textPrimary mb-4">{lang === 'TR' ? 'Profil Merkezi' : 'Profile Center'}</h1>
+        <div className="max-w-xl"><ChainFallbackTradesPanel lang={lang} chainFallback={props.chainFallback} /></div>
+      </div>
+    );
+  }
   if (!props.isConnected || !props.isAuthenticated) {
     return (
       <div className="w-full max-w-[1200px] px-4 md:px-8">

@@ -10,6 +10,9 @@ import AppShell from './app/shell/AppShell';
 import { switchToExpectedChain } from './app/switchNetwork';
 import { useSessionActions } from './app/providers/SessionProvider';
 import { useAppSessionData } from './app/useAppSessionData';
+import { useChainFallbackTrades, useChainFallbackRoomSync } from './app/useChainFallbackTrades';
+import { shouldUseChainFallback } from './app/chainFallback';
+import { removeKnownTradeIds } from './app/knownTrades';
 // [TR] Admin paneli yalnız yöneticiler içindir; ayrı chunk olarak ilk ihtiyaçta yüklenir.
 // [EN] The admin panel is for admins only; loaded as a separate chunk on first use.
 const AdminPanel = lazyWithRetry(() => import('./AdminPanel'));
@@ -228,6 +231,7 @@ function App() {
     mintToken,
     getFirstSuccessfulTradeAt,
     getTrade,
+    getTradesBatch,
   } = useArafContract({ expectedChainId: deploymentChainId });
 
   const {
@@ -291,6 +295,7 @@ function App() {
     authenticatedFetch,
     fetchStats,
     fetchMyTrades,
+    tradesBackendUnavailable,
     tradeState,
     setTradeState,
     userRole,
@@ -337,6 +342,59 @@ function App() {
     marketFilters,
     devScenarioActive,
   });
+  // [TR] P4: backend işlem listesi alınamadığında bilinen tradeId'ler kontrattan okunur. Backend sağlıklıyken
+  //      `chainFallbackEnabled` false'tur ve hiçbir okuma yapılmaz (mevcut akış aynen kalır).
+  const chainFallbackEnabled = shouldUseChainFallback({ backendTradesUnavailable: tradesBackendUnavailable, isConnected, address, devScenarioActive });
+  const chainFallbackState = useChainFallbackTrades({
+    enabled: chainFallbackEnabled,
+    viewActive: currentView === 'home' || currentView === 'profile' || currentView === 'tradeRoom',
+    address,
+    chainId,
+    escrowAddress: import.meta.env.VITE_ESCROW_ADDRESS,
+    readTrade: getTrade,
+    readTrades: getTradesBatch,
+    supportedTokens: SUPPORTED_TOKEN_ADDRESSES,
+    tokenDecimalsMap,
+    onRetryBackend: fetchMyTrades,
+  });
+  const openChainFallbackTrade = React.useCallback((trade) => {
+    if (!trade?.onchainId) return;
+    const { role, cancelStatus: chainCancelStatus, ...roomTrade } = trade;
+    setActiveTrade(roomTrade);
+    setUserRole(role);
+    setTradeState(roomTrade.state);
+    setCancelStatus(chainCancelStatus ?? null);
+    setChargebackAccepted(false);
+    setCurrentView('tradeRoom');
+  }, [setActiveTrade, setUserRole, setTradeState, setCancelStatus, setChargebackAccepted]);
+  const chainFallback = React.useMemo(() => ({
+    active: chainFallbackEnabled,
+    trades: chainFallbackState.trades,
+    loading: chainFallbackState.loading,
+    loadedAt: chainFallbackState.loadedAt,
+    submitManualId: chainFallbackState.submitManualId,
+    openTrade: openChainFallbackTrade,
+  }), [chainFallbackEnabled, chainFallbackState.trades, chainFallbackState.loading, chainFallbackState.loadedAt, chainFallbackState.submitManualId, openChainFallbackTrade]);
+
+  // [TR] Açık yedek odayı zincirle eşitler; cüzdan değişip görüntüleyen artık aynı rolde taraf değilse odayı kapatır.
+  useChainFallbackRoomSync({
+    enabled: chainFallbackEnabled,
+    activeTrade,
+    address,
+    userRole,
+    trades: chainFallbackState.trades,
+    states: chainFallbackState.states,
+    setActiveTrade,
+    setCancelStatus,
+    setChargebackAccepted,
+    setCurrentView,
+  });
+
+  // [TR] Kapanan işlem (finishTrade) bilinen işlemler kaydından çıkarılır; yedek okuma onu bir daha istemez.
+  const forgetKnownTrade = React.useCallback((onchainId) => {
+    removeKnownTradeIds({ wallet: address, escrow: import.meta.env.VITE_ESCROW_ADDRESS, chainId }, [onchainId]);
+  }, [address, chainId]);
+
   const txGate = React.useMemo(() => resolveNewTxGate({
     isPaused, rpcChecked, backendUnreachable: infra.backend, rpcUnreachable: infra.rpc, configStale: infra.configStale, serviceDegraded: infra.degraded, escrowMismatch: infra.escrowMismatch, lang,
   }), [isPaused, rpcChecked, infra.backend, infra.rpc, infra.configStale, infra.degraded, infra.escrowMismatch, lang]);
@@ -534,8 +592,10 @@ function App() {
   React.useEffect(() => {
     if (!authChecked || devScenarioActive) return;
     if (isConnected && isAuthenticated) return;
+    // [TR] P4: yedek görünümde profil (işlem listesi) ve işlem odası oturumsuz da açık kalır.
+    if (chainFallbackEnabled && (currentView === 'profile' || currentView === 'tradeRoom')) return;
     if (SESSION_ONLY_VIEWS.has(currentView)) setCurrentView('home');
-  }, [authChecked, devScenarioActive, isConnected, isAuthenticated, currentView]);
+  }, [authChecked, devScenarioActive, isConnected, isAuthenticated, currentView, chainFallbackEnabled]);
 
 
   const handleTermsRequired = React.useCallback((wallet) => setTermsPromptWallet(String(wallet || '').toLowerCase()), []);
@@ -781,9 +841,11 @@ function App() {
     setCurrentView,
     getTrade,
     pinTradeState,
+    onTradeFinished: forgetKnownTrade,
   }), [
     getTrade,
     pinTradeState,
+    forgetKnownTrade,
     lang,
     activeTrade,
     effectiveActiveEscrows,
@@ -1115,6 +1177,7 @@ function App() {
     profileContextTab,
     setProfileContextTab,
     labProfile: lab?.profile ?? null,
+    chainFallback,
     reputationPolicy,
     isBanned,
     decayReputation: lab?.profile ? lab.setter('decay_reputation') : decayReputationAndRefresh,
