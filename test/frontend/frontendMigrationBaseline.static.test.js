@@ -95,7 +95,7 @@ const extractObjectCall = (source, callName) => {
 
 describe('frontend migration scaffold baseline', () => {
   it('keeps App.jsx as composition wiring while action modules own contract handlers and session orchestration', () => {
-    expect(appSource).toMatch(/import\s+\{\s*useAccount,\s*useConnect,\s*useDisconnect,\s*useSignMessage,\s*useChainId,\s*usePublicClient\s*\}\s+from\s+['"]wagmi['"]/);
+    expect(appSource).toMatch(/import\s+\{\s*useAccount,\s*useConnect,\s*useDisconnect,\s*useSignMessage,\s*useSwitchChain,\s*useChainId,\s*usePublicClient\s*\}\s+from\s+['"]wagmi['"]/);
     expect(appSource).toContain("import { useSessionActions } from './app/providers/SessionProvider';");
     expect(appSource).not.toContain("import { SiweMessage } from 'siwe';");
     expect(appSource).toContain("import { useAppSessionData } from './app/useAppSessionData';");

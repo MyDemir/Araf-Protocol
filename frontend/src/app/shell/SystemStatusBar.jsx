@@ -3,6 +3,7 @@ import { EyeOff, LoaderCircle, ShieldAlert, TriangleAlert, X } from 'lucide-reac
 import { WALLET_AGE_MIN_DAYS } from '../walletAge';
 import { tx as t } from '../copy';
 import { isTestnetBuild } from '../chainPolicy';
+import { getExpectedChain, switchChainLabel } from '../switchNetwork';
 import { isCriticalStatus, useStatusDismissals } from './statusDismissal';
 import { ENV_ERROR_CODES, envError, envErrorMessage } from '../envErrorCodes';
 import { useInfraHealth } from '../infraHealth';
@@ -22,6 +23,7 @@ export const resolveSystemStatuses = ({
   supportedChains = {},
   isWalletRegistered = null,
   isRegisteringWallet = false,
+  isSwitchingChain = false,
   sybilStatus = null,
   walletAgeRemainingDays = null,
   activeTrade = null,
@@ -57,6 +59,8 @@ export const resolveSystemStatuses = ({
       message: names
         ? t(lang, `Yanlış Ağ! Lütfen ${names} ağına geçin.`, `Wrong Network! Please switch to ${names}.`)
         : t(lang, 'Lütfen desteklenen ağa geçin.', 'Please switch to a supported network.'),
+      action: 'switch_chain',
+      isActionLoading: isSwitchingChain,
     });
   }
 
@@ -202,6 +206,8 @@ export const SystemStatusBar = ({
   isWalletRegistered = null,
   isRegisteringWallet = false,
   onRegisterWallet = null,
+  isSwitchingChain = false,
+  onSwitchChain = null,
   sybilStatus = null,
   walletAgeRemainingDays = null,
   activeTrade = null,
@@ -230,6 +236,7 @@ export const SystemStatusBar = ({
     supportedChains,
     isWalletRegistered,
     isRegisteringWallet,
+    isSwitchingChain,
     sybilStatus,
     walletAgeRemainingDays,
     activeTrade,
@@ -243,6 +250,8 @@ export const SystemStatusBar = ({
       isTestnet={isTestnet}
       isRegisteringWallet={isRegisteringWallet}
       onRegisterWallet={onRegisterWallet}
+      isSwitchingChain={isSwitchingChain}
+      onSwitchChain={onSwitchChain}
       lang={lang}
     >
       {children}
@@ -250,7 +259,7 @@ export const SystemStatusBar = ({
   );
 };
 
-const SystemStatusBarView = ({ statuses, isTestnet, isRegisteringWallet, onRegisterWallet, lang, children }) => {
+const SystemStatusBarView = ({ statuses, isTestnet, isRegisteringWallet, onRegisterWallet, isSwitchingChain, onSwitchChain, lang, children }) => {
   const { isDismissed, dismiss, restore, forget } = useStatusDismissals();
   const sectionRef = React.useRef(null);
   const pendingFocusRef = React.useRef(null);
@@ -336,6 +345,17 @@ const SystemStatusBarView = ({ statuses, isTestnet, isRegisteringWallet, onRegis
                       className="bg-warning text-black px-4 py-1.5 rounded-lg text-xs font-bold hover:opacity-90 disabled:opacity-50 transition shrink-0"
                     >
                       {isRegisteringWallet ? <LoaderCircle className="w-4 h-4 animate-spin" strokeWidth={1.8} aria-hidden="true" /> : (lang === 'TR' ? 'Kaydet' : 'Register')}
+                    </button>
+                  )}
+                  {status.action === 'switch_chain' && (
+                    <button
+                      type="button"
+                      data-testid="status-switch-chain"
+                      onClick={onSwitchChain || undefined}
+                      disabled={isSwitchingChain}
+                      className="bg-danger text-[color:var(--color-on-danger)] px-4 py-1.5 rounded-lg text-xs font-bold hover:opacity-90 disabled:opacity-50 transition shrink-0"
+                    >
+                      {isSwitchingChain ? <LoaderCircle className="w-4 h-4 animate-spin" strokeWidth={1.8} aria-hidden="true" /> : switchChainLabel(lang, getExpectedChain().name)}
                     </button>
                   )}
                   {critical ? (

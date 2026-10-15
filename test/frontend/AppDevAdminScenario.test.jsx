@@ -7,6 +7,7 @@ vi.mock('wagmi', () => ({
   useConnect: () => ({ connect: vi.fn(), connectors: [] }),
   useDisconnect: () => ({ disconnect: vi.fn() }),
   useSignMessage: () => ({ signMessageAsync: vi.fn() }),
+  useSwitchChain: () => ({ switchChainAsync: vi.fn(), isPending: false }),
   useChainId: () => 31337,
   usePublicClient: () => ({}),
 }));
