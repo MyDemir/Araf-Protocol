@@ -247,24 +247,18 @@ describe('AppModals side-aware behaviors', () => {
   });
 
 
-  it('lets maker modal reveal payment-risk technical disclosure on demand', async () => {
-    const user = userEvent.setup();
+  it('maker modal shows a compact payment-risk card without raw technical fields', () => {
+    vi.stubEnv('DEV', true);
     const modals = buildAppModals(makeCtx({ profileTab: 'ayarlar', showProfileModal: false }));
 
     render(<div>{modals.renderMakerModal()}</div>);
 
-    expect(screen.getAllByText(/Payment method complexity/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Payment method complexity/i)).toHaveLength(1);
     expect(screen.getAllByText('Medium').length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/not a user trust score/i).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: /technical disclosure/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/minBondSurchargeBps/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/warningKey/i)).not.toBeInTheDocument();
-
-    await user.click(screen.getAllByRole('button', { name: /Show technical disclosure/i })[0]);
-
-    expect(screen.getAllByText(/minBondSurchargeBps/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/feeSurchargeBps/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/warningKey/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/BANK_TRANSFER_CONFIRMATION_REQUIRED/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Preview\/config only/i)).not.toBeInTheDocument();
   });
 
   it('no longer ships a duplicate profile modal (Profile Center page is the only profile surface)', () => {

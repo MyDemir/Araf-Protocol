@@ -122,6 +122,7 @@ export default function PaymentRiskBadge({
   lang = 'TR',
   riskEntry,
   compact = false,
+  showMainExplanation = false,
   defaultTechnicalOpen = false,
 }) {
   if (!riskEntry) return null;
@@ -133,14 +134,21 @@ export default function PaymentRiskBadge({
     //      the explanation stays as a tooltip and screen-reader text. Generic/restricted warnings stay visible.
     const riskLevel = String(riskEntry.riskLevel || 'MEDIUM').toUpperCase();
     const chipClass = RISK_LEVEL_CLASS[riskLevel] || RISK_LEVEL_CLASS.MEDIUM;
+    const desc = riskEntry?.description?.[lang] || riskEntry?.description?.EN || '';
+    const mainExplanation = showMainExplanation
+      ? desc || getPaymentRiskSummaryCopy('operationalExplanation', lang)
+      : '';
     const explanation = `${getPaymentRiskSummaryCopy('subtitle', lang)} ${getPaymentRiskSummaryCopy('notTrustScore', lang)}`;
     return (
       <div className="mt-1.5" title={explanation}>
         <span className="inline-flex items-center gap-1.5 text-[11px] text-textMuted">
-          {getPaymentRiskSummaryCopy('compactTitle', lang)}
+          {getPaymentRiskSummaryCopy(showMainExplanation ? 'title' : 'compactTitle', lang)}
           <span className={`text-[10px] px-2 py-0.5 rounded border font-bold ${chipClass}`}>{getPaymentRiskLevelLabel(riskLevel, lang)}</span>
         </span>
         <span className="sr-only">{explanation}</span>
+        {mainExplanation && (
+          <p className="mt-1 text-sm leading-snug text-textSecondary">{mainExplanation}</p>
+        )}
         {riskEntry?.generic === true && (
           <p className="mt-1 text-[11px] text-warning leading-snug">{getPaymentRiskSummaryCopy('genericWarning', lang)}</p>
         )}
@@ -154,7 +162,9 @@ export default function PaymentRiskBadge({
   return (
     <div className="mt-3 p-3 rounded-xl border border-borderStrong bg-surface">
       <PaymentRiskSummary lang={lang} riskEntry={riskEntry} compact={false} />
-      <PaymentRiskTechnicalDisclosure lang={lang} riskEntry={riskEntry} defaultOpen={defaultTechnicalOpen} />
+      {import.meta.env.DEV && (
+        <PaymentRiskTechnicalDisclosure lang={lang} riskEntry={riskEntry} defaultOpen={defaultTechnicalOpen} />
+      )}
     </div>
   );
 }
