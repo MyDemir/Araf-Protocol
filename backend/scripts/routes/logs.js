@@ -23,6 +23,15 @@ function scrubClientErrorText(value) {
     .replace(/\b(eyJ[^\s]+)\b/g, "[REDACTED]");
 }
 
+// [TR] Teşhis alanları scrub'sız loglanır; yalnız sıkı beyaz liste regex'lerine uyanlar geçer.
+function pickDiagFields({ diag, rpcCode, selector }) {
+  const out = {};
+  if (typeof diag === "string" && /^[A-Za-z0-9:_-]{1,64}$/.test(diag)) out.diag = diag;
+  if (Number.isInteger(rpcCode) && rpcCode >= -99999 && rpcCode <= 99999) out.rpcCode = rpcCode;
+  if (typeof selector === "string" && /^0x[0-9a-fA-F]{8}$/.test(selector)) out.selector = selector;
+  return out;
+}
+
 router.post("/client-error", clientLogLimiter, (req, res) => {
   const { message, stack, componentStack, url } = req.body || {};
   if (!message || typeof message !== "string") return res.status(400).json({ error: "message alanı zorunludur." });
@@ -31,6 +40,7 @@ router.post("/client-error", clientLogLimiter, (req, res) => {
     url: url ? stripLogControlChars(String(url).slice(0, 200)) : undefined,
     stack: stack ? scrubClientErrorText(String(stack).slice(0, 2000)) : undefined,
     componentStack: componentStack ? scrubClientErrorText(String(componentStack).slice(0, 1000)) : undefined,
+    ...pickDiagFields(req.body || {}),
     userAgent: stripLogControlChars(req.headers["user-agent"]?.slice(0, 200)),
   });
   res.status(204).end();

@@ -23,7 +23,7 @@ import { resolveClientErrorLogUrl } from '../app/apiConfig';
 import { setMakerChallengeWindowMs } from '../app/contexts/trade-room/tradeTimeline';
 import { getSupportedChainsMap, isConfiguredTestToken, isFaucetChainId, isMintTokenEnabled } from '../app/chainPolicy';
 import { ARAF_CONTRACT_ERROR_ABI, decorateContractError } from '../app/contractErrors';
-import { diagnoseWriteError, applyDiagnosis, formatDiagnosisForLog, stripAddresses } from '../app/walletRpcDiagnosis';
+import { diagnoseWriteError, applyDiagnosis, stripAddresses } from '../app/walletRpcDiagnosis';
 
 const ArafEscrowABI = parseAbi([
   'function registerWallet()',
@@ -415,7 +415,7 @@ export function useArafContract({ expectedChainId = null } = {}) {
           applyDiagnosis(error, diag);
         } catch { /* teşhis asla asıl hatayı gölgelemez */ }
       }
-      const errorMessage = stripAddresses(rawMessage) + formatDiagnosisForLog(diag);
+      const errorMessage = stripAddresses(rawMessage);
       
       //Hatayı sessizce backend log dosyasına gönder (Kullanıcı arayüzünü dondurmaz)
       const logUrl = resolveClientErrorLogUrl();
@@ -425,6 +425,9 @@ export function useArafContract({ expectedChainId = null } = {}) {
         body: JSON.stringify({
           level: "ERROR",
           message: `[CONTRACT-REVERT] ${functionName}: ${errorMessage}`,
+          diag: diag.kind,
+          rpcCode: diag.rpcCode ?? undefined,
+          selector: diag.selector ?? undefined,
           url: window.location.href,
           wallet: walletClient?.account?.address
         })

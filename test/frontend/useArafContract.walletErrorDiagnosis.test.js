@@ -49,7 +49,7 @@ describe('cuzdan hatasi teshisi', () => {
     const err = await call(c).catch((e) => e);
     expect(simulateContract).toHaveBeenCalledTimes(1);
     expect(err.shortMessage).toBe('Bu tier için seviyeniz yetersiz.');
-    expect(logBody().message).toContain('diag=contract-revert:TierNotAllowed');
+    expect(logBody().diag).toBe('contract-revert:TierNotAllowed');
   });
 
   it('(b) -32029 + simulasyon basarili + 84532: cuzdan RPC mesaji', async () => {
@@ -59,9 +59,10 @@ describe('cuzdan hatasi teshisi', () => {
     const err = await call(c).catch((e) => e);
     expect(err.shortMessage).toContain('https://sepolia.base.org');
     expect(err.shortMessage).toContain('cüzdanınızın ağ bağlantısından');
-    const msg = logBody().message;
-    expect(msg).toContain('diag=wallet-rpc');
-    expect(msg).toContain('rpcCode=-32029');
+    expect(logBody().diag).toBe('wallet-rpc-limit');
+    expect(logBody().rpcCode).toBe(-32029);
+    expect(simulateContract).not.toHaveBeenCalled();
+    expect(logBody().message).not.toContain('diag=');
   });
 
   it('(b2) bilinmeyen zincirde adres verilmez; 8453 mainnet adresi', async () => {
@@ -79,7 +80,7 @@ describe('cuzdan hatasi teshisi', () => {
     const err = await call(c).catch((e) => e);
     expect(simulateContract).not.toHaveBeenCalled();
     expect(err.shortMessage).toBe('Cüzdanınızda işlem ücreti (gas) için yeterli ETH yok. Base Sepolia ETH ekleyip tekrar deneyin.');
-    expect(logBody().message).toContain('diag=wallet-insufficient-gas');
+    expect(logBody().diag).toBe('wallet-insufficient-gas');
   });
 
   it('(c) kullanici reddi: simulasyon yok, mesaj degismez', async () => {
@@ -131,6 +132,32 @@ describe('cuzdan hatasi teshisi', () => {
     await call(c).catch(() => {});
     const msg = logBody().message;
     expect(msg).not.toMatch(/0x[0-9a-fA-F]{40}/);
-    expect(msg).toContain('diag=wallet-rpc');
+    expect(logBody().diag).toBe('wallet-rpc');
+  });
+
+  it('gas station / EIP-7702: wallet-gas-included, simulasyon yok', async () => {
+    writeContract.mockRejectedValue(new Error('The contract function "registerWallet" reverted with the following reason: Gas Station 4f2: Chain must support EIP-7702 for sponsored or gas included transaction'));
+    const c = await load();
+    const err = await call(c).catch((e) => e);
+    expect(simulateContract).not.toHaveBeenCalled();
+    expect(err.shortMessage).toBe('Cüzdanınız işlem ücretini token ile ödemeyi (gas station) denedi; bu ağda desteklenmiyor. Cüzdanınıza Base Sepolia ETH ekleyip tekrar deneyin.');
+    expect(logBody().diag).toBe('wallet-gas-included');
+  });
+
+  it('gas station: bilinmeyen zincirde yalniz ETH (EN)', async () => {
+    const { diagnoseWriteError } = await import('../../frontend/src/app/walletRpcDiagnosis');
+    const d = await diagnoseWriteError({ error: new Error('Gas Station x: EIP7702 required'), chainId: 1, lang: 'EN' });
+    expect(d.kind).toBe('wallet-gas-included');
+    expect(d.message).toContain('Add ETH to your wallet');
+  });
+
+  it('-32005 / exceeds defined limit: wallet-rpc-limit, simulasyon yok', async () => {
+    writeContract.mockRejectedValue(Object.assign(new Error('Request exceeds defined limit.'), { code: -32005 }));
+    const c = await load();
+    const err = await call(c).catch((e) => e);
+    expect(simulateContract).not.toHaveBeenCalled();
+    expect(err.shortMessage).toContain('https://sepolia.base.org');
+    expect(logBody().diag).toBe('wallet-rpc-limit');
+    expect(logBody().rpcCode).toBe(-32005);
   });
 });
