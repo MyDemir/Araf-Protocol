@@ -3,6 +3,7 @@ import { normalizeOrderSide, resolveOrderActionFns, resolvePaymentRiskEntry } fr
 import { buildApiUrl } from '../apiConfig';
 import { fmtNum } from '../copy';
 import { computeCreateAllowance } from './allowanceMath';
+import { checkTokenBalance } from './balanceGuard';
 import { computeMinFillRaw, parseDecimalToUnits } from './decimalUnits';
 import { isPayoutProfileSaved, profileRequiredMessage } from '../payoutProfileGate';
 import { enforceTxGate } from '../txGate';
@@ -128,6 +129,7 @@ export const buildCreateOrderAction = ({
   showToast,
   getTokenDecimals,
   getAllowance,
+  getTokenBalance,
   approveToken,
   createSellOrder,
   createBuyOrder,
@@ -278,6 +280,22 @@ export const buildCreateOrderAction = ({
       bondMap,
       reputation,
     });
+
+    const balanceError = await checkTokenBalance({
+      getTokenBalance,
+      getTokenDecimals,
+      tokenAddress,
+      owner: address,
+      required: requiredAllowance,
+      symbol: makerToken,
+      lang,
+      detailTr: normalizedSide === 'BUY_CRYPTO' ? 'teminat' : 'tutar + teminat',
+      detailEn: normalizedSide === 'BUY_CRYPTO' ? 'bond' : 'amount + bond',
+    });
+    if (balanceError) {
+      showToast(balanceError, 'error');
+      return;
+    }
 
     const currentAllowance = await getAllowance(tokenAddress, address);
     if (currentAllowance < requiredAllowance) {

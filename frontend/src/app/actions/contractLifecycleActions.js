@@ -6,6 +6,7 @@ import { normalizeOrderSide, removeOrderByOnchainId, resolveOrderActionFns } fro
 import { WALLET_AGE_MIN_DAYS } from '../walletAge';
 import { mapChainTradeState, resolveConfirmedState } from '../tradeStateSync';
 import { computeFillAllowance } from './allowanceMath';
+import { checkTokenBalance } from './balanceGuard';
 import { buildFillConfirmSummary } from '../fillConfirmSummary';
 import { clearAppHashRoute } from './tradeNavigationActions';
 import { isOwnerRailDisabled, ownerRailDisabledMessage, isOwnerPayoutProfileMissing, isPayoutProfileSaved, ownerProfileMissingMessage, profileRequiredMessage } from '../payoutProfileGate';
@@ -106,6 +107,8 @@ export const buildStartTradeAction = ({
   supportedTokenAddresses,
   getOrder,
   getAllowance,
+  getTokenBalance,
+  getTokenDecimals,
   approveToken,
   fillSellOrder,
   fillBuyOrder,
@@ -322,6 +325,23 @@ export const buildStartTradeAction = ({
     const { fillFn: fillOrderFn } = resolveOrderActionFns(side, { fillBuyOrder, fillSellOrder, createBuyOrder, createSellOrder, cancelBuyOrder, cancelSellOrder });
     if (isUsableChainTokenAddress(tokenFromChain)) {
       tokenAddress = tokenFromChain;
+    }
+
+    const balanceError = await checkTokenBalance({
+      getTokenBalance,
+      getTokenDecimals,
+      tokenAddress,
+      owner: address,
+      required: requiredAllowance,
+      symbol: order.crypto,
+      lang,
+      // [TR] Sell emrini dolduran taker yalnız teminat öder; buy emrini dolduran maker tutar + teminat öder.
+      detailTr: side === 'BUY_CRYPTO' ? 'tutar + teminat' : 'teminat',
+      detailEn: side === 'BUY_CRYPTO' ? 'amount + bond' : 'bond',
+    });
+    if (balanceError) {
+      showToast(balanceError, 'error');
+      return;
     }
 
     const currentAllowance = await getAllowance(tokenAddress, address);
