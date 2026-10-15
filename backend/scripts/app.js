@@ -70,6 +70,7 @@ const {
 const { runReferenceTickerJob } = require("./services/referenceTicker");
 const { createReadyHandler, createHealthHandler, invalidateReadinessCache } = require("./services/health");
 const { verifyIdentityNormalization } = require("./services/identityNormalizationGuard");
+const escrowGuard = require("./services/escrowRegistryGuard");
 const { parsePositiveTimerMs } = require("./utils/timeEnv");
 const { getAdminWallets } = require("./utils/adminWallets");
 const { didScheduledJobSucceed } = require("./utils/schedulerSuccess");
@@ -255,6 +256,7 @@ async function bootstrap() {
     if (referenceTickerInterval) clearInterval(referenceTickerInterval);
     if (reconciliationInterval) clearInterval(reconciliationInterval);
     if (recoveryLoop) recoveryLoop.stop();
+    escrowGuard.stop();
   };
 
   /**
@@ -266,6 +268,12 @@ async function bootstrap() {
    */
   const runScheduledJob = async (jobKey, jobFn, onSuccess) => {
     if (CHAIN_BOUND_JOBS.has(jobKey) && serviceMode.isDegraded()) return;
+    // [TR] Escrow bekçisi (enforce + uyumsuz): zincire bağlı işler atlanır; degraded'dan ayrı bayrak.
+    if (CHAIN_BOUND_JOBS.has(jobKey) && escrowGuard.isBlocking()) {
+      const skipped = `escrow_registry_${escrowGuard.getBlockReason()}`;
+      logger.warn(`[Scheduler] ${jobKey} atlandı (${skipped}).`);
+      return { success: true, skipped };
+    }
     if (jobLocks[jobKey]) {
       logger.warn(`[Scheduler] ${jobKey} hâlâ çalışıyor — bu tick atlandı.`);
       return;
@@ -416,6 +424,10 @@ async function bootstrap() {
       mode: _resolveIdentityGuardMode(),
     });
 
+    // [TR] Escrow kayıt bekçisi: tek Mongo okuması (asla fırlatmaz). enforce+uyumsuz ise worker başlatılmaz.
+    //      Varsayılan mod warn: yalnız log + /ready bilgi alanı.
+    await escrowGuard.check();
+
     // [TR] V3 mutable protocol config mirror'ı yüklenir.
     //      Config yüklenemiyorsa server tamamen çökmez; route'lar CONFIG_UNAVAILABLE dönebilir.
     // [EN] V3 mutable protocol config mirror is loaded here.
@@ -463,10 +475,14 @@ async function bootstrap() {
       {
         name: "worker",
         // [TR] Yalnız toparlanma döngüsü başlatır (açılış yolu worker.start()'ı beklemez, B19).
-        run: () => worker.start().catch(async (err) => {
-          await worker.stop().catch(() => {});
-          throw err;
-        }),
+        run: () => {
+          // [TR] Escrow bekçisi engelliyorsa worker başlatılmaz; bekçi uyumlu olunca onChange başlatır.
+          if (escrowGuard.isBlocking()) return Promise.resolve();
+          return worker.start().catch(async (err) => {
+            await worker.stop().catch(() => {});
+            throw err;
+          });
+        },
       },
     ];
     const startRecoveryLoop = () => {
@@ -647,10 +663,7 @@ async function bootstrap() {
       logger.info("===========================================================");
     });
 
-    if (serviceMode.isDegraded()) {
-      // [TR] Kısıtlı mod: worker burada BAŞLATILMAZ; tek toparlanma döngüsü RPC gelince başlatır.
-      startRecoveryLoop();
-    } else worker.startInBackground({
+    const startWorkerInBackground = () => worker.startInBackground({
       onFatal: (err) => {
         if (serviceMode.classifyStartupError(err) === "transient") {
           completedRpcSteps.add("sec01_kms");
@@ -669,6 +682,29 @@ async function bootstrap() {
         logger.warn(`[Worker] Event Listener aktif değil. state=${worker._state || "unknown"}`);
       }
     });
+
+    if (serviceMode.isDegraded()) {
+      // [TR] Kısıtlı mod: worker burada BAŞLATILMAZ; tek toparlanma döngüsü RPC gelince başlatır.
+      startRecoveryLoop();
+    } else if (escrowGuard.isBlocking()) {
+      logger.error(`[EscrowRegistryGuard] Worker BAŞLATILMADI (enforce, reason=${escrowGuard.getBlockReason()}).`);
+    } else {
+      startWorkerInBackground();
+    }
+
+    // [TR] Bekçi durum değişimi: engel başlarsa çalışan worker durdurulur; kalkarsa (ve degraded değilse) başlatılır.
+    //      Periyodik yeniden kontrol (varsayılan 60 sn); off modunda okuma yapılmaz.
+    escrowGuard.setOnChange(async ({ blocking, reason }) => {
+      invalidateReadinessCache();
+      if (blocking) {
+        await worker.stop();
+        logger.error(`[EscrowRegistryGuard] Worker durduruldu (reason=${reason}).`);
+      } else if (!serviceMode.isDegraded() && !worker.isRunning && !isShuttingDown) {
+        logger.info("[EscrowRegistryGuard] Kayıt uyumlu; worker başlatılıyor.");
+        startWorkerInBackground();
+      }
+    });
+    escrowGuard.start(_envMs("ESCROW_REGISTRY_GUARD_INTERVAL_MS", 60_000));
 
     process.on("SIGTERM", () => shutdown({ signal: "SIGTERM", exitCode: 0 }));
     process.on("SIGINT", () => shutdown({ signal: "SIGINT", exitCode: 0 }));
