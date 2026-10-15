@@ -9,8 +9,10 @@ import {
   CHAIN_FALLBACK_REFRESH_MS,
   canRefreshChainFallback,
   classifyChainTrade,
+  isChainFallbackRoomOwnedBy,
   loadChainFallbackTrades,
   mapChainTradeToRoomTrade,
+  mergeChainTradeIntoRoom,
 } from './chainFallback';
 
 const isHidden = () => typeof document !== 'undefined' && Boolean(document.hidden);
@@ -43,7 +45,8 @@ export function useChainFallbackTrades({
   const depsRef = React.useRef({});
   depsRef.current = { readTrade, readTrades, supportedTokens, tokenDecimalsMap, onRetryBackend };
 
-  // Kapsam değişince ya da yedek mod kapanınca liste ve sayaç sıfırlanır.
+  // [TR] Liste ve 30 sn sayacı YALNIZ kapsam (cüzdan/escrow/zincir) değişince sıfırlanır. Yedek modun açılıp
+  //      kapanması (backend dalgalanması) sayacı sıfırlamaz; aksi halde 30 sn sınırı atlanırdı.
   React.useEffect(() => {
     seqRef.current += 1;
     lastAtRef.current = 0;
@@ -52,7 +55,7 @@ export function useChainFallbackTrades({
     setStates({});
     setLoadedAt(0);
     setLoading(false);
-  }, [scopeKey, enabled]);
+  }, [scopeKey]);
 
   const load = React.useCallback(async () => {
     if (!enabled || inFlightRef.current) return;
@@ -118,6 +121,47 @@ export function useChainFallbackTrades({
   }, [enabled, address, scope]);
 
   return { active: Boolean(enabled), trades, states, loading, loadedAt, refresh: load, submitManualId };
+}
+
+/**
+ * [TR] Açık yedek odayı (activeTrade._chainFallback) yönetir:
+ *   1. Bağlı cüzdan bu işlemin aynı roldeki tarafı değilse (cüzdan değişimi; backend yokken oturum temizliği
+ *      çalışmaz) oda KAPANIR: activeTrade/cancelStatus/chargeback temizlenir, kullanıcı listeye (profil) döner.
+ *   2. Backend dönünce oda mevcut "backend kaydı senkronize ediliyor" akışına devredilir.
+ *   3. Aksi halde son zincir okumasıyla birleştirilir (durum geri gitmez).
+ */
+export function useChainFallbackRoomSync({
+  enabled = false,
+  activeTrade = null,
+  address = null,
+  userRole = null,
+  trades = [],
+  states = {},
+  setActiveTrade,
+  setCancelStatus,
+  setChargebackAccepted,
+  setCurrentView,
+}) {
+  React.useEffect(() => {
+    if (!activeTrade?._chainFallback) return;
+    if (!isChainFallbackRoomOwnedBy(activeTrade, address, userRole)) {
+      setActiveTrade(null);
+      setCancelStatus(null);
+      setChargebackAccepted?.(false);
+      setCurrentView?.('profile');
+      return;
+    }
+    if (!enabled) {
+      if (!activeTrade.id) setActiveTrade((prev) => (prev?._chainFallback && !prev.id ? { ...prev, _chainFallback: false, _pendingBackendSync: true } : prev));
+      return;
+    }
+    const id = String(activeTrade.onchainId ?? '');
+    const fresh = trades.find((t) => t.onchainId === id) || null;
+    const merged = mergeChainTradeIntoRoom(activeTrade, fresh, states[id]);
+    if (merged === activeTrade) return;
+    setActiveTrade((prev) => (prev?._chainFallback && String(prev.onchainId ?? '') === id ? merged : prev));
+    if (fresh) setCancelStatus(fresh.cancelStatus ?? null);
+  }, [enabled, trades, states, activeTrade, address, userRole, setActiveTrade, setCancelStatus, setChargebackAccepted, setCurrentView]);
 }
 
 export default useChainFallbackTrades;

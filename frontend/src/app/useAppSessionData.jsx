@@ -529,6 +529,9 @@ export function useAppSessionData({
   }, [isAuthenticated]);
 
   const formatAddress = shortAddress;
+  // [TR] P4: kayıt anahtarındaki zincir ref'ten okunur; zincir değişimi fazladan /trades/my isteği tetiklemez.
+  const chainIdRef = React.useRef(chainId);
+  chainIdRef.current = chainId;
 
   const fetchStats = React.useCallback(async () => {
     try {
@@ -577,7 +580,7 @@ export function useAppSessionData({
       setTradesBackendUnavailable(false);
       // [TR] P4: başarılı listedeki onchain id'ler yedek görünüm için kaydedilir (yalnız sayılar).
       addKnownTradeIds(
-        { wallet: address, escrow: import.meta.env.VITE_ESCROW_ADDRESS, chainId },
+        { wallet: address, escrow: import.meta.env.VITE_ESCROW_ADDRESS, chainId: chainIdRef.current },
         fetchedTrades.map((t) => t?.onchain_escrow_id),
       );
 
@@ -696,7 +699,7 @@ export function useAppSessionData({
       // [TR] P4: eski/başka oturuma ait istek bayrağı açmaz (oturum düşüşü backend arızası değildir).
       if (!isStale()) setTradesBackendUnavailable(true);
     }
-  }, [devScenarioActive, isAuthenticated, isConnected, address, chainId, lang, authenticatedFetch, tokenDecimalsMap, showToast, setActiveEscrows, setActiveTrade, formatAddress]);
+  }, [devScenarioActive, isAuthenticated, isConnected, address, lang, authenticatedFetch, tokenDecimalsMap, showToast, setActiveEscrows, setActiveTrade, formatAddress]);
 
   // [TR] Backend toparlanma yoklaması: arıza işaretliyken tek bir arka plan isteği (üstel geri çekilme).
   // [EN] Backend recovery probe: one background request with exponential backoff while marked failed.
@@ -809,11 +812,14 @@ export function useAppSessionData({
     ? bleedingState.value
     : null;
 
-  // [TR] Cüzdan değişince uçuştaki yanıtlar geçersiz sayılır.
+  // [TR] Cüzdan değişince uçuştaki yanıtlar geçersiz sayılır. P4: backend 5xx iken oturum temizliği çalışmaz;
+  //      önceki cüzdanın işlem listesi ve iptal durumu yeni cüzdana taşınmasın diye burada temizlenir.
   useEffect(() => {
     sessionEpochRef.current += 1;
     tradesSeqRef.current += 1;
-  }, [connectedWallet]);
+    setActiveEscrows([]);
+    setCancelStatus(null);
+  }, [connectedWallet, setActiveEscrows]);
 
   useEffect(() => {
     if (!isConnected || !connectedWallet) {

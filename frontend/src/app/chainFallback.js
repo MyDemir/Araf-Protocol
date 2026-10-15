@@ -220,3 +220,17 @@ export const mergeChainTradeIntoRoom = (current, fresh, chainState = null) => {
   }
   return current;
 };
+
+/**
+ * [TR] Açık yedek oda hâlâ bağlı cüzdana mı ait? Cüzdan değişince (backend yokken oturum temizliği çalışmaz)
+ *      görüntüleyen maker/taker değilse ya da rolü değiştiyse oda KAPATILMALIDIR; rol sessizce yeniden
+ *      hesaplanmaz, kullanıcı listeden yeniden açar.
+ */
+export const isChainFallbackRoomOwnedBy = (trade, viewer, role) => {
+  const me = toLowerAddress(viewer);
+  if (!me) return false;
+  const maker = toLowerAddress(trade?.makerFull);
+  const taker = toLowerAddress(trade?.takerFull);
+  const expectedRole = me === maker ? 'maker' : (me === taker ? 'taker' : null);
+  return Boolean(expectedRole) && expectedRole === role;
+};

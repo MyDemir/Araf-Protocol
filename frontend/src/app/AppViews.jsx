@@ -913,6 +913,7 @@ export const buildAppViews = (ctx) => {
       canBurnExpired: burnExpiredDeadlinePassed,
       paymentWindowExpired,
       cancelStatus,
+      chainFallback: chainFallbackRoom,
     };
     const tradeDecisionInput = ctx.devTradeDecisionInput
       ? { ...ctx.devTradeDecisionInput, lang, cancelStatus, timers: { ...ctx.devTradeDecisionInput.timers } }
