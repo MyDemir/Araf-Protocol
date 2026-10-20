@@ -163,4 +163,10 @@ sütunuyla birebir aynı. Bytecode boyutları yukarıdaki gibidir.
 | `createBuyOrder_t2` | 262,853 | 260,605 | -2,248 | -0.9% |
 | `fillBuyOrder_t2` | 276,564 | 276,635 | +71 | +0.0% |
 
-All other rows are identical. / Diğer tüm satırlar aynıdır.
+| `fillSellOrder_t0` | 203,737 | 203,809 | +72 | +0.0% |
+| `fillSellOrder_t2` | 273,327 | 273,398 | +71 | +0.0% |
+| `fillSellOrder_t2_partial` | 280,348 | 280,419 | +71 | +0.0% |
+| `createSellOrder_t2` | 277,796 | 277,795 | -1 | -0.0% |
+
+The +71 on fill paths is the extra internal call (`_enforceTakerDustAndCooldown`); other rows are identical.
+Fill yollarındaki +71, ek iç çağrıdan gelir; diğer satırlar aynıdır.
