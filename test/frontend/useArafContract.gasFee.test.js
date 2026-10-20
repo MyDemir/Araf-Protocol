@@ -69,7 +69,7 @@ describe.each(Object.keys(actions))('%s: gas/ucret ve ETH on kontrolu', (name) =
   });
 
   it('yetersiz ETH: writeContract cagrilmaz, Turkce hata', async () => {
-    pc = okClient({ getBalance: vi.fn().mockResolvedValue(1n) });
+    pc = okClient({ chain: { id: 84532 }, getBalance: vi.fn().mockResolvedValue(1n) });
     const c = await load();
     await expect(actions[name](c)).rejects.toThrow('Base Sepolia ETH bakiyen işlem ücretine yetmiyor');
     expect(writeContract).not.toHaveBeenCalled();
