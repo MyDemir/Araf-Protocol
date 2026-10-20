@@ -951,6 +951,10 @@ export const buildProfileActions = ({
         showToast(lang === 'TR' ? 'Cüzdan zaten kayıtlı.' : 'Wallet already registered.', 'info');
       } else if (isUserRejected(errorMessage)) {
         showToast(lang === 'TR' ? 'İşlem iptal edildi.' : 'Transaction cancelled.', 'error');
+      } else if (/Timeout|NotFound/i.test(String(err?.name || ''))) {
+        // [TR] Receipt beklerken zaman aşımı/RPC hatası: tx gönderildi, sonucu belirsiz (useArafContract pending kaydını
+        //      aynı sınıflandırmayla saklar). "Başarısız" denmez; kayıt durumu setIsRegisteringWallet(false) ile yeniden okunur.
+        showToast(lang === 'TR' ? 'İşlem gönderildi, zincirde doğrulanıyor.' : 'Transaction sent, verifying on-chain.', 'info');
       } else {
         showToast(errorMessage, 'error');
       }

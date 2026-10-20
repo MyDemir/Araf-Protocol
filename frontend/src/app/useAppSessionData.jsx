@@ -252,11 +252,37 @@ export function useAppSessionData({
   // [TR] Zincirde walletRegisteredAt sıfırlanamaz. Kilit state'ten türetilmez; yalnız (a) okuma regAt>0n döndüğünde
   //      ya da (b) kayıt başarılı olup dışarıdan true set edildiğinde açılır; yalnız adres değişince kapanır.
   const walletRegLockedRef = React.useRef(false);
+  // [TR] Kayıt tx'i beklenirken hesap değişirse sonuç eski hesaba aittir: tx başlarken adres yakalanır, true yazımı
+  //      güncel adresle eşleşmezse yapılmaz (yeni hesap "kayıtlı" görünmez; yalnız kayıt durumu yeniden okunur).
+  // [EN] Address captured when the registration tx starts; a late true for a switched account is dropped and the
+  //      registration state is re-read instead.
+  const currentAddressRef = React.useRef(null);
+  currentAddressRef.current = address ? String(address).toLowerCase() : null;
+  const registeringAddressRef = React.useRef(null);
+  const walletRegRefreshRef = React.useRef(() => {});
   const setIsWalletRegistered = React.useCallback((v) => {
-    if (v === true) walletRegLockedRef.current = true;
+    if (v === true) {
+      const startedFor = registeringAddressRef.current;
+      if (startedFor && startedFor !== currentAddressRef.current) {
+        walletRegRefreshRef.current();
+        return;
+      }
+      walletRegLockedRef.current = true;
+    }
     setIsWalletRegisteredRaw(v);
   }, []);
-  const [isRegisteringWallet, setIsRegisteringWallet] = useState(false);
+  const [isRegisteringWallet, setIsRegisteringWalletRaw] = useState(false);
+  // [TR] true: adres yakalanır. false: deneme bitti (başarı/hata/zaman aşımı); durum zincirden yeniden okunur
+  //      (zaman aşımında tx geçmiş olabilir).
+  const setIsRegisteringWallet = React.useCallback((v) => {
+    if (v === true) {
+      registeringAddressRef.current = currentAddressRef.current;
+    } else if (v === false) {
+      registeringAddressRef.current = null;
+      walletRegRefreshRef.current();
+    }
+    setIsRegisteringWalletRaw(v);
+  }, []);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   const [userReputation, setUserReputation] = useState(null);
@@ -325,6 +351,10 @@ export function useAppSessionData({
   // [TR] null = henüz okunmadı / okunamadı (bilinmiyor); eski varsayılan 15 gerçek ücretmiş gibi gösteriliyordu.
   // [TR] Zincir saati - cihaz saati farkı (ms); aşağıdaki zamana bağlı kararlar bunu kullanır.
   const [chainOffsetMs, setChainOffsetMs] = useState(0);
+  // [TR] Kayıt okuma effect'i ofseti ref'ten okur; yalnız dakikalık kova değişince yeniden çalışır (ms oynaması tetiklemez).
+  const chainOffsetRef = React.useRef(0);
+  chainOffsetRef.current = chainOffsetMs;
+  const chainOffsetBucket = Math.round(chainOffsetMs / 60000);
   const [takerFeeBps, setTakerFeeBps] = useState(null);
   // [TR] Kontrat getFeeConfig aynası (backend /orders/config): emir önizlemesinde ücret gösterimi için.
   const [protocolFeeConfig, setProtocolFeeConfig] = useState(null);
@@ -1056,6 +1086,7 @@ export function useAppSessionData({
   //      (5/10/20/40/60 sn); okununca 60 sn; kayıtlı + yaşı dolmuşsa durur. Gizli sekmede istek yok.
   const [walletRegNonce, setWalletRegNonce] = useState(0);
   const refreshWalletRegistration = React.useCallback(() => setWalletRegNonce((n) => n + 1), []);
+  walletRegRefreshRef.current = refreshWalletRegistration;
   const walletRegKeyRef = React.useRef(null);
   useEffect(() => {
     if (!isConnected || !address || !getWalletRegisteredAt) {
@@ -1090,7 +1121,8 @@ export function useAppSessionData({
         if (regAt > 0n) walletRegLockedRef.current = true;
         setIsWalletRegisteredRaw(regAt > 0n);
         if (regAt > 0n) {
-          const nowSec = Math.floor(Date.now() / 1000);
+          // [TR] Zincir saati (cihaz saati ileriyse "0 gün" görünmesin); ofset ref'ten okunur, effect'i yeniden çalıştırmaz.
+          const nowSec = Math.floor((Date.now() + chainOffsetRef.current) / 1000);
           const remainingSec = Math.max(0, Number(regAt) + WALLET_AGE_MIN_SEC - nowSec);
           setWalletAgeRemainingDays(Math.ceil(remainingSec / (24 * 3600)));
           if (remainingSec === 0) return; // aged: no more refresh
@@ -1114,7 +1146,7 @@ export function useAppSessionData({
     };
     checkRegistration();
     return () => { cancelled = true; if (timer) clearTimeout(timer); };
-  }, [isConnected, address, getWalletRegisteredAt, walletRegNonce]);
+  }, [isConnected, address, getWalletRegisteredAt, walletRegNonce, chainOffsetBucket]);
 
   // [TR] Kayıt sonrası (true ama gün sayısı yok) bir okuma tetiklenir; gün sayısı hesaplanır.
   useEffect(() => {
