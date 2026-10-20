@@ -91,6 +91,34 @@ describe('escrow-registry.js --adopt', () => {
     }
   });
 
+  it('ROTATING is NEVER overwritten, even with --force-switch (dry-run and apply); points to rotate-escrow.yml', async () => {
+    for (const argv of [['--adopt', '--force-switch'], ['--adopt', '--apply', '--force-switch'], ['--adopt', '--apply']]) {
+      for (const over of [{ state: 'ROTATING' }, { state: 'ROTATING', escrow_address: OTHER }]) {
+        const store = fakeStore(active(over));
+        const r = await exec(argv, { store });
+        expect(r.code, argv.join(' ')).to.equal(1);
+        expect(r.out).to.include('rotate-escrow.yml');
+        expect(store.writes).to.have.length(0);
+      }
+    }
+  });
+
+  it('--status is read-only: none / ACTIVE / ROTATING; never writes; needs no escrow env; no URI leak', async () => {
+    const env = { MONGODB_URI: URI };
+    for (const [doc, want] of [[null, 'registry_state=none'], [active(), 'registry_state=ACTIVE'], [active({ state: 'ROTATING' }), 'registry_state=ROTATING']]) {
+      const store = fakeStore(doc);
+      const r = await exec(['--status'], { env, store });
+      expect(r.code).to.equal(0);
+      expect(r.out).to.equal(want);
+      expect(store.writes).to.have.length(0);
+    }
+    const bad = await exec(['--status'], { env, store: fakeStore(null, { failRead: true }) });
+    expect(bad.code).to.equal(1);
+    expect(bad.out).to.not.include('Sup3rSecretPw');
+    expect((await exec(['--status', '--adopt'], { env, store: fakeStore() })).code).to.equal(2);
+    expect((await exec(['--status'], { env: {} })).code).to.equal(1);
+  });
+
   it('--force-switch --apply replaces a different active escrow; without --apply it still writes nothing', async () => {
     const dry = fakeStore(active({ escrow_address: OTHER }));
     expect((await exec(['--adopt', '--force-switch'], { store: dry })).code).to.equal(0);

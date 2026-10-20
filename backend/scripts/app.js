@@ -73,6 +73,7 @@ const { verifyIdentityNormalization } = require("./services/identityNormalizatio
 const escrowGuard = require("./services/escrowRegistryGuard");
 const { parsePositiveTimerMs } = require("./utils/timeEnv");
 const { getAdminWallets } = require("./utils/adminWallets");
+const { runArchiveRetention } = require("./jobs/archiveRetention");
 const { didScheduledJobSucceed } = require("./utils/schedulerSuccess");
 
 // [TR] Global Express hata yakalayıcı
@@ -95,6 +96,7 @@ app.locals.schedulerState = {
   rewardRecorderLastRunAt: null,
   statsSnapshotLastRunAt: null,
   sensitiveCleanupLastRunAt: null,
+  archiveRetentionLastRunAt: null,
   userBankRiskCleanupLastRunAt: null,
   referenceTickerLastRunAt: null,
   reconciliationLastRunAt: null,
@@ -219,6 +221,8 @@ async function bootstrap() {
   let statsSnapshotInterval = null;
   let sensitiveCleanupDelay = null;
   let sensitiveCleanupInterval = null;
+  let archiveRetentionDelay = null;
+  let archiveRetentionInterval = null;
   let userBankRiskCleanupDelay = null;
   let userBankRiskCleanupInterval = null;
   let referenceTickerInterval = null;
@@ -227,6 +231,10 @@ async function bootstrap() {
 
   // [TR] Zincire/RPC'ye bağlı job'lar kısıtlı modda ATLANIR (zincir durumunu riske atmamak için).
   // [EN] Chain-bound jobs are skipped while degraded.
+  // [TR] archiveRetention CHAIN_BOUND DEĞİLDİR: yalnız Mongo'daki arşiv koleksiyonlarını temizler, RPC/zincir
+  //      durumuna dokunmaz; gizlilik temizliği escrow uyumsuzluğunda ya da degraded modda da sürmelidir
+  //      (sensitiveCleanup ile aynı sınıf).
+  // [EN] archiveRetention is NOT chain-bound: Mongo-only privacy cleanup must continue while degraded/blocked.
   const CHAIN_BOUND_JOBS = new Set(["dlq", "reputationDecay", "rewardRecorder", "reconciliation"]);
 
   // [TR] Aynı job'ın üst üste binmesini engelleyen hafif scheduler lock'ları.
@@ -237,6 +245,7 @@ async function bootstrap() {
     rewardRecorder: false,
     statsSnapshot: false,
     sensitiveCleanup: false,
+    archiveRetention: false,
     userBankRiskCleanup: false,
     referenceTicker: false,
     reconciliation: false,
@@ -251,6 +260,8 @@ async function bootstrap() {
     if (statsSnapshotInterval) clearInterval(statsSnapshotInterval);
     if (sensitiveCleanupDelay) clearTimeout(sensitiveCleanupDelay);
     if (sensitiveCleanupInterval) clearInterval(sensitiveCleanupInterval);
+    if (archiveRetentionDelay) clearTimeout(archiveRetentionDelay);
+    if (archiveRetentionInterval) clearInterval(archiveRetentionInterval);
     if (userBankRiskCleanupDelay) clearTimeout(userBankRiskCleanupDelay);
     if (userBankRiskCleanupInterval) clearInterval(userBankRiskCleanupInterval);
     if (referenceTickerInterval) clearInterval(referenceTickerInterval);
@@ -511,6 +522,8 @@ async function bootstrap() {
     const STATS_SNAPSHOT_INTERVAL_MS = _envMs("JOB_STATS_SNAPSHOT_INTERVAL_MS", 24 * 60 * 60 * 1000);
     const SENSITIVE_CLEANUP_DELAY_MS = _envMs("JOB_SENSITIVE_CLEANUP_DELAY_MS", 120_000);
     const SENSITIVE_CLEANUP_INTERVAL_MS = _envMs("JOB_SENSITIVE_CLEANUP_INTERVAL_MS", 30 * 60 * 1000);
+    const ARCHIVE_RETENTION_DELAY_MS = _envMs("JOB_ARCHIVE_RETENTION_DELAY_MS", 180_000);
+    const ARCHIVE_RETENTION_INTERVAL_MS = _envMs("JOB_ARCHIVE_RETENTION_INTERVAL_MS", 30 * 60 * 1000);
     const USER_BANK_RISK_CLEANUP_DELAY_MS = _envMs("JOB_USER_BANK_RISK_CLEANUP_DELAY_MS", 150_000);
     const USER_BANK_RISK_CLEANUP_INTERVAL_MS = _envMs("JOB_USER_BANK_RISK_CLEANUP_INTERVAL_MS", 6 * 60 * 60 * 1000);
     const RECONCILIATION_INTERVAL_MS = _envMs("JOB_RECONCILIATION_INTERVAL_MS", 10 * 60 * 1000);
@@ -576,6 +589,20 @@ async function bootstrap() {
         app.locals.schedulerState.sensitiveCleanupLastRunAt = new Date().toISOString();
       });
     }, SENSITIVE_CLEANUP_INTERVAL_MS);
+
+    // [TR] Arşiv retention — her 30 dakikada bir (archive_*_trades; status filtresiz).
+    // [EN] Archive retention every 30 minutes (archive_*_trades; no status filter).
+    archiveRetentionDelay = setTimeout(() => {
+      runScheduledJob("archiveRetention", runArchiveRetention, () => {
+        app.locals.schedulerState.archiveRetentionLastRunAt = new Date().toISOString();
+      });
+    }, ARCHIVE_RETENTION_DELAY_MS);
+
+    archiveRetentionInterval = setInterval(() => {
+      runScheduledJob("archiveRetention", runArchiveRetention, () => {
+        app.locals.schedulerState.archiveRetentionLastRunAt = new Date().toISOString();
+      });
+    }, ARCHIVE_RETENTION_INTERVAL_MS);
 
     // [TR] User bank risk metadata prune — her 6 saatte bir
     //      Amaç:
