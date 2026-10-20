@@ -18,7 +18,7 @@ import { formatOwnerAgeRemaining } from '../hooks/useOwnerWalletAge';
 import { marketGateLabel } from './contexts/marketplace/marketGateLabel';
 import { mapResolutionTypeLabel } from './useAppSessionData';
 import TradeRoomPage from './contexts/trade-room/TradeRoomPage';
-import ChainFallbackTradesPanel, { ChainFallbackNotice } from './contexts/trade-room/ChainFallbackTradesPanel';
+import ChainFallbackTradesPanel, { ChainFallbackNotice, ChainFallbackReceiptPicker } from './contexts/trade-room/ChainFallbackTradesPanel';
 import ThemeToggle from './shell/ThemeToggle';
 import NowBoundary from './shell/NowBoundary';
 import FooterSocialLinks from './shell/FooterSocialLinks';
@@ -167,6 +167,7 @@ export const buildAppViews = (ctx) => {
     setChargebackAccepted,
     paymentIpfsHash,
     handleFileUpload,
+    handleLocalReceiptSelect,
     handleReportPayment,
     handleProposeCancel,
     handleRevokeCancel,
@@ -1035,6 +1036,9 @@ export const buildAppViews = (ctx) => {
                   </label>
                 </>
               );
+            } else if (chainFallbackRoom && roomState === 'LOCKED' && isTaker && hasOnchainTradeId && !paymentWindowExpired) {
+              // [TR] Yedek odada dekont sunucuya yüklenmez: dosya cihazda özetlenir, yalnız özet kontrata gider.
+              primaryInput = <ChainFallbackReceiptPicker lang={lang} hash={paymentIpfsHash} onSelect={handleLocalReceiptSelect} />;
             } else if (!chainFallbackRoom && roomState === 'LOCKED' && isTaker) {
               // [TR] Dekont yüklemesi backend'e gider; yedek odada gösterilmez (ödeme bildirimi dekont ister).
               primaryInput = (

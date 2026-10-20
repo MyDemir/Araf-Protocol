@@ -941,6 +941,7 @@ function App() {
 
   const {
     handleFileUpload,
+    handleLocalReceiptSelect,
     handleReportPayment,
     handleProposeCancel,
     handleRevokeCancel,
@@ -1137,6 +1138,7 @@ function App() {
     setChargebackAccepted,
     paymentIpfsHash: room.paymentIpfsHash,
     handleFileUpload,
+    handleLocalReceiptSelect,
     handleReportPayment,
     handleProposeCancel,
     handleRevokeCancel,

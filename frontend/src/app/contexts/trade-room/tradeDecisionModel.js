@@ -202,7 +202,14 @@ export function buildTradeDecisionModel({
         requiresPaymentProof: !paymentIpfsHash,
       },
     );
-    if (chainFallback) primaryDisabledReasons.push(t(lang,
+    // [TR] Yedek mod + kontratta yaşayan (onchainId'li) LOCKED işlem + taker: ödeme bildirimi açılır; dekont cihazda
+    //      özetlenir (localReceiptHash.js). Bu yalnız ipucudur; süre ve durum kararı reportPayment'ta kontrattadır.
+    // [EN] Backup mode + live on-chain LOCKED trade + taker: reporting opens with a device-side digest (hint only).
+    const hasOnchainId = trade?.onchainId !== null && trade?.onchainId !== undefined && trade?.onchainId !== '';
+    const localReportOpen = chainFallback && hasOnchainId && !paymentWindowExpired;
+    if (localReportOpen) {
+      if (!paymentIpfsHash) primaryDisabledReasons.push(t(lang, 'Dekont dosyası seçin (cihazda özetlenir).', 'Select the receipt file (hashed on this device).'));
+    } else if (chainFallback) primaryDisabledReasons.push(t(lang,
       'Sunucuya ulaşılamadığı için ödeme bildirilemiyor (dekont sunucuya yüklenir). Ödeme penceresi dolmadan sunucu dönmezse: ödeme yaptıysanız karşı tarafla karşılıklı iptali birlikte onaylayın.',
       'Payment cannot be reported while the server is unreachable (the receipt is uploaded to the server). If the server does not return before the payment window ends and you have paid, agree on a mutual cancel with the counterparty.'));
     else if (!paymentIpfsHash) primaryDisabledReasons.push(t(lang, 'Dekont gerekli.', 'Payment proof is required.'));
