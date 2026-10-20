@@ -6,7 +6,8 @@
 !.env.example
 
 # ─── Node ────────────────────────────────────────────────────────────────────
-node_modules/
+node_modules
+.claude/worktrees/
 npm-debug.log*
 
 # ─── Hardhat / Kontrat ───────────────────────────────────────────────────────
