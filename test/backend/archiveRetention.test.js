@@ -102,6 +102,18 @@ describe('archiveRetention', () => {
     expect(src).not.toMatch(/\bdecrypt\w*\s*\(/i);
   });
 
+  it('continues with remaining collections when the first one fails, then returns success:false', async () => {
+    const SECOND = `archive_8453_0x${'cd'.repeat(20)}_trades`;
+    mockNames.push(GOOD, SECOND);
+    mockCollections[GOOD] = { updateMany: jest.fn().mockRejectedValue(new Error('secret-detail')) };
+    const res = await runArchiveRetention(NOW);
+    expect(res.success).toBe(false);
+    expect(mockCollections[SECOND].updateMany).toHaveBeenCalledTimes(2);
+    const logged = logger.error.mock.calls.map((c) => c[0]).join('\n');
+    expect(logged).toContain(GOOD);
+    expect(logged).not.toContain('secret-detail');
+  });
+
   it('fails closed when an update throws', async () => {
     mockNames.push(GOOD);
     mockCollections[GOOD] = { updateMany: jest.fn().mockRejectedValue(new Error('boom')) };

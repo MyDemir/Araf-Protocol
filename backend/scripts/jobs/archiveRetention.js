@@ -112,11 +112,20 @@ async function runArchiveRetention(now = new Date()) {
     if (!db) throw new Error("db_unavailable");
     const names = await listArchiveTradeCollections(db);
     let total = 0;
+    let failed = 0;
     for (const name of names) {
-      const count = await cleanupOneCollection(db.collection(name), now);
-      total += count;
-      if (count > 0) logger.info(`[Job:ArchiveRetention] ${name}: ${count} güncelleme.`);
+      // [TR] Koleksiyon başına ayrı try/catch: biri düşse de kalanlar temizlenir; sonuç success:false olur.
+      // [EN] Per-collection try/catch: one failure does not skip the rest; overall result is success:false.
+      try {
+        const count = await cleanupOneCollection(db.collection(name), now);
+        total += count;
+        if (count > 0) logger.info(`[Job:ArchiveRetention] ${name}: ${count} güncelleme.`);
+      } catch (err) {
+        failed += 1;
+        logger.error(`[Job:ArchiveRetention] ${name}: temizlik başarısız (${(err && err.name) || "Error"}).`);
+      }
     }
+    if (failed > 0) return { success: false, collections: names.length, modifiedCount: total, failed };
     return { success: true, collections: names.length, modifiedCount: total };
   } catch (err) {
     logger.error(`[Job:ArchiveRetention] Temizlik başarısız: ${err.message}`);
