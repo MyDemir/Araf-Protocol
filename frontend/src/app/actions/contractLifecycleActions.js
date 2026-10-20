@@ -2,6 +2,7 @@ import { enforceTxGate } from '../txGate';
 import { keccak256, stringToHex } from 'viem';
 import { buildApiUrl } from '../apiConfig';
 import { resolveValidatedFillAmountRaw } from '../fillAmountPolicy';
+import { hashLocalReceipt } from '../localReceiptHash';
 import { normalizeOrderSide, removeOrderByOnchainId, resolveOrderActionFns } from '../orderUiModel';
 import { WALLET_AGE_MIN_DAYS } from '../walletAge';
 import { isTerminalTradeState, mapChainTradeState, resolveConfirmedState } from '../tradeStateSync';
@@ -626,6 +627,26 @@ export const buildTradeRoomActions = ({
     }
   };
 
+  // [TR] P4 yedek mod: dekont cihazda özetlenir (SHA-256); dosya ağa gitmez, loglanmaz. Özet, çıplak hex'ten
+  //      ayrışan "local-sha256:" önekiyle paymentIpfsHash'e yazılır; ödeme bildirimi mevcut akışla gider.
+  // [EN] P4 backup mode: hash the receipt on-device; nothing is uploaded or logged.
+  const handleLocalReceiptSelect = async (e) => {
+    const file = e?.target?.files?.[0];
+    if (!file) return;
+    if (!requireActiveOnchainId()) return;
+    try {
+      setPaymentIpfsHash(await hashLocalReceipt(file));
+      showToast(lang === 'TR' ? 'Dekont özeti cihazda hesaplandı.' : 'Receipt digest computed on this device.', 'success');
+    } catch (err) {
+      const tooLarge = err?.message === 'file_too_large';
+      showToast(tooLarge
+        ? (lang === 'TR' ? 'Dosya çok büyük (en fazla 25 MB).' : 'File is too large (25 MB max).')
+        : (lang === 'TR' ? 'Dekont özeti hesaplanamadı.' : 'Could not compute the receipt digest.'), 'error');
+    } finally {
+      if (e?.target) e.target.value = '';
+    }
+  };
+
   const handleReportPayment = async () => {
     if (!requireActiveOnchainId()) return;
     if (!paymentIpfsHash.trim()) {
@@ -870,6 +891,7 @@ export const buildTradeRoomActions = ({
 
   return {
     handleFileUpload,
+    handleLocalReceiptSelect,
     handleReportPayment,
     handleProposeCancel,
     handleRevokeCancel,
