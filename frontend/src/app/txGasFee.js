@@ -11,47 +11,50 @@ export const GAS_BUFFER_DENOMINATOR = 100n;
 
 export const bufferGas = (gas) => (gas * GAS_BUFFER_NUMERATOR) / GAS_BUFFER_DENOMINATOR;
 
-/**
- * [TR] Gas ve EIP-1559 ücretlerini bizim publicClient'tan hesaplar. Herhangi bir adım başarısız olursa
- *      ilgili alan verilmez (sessiz geri düşüş: cüzdan kendi tahminini yapar). Asla throw etmez.
- * [EN] Returns { gas, maxFeePerGas, maxPriorityFeePerGas } (fields omitted when unavailable). Never throws.
- */
 export async function estimateTxParams({ publicClient, account, address, abi, functionName, args }) {
   const out = {};
   if (!publicClient) return out;
-  try {
-    if (typeof publicClient.estimateContractGas === 'function') {
+  const gasP = (async () => {
+    try {
+      if (typeof publicClient.estimateContractGas !== 'function') return;
       const gas = await publicClient.estimateContractGas({ address, abi, functionName, args, account });
       if (typeof gas === 'bigint' && gas > 0n) out.gas = bufferGas(gas);
-    }
-  } catch { /* tahmin yok -> cüzdana bırak */ }
-  try {
-    if (typeof publicClient.estimateFeesPerGas === 'function') {
+    } catch { /* tahmin yok -> cüzdana bırak */ }
+  })();
+  const feeP = (async () => {
+    try {
+      if (typeof publicClient.estimateFeesPerGas !== 'function') return;
       const fees = await publicClient.estimateFeesPerGas();
       if (typeof fees?.maxFeePerGas === 'bigint' && typeof fees?.maxPriorityFeePerGas === 'bigint') {
         out.maxFeePerGas = fees.maxFeePerGas;
         out.maxPriorityFeePerGas = fees.maxPriorityFeePerGas;
       }
-    }
-  } catch { /* ücret yok -> cüzdana bırak */ }
+    } catch { /* ücret yok -> cüzdana bırak */ }
+  })();
+  await Promise.all([gasP, feeP]);
   return out;
+}
+
+/** [TR] Bakiyeyi okur; okunamazsa null (engellemez). [EN] Reads balance; null when unknown. */
+export async function readNativeBalance({ publicClient, account }) {
+  if (typeof publicClient?.getBalance !== 'function' || !account) return null;
+  try {
+    const b = await publicClient.getBalance({ address: account });
+    return typeof b === 'bigint' ? b : null;
+  } catch { return null; }
 }
 
 /**
  * [TR] Bakiye tahmini maliyetin (gas × maxFee) altındaysa cüzdan açılmadan anlaşılır hata fırlatır.
- *      Bakiye okunamazsa veya maliyet hesaplanamazsa ENGELLEMEZ.
+ *      Bakiye okunamazsa (null) veya maliyet hesaplanamazsa ENGELLEMEZ.
  * [EN] Throws a readable error when native balance < gas × maxFee. Unknown balance/cost never blocks.
  */
-export async function assertNativeBalance({ publicClient, account, params, faucetUrl }) {
+export function assertNativeBalance({ balance, params }) {
   if (typeof params?.gas !== 'bigint' || typeof params?.maxFeePerGas !== 'bigint') return;
-  if (typeof publicClient?.getBalance !== 'function' || !account) return;
-  let balance;
-  try { balance = await publicClient.getBalance({ address: account }); } catch { return; }
   if (typeof balance !== 'bigint') return;
   if (balance >= params.gas * params.maxFeePerGas) return;
   const err = new Error(
     'Base Sepolia ETH bakiyen işlem ücretine yetmiyor. Cüzdanına Base Sepolia ETH ekleyip tekrar dene.'
-    + (faucetUrl ? ` Faucet: ${faucetUrl}` : '')
   );
   err.name = 'InsufficientNativeBalance';
   err.arafPreflight = true;
@@ -59,11 +62,11 @@ export async function assertNativeBalance({ publicClient, account, params, fauce
 }
 
 /**
- * [TR] Tüm write yolları için tek giriş: tahmin + bakiye ön kontrolü; dönen alanlar writeContract'a yayılır.
- * [EN] Single entry for all write paths: estimate + balance preflight; spread result into writeContract.
+ * [TR] Tüm write yolları için tek giriş: tahmin ve bakiye okuması paralel; sonra ön kontrol.
+ * [EN] Single entry for all write paths: estimates and balance read run in parallel, then preflight.
  */
 export async function prepareTxParams(ctx) {
-  const params = await estimateTxParams(ctx);
-  await assertNativeBalance({ ...ctx, params });
+  const [params, balance] = await Promise.all([estimateTxParams(ctx), readNativeBalance(ctx)]);
+  assertNativeBalance({ balance, params });
   return params;
 }

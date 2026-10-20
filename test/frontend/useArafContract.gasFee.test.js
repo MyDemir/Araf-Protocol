@@ -89,4 +89,19 @@ describe.each(Object.keys(actions))('%s: gas/ucret ve ETH on kontrolu', (name) =
     await actions[name](c);
     expect(writeContract).toHaveBeenCalledTimes(1);
   });
+
+  it('estimateContractGas cuzdanin account adresini alir', async () => {
+    const c = await load();
+    await actions[name](c);
+    expect(pc.estimateContractGas.mock.calls[0][0].account).toBe(ME);
+  });
+
+  it('biri dusse digerleri kullanilir (fee dusse gas yine verilir)', async () => {
+    pc = okClient({ estimateFeesPerGas: vi.fn().mockRejectedValue(new Error('x')) });
+    const c = await load();
+    await actions[name](c);
+    const arg = writeContract.mock.calls[0][0];
+    expect(arg.gas).toBe(120_000n);
+    expect(arg).not.toHaveProperty('maxFeePerGas');
+  });
 });
