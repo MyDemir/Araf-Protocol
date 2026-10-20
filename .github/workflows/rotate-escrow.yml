@@ -1,0 +1,207 @@
+name: Rotate Escrow
+
+# Arşiv Faz 2b: escrow rotasyonu / geri yükleme, kontrat deploy ETMEDEN. Çekirdek: .github/scripts/rotate-escrow.js.
+#   precheck : salt okur ön kontrol (registry == vars, chain, eski escrow PAUSE, açık trade/order).
+#   rotate   : yarıda kalan rotasyonu tamamlar (kaldığı yerden devam eder). Yeni escrow = vars.ARAF_ESCROW_ADDRESS
+#              (deploy workflow'u bunu yazmıştır); eski escrow = old_escrow_address girdisi.
+#   restore  : arşivi geri yükler. confirm = "RESTORE <eskiEscrow>"; geri yüklenecek escrow ve deploy bloğu girdilerden
+#              gelir; Fly'daki ARAF_ESCROW_ADDRESS/ARAF_DEPLOYMENT_BLOCK aynı çalışmada eski değerlere çekilir.
+# dry_run varsayılan true: hiçbir şey yazılmaz, makineler durdurulmaz. Workflow kontratı PAUSE ETMEZ (owner anahtarı yok).
+# JWT_SECRET / MASTER_ENCRYPTION_KEY bu workflow'da YOKTUR. Kontrat deploy workflow'u ile aynı concurrency grubu.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "precheck (read-only) | rotate (complete an interrupted rotation) | restore (restore an archive)"
+        required: true
+        default: precheck
+        type: choice
+        options:
+          - precheck
+          - rotate
+          - restore
+      dry_run:
+        description: "Dry-run (default true): nothing is written and no machine is stopped. Set false to apply (rotate/restore)."
+        required: false
+        default: true
+        type: boolean
+      old_escrow_address:
+        description: "rotate: the OLD escrow address being archived (0x...). restore: ignored."
+        required: false
+        default: ""
+        type: string
+      archive_id:
+        description: "restore: archive id to restore (from the rotation manifest)."
+        required: false
+        default: ""
+        type: string
+      restore_deployment_block:
+        description: "restore: ARAF_DEPLOYMENT_BLOCK of the escrow being restored (positive integer)."
+        required: false
+        default: ""
+        type: string
+      confirm:
+        description: "restore: exactly 'RESTORE <escrow being restored>' (e.g. RESTORE 0xabc...). Ignored otherwise."
+        required: false
+        default: ""
+        type: string
+      confirm_archive_active_trades:
+        description: "Type YES to continue even though the old escrow still has open trades or orders."
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-base-sepolia
+  cancel-in-progress: false
+
+jobs:
+  rotate:
+    name: Escrow rotation (${{ inputs.mode }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      FLY_APP_NAME: ${{ vars.FLY_APP_NAME || 'araf-protocol-backend' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Validate inputs
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          IN_OLD: ${{ inputs.old_escrow_address }}
+          IN_ARCHIVE: ${{ inputs.archive_id }}
+          IN_BLOCK: ${{ inputs.restore_deployment_block }}
+          IN_CONFIRM: ${{ inputs.confirm }}
+          CONFIRM_ARCHIVE_ACTIVE_TRADES: ${{ inputs.confirm_archive_active_trades }}
+          VAR_ESCROW: ${{ vars.ARAF_ESCROW_ADDRESS }}
+          VAR_BLOCK: ${{ vars.ARAF_DEPLOYMENT_BLOCK }}
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          ADDRESS_RE='^0x[a-fA-F0-9]{40}$'
+          fail() { echo "::error::$*"; exit 1; }
+          for n in MONGODB_URI REDIS_URL BASE_SEPOLIA_RPC_URL; do test -n "${!n}" || fail "$n is required."; done
+          [[ "$REDIS_URL" == rediss://* ]] || fail "REDIS_URL must be rediss://."
+          [[ -z "$CONFIRM_ARCHIVE_ACTIVE_TRADES" || "$CONFIRM_ARCHIVE_ACTIVE_TRADES" == "YES" ]] || fail "confirm_archive_active_trades must be empty or exactly YES."
+          [[ "$VAR_ESCROW" =~ $ADDRESS_RE ]] || fail "Repository variable ARAF_ESCROW_ADDRESS must be set to a 0x address."
+          [[ "$VAR_BLOCK" =~ ^[1-9][0-9]*$ ]] || fail "Repository variable ARAF_DEPLOYMENT_BLOCK must be a positive integer."
+          if [ "$MODE" != "precheck" ] && [ "$DRY_RUN" = "false" ]; then test -n "$FLY_API_TOKEN" || fail "FLY_API_TOKEN is required to apply."; fi
+          case "$MODE" in
+            precheck)
+              { echo "OLD_ESCROW_ADDRESS=$VAR_ESCROW"; echo "ARAF_ESCROW_ADDRESS=$VAR_ESCROW"; echo "ARAF_DEPLOYMENT_BLOCK=$VAR_BLOCK"; } >> "$GITHUB_ENV" ;;
+            rotate)
+              [[ "$IN_OLD" =~ $ADDRESS_RE ]] || fail "old_escrow_address (0x + 40 hex) is required for mode=rotate."
+              [[ "${IN_OLD,,}" != "${VAR_ESCROW,,}" ]] || fail "old_escrow_address equals the current ARAF_ESCROW_ADDRESS variable; nothing to rotate."
+              { echo "OLD_ESCROW_ADDRESS=$IN_OLD"; echo "ARAF_ESCROW_ADDRESS=$VAR_ESCROW"; echo "ARAF_DEPLOYMENT_BLOCK=$VAR_BLOCK"; } >> "$GITHUB_ENV" ;;
+            restore)
+              [[ "$IN_ARCHIVE" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,119}$ ]] || fail "archive_id is required and must be [A-Za-z0-9_.-] for mode=restore."
+              [[ "$IN_BLOCK" =~ ^[1-9][0-9]*$ ]] || fail "restore_deployment_block must be a positive integer for mode=restore."
+              [[ "$IN_CONFIRM" =~ ^RESTORE\ (0x[a-fA-F0-9]{40})$ ]] || fail "confirm must be exactly 'RESTORE <escrow address being restored>'."
+              TARGET="${BASH_REMATCH[1]}"
+              [[ "${TARGET,,}" != "${VAR_ESCROW,,}" ]] || fail "The escrow being restored equals the current ARAF_ESCROW_ADDRESS variable."
+              { echo "OLD_ESCROW_ADDRESS=$VAR_ESCROW"; echo "ARAF_ESCROW_ADDRESS=$TARGET"; echo "ARAF_DEPLOYMENT_BLOCK=$IN_BLOCK"; echo "RESTORE_TARGET=$TARGET"; } >> "$GITHUB_ENV" ;;
+            *) fail "unknown mode" ;;
+          esac
+
+      # Mongo sürücüsü backend bağımlılığıdır (yeni paket değil).
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci --omit=dev --ignore-scripts
+
+      - name: Install contract dependencies
+        working-directory: contracts
+        run: npm ci
+
+      - name: Setup Fly CLI
+        if: ${{ inputs.mode != 'precheck' && !inputs.dry_run }}
+        uses: superfly/flyctl-actions/setup-flyctl@1.5
+
+      - name: Precheck (read-only)
+        if: ${{ inputs.mode == 'precheck' }}
+        shell: bash
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+          EXPECTED_CHAIN_ID: "84532"
+          CONFIRM_ARCHIVE_ACTIVE_TRADES: ${{ inputs.confirm_archive_active_trades }}
+        run: node .github/scripts/rotate-escrow.js --precheck
+
+      - name: Rotate (complete interrupted rotation)
+        if: ${{ inputs.mode == 'rotate' }}
+        shell: bash
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+          EXPECTED_CHAIN_ID: "84532"
+          CONFIRM_ARCHIVE_ACTIVE_TRADES: ${{ inputs.confirm_archive_active_trades }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [ "$DRY_RUN" = "false" ]; then
+            bash .github/scripts/rotate-escrow-state.sh rotate --apply
+          else
+            bash .github/scripts/rotate-escrow-state.sh rotate
+          fi
+
+      - name: Restore archive
+        if: ${{ inputs.mode == 'restore' }}
+        shell: bash
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+          EXPECTED_CHAIN_ID: "84532"
+          CONFIRM_ARCHIVE_ACTIVE_TRADES: ${{ inputs.confirm_archive_active_trades }}
+          ARCHIVE_ID: ${{ inputs.archive_id }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [ "$DRY_RUN" = "false" ]; then
+            bash .github/scripts/rotate-escrow-state.sh restore "$ARCHIVE_ID" --apply
+          else
+            bash .github/scripts/rotate-escrow-state.sh restore "$ARCHIVE_ID"
+          fi
+
+      # Restore uygulandıysa repo variable'ları da eski escrow'a çekilir (deploy-runtime bu değerleri okur).
+      - name: Persist restored escrow variables
+        if: ${{ inputs.mode == 'restore' && !inputs.dry_run }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GH_VARIABLES_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -n "$GH_TOKEN" ]; then
+            gh variable set ARAF_ESCROW_ADDRESS --body "$ARAF_ESCROW_ADDRESS" --repo "$GITHUB_REPOSITORY"
+            gh variable set ARAF_DEPLOYMENT_BLOCK --body "$ARAF_DEPLOYMENT_BLOCK" --repo "$GITHUB_REPOSITORY"
+            echo "Repository variables ARAF_ESCROW_ADDRESS / ARAF_DEPLOYMENT_BLOCK restored."
+          else
+            echo "::warning::GH_VARIABLES_TOKEN is not set; set ARAF_ESCROW_ADDRESS=$ARAF_ESCROW_ADDRESS and ARAF_DEPLOYMENT_BLOCK=$ARAF_DEPLOYMENT_BLOCK manually."
+          fi
+
+      - name: Check backend health
+        if: ${{ inputs.mode != 'precheck' && !inputs.dry_run }}
+        shell: bash
+        env:
+          FLY_APP_NAME: ${{ env.FLY_APP_NAME }}
+        run: bash .github/scripts/stage-runtime-env.sh health

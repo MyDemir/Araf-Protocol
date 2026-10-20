@@ -239,7 +239,7 @@ describe('deploy-base-sepolia.yml / rotate-escrow.yml rotation wiring', function
     expect(wf.concurrency.group).to.equal('deploy-base-sepolia');
     expect(wf.concurrency['cancel-in-progress']).to.equal(false);
     const text = fs.readFileSync(path.join(ROOT, '.github/workflows/rotate-escrow.yml'), 'utf8');
-    expect(text).to.not.match(/MASTER_ENCRYPTION_KEY|JWT_SECRET/);
+    expect(text.replace(/#.*$/gm, '')).to.not.match(/MASTER_ENCRYPTION_KEY|JWT_SECRET/);
     expect(text).to.include('RESTORE ');
     expect(text).to.include('rotate-escrow-state.sh');
     expect(text).to.include('rotate-escrow.js --precheck');
