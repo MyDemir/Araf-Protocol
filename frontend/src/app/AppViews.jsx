@@ -13,6 +13,8 @@ import ProfileContextPage from './contexts/profile/ProfileContextPage';
 import { countActiveMarketFilters, MARKET_FILTER_DEFAULTS } from './contexts/marketplace/marketFilters';
 import MarketFilters, { MarketEmpty } from './contexts/marketplace/MarketFilters';
 import MarketOrderCard from './contexts/marketplace/MarketOrderCard';
+import OwnerAgeScope from './contexts/marketplace/OwnerAgeScope';
+import { formatOwnerAgeRemaining } from '../hooks/useOwnerWalletAge';
 import { marketGateLabel } from './contexts/marketplace/marketGateLabel';
 import { mapResolutionTypeLabel } from './useAppSessionData';
 import TradeRoomPage from './contexts/trade-room/TradeRoomPage';
@@ -181,6 +183,7 @@ export const buildAppViews = (ctx) => {
     tradeTimers: tradeTimerOverrides = {},
     chainNowMs,
     chainOffsetMs = 0,
+    getWalletRegisteredAt,
     bleedingAmounts,
     takerName,
     tokenDecimalsMap,
@@ -194,6 +197,7 @@ export const buildAppViews = (ctx) => {
     // [TR] P4: backend listesi alınamadığında zincirden okunan yedek görünüm (yoksa/pasifse hiçbir şey değişmez).
     chainFallback = null,
   } = ctx;
+  const ownerAgeHelp = (l) => (l === 'TR' ? 'Emir sahibinin cüzdanı 2 günlük yaş süresini doldurmadı.' : "The order owner's wallet has not completed the 2-day age period.");
   const chainFallbackActive = Boolean(chainFallback?.active);
   const newTxBlocked = Boolean(isPaused || txGate?.blocked);
 
@@ -636,6 +640,8 @@ export const buildAppViews = (ctx) => {
           {[0, 1, 2].map((i) => <div key={i} className="h-40 rounded-2xl bg-surface border border-borderSubtle animate-pulse" />)}
         </div>
       ) : visibleOrders.length > 0 ? (
+        <OwnerAgeScope orders={visibleOrders} getWalletRegisteredAt={getWalletRegisteredAt} chainOffsetMs={chainOffsetMs}>
+        {(ownerAgeRemainingSec) => (
         <div className="grid gap-2 md:gap-3 xl:grid-cols-2" data-testid="market-order-list">
           {visibleOrders.map((order) => {
               const effectiveUserTier = userReputation?.effectiveTier ?? 0;
@@ -663,7 +669,10 @@ export const buildAppViews = (ctx) => {
               const ownerProfileMissing = isOwnerPayoutProfileMissing(order);
               // [TR] Emir sahibinin profil rail'i admin tarafından kapatıldıysa yeni doldurma kapalı (aktif işlemler etkilenmez).
               const ownerRailDisabled = isOwnerRailDisabled(order);
-              const finalCanTakeOrder = canTakeOrder && !needsOwnProfile && !ownerProfileMissing && !ownerRailDisabled && !isOwnerBanned && isCooldownOk && isFunded && isAged && !newTxBlocked && isTokenConfigured && isCorrectChain;
+              // [TR] Yalnız ipucu (fail-open): BUY emrinin sahibi 2 günlük yaşı doldurmadıysa kontrat fill'i WalletTooYoung ile reddeder.
+              const ownerAgeSec = ownerAgeRemainingSec(order);
+              const notFillableYet = ownerAgeSec != null;
+              const finalCanTakeOrder = canTakeOrder && !notFillableYet && !needsOwnProfile && !ownerProfileMissing && !ownerRailDisabled && !isOwnerBanned && isCooldownOk && isFunded && isAged && !newTxBlocked && isTokenConfigured && isCorrectChain;
               // [TR] Oturum yoksa buton pasif "Kilitli" yerine giriş akışını başlatır.
               const needsSignIn = !isConnected || !isAuthenticated;
               const isDisabled = needsSignIn ? false : (!finalCanTakeOrder || isContractLoading);
@@ -681,6 +690,7 @@ export const buildAppViews = (ctx) => {
                 ownerProfileMissing ? <>{icon(Lock)} {tr ? 'Profil yok' : 'No profile'}</> :
                 ownerRailDisabled   ? <>{icon(Lock)} {tr ? 'Yöntem şu an kapalı' : 'Method currently closed'}</> :
                 isOwnerBanned       ? <>{icon(Lock)} {tr ? 'Satıcı kısıtlı' : 'Seller restricted'}</> :
+                notFillableYet      ? <>{icon(Hourglass)} {tr ? 'Henüz doldurulamaz' : 'Not fillable yet'}</> :
                 !canTakeOrder       ? <>{icon(Lock)} {tr ? 'Kilitli' : 'Locked'}</> :
                 !isAged             ? <>{icon(Hourglass)} {tr ? 'Cüzdan çok yeni' : 'Wallet too new'}</> :
                 !isFunded           ? <>{icon(TriangleAlert)} {tr ? 'Bakiye yetersiz' : 'Low balance'}</> :
@@ -698,6 +708,11 @@ export const buildAppViews = (ctx) => {
                     <button type="button" data-testid="fill-needs-profile" onClick={() => openProfilePage?.('account')} className={`${noteCls} block text-brand underline`}>
                       {profileRequiredMessage(lang)}
                     </button>
+                  )}
+                  {notFillableYet && (
+                    <p data-testid="fill-owner-too-young" title={ownerAgeHelp(lang)} className={`${noteCls} text-warning`}>
+                      {tr ? 'Henüz doldurulamaz' : 'Not fillable yet'} · {formatOwnerAgeRemaining(ownerAgeSec, lang)}. {ownerAgeHelp(lang)}
+                    </p>
                   )}
                   {!needsOwnProfile && !ownerProfileMissing && ownerRailDisabled && (
                     <p data-testid="fill-owner-rail-closed" className={`${noteCls} text-danger`}>{ownerRailDisabledMessage(lang)}</p>
@@ -717,7 +732,7 @@ export const buildAppViews = (ctx) => {
                     disabled: isDisabled,
                     toneClass: ctaTone,
                     onClick: () => (needsSignIn ? handleAuthAction() : handleStartTrade(order)),
-                    title: needsSignIn ? (tr ? 'Önce cüzdanınızı bağlayıp giriş yapın' : 'Connect your wallet and sign in first') : undefined,
+                    title: needsSignIn ? (tr ? 'Önce cüzdanınızı bağlayıp giriş yapın' : 'Connect your wallet and sign in first') : (notFillableYet ? ownerAgeHelp(lang) : undefined),
                   }}
                   notes={notes}
                   footnote={!isFunded && isConnected && canTakeOrder && !newTxBlocked
@@ -727,6 +742,8 @@ export const buildAppViews = (ctx) => {
               );
             })}
         </div>
+        )}
+        </OwnerAgeScope>
       ) : (
         emptyState
       );
