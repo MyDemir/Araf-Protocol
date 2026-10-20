@@ -464,6 +464,7 @@ router.get("/summary", async (req, res, next) => {
         reputationDecayLastRunAt: schedulerState.reputationDecayLastRunAt || null,
         statsSnapshotLastRunAt: schedulerState.statsSnapshotLastRunAt || null,
         sensitiveCleanupLastRunAt: schedulerState.sensitiveCleanupLastRunAt || null,
+        archiveRetentionLastRunAt: schedulerState.archiveRetentionLastRunAt || null,
         userBankRiskCleanupLastRunAt: schedulerState.userBankRiskCleanupLastRunAt || null,
       },
       degraded,
