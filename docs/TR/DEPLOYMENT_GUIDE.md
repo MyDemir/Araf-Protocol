@@ -754,7 +754,30 @@ Production açılışta KMS self-test çalıştırır (`runProductionKmsStartupS
 2. **Escrow Registry Adopt** workflow'unu (`escrow-registry-adopt.yml`) önce `dry_run=true` ile çalıştırıp çıktıyı okuyun, sonra `dry_run=false` ile tekrar çalıştırın. Canlı escrow'u (`ARAF_ESCROW_ADDRESS` / `ARAF_DEPLOYMENT_BLOCK` repo variable'ları, zincir 84532) `active` olarak yazar.
 3. Backend logunda `[EscrowRegistryGuard] UYUMSUZ` satırı yoksa ve `/ready` `escrowRegistry.ok: true` diyorsa zorlamayı açın: `flyctl secrets set ESCROW_REGISTRY_GUARD_MODE=enforce -a <app>`.
 
-Tam kontrat deploy'u (`deploy-base-sepolia.yml`) yeni escrow'u "Write active escrow registry" adımında kendisi yazar (checkpoint sıfırlamadan sonra, health kontrolünden önce, `--force-switch` ile). Runtime deploy escrow'u değiştirmez ve registry'ye yazmaz; `araf_escrow_address` override'ı registry'den farklıysa bekçi `escrow_mismatch` bildirir. Arşivleme ve rotasyon bu fazın kapsamında değildir.
+Tam kontrat deploy'u (`deploy-base-sepolia.yml`) registry'yi iki yoldan yazar: registry **hiç yoksa** (ilk kurulum) eski davranış sürer ("first install" adımları: checkpoint sıfırlama + `--adopt --apply`, ezilecek kayıt olmadığından `--force-switch` yok); registry **ACTIVE** ise escrow rotasyonu çalışır (bkz. 6.6b). Registry **ROTATING** ise deploy kontrat yayınlamadan durur; `--force-switch` ROTATING kaydını hiçbir koşulda ezmez. Runtime deploy escrow'u değiştirmez ve registry'ye yazmaz; `araf_escrow_address` override'ı registry'den farklıysa bekçi `escrow_mismatch` bildirir.
+
+### 6.6b Escrow rotasyonu (Faz 2b)
+
+Yeni kontrat deploy'unda eski escrow'a bağlı Mongo koleksiyonları aynı veritabanında `archive_<eskiEscrow>_*` adlarına taşınır, User aynası arşive yazılır, Redis DLQ ve `last_known` anahtarları yeniden adlandırılır, worker checkpoint'leri (`worker:last_block`, `worker:last_safe_block`) manifeste yazılıp silinir. Registry `ROTATING` → `ACTIVE` geçişi **commit noktasıdır**; o yazılana kadar bekçi worker'ı kapalı tutar. Çekirdek `.github/scripts/rotate-escrow.js`, makine durdurma sarmalayıcısı `rotate-escrow-state.sh`'tır. Workflow kontratı **pause etmez** (owner anahtarı workflow'da yoktur); yalnız pause durumunu okur.
+
+**Öncesi (`GOVERNANCE_READINESS.md` §2 adımları)**
+1. **Ön duyuru:** amaç (yeni escrow), tarih/saat, beklenen etki (kısa kesinti, açık işlemler için P4 yedek görünümü).
+2. **Ön kontrol (zincir):** eski escrow'u owner/multisig ile `pause()` edin; `paused()==true` doğrulayın. Açık trade (LOCKED/PAID/CHALLENGED) ve açık order sayısına bakın. Sıfır değilse deploy `confirm_archive_active_trades=YES` olmadan durur; kalan id'ler raporlanır.
+3. `rotate-escrow.yml` ile `mode=precheck` çalıştırın (salt okur): registry == `ARAF_ESCROW_ADDRESS` değişkeni, chain 84532, pause, açık işlem.
+
+**Çalıştırma**
+- Normal yol: `deploy-base-sepolia.yml`. "Read escrow registry state" → "Precheck escrow rotation (read-only)" kontrat deploy'undan **önce**; başarısızsa kontrat yayınlanmaz. Fly deploy'undan sonra "Rotate escrow state" (health kontrolünden önce) makineleri durdurur ve doğrular (3 deneme), çekirdeği `--apply` ile çalıştırır, makineleri yeniden başlatır (hata olsa da, yalnız başlangıçta açık olanlar).
+- Yarıda kalırsa: registry `ROTATING` kalır; yeni deploy bu durumda kontrat yayınlamadan durur. `rotate-escrow.yml` ile `mode=rotate`, `dry_run=false`, `old_escrow_address=<eski>` girin; çekirdek kaldığı yerden devam eder. (Not: deploy workflow'u repo değişkenlerini hata olsa da yazdığından `ARAF_ESCROW_ADDRESS` yeni escrow'u gösterir; eski adresi girdi olarak verin.)
+- Önce `dry_run=true` (varsayılan) ile okuyun.
+
+**Sonrası**
+1. `/ready` → `escrowRegistry.ok: true`; registry `ACTIVE` ve yeni adres; `archive_<eski>_*` sayıları manifestle eşleşiyor.
+2. Smoke: yeni escrow'da order oluştur/doldur; worker `ARAF_DEPLOYMENT_BLOCK`'tan başladı mı.
+3. **Kayıt:** run id, aktör, eski/yeni escrow, archive_id, kalan açık işlem id'leri, onaylayanlar.
+
+**Geri alma:** `rotate-escrow.yml`, `mode=restore`, `archive_id`, `restore_deployment_block` (geri yüklenecek escrow'un deploy bloğu), `confirm=RESTORE <eskiEscrow>`, `dry_run=false`. Makineler durur; canlı koleksiyonlar kendi arşivine taşınır, arşiv canlıya döner, registry eski escrow'a döner, Fly'daki `ARAF_ESCROW_ADDRESS`/`ARAF_DEPLOYMENT_BLOCK` eski değerlere çekilir (makineler yeniden durdurulup doğrulanır), repo değişkenleri güncellenir (`GH_VARIABLES_TOKEN` varsa), sonra makineler başlar.
+
+Güvenlik: bu adımların env'inde `JWT_SECRET`/`MASTER_ENCRYPTION_KEY` yoktur (sarmalayıcı varsa reddeder); şifreli alanlar çözülmez. Arşivdeki trade kayıtlarında 365 günlük TTL ve PII `delete_at` temizliği sürer.
 
 ### 6.7 Backend — zamanlanmış işler (aksi belirtilmedikçe ms; en çok 2 147 483 647)
 
