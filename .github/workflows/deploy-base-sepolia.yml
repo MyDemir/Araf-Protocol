@@ -183,7 +183,6 @@ jobs:
           REDIS_URL: ${{ secrets.REDIS_URL }}
           RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
           OLD_ESCROW_ADDRESS: ${{ vars.ARAF_ESCROW_ADDRESS }}
-          ARAF_DEPLOYMENT_BLOCK: ${{ vars.ARAF_DEPLOYMENT_BLOCK }}
           EXPECTED_CHAIN_ID: "84532"
           CONFIRM_ARCHIVE_ACTIVE_TRADES: ${{ inputs.confirm_archive_active_trades }}
         run: node .github/scripts/rotate-escrow.js --precheck

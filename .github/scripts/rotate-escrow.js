@@ -20,7 +20,7 @@ const ZERO_ADDRESS = `0x${'0'.repeat(40)}`;
 const POSITIVE_INT_RE = /^[1-9][0-9]{0,15}$/;
 const NUM_RE = /^[0-9]{1,20}$/;
 const ARCHIVE_NAME_RE = /^archive_[0-9]+_0x[0-9a-f]{40}_[a-z_]+$/;
-const ARCHIVE_ID_RE = /^([0-9]+):(0x[0-9a-f]{40})$/;
+const ARCHIVE_ID_RE = /^([0-9]{1,10}):(0x[0-9a-fA-F]{40})$/;
 const FORBIDDEN_ENV = ['MASTER_ENCRYPTION_KEY', 'JWT_SECRET'];
 const USER_BATCH = 500;
 const ID_LIST_CAP = 200;
@@ -144,7 +144,6 @@ function isDefaultMirror(user) {
 }
 
 function parseArgs(argv) {
-  const known = new Set(['--precheck', '--rotate', '--restore', '--apply']);
   const out = { precheck: false, rotate: false, restore: null, apply: false, unknown: [] };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
@@ -155,7 +154,6 @@ function parseArgs(argv) {
   }
   const modes = [out.precheck, out.rotate, out.restore !== null].filter(Boolean).length;
   if (modes !== 1 || (out.precheck && out.apply)) out.unknown.push('mode');
-  void known;
   return out;
 }
 
@@ -175,20 +173,29 @@ function readConfig(env, args) {
     return v.toLowerCase();
   };
   if (args.restore !== null) {
-    const m = ARCHIVE_ID_RE.exec(String(args.restore).toLowerCase());
+    const m = ARCHIVE_ID_RE.exec(String(args.restore));
     if (!m) fail('--restore expects <chainId>:<oldEscrowLowercase>.');
     if (Number(m[1]) !== cfg.chainId) fail('restore archive id chain does not match EXPECTED_CHAIN_ID.');
-    cfg.old = m[2];
+    cfg.old = m[2].toLowerCase();
     cfg.archiveId = archiveId(cfg.chainId, cfg.old);
     if (String(env.ARAF_ESCROW_ADDRESS || '').trim()) cfg.new = addr('ARAF_ESCROW_ADDRESS', env.ARAF_ESCROW_ADDRESS);
     if (!String(env.REDIS_URL || '').trim()) fail('REDIS_URL is required.');
   } else {
     cfg.old = addr('OLD_ESCROW_ADDRESS', env.OLD_ESCROW_ADDRESS);
-    cfg.new = addr('ARAF_ESCROW_ADDRESS', env.ARAF_ESCROW_ADDRESS);
-    if (cfg.new === cfg.old) fail('ARAF_ESCROW_ADDRESS must differ from OLD_ESCROW_ADDRESS.');
+    // [TR] --precheck'te yeni escrow henüz deploy edilmemiş olabilir: ARAF_ESCROW_ADDRESS / ARAF_DEPLOYMENT_BLOCK opsiyonel.
+    const newRaw = String(env.ARAF_ESCROW_ADDRESS || '').trim();
     const block = String(env.ARAF_DEPLOYMENT_BLOCK || '').trim();
-    if (!POSITIVE_INT_RE.test(block)) fail('ARAF_DEPLOYMENT_BLOCK must be a positive integer.');
-    cfg.newBlock = Number(block);
+    if (args.precheck && !newRaw) {
+      cfg.new = null;
+    } else {
+      cfg.new = addr('ARAF_ESCROW_ADDRESS', newRaw);
+      if (cfg.new === cfg.old) fail('ARAF_ESCROW_ADDRESS must differ from OLD_ESCROW_ADDRESS.');
+    }
+    if (block || !args.precheck) {
+      if (!POSITIVE_INT_RE.test(block)) fail('ARAF_DEPLOYMENT_BLOCK must be a positive integer.');
+      cfg.newBlock = Number(block);
+    }
+    if (args.precheck && !String(env.RPC_URL || '').trim()) fail('RPC_URL is required.');
     cfg.archiveId = archiveId(cfg.chainId, cfg.old);
     if (args.rotate && !String(env.REDIS_URL || '').trim()) fail('REDIS_URL is required.');
   }
@@ -253,7 +260,9 @@ async function precheck(ctx) {
     out(`registry active: state=${reg.state} chain=${reg.chain_id}`);
   }
   const manifest = await mongo.getDoc(cfg.archiveId);
-  if (manifest) {
+  if (!cfg.new) {
+    out('new escrow not yet known; skipped (new!=old and manifest comparison).');
+  } else if (manifest) {
     if (String(manifest.new_escrow || '').toLowerCase() !== cfg.new) bad(`a manifest ${cfg.archiveId} already exists for a DIFFERENT new escrow.`);
     else out(`manifest ${cfg.archiveId} exists (state=${manifest.state}); the run will resume.`);
   }
@@ -624,6 +633,10 @@ async function restore(ctx) {
   const newEsc = String(m.new_escrow || '').toLowerCase();
   if (cfg.new && cfg.new !== newEsc) fail('ARAF_ESCROW_ADDRESS does not equal the manifest new escrow.');
   if (Number(m.chain_id) !== cfg.chainId) fail('manifest chain does not equal EXPECTED_CHAIN_ID.');
+  const targetBlock = Number(m.old_deploy_block);
+  if (m.old_deploy_block === null || m.old_deploy_block === undefined || !Number.isInteger(targetBlock) || targetBlock < 1) {
+    fail('manifest old_deploy_block is missing or invalid; refusing to restore (nothing was written).');
+  }
   const rs = m.restore ? m.restore.state : null;
   if (!rs && m.state !== 'VERIFIED') fail('only a VERIFIED rotation can be restored.');
   if (rs && !RESTORE_STATES.includes(rs)) fail('manifest has an unknown restore state.');
@@ -711,7 +724,7 @@ async function restore(ctx) {
         _id: 'active',
         escrow_address: cfg.old,
         chain_id: cfg.chainId,
-        deploy_block: m.old_deploy_block,
+        deploy_block: targetBlock,
         state: 'ACTIVE',
         since: now(),
         updated_by: `github-run-${cfg.runId}`,
@@ -732,7 +745,11 @@ async function restore(ctx) {
     }
     await advance('R_VERIFIED');
   }
-  out(apply ? 'restore VERIFIED. (Fly env ARAF_ESCROW_ADDRESS/ARAF_DEPLOYMENT_BLOCK must be switched back by the workflow.)' : 'dry-run: nothing written. Re-run with --apply.');
+  if (apply) {
+    out('restore VERIFIED. Fly env / repo variables must be switched to the values below by the workflow.');
+    out(`RESTORE_TARGET_ESCROW=${cfg.old}`);
+    out(`RESTORE_TARGET_DEPLOY_BLOCK=${targetBlock}`);
+  } else out('dry-run: nothing written. Re-run with --apply.');
   return 0;
 }
 function dryTail(ctx) {

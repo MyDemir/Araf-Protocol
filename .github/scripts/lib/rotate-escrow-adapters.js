@@ -74,6 +74,10 @@ function createMongo(uri, { mirrorFields, appName = 'araf-rotate-escrow' }) {
       return (await coll('users')).find(q, { projection, sort: { _id: 1 }, limit }).toArray();
     },
     async applyUserMirrorBatch({ archiveColl, docs, ids, defaults }) {
+      // [TR] Koleksiyon transaction'dan ÖNCE açıkça oluşturulur (transaction içinde implicit create sınırlı/riskli).
+      if (!(await (await open()).listCollections({ name: archiveColl }, { nameOnly: true }).toArray()).length) {
+        try { await (await open()).createCollection(archiveColl); } catch (e) { if (!e || e.code !== 48) throw e; }
+      }
       const session = client.startSession();
       try {
         await session.withTransaction(async () => {

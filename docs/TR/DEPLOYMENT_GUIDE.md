@@ -763,7 +763,7 @@ Yeni kontrat deploy'unda eski escrow'a bağlı Mongo koleksiyonları aynı verit
 **Öncesi (`GOVERNANCE_READINESS.md` §2 adımları)**
 1. **Ön duyuru:** amaç (yeni escrow), tarih/saat, beklenen etki (kısa kesinti, açık işlemler için P4 yedek görünümü).
 2. **Ön kontrol (zincir):** eski escrow'u owner/multisig ile `pause()` edin; `paused()==true` doğrulayın. Açık trade (LOCKED/PAID/CHALLENGED) ve açık order sayısına bakın. Sıfır değilse deploy `confirm_archive_active_trades=YES` olmadan durur; kalan id'ler raporlanır.
-3. `rotate-escrow.yml` ile `mode=precheck` çalıştırın (salt okur): registry == `ARAF_ESCROW_ADDRESS` değişkeni, chain 84532, pause, açık işlem.
+3. `rotate-escrow.yml` ile `mode=precheck` çalıştırın (salt okur): registry == `ARAF_ESCROW_ADDRESS` değişkeni, chain 84532, pause, açık işlem. Ön kontrol yeni escrow'u istemez (henüz deploy edilmemiştir; çıktıda `new escrow not yet known; skipped` yazar); `RPC_URL` zorunludur (pause zincirden okunur).
 
 **Çalıştırma**
 - Normal yol: `deploy-base-sepolia.yml`. "Read escrow registry state" → "Precheck escrow rotation (read-only)" kontrat deploy'undan **önce**; başarısızsa kontrat yayınlanmaz. Fly deploy'undan sonra "Rotate escrow state" (health kontrolünden önce) makineleri durdurur ve doğrular (3 deneme), çekirdeği `--apply` ile çalıştırır, makineleri yeniden başlatır (hata olsa da, yalnız başlangıçta açık olanlar).
@@ -775,7 +775,7 @@ Yeni kontrat deploy'unda eski escrow'a bağlı Mongo koleksiyonları aynı verit
 2. Smoke: yeni escrow'da order oluştur/doldur; worker `ARAF_DEPLOYMENT_BLOCK`'tan başladı mı.
 3. **Kayıt:** run id, aktör, eski/yeni escrow, archive_id, kalan açık işlem id'leri, onaylayanlar.
 
-**Geri alma:** `rotate-escrow.yml`, `mode=restore`, `archive_id`, `restore_deployment_block` (geri yüklenecek escrow'un deploy bloğu), `confirm=RESTORE <eskiEscrow>`, `dry_run=false`. Makineler durur; canlı koleksiyonlar kendi arşivine taşınır, arşiv canlıya döner, registry eski escrow'a döner, Fly'daki `ARAF_ESCROW_ADDRESS`/`ARAF_DEPLOYMENT_BLOCK` eski değerlere çekilir (makineler yeniden durdurulup doğrulanır), repo değişkenleri güncellenir (`GH_VARIABLES_TOKEN` varsa), sonra makineler başlar.
+**Geri alma:** `rotate-escrow.yml`, `mode=restore`, `archive_id=<chainId>:<0x eskiEscrow>` (rotasyon manifestinin `_id`'si, ör. `84532:0xabc...`), `confirm=RESTORE <0x eskiEscrow>` (archive_id'deki adresle aynı olmalı), `dry_run=false`. Şu anki escrow `ARAF_ESCROW_ADDRESS` değişkeninden gelir (manifestteki yeni escrow ile eşleşmelidir); geri yüklenecek escrow archive_id'den, deploy bloğu manifestteki `old_deploy_block`'tan alınır (null/geçersizse restore hiçbir şey yazmadan durur). Makineler durur; canlı koleksiyonlar kendi arşivine taşınır, arşiv canlıya döner, registry eski escrow'a döner. Çekirdek başarıda `RESTORE_TARGET_ESCROW=0x...` ve `RESTORE_TARGET_DEPLOY_BLOCK=<n>` satırlarını basar; Fly'daki `ARAF_ESCROW_ADDRESS`/`ARAF_DEPLOYMENT_BLOCK` ve (`GH_VARIABLES_TOKEN` varsa) repo değişkenleri YALNIZ bu iki değerle güncellenir (makineler yeniden durdurulup doğrulanır), sonra makineler başlar. `restore_deployment_block` girdisi yoktur.
 
 Güvenlik: bu adımların env'inde `JWT_SECRET`/`MASTER_ENCRYPTION_KEY` yoktur (sarmalayıcı varsa reddeder); şifreli alanlar çözülmez. Arşivdeki trade kayıtlarında 365 günlük TTL ve PII `delete_at` temizliği sürer.
 

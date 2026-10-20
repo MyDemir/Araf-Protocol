@@ -759,7 +759,7 @@ On a new contract deploy the Mongo collections bound to the old escrow are renam
 **Before (steps of `GOVERNANCE_READINESS.md` §2)**
 1. **Announcement:** purpose (new escrow), date/time, expected impact (short downtime, P4 fallback view for open trades).
 2. **Pre-check (on-chain):** `pause()` the old escrow through the owner/multisig and confirm `paused()==true`. Check open trades (LOCKED/PAID/CHALLENGED) and open orders. If not zero, the deploy stops unless `confirm_archive_active_trades=YES`; the remaining ids are reported.
-3. Run `rotate-escrow.yml` with `mode=precheck` (read-only): registry == `ARAF_ESCROW_ADDRESS` variable, chain 84532, pause, open trades/orders.
+3. Run `rotate-escrow.yml` with `mode=precheck` (read-only): registry == `ARAF_ESCROW_ADDRESS` variable, chain 84532, pause, open trades/orders. The precheck does not need the new escrow (it is not deployed yet; the output says `new escrow not yet known; skipped`); `RPC_URL` is mandatory (pause is read on-chain).
 
 **Run**
 - Normal path: `deploy-base-sepolia.yml`. "Read escrow registry state" → "Precheck escrow rotation (read-only)" run **before** the contract deploy; if they fail no contract is deployed. After the Fly deploy, "Rotate escrow state" (before the health check) stops and verifies the machines (3 attempts), runs the core with `--apply`, and restarts the machines (even on error, only those that were running).
@@ -771,7 +771,7 @@ On a new contract deploy the Mongo collections bound to the old escrow are renam
 2. Smoke: create/fill an order on the new escrow; the worker started from `ARAF_DEPLOYMENT_BLOCK`.
 3. **Log:** run id, actor, old/new escrow, archive_id, remaining open trade ids, approvers.
 
-**Rollback:** `rotate-escrow.yml` with `mode=restore`, `archive_id`, `restore_deployment_block` (deploy block of the escrow being restored), `confirm=RESTORE <oldEscrow>`, `dry_run=false`. Machines stop; live collections move to their own archive, the archive returns to live names, the registry points back to the old escrow, Fly `ARAF_ESCROW_ADDRESS`/`ARAF_DEPLOYMENT_BLOCK` are set back (machines re-verified stopped), the repository variables are updated (if `GH_VARIABLES_TOKEN` exists), then the machines start.
+**Rollback:** `rotate-escrow.yml` with `mode=restore`, `archive_id=<chainId>:<0x oldEscrow>` (the rotation manifest `_id`, e.g. `84532:0xabc...`), `confirm=RESTORE <0x oldEscrow>` (must match the address in archive_id), `dry_run=false`. The current escrow comes from the `ARAF_ESCROW_ADDRESS` variable (it must equal the manifest's new escrow); the escrow being restored is derived from archive_id and its deploy block from the manifest's `old_deploy_block` (if null/invalid the restore stops without writing anything). Machines stop; live collections move to their own archive, the archive returns to live names, the registry points back to the old escrow. On success the core prints `RESTORE_TARGET_ESCROW=0x...` and `RESTORE_TARGET_DEPLOY_BLOCK=<n>`; Fly `ARAF_ESCROW_ADDRESS`/`ARAF_DEPLOYMENT_BLOCK` and (if `GH_VARIABLES_TOKEN` exists) the repository variables are set to ONLY those two values (machines re-verified stopped), then the machines start. There is no `restore_deployment_block` input.
 
 Security: these steps have no `JWT_SECRET`/`MASTER_ENCRYPTION_KEY` in their environment (the wrapper rejects them); encrypted fields are never decrypted. The 365-day TTL on archived trades and the PII `delete_at` cleanup continue.
 

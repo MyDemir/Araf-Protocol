@@ -14,7 +14,7 @@ const NEW = '0x' + 'cd'.repeat(20);
 const URI = 'mongodb+srv://dbuser:Sup3rSecretPw@cluster0.example.mongodb.net/araf';
 
 // opts: states, secretsStarts (secrets import tüm makineleri başlatır), coreStartsM1 (çekirdek m1'i başlatır, ilk n çağrıda)
-function setup({ states = { m1: 'started', m2: 'started' }, secretsStarts = false, coreFail = false, coreStartsM1Calls = 0, listFailFrom } = {}) {
+function setup({ states = { m1: 'started', m2: 'started' }, secretsStarts = false, coreFail = false, coreStartsM1Calls = 0, listFailFrom, restoreLines = null } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'res-'));
   const log = path.join(dir, 'calls.log');
   const coreLog = path.join(dir, 'core.log');
@@ -48,6 +48,7 @@ fs.writeFileSync(D + '/corecount', String(n));
 const states = ${JSON.stringify(ids)}.map((id) => id + '=' + fs.readFileSync(D + '/s_' + id, 'utf8').trim()).join(',');
 fs.appendFileSync(${JSON.stringify(coreLog)}, JSON.stringify({ args: process.argv.slice(2), states, hasMongo: !!process.env.MONGODB_URI, hasMaster: !!process.env.MASTER_ENCRYPTION_KEY, hasJwt: !!process.env.JWT_SECRET, old: process.env.OLD_ESCROW_ADDRESS, esc: process.env.ARAF_ESCROW_ADDRESS }) + '\\n');
 ${coreStartsM1Calls ? `if (n <= ${coreStartsM1Calls}) fs.writeFileSync(D + '/s_m1', 'started');` : ''}
+${restoreLines ? `if (process.argv.includes('--restore') && process.argv.includes('--apply')) { console.log(${JSON.stringify(restoreLines)}); }` : ''}
 ${coreFail ? 'process.exit(3);' : ''}
 `);
   return { dir, log, coreLog, core };
@@ -141,12 +142,20 @@ describe('rotate-escrow-state.sh', function () {
     expect(flyCalls(s).join('\n')).to.not.match(/machine (stop|start)/);
   });
 
-  it('restore --apply: passes archive id, sets Fly secrets while stopped, re-verifies stop, then restarts', async function () {
-    const s = setup({ secretsStarts: true });
-    const r = await run(['restore', 'archive_x-1', '--apply'], envFor(s, { OLD_ESCROW_ADDRESS: NEW, ARAF_ESCROW_ADDRESS: OLD, ARAF_DEPLOYMENT_BLOCK: '1234' }));
+  const AID = `84532:${OLD}`;
+  const LINES = `RESTORE_TARGET_ESCROW=${OLD}\nRESTORE_TARGET_DEPLOY_BLOCK=1234`;
+
+  it('restore --apply: passes archive id, writes ONLY the core-reported target values to Fly while stopped, then restarts', async function () {
+    const s = setup({ secretsStarts: true, restoreLines: LINES });
+    const ghEnv = path.join(s.dir, 'ghenv');
+    // ARAF_ESCROW_ADDRESS = şu anki escrow (NEW); OLD_ESCROW_ADDRESS ve ARAF_DEPLOYMENT_BLOCK restore'da gerekmez.
+    const env = envFor(s, { ARAF_ESCROW_ADDRESS: NEW, GITHUB_ENV: ghEnv });
+    delete env.OLD_ESCROW_ADDRESS; delete env.ARAF_DEPLOYMENT_BLOCK;
+    const r = await run(['restore', AID, '--apply'], env);
     expect(r.status).to.equal(0, r.out);
-    expect(coreCalls(s)[0].args).to.deep.equal(['--restore', 'archive_x-1', '--apply']);
+    expect(coreCalls(s)[0].args).to.deep.equal(['--restore', AID, '--apply']);
     expect(fs.readFileSync(path.join(s.dir, 'secrets.in'), 'utf8')).to.equal(`ARAF_ESCROW_ADDRESS=${OLD}\nARAF_DEPLOYMENT_BLOCK=1234\n`);
+    expect(fs.readFileSync(ghEnv, 'utf8')).to.equal(`RESTORED_ESCROW_ADDRESS=${OLD}\nRESTORED_DEPLOYMENT_BLOCK=1234\n`);
     const calls = flyCalls(s);
     const secretsAt = calls.findIndex((x) => x.startsWith('secrets import'));
     const lastStop = calls.map((x, i) => (x.startsWith('machine stop') ? i : -1)).filter((i) => i >= 0).pop();
@@ -156,11 +165,28 @@ describe('rotate-escrow-state.sh', function () {
     expect(firstStart).to.be.greaterThan(lastStop);
   });
 
+  it('restore --apply: core does not report the target lines -> Fly untouched, non-zero, machines restarted', async function () {
+    const s = setup();
+    const env = envFor(s, { ARAF_ESCROW_ADDRESS: NEW }); delete env.OLD_ESCROW_ADDRESS; delete env.ARAF_DEPLOYMENT_BLOCK;
+    const r = await run(['restore', AID, '--apply'], env);
+    expect(r.status).to.not.equal(0);
+    expect(flyCalls(s).join('\n')).to.not.match(/secrets/);
+    expect(flyCalls(s).join('\n')).to.match(/machine start m1/);
+  });
+
+  it('restore --apply: malformed target lines are not trusted', async function () {
+    const s = setup({ restoreLines: 'RESTORE_TARGET_ESCROW=0x12\nRESTORE_TARGET_DEPLOY_BLOCK=0' });
+    const env = envFor(s, { ARAF_ESCROW_ADDRESS: NEW }); delete env.OLD_ESCROW_ADDRESS; delete env.ARAF_DEPLOYMENT_BLOCK;
+    const r = await run(['restore', AID, '--apply'], env);
+    expect(r.status).to.not.equal(0);
+    expect(flyCalls(s).join('\n')).to.not.match(/secrets/);
+  });
+
   it('restore dry-run touches no machine and no Fly secret', async function () {
     const s = setup();
-    const r = await run(['restore', 'a1'], envFor(s));
+    const r = await run(['restore', AID], envFor(s));
     expect(r.status).to.equal(0, r.out);
-    expect(coreCalls(s)[0].args).to.deep.equal(['--restore', 'a1']);
+    expect(coreCalls(s)[0].args).to.deep.equal(['--restore', AID]);
     expect(flyCalls(s)).to.have.length(0);
   });
 
@@ -169,6 +195,8 @@ describe('rotate-escrow-state.sh', function () {
       [['bogus'], {}],
       [['restore'], {}],
       [['restore', 'x;rm -rf'], {}],
+      [['restore', 'archive_x-1'], {}],
+      [['restore', `84532-${OLD}`], {}],
       [['rotate', '--bogus'], {}],
       [['rotate'], { OLD_ESCROW_ADDRESS: '0x123' }],
       [['rotate'], { ARAF_ESCROW_ADDRESS: '' }],
