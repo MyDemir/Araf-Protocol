@@ -23,7 +23,7 @@ import { resolveClientErrorLogUrl } from '../app/apiConfig';
 import { setMakerChallengeWindowMs } from '../app/contexts/trade-room/tradeTimeline';
 import { getSupportedChainsMap, isConfiguredTestToken, isFaucetChainId, isMintTokenEnabled } from '../app/chainPolicy';
 import { ARAF_CONTRACT_ERROR_ABI, decorateContractError } from '../app/contractErrors';
-import { diagnoseWriteError, applyDiagnosis, stripAddresses } from '../app/walletRpcDiagnosis';
+import { diagnoseWriteError, applyDiagnosis, stripAddresses, isUserRejection } from '../app/walletRpcDiagnosis';
 import { addKnownTradeIds } from '../app/knownTrades';
 
 const ArafEscrowABI = parseAbi([
@@ -449,8 +449,10 @@ export function useArafContract({ expectedChainId = null } = {}) {
       const errorMessage = stripAddresses(rawMessage);
       
       //Hatayı sessizce backend log dosyasına gönder (Kullanıcı arayüzünü dondurmaz)
+      // [TR] Kullanıcı cüzdanda reddettiyse hata değildir: backend'e log gönderilmez.
+      // [EN] Wallet rejection is not an error: nothing is sent to the backend.
       const logUrl = resolveClientErrorLogUrl();
-      fetch(logUrl, {
+      if (!isUserRejection(error)) fetch(logUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -620,7 +622,7 @@ export function useArafContract({ expectedChainId = null } = {}) {
       // Token Onayı iptallerini backend'e logla
       const errorMessage = error.shortMessage || error.message || "Bilinmeyen Onay Hatası";
       const logUrl = resolveClientErrorLogUrl();
-      fetch(logUrl, {
+      if (!isUserRejection(error)) fetch(logUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -661,7 +663,7 @@ export function useArafContract({ expectedChainId = null } = {}) {
        // Faucet iptallerini backend'e logla
        const errorMessage = error.shortMessage || error.message || "Bilinmeyen Faucet Hatası";
        const logUrl = resolveClientErrorLogUrl();
-       fetch(logUrl, {
+       if (!isUserRejection(error)) fetch(logUrl, {
          method: 'POST',
          headers: { 'Content-Type': 'application/json' },
          body: JSON.stringify({
