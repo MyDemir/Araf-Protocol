@@ -389,4 +389,15 @@ describe('rotate-escrow.js --restore', () => {
       expect((await exec(['--restore', bad], { ...w, env: { ...ENV, OLD_ESCROW_ADDRESS: undefined } })).code).to.equal(1);
     }
   });
+
+  it('registry deploy_block invalid: rotation stops with NO write', async () => {
+    for (const bad of [null, undefined, 0, -1, 'x', 1.5]) {
+      const w = world({ registry: { active: active({ deploy_block: bad }) } });
+      const r = await exec(['--rotate', '--apply'], w);
+      expect(r.code, String(bad)).to.equal(1);
+      expect(r.out).to.include('deploy_block');
+      expect(w.mongo.st.writes).to.have.length(0);
+      expect(w.redis.st.writes).to.have.length(0);
+    }
+  });
 });

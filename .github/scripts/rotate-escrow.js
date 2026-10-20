@@ -480,6 +480,8 @@ async function rotate(ctx) {
   } else {
     if (regAddr !== cfg.old) fail('registry active.escrow_address does not equal OLD_ESCROW_ADDRESS.');
     if (reg.state !== 'ACTIVE' && reg.state !== 'ROTATING') fail('registry active has an unexpected state.');
+    // [TR] Geri yükleme hedefi bu değerden türetilir: geçersizse HİÇBİR yazma yapmadan dur.
+    if (!Number.isInteger(reg.deploy_block) || reg.deploy_block < 1) fail('registry active.deploy_block is missing or invalid; refusing to rotate (nothing was written).');
     if (chain) {
       if (!(await chain.paused(cfg.old))) fail('old escrow is NOT paused; refusing to rotate.');
     } else out('::warning::RPC_URL not set; pause state not re-verified (precheck is responsible).');
@@ -493,7 +495,7 @@ async function rotate(ctx) {
       old_escrow: cfg.old,
       new_escrow: cfg.new,
       chain_id: cfg.chainId,
-      old_deploy_block: reg.deploy_block === undefined ? null : reg.deploy_block,
+      old_deploy_block: reg.deploy_block,
       new_deploy_block: cfg.newBlock,
       state: 'PLANNED',
       planned_at: now(),

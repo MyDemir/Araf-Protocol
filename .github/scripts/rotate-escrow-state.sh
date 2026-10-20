@@ -64,7 +64,7 @@ MAX_ATTEMPTS=3
 # shellcheck source=fly-machines-lib.sh
 source "$HERE/fly-machines-lib.sh"
 
-CORE_OUT="$(mktemp)"
+CORE_OUT=""
 IDS=()   # yalnız başlangıçta started olanlar; sonda yalnız bunlar başlatılır
 capture_started || die "Could not list Fly machines (or none exist) for $FLY_APP_NAME."
 
@@ -72,13 +72,14 @@ STOP_ATTEMPTED=0
 on_exit() {
   local rc=$?
   trap - EXIT
-  rm -f "$CORE_OUT"
+  if [ -n "$CORE_OUT" ]; then rm -f "$CORE_OUT"; fi
   if [ "$STOP_ATTEMPTED" = "1" ]; then
     start_all || rc=1
   fi
   exit "$rc"
 }
 trap on_exit EXIT
+CORE_OUT="$(mktemp)"
 
 # Tüm makineleri durdurur ve doğrular (en fazla MAX_ATTEMPTS). Başarısızsa 1.
 ensure_stopped() {
