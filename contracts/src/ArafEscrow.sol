@@ -624,13 +624,14 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
         PaymentRiskLevel _paymentRiskLevel
     ) external nonReentrant whenNotPaused returns (uint256 orderId) {
         if (!_isTokenAllowedForBuyOrder(_token)) revert TokenDirectionNotAllowed();
-        // [TR] Buy order sahibi child trade'de taker olacağı için create'te ban, DUST ve cooldown
-        //      kontrolleri zorlanır; cüzdan yaşı kontrolü create'te YOKTUR, fillBuyOrder'da
-        //      (_enforceTakerEntry) uygulanır.
-        // [EN] The buy order owner becomes taker in child trades, so ban, DUST and cooldown checks
-        //      are enforced at create; the wallet-age check is NOT applied at create and is
-        //      enforced at fillBuyOrder time (_enforceTakerEntry).
+        // [TR] Buy order sahibi child trade'de taker olacağı için create'te ban, kayıt, DUST ve
+        //      cooldown kontrolleri zorlanır (bu sırayla); 2 günlük cüzdan yaşı kontrolü create'te
+        //      YOKTUR, fillBuyOrder'da (_enforceTakerEntry) uygulanır.
+        // [EN] The buy order owner becomes taker in child trades, so ban, registration, DUST and
+        //      cooldown checks are enforced at create (in this order); the 2-day wallet-age check
+        //      is NOT applied at create and is enforced at fillBuyOrder time (_enforceTakerEntry).
         _enforceNotBanned(msg.sender, false);
+        if (walletRegisteredAt[msg.sender] == 0) revert WalletTooYoung();
         _enforceTakerDustAndCooldown(msg.sender, _tier);
 
         uint256 takerBondTotal = (_totalAmount * _getTakerBondBps(msg.sender, _tier)) / BPS_DENOMINATOR;
@@ -1934,8 +1935,10 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
     /**
      * @notice Taker giriş kapısını tek yerden zorlar.
      *         V3 order child-trade girişleri (fillSellOrder/fillBuyOrder) bu helper'ı ortak kullanır.
+     *         createBuyOrder bunu KULLANMAZ; kendi ban/kayıt/DUST/cooldown kontrolünü yapar (yaş yok).
      * @notice Enforces the taker entry gate in one place.
      *         V3 order child-trade entries (fillSellOrder/fillBuyOrder) share this helper.
+     *         createBuyOrder does NOT use it; it runs its own ban/registration/DUST/cooldown checks (no age).
      */
     function _enforceTakerEntry(address _wallet, uint8 _tier) internal view {
         _enforceNotBanned(_wallet, false);

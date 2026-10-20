@@ -20,22 +20,26 @@ async function eventArg(tx, c, name, key) {
 }
 
 async function fixture() {
-  const [owner, treasury, maker, taker, helper, other, helper2, young] = await ethers.getSigners();
+  const [owner, treasury, maker, taker, helper, other, helper2] = await ethers.getSigners();
   const token = await (await ethers.getContractFactory("MockERC20")).deploy("USDT", "USDT", 6);
   const { escrow } = await deployEscrowWithLibraries(treasury.address);
   await escrow.setTokenConfig(await token.getAddress(), true, true, true, 6, [U(1500), U(15000), U(75000), U(300000)]);
-  for (const w of [maker, taker, helper, other, helper2, young]) {
+  for (const w of [maker, taker, helper, other, helper2]) {
     await token.mint(w.address, U(100000));
     await token.connect(w).approve(await escrow.getAddress(), ethers.MaxUint256);
     await escrow.connect(w).registerWallet();
   }
   await time.increase(2 * DAY + 1);
-  // [TR] young: yaşı dolmamış taze kayıt. [EN] young: freshly registered, below the age minimum.
+  // [TR] fresh: yaşı dolmamış taze kayıt; stranger: hiç kayıt yok.
+  // [EN] fresh: registered but below the age minimum; stranger: never registered.
   const fresh = (await ethers.getSigners())[8];
   await token.mint(fresh.address, U(100000));
   await token.connect(fresh).approve(await escrow.getAddress(), ethers.MaxUint256);
   await escrow.connect(fresh).registerWallet();
-  return { escrow, token, owner, maker, taker, helper, other, helper2, fresh };
+  const stranger = (await ethers.getSigners())[9];
+  await token.mint(stranger.address, U(100000));
+  await token.connect(stranger).approve(await escrow.getAddress(), ethers.MaxUint256);
+  return { escrow, token, owner, maker, taker, helper, other, helper2, fresh, stranger };
 }
 
 async function createBuy(c, w, tier = 0) {
@@ -56,6 +60,11 @@ describe("createBuyOrder wallet-age relaxation", function () {
       .to.be.revertedWithCustomError(c.escrow, "WalletTooYoung");
     await time.increase(700);
     await expect(c.escrow.connect(c.maker).fillBuyOrder(oid, U(100), R())).to.emit(c.escrow, "OrderFilled");
+  });
+
+  it("(g) a never-registered wallet is rejected at createBuyOrder with WalletTooYoung", async function () {
+    const c = await loadFixture(fixture);
+    await expect(createBuy(c, c.stranger)).to.be.revertedWithCustomError(c.escrow, "WalletTooYoung");
   });
 
   it("(c) a banned wallet is still rejected at createBuyOrder", async function () {

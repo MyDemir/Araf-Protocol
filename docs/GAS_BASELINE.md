@@ -153,20 +153,24 @@ sütunuyla birebir aynı. Bytecode boyutları yukarıdaki gibidir.
 
 ## Buy order wallet-age relaxation (2026-10-20) / Alış emri cüzdan yaşı gevşetmesi
 
-- `createBuyOrder` no longer checks wallet age (ban, DUST and cooldown stay); `fillBuyOrder` still runs the full
-  `_enforceTakerEntry`, so an under-age owner's order is rejected there with `WalletTooYoung`.
-- `createBuyOrder` artık cüzdan yaşına bakmaz (ban, DUST, cooldown sürer); `fillBuyOrder` tam `_enforceTakerEntry`
-  çağırmaya devam eder.
+- `createBuyOrder` no longer checks the 2-day wallet age; it still checks ban, registration (`WalletTooYoung` when
+  never registered), DUST and cooldown, in that order. `fillBuyOrder` still runs the full `_enforceTakerEntry`,
+  so an under-age owner's order is rejected there with `WalletTooYoung`.
+- `createBuyOrder` artık 2 günlük cüzdan yaşına bakmaz; ban, kayıt (hiç kayıt yoksa `WalletTooYoung`), DUST ve
+  cooldown kontrolleri bu sırayla sürer. `fillBuyOrder` tam `_enforceTakerEntry` çağırmaya devam eder.
+
+Measured with `npm --prefix contracts run gas:baseline` (3 runs, identical output). Only rows that changed:
 
 | Operation | Before | After | Δ gas | Δ % |
 |---|---:|---:|---:|---:|
-| `createBuyOrder_t2` | 262,853 | 260,605 | -2,248 | -0.9% |
+| `createBuyOrder_t2` | 262,853 | 262,792 | -61 | -0.0% |
 | `fillBuyOrder_t2` | 276,564 | 276,635 | +71 | +0.0% |
-
 | `fillSellOrder_t0` | 203,737 | 203,809 | +72 | +0.0% |
 | `fillSellOrder_t2` | 273,327 | 273,398 | +71 | +0.0% |
 | `fillSellOrder_t2_partial` | 280,348 | 280,419 | +71 | +0.0% |
 | `createSellOrder_t2` | 277,796 | 277,795 | -1 | -0.0% |
 
-The +71 on fill paths is the extra internal call (`_enforceTakerDustAndCooldown`); other rows are identical.
-Fill yollarındaki +71, ek iç çağrıdan gelir; diğer satırlar aynıdır.
+`createBuyOrder` loses the age comparison but gains the registration check, so the net is -61. The fill paths
+gain ~71 gas (extra internal call from splitting the DUST/cooldown part out of `_enforceTakerEntry`).
+`createBuyOrder`, yaş karşılaştırmasını kaybedip kayıt kontrolünü kazandığı için net -61 gas; fill yolları ~71
+gas artar (DUST/cooldown kısmının ayrı iç fonksiyona alınması).
