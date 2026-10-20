@@ -3,8 +3,10 @@
 //      Mongo `escrow_registry` koleksiyonundaki `_id:"active"` belgesini oluşturur/günceller.
 //        node .github/scripts/escrow-registry.js --adopt [--apply] [--force-switch]
 //      VARSAYILAN dry-run: yalnız ne yazacağını yazdırır (mevcut belge OKUNUR, hiçbir şey yazılmaz). Yazma için açık --apply.
-//      Mevcut active BAŞKA bir escrow/zincir gösteriyorsa (veya state ROTATING ise) --force-switch olmadan DURUR
-//      (rotasyonu Faz 2 yönetecek). Girdiler yalnız env'den: MONGODB_URI ARAF_ESCROW_ADDRESS EXPECTED_CHAIN_ID
+//      Mevcut active BAŞKA bir escrow/zincir gösteriyorsa --force-switch olmadan DURUR. State ROTATING ise
+//      --force-switch ile bile HER KOŞULDA durur: rotasyonu yalnız rotate-escrow.yml (rotate-escrow.js) tamamlar.
+//        node .github/scripts/escrow-registry.js --status   # salt okur: "registry_state=none|ACTIVE|ROTATING"
+//      Girdiler yalnız env'den: MONGODB_URI ARAF_ESCROW_ADDRESS EXPECTED_CHAIN_ID
 //      ARAF_DEPLOYMENT_BLOCK GITHUB_RUN_ID (opsiyonel). MONGODB_URI / secret hiçbir koşulda yazdırılmaz.
 //      Mongo sürücüsü yeni bağımlılık değildir: backend/node_modules (npm ci --prefix backend) içinden yüklenir.
 // [EN] Sole writer of the "active escrow" registry document. Dry-run by default; --apply to write;
@@ -19,9 +21,9 @@ const RUN_ID_RE = /^[0-9]{1,20}$/;
 
 function parseArgs(argv) {
   const flags = new Set(argv);
-  const known = new Set(['--adopt', '--apply', '--force-switch']);
+  const known = new Set(['--adopt', '--apply', '--force-switch', '--status']);
   const unknown = argv.filter((a) => !known.has(a));
-  return { adopt: flags.has('--adopt'), apply: flags.has('--apply'), forceSwitch: flags.has('--force-switch'), unknown };
+  return { status: flags.has('--status'), adopt: flags.has('--adopt'), apply: flags.has('--apply'), forceSwitch: flags.has('--force-switch'), unknown };
 }
 
 function buildDesired(env) {
@@ -81,9 +83,29 @@ function createMongoStore(uri) {
 
 async function run({ argv = process.argv.slice(2), env = process.env, store, out = console.log, now = () => new Date() } = {}) {
   const args = parseArgs(argv);
-  if (args.unknown.length || !args.adopt) {
-    out('usage: escrow-registry.js --adopt [--apply] [--force-switch]   (default: dry-run)');
+  if (args.unknown.length || (!args.adopt && !args.status) || (args.adopt && args.status)) {
+    out('usage: escrow-registry.js --adopt [--apply] [--force-switch]   (default: dry-run) | --status');
     return 2;
+  }
+
+  // Salt okur durum sorgusu: yalnız MONGODB_URI gerekir; hiçbir şey yazılmaz.
+  if (args.status) {
+    if (!env.MONGODB_URI && !store) {
+      out('::error::MONGODB_URI is required.');
+      return 1;
+    }
+    let st = store;
+    try {
+      st = st || createMongoStore(env.MONGODB_URI);
+      const existing = await st.read();
+      out(`registry_state=${existing ? (existing.state === 'ROTATING' ? 'ROTATING' : existing.state === 'ACTIVE' ? 'ACTIVE' : 'UNKNOWN') : 'none'}`);
+      return 0;
+    } catch (e) {
+      out(e && e.safe ? `::error::${e.message}` : `::error::registry operation failed (${(e && e.name) || 'Error'}).`);
+      return 1;
+    } finally {
+      if (st && !store) await st.close();
+    }
   }
 
   let desired;
@@ -106,6 +128,11 @@ async function run({ argv = process.argv.slice(2), env = process.env, store, out
     let action = 'create';
 
     if (existing) {
+      // ROTATING: rotasyon yarım; --force-switch dahil HİÇBİR koşulda ezilmez (DEVAM_NOTLARI 4.5/3).
+      if (existing.state === 'ROTATING') {
+        out(`::error::Registry state is ROTATING (${describe(existing)}). A rotation is in progress or was interrupted; refusing to overwrite even with --force-switch. Complete the rotation with the rotate-escrow.yml workflow.`);
+        return 1;
+      }
       if (sameTarget(existing, desired)) {
         action = 'update (same escrow)';
         doc.since = existing.since || doc.since;

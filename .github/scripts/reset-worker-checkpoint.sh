@@ -6,6 +6,7 @@
 #      başlatabilir; bu yüzden DEL'den hemen önce ve hemen sonra doğrulanır, en fazla 3 deneme yapılır.
 #      Makine listesi FAIL-CLOSED okunur: flyctl hatası, boş/geçersiz çıktı ya da 0 makine = hata.
 #      Sonda yalnız başlangıçta started olan makineler başlatılır.
+#      Makine yardımcıları fly-machines-lib.sh'te ortaktır (rotate-escrow-state.sh de kullanır).
 #      Env: FLY_APP_NAME FLY_API_TOKEN REDIS_URL DEPLOY_BLOCK (+ test için WAIT_TIMEOUT_S, WAIT_INTERVAL_S).
 #      Gizli değerler basılmaz.
 # [EN] Safely resets the worker Redis checkpoint after a contract deploy (stop, verify, delete 2 keys, verify, start).
@@ -20,30 +21,13 @@ WAIT_TIMEOUT_S="${WAIT_TIMEOUT_S:-180}"
 WAIT_INTERVAL_S="${WAIT_INTERVAL_S:-5}"
 MAX_ATTEMPTS=3
 
-# Çıktı: "<id> <state>" satırları. FAIL-CLOSED: flyctl hatası, geçersiz JSON ya da 0 makine => dönüş kodu 1.
-list_machines() {
-  flyctl machine list --json -a "$FLY_APP_NAME" | python3 -c '
-import json,sys
-d=json.load(sys.stdin)
-if not isinstance(d,list) or len(d)==0: sys.exit(1)
-for m in d:
-    print(m.get("id",""), m.get("state",""))'
-}
+# shellcheck source=fly-machines-lib.sh
+source "$HERE/fly-machines-lib.sh"
 
-INITIAL="$(list_machines)" || die "Could not list Fly machines (or none exist) for $FLY_APP_NAME."
 IDS=()   # yalnız başlangıçta started olanlar; sonda yalnız bunlar başlatılır
-while read -r id state; do
-  if [ -n "$id" ] && [ "$state" = "started" ]; then IDS+=("$id"); fi
-done <<<"$INITIAL"
+capture_started || die "Could not list Fly machines (or none exist) for $FLY_APP_NAME."
 
 STOP_ATTEMPTED=0
-start_all() {
-  local rc=0 id
-  for id in ${IDS[@]+"${IDS[@]}"}; do
-    flyctl machine start "$id" -a "$FLY_APP_NAME" >/dev/null || { echo "::error::Failed to start machine $id"; rc=1; }
-  done
-  return $rc
-}
 on_exit() {
   local rc=$?
   trap - EXIT
@@ -53,32 +37,6 @@ on_exit() {
   exit "$rc"
 }
 trap on_exit EXIT
-
-# Stopped olmayan her makineyi durdurur (auto_start proxy'si yeniden başlatmış olabilir). Liste hatası => 1.
-stop_running() {
-  local rc=0 id state out
-  out="$(list_machines)" || return 1
-  while read -r id state; do
-    if [ -n "$id" ] && [ "$state" != "stopped" ]; then
-      flyctl machine stop "$id" -a "$FLY_APP_NAME" >/dev/null || { echo "::warning::Failed to stop machine $id"; rc=1; }
-    fi
-  done <<<"$out"
-  return $rc
-}
-# Çalışan sayısını basar; liste hatası => 1 (fail-closed).
-count_running() {
-  local out
-  out="$(list_machines)" || return 1
-  awk '$1 != "" && $2 != "stopped" {c++} END {print c+0}' <<<"$out"
-}
-all_stopped() { local n; n="$(count_running)" || return 1; [ "$n" = "0" ]; }
-wait_stopped() {
-  local start=$SECONDS
-  while ! all_stopped; do
-    [ $((SECONDS - start)) -lt "$WAIT_TIMEOUT_S" ] || return 1
-    sleep "$WAIT_INTERVAL_S"
-  done
-}
 
 STOP_ATTEMPTED=1
 ok=0
