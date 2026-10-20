@@ -53,6 +53,7 @@ const { RedisStore } = require("rate-limit-redis");
 const { getRedisClient, isReady } = require("../config/redis");
 const User = require("../models/User");
 const logger = require("../utils/logger");
+const { resolveClientIp } = require("../utils/clientIp");
 
 /**
  * Redis store oluşturur.
@@ -307,7 +308,7 @@ function makeTieredSensitiveLimiter({
 function makePiiLimiter({ label, storePrefix, windowMs, max, extraKey = () => "", message }) {
   const keyGenerator = (req) => {
     const extra = extraKey(req);
-    return `${req.ip}:${req.wallet || "anon"}${extra ? `:${extra}` : ""}`;
+    return `${resolveClientIp(req)}:${req.wallet || "anon"}${extra ? `:${extra}` : ""}`;
   };
   const errorBody = () => ({
     error: message,
@@ -389,7 +390,7 @@ const piiLimiter = piiProfileLimiter;
 const authRedisLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 10,
-  keyGenerator: (req) => req.ip,
+  keyGenerator: (req) => resolveClientIp(req),
   store: makeStore("auth"),
   handler: (req, res) => {
     onLimitReached(req);
@@ -403,7 +404,7 @@ const authInMemoryLimiter = makeInMemoryLimiter({
   label: "AUTH",
   windowMs: 60 * 1000,
   max: 10,
-  keyGenerator: (req) => req.ip,
+  keyGenerator: (req) => resolveClientIp(req),
   errorMessage: () => ({
     error: "Çok fazla auth isteği. 1 dakika sonra tekrar deneyin.",
   }),
@@ -423,7 +424,7 @@ const authLimiter = makeSensitiveLimiter({
 const nonceRedisLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 6,
-  keyGenerator: (req) => `${req.ip}:${String(req.query?.wallet || "anon").toLowerCase()}`,
+  keyGenerator: (req) => `${resolveClientIp(req)}:${String(req.query?.wallet || "anon").toLowerCase()}`,
   store: makeStore("auth-nonce"),
   handler: (req, res) => {
     onLimitReached(req);
@@ -437,7 +438,7 @@ const nonceInMemoryLimiter = makeInMemoryLimiter({
   label: "AUTH-NONCE",
   windowMs: 60 * 1000,
   max: 6,
-  keyGenerator: (req) => `${req.ip}:${String(req.query?.wallet || "anon").toLowerCase()}`,
+  keyGenerator: (req) => `${resolveClientIp(req)}:${String(req.query?.wallet || "anon").toLowerCase()}`,
   errorMessage: () => ({
     error: "Çok fazla nonce isteği. Lütfen kısa bir süre sonra tekrar deneyin.",
   }),
@@ -454,7 +455,7 @@ const nonceLimiter = makeSensitiveLimiter({
 const marketReadRedisLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 100,
-  keyGenerator: (req) => req.ip,
+  keyGenerator: (req) => resolveClientIp(req),
   store: makeStore("market-read"),
   handler: (req, res) => {
     onLimitReached(req);
@@ -468,7 +469,7 @@ const marketReadInMemoryLimiter = makeInMemoryLimiter({
   label: "MARKET-READ",
   windowMs: 60 * 1000,
   max: 100,
-  keyGenerator: (req) => req.ip,
+  keyGenerator: (req) => resolveClientIp(req),
   errorMessage: () => ({
     error: "Çok fazla istek. Yavaşlayın.",
   }),
@@ -484,7 +485,7 @@ const marketReadLimiter = makeSensitiveLimiter({
 const statsReadRedisLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 60,
-  keyGenerator: (req) => req.ip,
+  keyGenerator: (req) => resolveClientIp(req),
   store: makeStore("stats-read"),
   handler: (req, res) => {
     onLimitReached(req);
@@ -498,7 +499,7 @@ const statsReadInMemoryLimiter = makeInMemoryLimiter({
   label: "STATS-READ",
   windowMs: 60 * 1000,
   max: 60,
-  keyGenerator: (req) => req.ip,
+  keyGenerator: (req) => resolveClientIp(req),
   errorMessage: () => ({
     error: "Stats isteği limiti aşıldı. Lütfen kısa bir süre sonra tekrar deneyin.",
   }),
@@ -515,7 +516,7 @@ const statsReadLimiter = makeSensitiveLimiter({
 const ordersWriteLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 5,
-  keyGenerator: (req) => req.wallet || req.ip,
+  keyGenerator: (req) => req.wallet || resolveClientIp(req),
   store: makeStore("orders-write"),
   skip: makeSkipFn(),
   handler: (req, res) => {
@@ -530,7 +531,7 @@ const ordersWriteInMemoryLimiter = makeInMemoryLimiter({
   label: "ORDERS-WRITE",
   windowMs: 60 * 60 * 1000,
   max: 5,
-  keyGenerator: (req) => req.wallet || req.ip,
+  keyGenerator: (req) => req.wallet || resolveClientIp(req),
   errorMessage: () => ({
     error: "Order oluşturma limiti: Saatte 5 istek.",
   }),
@@ -550,7 +551,7 @@ const ordersWriteLimiterWithFallback = makeSensitiveLimiter({
 const ordersReadLimiter = makeTieredSensitiveLimiter({
   label: "ORDERS-READ",
   windowMs: 60 * 1000,
-  keyGenerator: (req) => req.wallet || req.ip,
+  keyGenerator: (req) => req.wallet || resolveClientIp(req),
   storePrefix: "orders-read",
   // [TR] Tier-aware throughput farkı yalnız abuse/fair-use içindir; authority üretmez.
   // [EN] Tier-aware throughput only tunes fair-use capacity and remains non-authoritative.
@@ -565,7 +566,7 @@ const ordersReadLimiter = makeTieredSensitiveLimiter({
 const roomReadLimiter = makeTieredSensitiveLimiter({
   label: "ROOM-READ",
   windowMs: 60 * 1000,
-  keyGenerator: (req) => req.wallet || req.ip,
+  keyGenerator: (req) => req.wallet || resolveClientIp(req),
   storePrefix: "room-read",
   limitsByTier: [20, 30, 40, 55, 70],
   errorMessageFactory: (_req, { max }) => ({
@@ -581,7 +582,7 @@ const roomReadLimiter = makeTieredSensitiveLimiter({
 const receiptUploadLimiter = makeTieredSensitiveLimiter({
   label: "RECEIPT-UPLOAD",
   windowMs: 10 * 60 * 1000,
-  keyGenerator: (req) => req.wallet || req.ip,
+  keyGenerator: (req) => req.wallet || resolveClientIp(req),
   storePrefix: "receipt-upload",
   limitsByTier: [6, 8, 10, 12, 14],
   errorMessageFactory: (_req, { max }) => ({
@@ -593,7 +594,7 @@ const receiptUploadLimiter = makeTieredSensitiveLimiter({
 const coordinationWriteLimiter = makeTieredSensitiveLimiter({
   label: "COORDINATION-WRITE",
   windowMs: 10 * 60 * 1000,
-  keyGenerator: (req) => req.wallet || req.ip,
+  keyGenerator: (req) => req.wallet || resolveClientIp(req),
   storePrefix: "coordination-write",
   limitsByTier: [8, 12, 16, 20, 24],
   errorMessageFactory: (_req, { max }) => ({
@@ -608,7 +609,7 @@ const coordinationWriteLimiter = makeTieredSensitiveLimiter({
 const adminReadLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 60,
-  keyGenerator: (req) => req.wallet || req.ip,
+  keyGenerator: (req) => req.wallet || resolveClientIp(req),
   store: makeStore("admin-read"),
   skip: makeSkipFn(),
   handler: (req, res) => {
@@ -623,7 +624,7 @@ const adminReadInMemoryLimiter = makeInMemoryLimiter({
   label: "ADMIN-READ",
   windowMs: 60 * 1000,
   max: 60,
-  keyGenerator: (req) => req.wallet || req.ip,
+  keyGenerator: (req) => req.wallet || resolveClientIp(req),
   errorMessage: () => ({
     error: "Admin gözlem limiti aşıldı. Kısa süre sonra tekrar deneyin.",
   }),
@@ -648,7 +649,7 @@ const adminWriteErrorBody = () => ({
 const adminWriteRedisLimiter = rateLimit({
   windowMs: ADMIN_WRITE_WINDOW_MS,
   max: ADMIN_WRITE_MAX,
-  keyGenerator: (req) => req.wallet || req.ip,
+  keyGenerator: (req) => req.wallet || resolveClientIp(req),
   store: makeStore("admin-write"),
   skip: makeSkipFn(),
   handler: (req, res) => {
@@ -662,7 +663,7 @@ const adminWriteInMemoryLimiter = makeInMemoryLimiter({
   label: "ADMIN-WRITE",
   windowMs: ADMIN_WRITE_WINDOW_MS,
   max: ADMIN_WRITE_MAX,
-  keyGenerator: (req) => req.wallet || req.ip,
+  keyGenerator: (req) => req.wallet || resolveClientIp(req),
   errorMessage: adminWriteErrorBody,
 });
 const adminWriteLimiter = makeSensitiveLimiter({
@@ -675,7 +676,7 @@ const adminWriteLimiter = makeSensitiveLimiter({
 const clientLogRedisLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 10,
-  keyGenerator: (req) => req.ip,
+  keyGenerator: (req) => resolveClientIp(req),
   store: makeStore("client-log"),
   handler: (req, res) => {
     onLimitReached(req);
@@ -689,7 +690,7 @@ const clientLogInMemoryLimiter = makeInMemoryLimiter({
   label: "CLIENT-LOG",
   windowMs: 60 * 1000,
   max: 10,
-  keyGenerator: (req) => req.ip,
+  keyGenerator: (req) => resolveClientIp(req),
   errorMessage: () => ({
     error: "Client log limiti aşıldı. Lütfen daha sonra tekrar deneyin.",
   }),
@@ -706,7 +707,7 @@ const clientLogLimiter = makeSensitiveLimiter({
 const feedbackLimiter = makeTieredSensitiveLimiter({
   label: "FEEDBACK",
   windowMs: 60 * 60 * 1000,
-  keyGenerator: (req) => req.wallet || req.ip,
+  keyGenerator: (req) => req.wallet || resolveClientIp(req),
   storePrefix: "feedback",
   limitsByTier: [2, 3, 4, 5, 6],
   errorMessageFactory: (_req, { max }) => ({
