@@ -9,6 +9,7 @@ const { getRedisClient } = require("../config/redis");
 const { getReadiness } = require("../services/health");
 const { getDlqMetrics } = require("../services/dlqProcessor");
 const worker = require("../services/eventListener");
+const { resolveClientIp } = require("../utils/clientIp");
 const Trade = require("../models/Trade");
 const User = require("../models/User");
 const Feedback = require("../models/Feedback");
@@ -736,7 +737,7 @@ router.put("/payment-rails/:rail", adminWriteLimiter, async (req, res, next) => 
     const { error, value } = RAIL_PUT_SCHEMA.validate(req.body);
     if (error) return res.status(400).json({ error: error.message });
 
-    const ipHash = await hmacDigest("admin-audit-ip", req.ip || "");
+    const ipHash = await hmacDigest("admin-audit-ip", resolveClientIp(req) || "");
     const result = await paymentRails.setRailEnabled(rail, value.enabled, {
       wallet: req.wallet,
       reason: value.reason || "",
@@ -804,7 +805,7 @@ router.put("/runtime-settings/:key", adminWriteLimiter, async (req, res, next) =
       return res.status(400).json({ error: `Değer ${d.min}-${d.max} aralığında olmalı.`, code: "RUNTIME_SETTING_OUT_OF_RANGE" });
     }
 
-    const ipHash = await hmacDigest("admin-audit-ip", req.ip || "");
+    const ipHash = await hmacDigest("admin-audit-ip", resolveClientIp(req) || "");
     const result = await runtimeSettings.setSetting(key, nextValue, {
       wallet: req.wallet,
       reason: value.reason || "",
@@ -865,7 +866,7 @@ router.put("/social-links", adminWriteLimiter, async (req, res, next) => {
   try {
     const { error, value } = SOCIAL_LINKS_PUT_SCHEMA.validate(req.body);
     if (error) return res.status(400).json({ error: error.message, code: "SOCIAL_LINKS_INVALID" });
-    const ipHash = await hmacDigest("admin-audit-ip", req.ip || "");
+    const ipHash = await hmacDigest("admin-audit-ip", resolveClientIp(req) || "");
     const result = await socialLinks.replaceLinks(value.links, {
       wallet: req.wallet,
       reason: value.reason || "",
