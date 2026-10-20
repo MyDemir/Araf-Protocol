@@ -1151,6 +1151,7 @@ function App() {
     // [TR] Gerçek sayaçlar saat sınırında (AppViews/NowBoundary) türetilir; burada yalnız lab geçersiz kılmaları taşınır.
     tradeTimers: labTradeRoom ? labTradeRoom.timers : undefined,
     chainOffsetMs,
+    getWalletRegisteredAt,
     canMakerStartChallengeFlow,
     canMakerChallenge,
     // [TR] Lab'da kontrat okuması yok; eriyen tutar kontrat formülünün aynasıyla tahmin edilir.
