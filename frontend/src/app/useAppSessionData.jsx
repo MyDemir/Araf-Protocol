@@ -1549,17 +1549,27 @@ export function useAppSessionData({
     }, Math.min(remainingMs + 500, 2 ** 31 - 1));
     return () => clearTimeout(timer);
   }, [bannedUntilSec, chainOffsetMs, banTick, refreshReputation]);
+  // [TR] Pazarda BUY emri varsa genç-sahip etiketi (useOwnerWalletAge) zincir saatine ihtiyaç duyar; açık işlem/ban
+  //      olmasa da ofset bir kez okunur ve 5 dk'da bir tazelenir. Hata olursa mevcut ofset korunur.
+  // [EN] With BUY orders listed, the young-owner label needs chain time: read the offset even without an open trade/ban,
+  //      refresh every 5 min; on failure the current offset is kept.
+  const hasBuyOrders = orders.some((o) => o?.side === 'BUY_CRYPTO');
+  const needsChainClock = tradeRoomOpen || bannedUntilSec > 0 || hasBuyOrders;
   useEffect(() => {
-    if (!(tradeRoomOpen || bannedUntilSec > 0) || !publicClient?.getBlock) return undefined;
+    if (!needsChainClock || !publicClient?.getBlock) return undefined;
     let alive = true;
-    publicClient.getBlock()
-      .then((block) => {
-        const blockMs = Number(block?.timestamp) * 1000;
-        if (alive && Number.isFinite(blockMs) && blockMs > 0) setChainOffsetMs(blockMs - Date.now());
-      })
-      .catch(() => {});
-    return () => { alive = false; };
-  }, [tradeRoomOpen, bannedUntilSec, publicClient]);
+    const readOffset = () => {
+      publicClient.getBlock()
+        .then((block) => {
+          const blockMs = Number(block?.timestamp) * 1000;
+          if (alive && Number.isFinite(blockMs) && blockMs > 0) setChainOffsetMs(blockMs - Date.now());
+        })
+        .catch(() => {});
+    };
+    readOffset();
+    const timer = setInterval(readOffset, 5 * 60 * 1000);
+    return () => { alive = false; clearInterval(timer); };
+  }, [needsChainClock, publicClient]);
   // [TR] P1: saniyelik saat App kökünde state DEĞİL; zincir farkı paylaşılan saat store'una yazılır ve yalnız saate
   //      ihtiyaç duyan yaprak bileşenler (NowBoundary/useNow) saniyede bir render olur.
   // [EN] P1: the per-second clock is not root state; the chain offset feeds the shared clock store and only leaf
