@@ -624,11 +624,14 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
         PaymentRiskLevel _paymentRiskLevel
     ) external nonReentrant whenNotPaused returns (uint256 orderId) {
         if (!_isTokenAllowedForBuyOrder(_token)) revert TokenDirectionNotAllowed();
-        // [TR] Buy order sahibi child trade'de taker rolünü üstleneceği için
-        //      create aşamasında da taker giriş kapısı zorlanır.
-        // [EN] Since buy order owner becomes taker in child trades,
-        //      enforce taker entry gate at create time as well.
-        _enforceTakerEntry(msg.sender, _tier);
+        // [TR] Buy order sahibi child trade'de taker olacağı için create'te ban, DUST ve cooldown
+        //      kontrolleri zorlanır; cüzdan yaşı kontrolü create'te YOKTUR, fillBuyOrder'da
+        //      (_enforceTakerEntry) uygulanır.
+        // [EN] The buy order owner becomes taker in child trades, so ban, DUST and cooldown checks
+        //      are enforced at create; the wallet-age check is NOT applied at create and is
+        //      enforced at fillBuyOrder time (_enforceTakerEntry).
+        _enforceNotBanned(msg.sender, false);
+        _enforceTakerDustAndCooldown(msg.sender, _tier);
 
         uint256 takerBondTotal = (_totalAmount * _getTakerBondBps(msg.sender, _tier)) / BPS_DENOMINATOR;
         orderId = _createOrder(OrderSide.BUY_CRYPTO, _token, _totalAmount, _minFillAmount, _tier, _orderRef, _paymentRiskLevel, 0, takerBondTotal);
@@ -1942,6 +1945,16 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
             revert WalletTooYoung();
         }
 
+        _enforceTakerDustAndCooldown(_wallet, _tier);
+    }
+
+    /**
+     * @notice Taker giriş kapısının yaş dışı kısmı: DUST bakiyesi ve tier cooldown (bu sırayla).
+     *         createBuyOrder (ban ile birlikte) ve _enforceTakerEntry tarafından kullanılır.
+     * @notice The non-age part of the taker entry gate: DUST balance and tier cooldown (in that order).
+     *         Used by createBuyOrder (together with the ban check) and by _enforceTakerEntry.
+     */
+    function _enforceTakerDustAndCooldown(address _wallet, uint8 _tier) internal view {
         if (_wallet.balance < DUST_LIMIT) revert InsufficientNativeBalance();
 
         uint256 cooldown = _getCooldownForTier(_tier);

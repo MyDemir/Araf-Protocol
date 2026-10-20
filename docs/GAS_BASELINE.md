@@ -150,3 +150,17 @@ sütunuyla birebir aynı. Bytecode boyutları yukarıdaki gibidir.
 - `Math.mulDiv` in reward weight: the product cannot overflow (6-decimal notional × 25,000 × 13,000). Not needed.
 - Batch claim: with a 30-day epoch and a 7-day claim window at most one epoch is claimable at a time.
 - `uint128` amounts: would save a further ~22–44k per fill/order but exceeded the 24,576-byte EIP-170 limit.
+
+## Buy order wallet-age relaxation (2026-10-20) / Alış emri cüzdan yaşı gevşetmesi
+
+- `createBuyOrder` no longer checks wallet age (ban, DUST and cooldown stay); `fillBuyOrder` still runs the full
+  `_enforceTakerEntry`, so an under-age owner's order is rejected there with `WalletTooYoung`.
+- `createBuyOrder` artık cüzdan yaşına bakmaz (ban, DUST, cooldown sürer); `fillBuyOrder` tam `_enforceTakerEntry`
+  çağırmaya devam eder.
+
+| Operation | Before | After | Δ gas | Δ % |
+|---|---:|---:|---:|---:|
+| `createBuyOrder_t2` | 262,853 | 260,605 | -2,248 | -0.9% |
+| `fillBuyOrder_t2` | 276,564 | 276,635 | +71 | +0.0% |
+
+All other rows are identical. / Diğer tüm satırlar aynıdır.
