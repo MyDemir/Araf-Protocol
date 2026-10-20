@@ -32,13 +32,19 @@ const isHiddenDoc = () => typeof document !== 'undefined' && document.visibility
 // [TR] Başarısız okuma 'error' olur; asla 0 gösterilmez. Sekme gizliyken okuma yapılmaz.
 // [EN] A failed read becomes 'error', never 0. No reads while the tab is hidden.
 export function useTokenBalances({ publicClient, owner, tokens, intervalMs = MIN_REFRESH_MS }) {
-  const [balances, setBalances] = useState({});
+  const [stored, setStored] = useState({ scope: null, data: {} });
   const tokensRef = useRef(tokens);
   tokensRef.current = tokens;
   const tokenKey = tokens.map((t) => `${t.key}:${t.address}`).join(',');
+  // [TR] Bakiye owner + zincir + token listesi kapsamına bağlıdır; eşleşmeyen saklı değer çizilmez.
+  // [EN] Balances are scoped to owner + chain + token list; a stored value from another scope is never rendered.
+  const scope = `${String(owner || '').toLowerCase()}|${publicClient?.chain?.id ?? ''}|${tokenKey}`;
+  const activeScopeRef = useRef(null);
 
   const refresh = useCallback(async () => {
     if (!publicClient || !owner || isHiddenDoc()) return;
+    const mine = activeScopeRef.current;
+    if (!mine) return;
     const list = tokensRef.current;
     const results = await Promise.all(list.map(async (t) => {
       try {
@@ -48,18 +54,27 @@ export function useTokenBalances({ publicClient, owner, tokens, intervalMs = MIN
         return [t.key, { status: 'error' }];
       }
     }));
-    setBalances(Object.fromEntries(results));
+    // [TR] Uçuştaki okuma, kapsam değiştiyse ya da unmount olduysa yazılmaz.
+    // [EN] An in-flight read is dropped if the scope changed or the hook unmounted.
+    if (activeScopeRef.current !== mine) return;
+    setStored({ scope: mine, data: Object.fromEntries(results) });
   }, [publicClient, owner]);
 
   useEffect(() => {
-    setBalances({});
     if (!publicClient || !owner || !tokenKey) return undefined;
+    activeScopeRef.current = scope;
     refresh();
     const id = setInterval(refresh, Math.max(MIN_REFRESH_MS, intervalMs));
     const onVisible = () => { if (!isHiddenDoc()) refresh(); };
     document.addEventListener('visibilitychange', onVisible);
-    return () => { clearInterval(id); document.removeEventListener('visibilitychange', onVisible); };
-  }, [publicClient, owner, tokenKey, intervalMs, refresh]);
+    return () => {
+      activeScopeRef.current = null;
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [publicClient, owner, tokenKey, scope, intervalMs, refresh]);
+
+  const balances = stored.scope === scope ? stored.data : {};
 
   return { balances, refresh };
 }

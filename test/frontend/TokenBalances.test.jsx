@@ -58,6 +58,42 @@ describe('useTokenBalances', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(1_500); });
     expect(publicClient.readContract).toHaveBeenCalledTimes(4);
   });
+  it('does not show the previous owner balance under a new owner', async () => {
+    const OWNER2 = '0x4444444444444444444444444444444444444444';
+    let resolve2;
+    const publicClient = { readContract: vi.fn((req) => (req.args[0] === OWNER ? Promise.resolve(7n) : new Promise((r) => { resolve2 = r; }))) };
+    const { result, rerender } = renderHook(({ owner }) => useTokenBalances({ publicClient, owner, tokens }), { initialProps: { owner: OWNER } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(result.current.balances.USDT).toEqual({ status: 'ok', raw: 7n });
+    rerender({ owner: OWNER2 });
+    expect(result.current.balances).toEqual({});
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(result.current.balances).toEqual({});
+    await act(async () => { resolve2(9n); await vi.advanceTimersByTimeAsync(0); });
+  });
+  it('drops an in-flight read that resolves after the owner changed', async () => {
+    const OWNER2 = '0x4444444444444444444444444444444444444444';
+    const pending = [];
+    const publicClient = { readContract: vi.fn((req) => new Promise((r) => { pending.push({ owner: req.args[0], r }); })) };
+    const { result, rerender } = renderHook(({ owner }) => useTokenBalances({ publicClient, owner, tokens }), { initialProps: { owner: OWNER } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    rerender({ owner: OWNER2 });
+    await act(async () => { pending.filter((p) => p.owner === OWNER).forEach((p) => p.r(111n)); await vi.advanceTimersByTimeAsync(0); });
+    expect(result.current.balances).toEqual({});
+    await act(async () => { pending.filter((p) => p.owner === OWNER2).forEach((p) => p.r(222n)); await vi.advanceTimersByTimeAsync(0); });
+    expect(result.current.balances.USDT).toEqual({ status: 'ok', raw: 222n });
+  });
+  it('refreshes when the tab becomes visible again', async () => {
+    setVisibility('hidden');
+    const publicClient = { readContract: vi.fn().mockResolvedValue(5n) };
+    const { result } = renderHook(() => useTokenBalances({ publicClient, owner: OWNER, tokens }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(publicClient.readContract).not.toHaveBeenCalled();
+    setVisibility('visible');
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); await vi.advanceTimersByTimeAsync(0); });
+    expect(publicClient.readContract).toHaveBeenCalledTimes(2);
+    expect(result.current.balances.USDT).toEqual({ status: 'ok', raw: 5n });
+  });
   it('does not read while the tab is hidden', async () => {
     setVisibility('hidden');
     const publicClient = { readContract: vi.fn().mockResolvedValue(5n) };
