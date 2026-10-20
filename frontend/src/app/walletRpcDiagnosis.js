@@ -156,8 +156,4 @@ export function applyDiagnosis(error, diag) {
   return error;
 }
 
-/** [TR] Crash log eki: yalnız tür, selector, RPC kodu. [EN] Log suffix: kind, selector, rpc code only. */
-export const formatDiagnosisForLog = (diag) =>
-  ` [diag=${diag.kind}${diag.selector ? ` selector=${diag.selector}` : ''}${diag.rpcCode != null ? ` rpcCode=${diag.rpcCode}` : ''}]`;
-
 export const stripAddresses = (text) => String(text).replace(/0x[0-9a-fA-F]{40}/g, '[addr]');
