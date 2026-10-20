@@ -168,6 +168,30 @@ Kontrat `reportPayment` için boş olmayan bir `_ipfsHash` istiyor (`ArafEscrow.
 
 Kullanıcı kararı gerekiyor.
 
+### 4.5 Doğrulanmamış ya da açık kalan küçük başlıklar
+
+1. **Rate limit IP'si: tüm kullanıcılar tek kullanıcı sayılıyor olabilir.**
+   - Bir crash logunda istemci IP'si `66.241.125.182` görünüyordu. Bu adres Fly'ın ağ aralığına benziyor.
+   - Backend `trust proxy = 1` kullanıyor (`backend/scripts/app.js:122`). `req.ip` istemcinin değil, proxy'nin adresini veriyorsa IP tabanlı rate limit herkesi tek kullanıcı gibi sayar.
+   - DOĞRULANMADI. Kontrol: kendi IP'ni bir istek logundaki IP ile karşılaştır, ya da Fly'ın `Fly-Client-IP` header'ını incele.
+   - Not: IP artık loglara yazılmıyor (#143). Doğrulamak için geçici ve gizlilik dostu bir yöntem gerekir.
+2. **Tier tutar limitleri zincirden okunamadı.**
+   - Beklenen: USDT ve USDC için 150 / 1.500 / 7.500 / 30.000.
+   - Dolaylı kanıt: deploy betiği limitleri yazdıktan sonra zincirden okuyup birebir karşılaştırıyor, tutmazsa duruyor (`contracts/scripts/deploy.js:248-264`). Run #19 başarılı bitti.
+   - Owner sonradan `setTokenConfig` ile değiştirdiyse bu görülmez. Bu oturum `sepolia.base.org`'a erişemedi.
+   - Teyit: BaseScan → escrow → Read Contract → `getTokenConfig(token)`.
+   - Önemi: limit 0 olursa o tier için tutar sınırı uygulanmaz (`ArafEscrow.sol:705-706`).
+3. **Faz 1 bekçisinin `enforce` moduna geçmeden önceki kararları** (denetçi bulguları):
+   - `enforce` modunda `/api/admin` da kapanıyor. Güvenli taraf, ama kriz anında admin panele erişilemez.
+   - Deploy workflow'u `--force-switch` ile ROTATING durumundaki kaydı da ezer. Faz 2b rotasyonu sürerken yanlışlıkla bir deploy çalışırsa koruma atlanır. Faz 2b'de deploy adımına ROTATING için ayrı kural düşünülmeli.
+   - Yeni deploy ile registry yazımı arasında, `enforce` açıksa, en fazla ~60 sn route'lar kapalı kalır. Kendiliğinden toparlanır.
+4. **P4 yedek görünümünün bilinen sınırları:**
+   - Bilinen tradeId listesi cihaza bağlı. Başka cihazda ya da P4'ten önce açılmış işlemler yalnız elle girişle bulunur; tasarım gereği tarama yok.
+   - Yedek modda `#/trade/<id>` bağlantısı odayı kendiliğinden açmıyor.
+   - Elle tradeId girişinde hız sınırı yok. Her giriş tek bir `getTrade` çağrısı; denetçi riski düşük buldu.
+5. **Küçük temizlik:** `frontend/src/app/walletRpcDiagnosis.js` içindeki `formatDiagnosisForLog` artık kullanılmıyor (#144'ten sonra). Silinebilir.
+6. **Bekleyen istek:** sitede alınan hata mesajının tam metni. USDC sorunu (4.3) için kullanıcıdan istenmişti.
+
 ---
 
 ## 5. Mainnet öncesi kontrat işleri (HER BİRİ kullanıcı onayı gerektirir)
