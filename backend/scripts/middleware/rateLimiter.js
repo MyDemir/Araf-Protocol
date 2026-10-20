@@ -17,8 +17,8 @@ That meant `/nonce`, `/verify`, and `/refresh` could become temporarily unprotec
 ### Existing fix that remains
 The earlier fix for proxy/load-balancer environments still stands:
 
-- rate limit keys are still based on `req.ip`
-- this assumes `trust proxy` is correctly enabled in `app.js`
+- rate limit keys are based on `resolveClientIp(req)` (utils/clientIp.js): `req.ip` by default,
+  or `x-real-ip` only when ORIGIN_SHARED_SECRET matches the `x-araf-origin-secret` header
 - without that, all users behind the same proxy/load balancer could collapse into one IP bucket
 
 That part is preserved and not changed here.
@@ -140,7 +140,7 @@ function makeInMemoryLimiter({
     current.count += 1;
 
     if (current.count > max) {
-      logger.warn(`[RateLimit:${label}-FALLBACK] In-memory limit aşıldı: ${key}`);
+      logger.warn(`[RateLimit:${label}-FALLBACK] In-memory limit aşıldı.`);
       return res.status(429).json(errorMessage(req));
     }
 

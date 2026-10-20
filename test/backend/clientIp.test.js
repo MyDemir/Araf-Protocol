@@ -52,6 +52,8 @@ describe("rate limiter: farklı x-real-ip ayrı kova", () => {
     else process.env.ORIGIN_SHARED_SECRET = prev;
   });
 
+  const warn = jest.fn();
+
   function load() {
     let mod;
     jest.isolateModules(() => {
@@ -61,7 +63,7 @@ describe("rate limiter: farklı x-real-ip ayrı kova", () => {
       }));
       jest.doMock("../../backend/scripts/models/User", () => ({ findOne: jest.fn() }));
       jest.doMock("../../backend/scripts/utils/logger", () => ({
-        info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn(),
+        info: jest.fn(), warn, error: jest.fn(), debug: jest.fn(),
       }));
       mod = require("../../backend/scripts/middleware/rateLimiter");
     });
@@ -92,5 +94,19 @@ describe("rate limiter: farklı x-real-ip ayrı kova", () => {
     const l = load();
     for (let i = 0; i < 10; i += 1) expect(await call(l.piiProfileLimiter, h("9.9.9.9"))).toBe(200);
     expect(await call(l.piiProfileLimiter, h("8.8.8.8"))).toBe(429);
+  });
+
+  test("in-memory fallback 429 logu istemci IP'sini içermez", async () => {
+    process.env.ORIGIN_SHARED_SECRET = SECRET;
+    warn.mockClear();
+    const l = load();
+    for (let i = 0; i < 10; i += 1) await call(l.piiProfileLimiter, h("9.9.9.9"));
+    expect(await call(l.piiProfileLimiter, h("9.9.9.9"))).toBe(429);
+    const logged = warn.mock.calls.map((c) => c.join(" "));
+    expect(logged.some((m) => m.includes("In-memory limit"))).toBe(true);
+    for (const m of logged) {
+      expect(m).not.toContain("9.9.9.9");
+      expect(m).not.toContain("66.241.125.182");
+    }
   });
 });
