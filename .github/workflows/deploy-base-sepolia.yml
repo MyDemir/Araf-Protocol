@@ -30,6 +30,11 @@ on:
         required: false
         default: ""
         type: string
+      confirm_archive_active_trades:
+        description: "Type YES to continue the escrow rotation even though the old escrow still has open trades or orders (LOCKED/PAID/CHALLENGED/open orders). The precheck lists the remaining ids; the old escrow must also be paused."
+        required: false
+        default: ""
+        type: string
       verify_contracts:
         description: "Experimental: verify contracts on BaseScan via Etherscan V2, Sourcify and Blockscout (ETHERSCAN_API_KEY secret optional; legacy BASESCAN_API_KEY is still read; Sourcify/Blockscout are keyless)"
         required: false
@@ -82,6 +87,7 @@ jobs:
           DEPLOY_TEST_USDT: ${{ inputs.deploy_test_usdt }}
           DEPLOY_REWARDS: ${{ inputs.deploy_rewards }}
           CONFIRM_REDEPLOY_REWARDS: ${{ inputs.confirm_redeploy_rewards }}
+          CONFIRM_ARCHIVE_ACTIVE_TRADES: ${{ inputs.confirm_archive_active_trades }}
           FINAL_TREASURY_ADDRESS: ${{ vars.FINAL_TREASURY_ADDRESS }}
           VAR_REVENUE_VAULT: ${{ vars.ARAF_REVENUE_VAULT_ADDRESS }}
           VAR_REWARDS: ${{ vars.ARAF_REWARDS_ADDRESS }}
@@ -126,6 +132,8 @@ jobs:
           PY
           [[ "$MASTER_ENCRYPTION_KEY" =~ ^[a-fA-F0-9]{64}$ ]] || { echo "::error::MASTER_ENCRYPTION_KEY must be exactly 64 hex characters."; exit 1; }
 
+          [[ -z "$CONFIRM_ARCHIVE_ACTIVE_TRADES" || "$CONFIRM_ARCHIVE_ACTIVE_TRADES" == "YES" ]] || { echo "::error::confirm_archive_active_trades must be empty or exactly YES."; exit 1; }
+
           # Rewards kilidi escrow deploy'undan ÖNCE çalışır (yarım kalmış deploy olmasın).
           [[ -z "$CONFIRM_REDEPLOY_REWARDS" || "$CONFIRM_REDEPLOY_REWARDS" == "YES" ]] || { echo "::error::confirm_redeploy_rewards must be empty or exactly YES."; exit 1; }
           if [ "$DEPLOY_REWARDS" = "true" ]; then
@@ -147,6 +155,38 @@ jobs:
       - name: Install backend dependencies (escrow registry writer)
         working-directory: backend
         run: npm ci --omit=dev --ignore-scripts
+
+      # Arşiv Faz 2b: registry durumu (salt okur). ROTATING = yarım kalmış rotasyon: kontrat deploy EDİLMEZ, rotate-escrow.yml ile tamamlanır.
+      # none = ilk kurulum/adopt edilmemiş: eski adopt davranışı (aşağıdaki "first install" adımları). ACTIVE = rotasyon yolu.
+      - name: Read escrow registry state
+        shell: bash
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+        run: |
+          set -euo pipefail
+          out="$(node .github/scripts/escrow-registry.js --status)"
+          state="$(printf '%s\n' "$out" | sed -n 's/^registry_state=//p')"
+          case "$state" in
+            none|ACTIVE) echo "REGISTRY_STATE=$state" >> "$GITHUB_ENV"; echo "Escrow registry state: $state" ;;
+            ROTATING) echo "::error::Escrow registry is ROTATING (an earlier rotation is incomplete). No contract is deployed. Complete it with the rotate-escrow.yml workflow (mode=rotate), then re-run this deploy."; exit 1 ;;
+            *) echo "::error::Could not determine escrow registry state."; exit 1 ;;
+          esac
+
+      # Salt okur ön kontrol, kontrat deploy'undan ÖNCE: registry == vars.ARAF_ESCROW_ADDRESS, chain, eski escrow PAUSE,
+      # açık trade/order yoksa ya da confirm_archive_active_trades=YES. Başarısızsa kontrat hiç deploy edilmez.
+      # Uygulama sırları (JWT_SECRET/MASTER_ENCRYPTION_KEY) bu adımın env'inde YOKTUR.
+      - name: Precheck escrow rotation (read-only)
+        if: ${{ env.REGISTRY_STATE == 'ACTIVE' }}
+        shell: bash
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+          OLD_ESCROW_ADDRESS: ${{ vars.ARAF_ESCROW_ADDRESS }}
+          ARAF_DEPLOYMENT_BLOCK: ${{ vars.ARAF_DEPLOYMENT_BLOCK }}
+          EXPECTED_CHAIN_ID: "84532"
+          CONFIRM_ARCHIVE_ACTIVE_TRADES: ${{ inputs.confirm_archive_active_trades }}
+        run: node .github/scripts/rotate-escrow.js --precheck
 
       - name: Compile contracts
         working-directory: contracts
@@ -374,27 +414,44 @@ jobs:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: flyctl deploy --remote-only -a "$FLY_APP_NAME"
 
-      # Eski escrow'un Redis checkpoint'i (worker:last_block / worker:last_safe_block) escrow'a bağlı değildir; silinmezse worker
-      # yeni deploy bloğunu atlayabilir. Yarışı önlemek için tüm makineler durdurulur, yalnız bu iki anahtar silinir, makineler
-      # başlatılır (hata olsa da). Bu adım yalnız kontrat deploy eden bu workflow'dadır. Secret basılmaz.
-      - name: Reset worker checkpoint for new deployment
+      # Arşiv Faz 2b (tasarım §3b): rotasyon, health kontrolünden önce. Makineler durdurulur ve doğrulanır; Mongo koleksiyonları
+      # arşive taşınır, User aynası, Redis anahtarları ve checkpoint'ler (manifeste yazılıp silinir) işlenir; registry ROTATING -> ACTIVE
+      # (commit noktası) en son yazılır; makineler `trap` ile başlatılır. Kaldığı yerden devam eder (yarım kalırsa rotate-escrow.yml).
+      # Yalnız bu adımda MONGODB_URI/REDIS_URL/FLY_API_TOKEN var; JWT_SECRET/MASTER_ENCRYPTION_KEY YOK. Secret basılmaz.
+      - name: Rotate escrow state (archive + registry switch)
+        if: ${{ env.REGISTRY_STATE == 'ACTIVE' }}
+        shell: bash
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+          OLD_ESCROW_ADDRESS: ${{ vars.ARAF_ESCROW_ADDRESS }}
+          ARAF_ESCROW_ADDRESS: ${{ env.ESCROW }}
+          ARAF_DEPLOYMENT_BLOCK: ${{ env.DEPLOY_BLOCK }}
+          EXPECTED_CHAIN_ID: "84532"
+          CONFIRM_ARCHIVE_ACTIVE_TRADES: ${{ inputs.confirm_archive_active_trades }}
+        run: bash .github/scripts/rotate-escrow-state.sh rotate --apply
+
+      # İLK KURULUM dalı (registry hiç yok): eski davranış korunur. Eski escrow arşivlenmez (kayıtlı eski escrow yok);
+      # worker checkpoint'i güvenle sıfırlanır ve yeni escrow registry'ye ilk kez yazılır (ezilecek kayıt yok; zorla-geçiş bayrağı gerekmez).
+      - name: Reset worker checkpoint for new deployment (first install)
+        if: ${{ env.REGISTRY_STATE == 'none' }}
         shell: bash
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           REDIS_URL: ${{ secrets.REDIS_URL }}
         run: bash .github/scripts/reset-worker-checkpoint.sh
 
-      # Yeni escrow'u Mongo `escrow_registry` içinde `_id:"active"` olarak yazar (backend bekçisi yalnız OKUR; tek yazar bu betik).
-      # Eski kayıt başka bir escrow'u gösterdiği için --force-switch gerekir (rotasyonu Faz 2 yönetecek). Checkpoint sıfırlamadan
-      # sonra, health kontrolünden önce. Mongo sürücüsü backend bağımlılığıdır ("Install backend dependencies" adımı). Secret/URI basılmaz.
-      - name: Write active escrow registry
+      - name: Write active escrow registry (first install)
+        if: ${{ env.REGISTRY_STATE == 'none' }}
         shell: bash
         env:
           MONGODB_URI: ${{ secrets.MONGODB_URI }}
           ARAF_ESCROW_ADDRESS: ${{ env.ESCROW }}
           ARAF_DEPLOYMENT_BLOCK: ${{ env.DEPLOY_BLOCK }}
           EXPECTED_CHAIN_ID: "84532"
-        run: node .github/scripts/escrow-registry.js --adopt --apply --force-switch
+        run: node .github/scripts/escrow-registry.js --adopt --apply
 
       # /health 200 zorunlu; /ready 503 degraded:true ise yalnız ::warning:: (deploy başarılı sayılır).
       - name: Check backend health

@@ -20,20 +20,21 @@ describe("deploy hardening static guards", () => {
     expect(en).toContain("REDIS_TLS_SKIP_VERIFY=true");
   });
 
-  it("escrow registry adopt step runs after contract deploy + checkpoint reset and before the health check", () => {
+  it("escrow registry first-install adopt step runs after contract deploy + checkpoint reset and before the health check", () => {
     const wf = fs.readFileSync(path.resolve(process.cwd(), "../.github/workflows/deploy-base-sepolia.yml"), "utf8");
     const at = (needle) => wf.indexOf(`- name: ${needle}`);
     const deploy = at("Deploy contracts to Base Sepolia");
     const flyDeploy = at("Deploy backend to Fly");
-    const reset = at("Reset worker checkpoint for new deployment");
-    const registry = at("Write active escrow registry");
+    const reset = at("Reset worker checkpoint for new deployment (first install)");
+    const registry = at("Write active escrow registry (first install)");
     const health = at("Check backend health");
     for (const n of [deploy, flyDeploy, reset, registry, health]) expect(n).toBeGreaterThan(-1);
     expect(deploy).toBeLessThan(flyDeploy);
     expect(reset).toBeLessThan(registry);
     expect(registry).toBeLessThan(health);
     const step = wf.slice(registry, health);
-    expect(step).toContain("escrow-registry.js --adopt --apply --force-switch");
+    expect(step).toContain("escrow-registry.js --adopt --apply");
+    expect(step).not.toContain("--force-switch");
     expect(step).toContain("MONGODB_URI: ${{ secrets.MONGODB_URI }}");
     // runtime deploy escrow'u değiştirmez: registry yazmaz
     const runtime = fs.readFileSync(path.resolve(process.cwd(), "../.github/workflows/deploy-runtime-base-sepolia.yml"), "utf8");

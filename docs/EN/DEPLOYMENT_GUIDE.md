@@ -750,7 +750,30 @@ The `escrow_registry` Mongo collection holds one document, `_id: "active"`: `esc
 2. Run the **Escrow Registry Adopt** workflow (`escrow-registry-adopt.yml`) with `dry_run=true` and read the output, then run it again with `dry_run=false`. It writes the live escrow (`ARAF_ESCROW_ADDRESS` / `ARAF_DEPLOYMENT_BLOCK` repository variables, chain 84532) as `active`.
 3. If the backend log shows no `[EscrowRegistryGuard] UYUMSUZ` line and `/ready` reports `escrowRegistry.ok: true`, switch on enforcement: `flyctl secrets set ESCROW_REGISTRY_GUARD_MODE=enforce -a <app>`.
 
-A full contract deploy (`deploy-base-sepolia.yml`) writes the new escrow itself in the "Write active escrow registry" step (after the checkpoint reset, before the health check, with `--force-switch`). The runtime deploy does not change the escrow and never writes the registry; if its `araf_escrow_address` override differs from the registry, the guard reports `escrow_mismatch`. Archiving and rotation are not part of this phase.
+A full contract deploy (`deploy-base-sepolia.yml`) writes the registry in one of two ways: if **no registry exists** (first install) the old behaviour is kept (the "first install" steps: checkpoint reset + `--adopt --apply`, no `--force-switch` because there is nothing to overwrite); if the registry is **ACTIVE**, the escrow rotation runs (see 6.6b). If it is **ROTATING**, the deploy stops before deploying a contract; `--force-switch` never overwrites a ROTATING record. The runtime deploy does not change the escrow and never writes the registry; if its `araf_escrow_address` override differs from the registry, the guard reports `escrow_mismatch`.
+
+### 6.6b Escrow rotation (Phase 2b)
+
+On a new contract deploy the Mongo collections bound to the old escrow are renamed inside the same database to `archive_<oldEscrow>_*`, the User mirror is written to the archive, the Redis DLQ and `last_known` keys are renamed, and the worker checkpoints (`worker:last_block`, `worker:last_safe_block`) are written to the manifest and deleted. The registry `ROTATING` → `ACTIVE` switch is the **commit point**; until it is written the guard keeps the worker closed. The core is `.github/scripts/rotate-escrow.js`; the machine-stopping wrapper is `rotate-escrow-state.sh`. The workflow does **not** pause the contract (the owner key is not in the workflow); it only reads the pause state.
+
+**Before (steps of `GOVERNANCE_READINESS.md` §2)**
+1. **Announcement:** purpose (new escrow), date/time, expected impact (short downtime, P4 fallback view for open trades).
+2. **Pre-check (on-chain):** `pause()` the old escrow through the owner/multisig and confirm `paused()==true`. Check open trades (LOCKED/PAID/CHALLENGED) and open orders. If not zero, the deploy stops unless `confirm_archive_active_trades=YES`; the remaining ids are reported.
+3. Run `rotate-escrow.yml` with `mode=precheck` (read-only): registry == `ARAF_ESCROW_ADDRESS` variable, chain 84532, pause, open trades/orders.
+
+**Run**
+- Normal path: `deploy-base-sepolia.yml`. "Read escrow registry state" → "Precheck escrow rotation (read-only)" run **before** the contract deploy; if they fail no contract is deployed. After the Fly deploy, "Rotate escrow state" (before the health check) stops and verifies the machines (3 attempts), runs the core with `--apply`, and restarts the machines (even on error, only those that were running).
+- If interrupted: the registry stays `ROTATING`; a new deploy stops without deploying a contract. Run `rotate-escrow.yml` with `mode=rotate`, `dry_run=false`, `old_escrow_address=<old>`; the core resumes where it stopped. (The deploy workflow writes the repository variables even on failure, so `ARAF_ESCROW_ADDRESS` already shows the new escrow; pass the old address as an input.)
+- Read first with `dry_run=true` (the default).
+
+**After**
+1. `/ready` → `escrowRegistry.ok: true`; registry `ACTIVE` with the new address; `archive_<old>_*` counts match the manifest.
+2. Smoke: create/fill an order on the new escrow; the worker started from `ARAF_DEPLOYMENT_BLOCK`.
+3. **Log:** run id, actor, old/new escrow, archive_id, remaining open trade ids, approvers.
+
+**Rollback:** `rotate-escrow.yml` with `mode=restore`, `archive_id`, `restore_deployment_block` (deploy block of the escrow being restored), `confirm=RESTORE <oldEscrow>`, `dry_run=false`. Machines stop; live collections move to their own archive, the archive returns to live names, the registry points back to the old escrow, Fly `ARAF_ESCROW_ADDRESS`/`ARAF_DEPLOYMENT_BLOCK` are set back (machines re-verified stopped), the repository variables are updated (if `GH_VARIABLES_TOKEN` exists), then the machines start.
+
+Security: these steps have no `JWT_SECRET`/`MASTER_ENCRYPTION_KEY` in their environment (the wrapper rejects them); encrypted fields are never decrypted. The 365-day TTL on archived trades and the PII `delete_at` cleanup continue.
 
 ### 6.7 Backend — scheduled jobs (all in ms unless noted; max 2 147 483 647)
 
