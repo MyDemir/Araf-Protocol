@@ -223,6 +223,7 @@ async function _buildConfigFromChain({ strictTokens }) {
     surface: "ProtocolConfig",
   });
   const tokenMap = {};
+  let partialTokens = false; // [TR] B4-10: bir token okuması düştüyse kısmi config önbelleğe yazılmaz.
 
   for (const token of trackedTokens) {
     try {
@@ -239,6 +240,7 @@ async function _buildConfigFromChain({ strictTokens }) {
     } catch (err) {
       logger.warn(`[Config] tokenConfig load başarısız: token=${token} err=${err.message}`);
       if (strictTokens) throw err;
+      partialTokens = true;
       tokenMap[token] = {
         supported: false,
         allowSellOrders: false,
@@ -276,6 +278,11 @@ async function _buildConfigFromChain({ strictTokens }) {
     reputationPolicy: previousReputationPolicy,
   };
 
+  if (partialTokens) {
+    // [TR] B4-10: geçici token hatası TTL boyunca (ve last_known'a) kalıcılaşmasın; bellekte fail-closed kalır.
+    logger.warn("[Config] Bazı token okumaları başarısız; kısmi config önbelleğe yazılmadı (bellekte fail-closed).");
+    return built;
+  }
   await _writeCache(redis, built);
   logger.info(`[Config] V3 on-chain parametreler yüklendi ve cache'lendi (TTL=${configCacheTtl()}s).`);
   return built;
@@ -305,6 +312,11 @@ async function _patchAndPersist(mutator) {
   }
   mutator(protocolConfig);
   protocolConfig.loaded_at = new Date().toISOString();
+  // [TR] B4-10: last_known'dan yüklenmiş (bayat) config taze TTL anahtarına yazılmaz; yoksa sonraki yükleme onu taze sayar.
+  if (configIsStale) {
+    logger.warn("[Config] Config bayat (last_known); event yaması yalnız bellekte uygulandı, önbelleğe yazılmadı.");
+    return protocolConfig;
+  }
   await _writeCache(redis, protocolConfig);
   return protocolConfig;
 }
