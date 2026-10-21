@@ -14,9 +14,13 @@ const crypto = require("crypto");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
+const { asyncHandler } = require("../utils/asyncHandler");
 const router = express.Router();
 
-const { requireAuth, requireSessionWalletMatch } = require("../middleware/auth");
+const { requireAuth: _requireAuth, requireSessionWalletMatch: _requireSessionWalletMatch } = require("../middleware/auth");
+// [TR] B2-17: async auth middleware'leri de reddi next(err)'e iletecek şekilde sarılır.
+const requireAuth = asyncHandler(_requireAuth);
+const requireSessionWalletMatch = asyncHandler(_requireSessionWalletMatch);
 const { receiptUploadLimiter } = require("../middleware/rateLimiter");
 const { encryptField } = require("../services/encryption");
 const Trade = require("../models/Trade");
@@ -36,7 +40,11 @@ const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const allowed = ["image/jpeg", "image/png", "image/webp", "image/gif", "application/pdf"];
-    if (!allowed.includes(file.mimetype)) return cb(new Error(`UNSUPPORTED_MIME:${file.mimetype}`));
+    if (!allowed.includes(file.mimetype)) {
+      const err = new Error("UNSUPPORTED_MIME");
+      err.code = "UNSUPPORTED_MIME";
+      return cb(err);
+    }
     cb(null, true);
   },
 });
@@ -86,7 +94,7 @@ async function encryptFileFromDisk(filePath, wallet) {
 
 // [TR] Receipt upload write-adjacent coordination yüzeyidir; generic trade-room bucket'tan ayrıdır.
 // [EN] Receipt upload is write-adjacent coordination, isolated from generic room-read bucket.
-router.post("/upload", requireAuth, requireSessionWalletMatch, receiptUploadLimiter, upload.single("receipt"), async (req, res, next) => {
+router.post("/upload", requireAuth, requireSessionWalletMatch, receiptUploadLimiter, upload.single("receipt"), asyncHandler(async (req, res, next) => {
   const tempFilePath = req.file?.path;
   try {
     if (!req.file) return res.status(400).json({ error: "Dekont dosyası eksik veya boş." });
@@ -135,17 +143,13 @@ router.post("/upload", requireAuth, requireSessionWalletMatch, receiptUploadLimi
     logger.info(`[Receipts] Dekont kaydedildi: trade=#${onchainId} mime=${req.file.mimetype} hash=${sha256Hash.slice(0, 8)}...`);
     return res.status(201).json({ hash: sha256Hash });
   } catch (err) {
-    if (err.code === "LIMIT_FILE_SIZE") return res.status(413).json({ error: "Dosya boyutu 5 MB sınırını aşıyor." });
-    if (err.message?.startsWith("UNSUPPORTED_MIME:")) {
-      const mime = err.message.split(":")[1];
-      return res.status(415).json({ error: `Desteklenmeyen dosya tipi: ${mime}. İzin verilenler: JPEG, PNG, WebP, GIF, PDF` });
-    }
+    // [TR] B3-01: multer hataları handler'a girmez; globalErrorHandler 413/415/400 + sabit kod döner.
     next(err);
   } finally {
     if (tempFilePath) {
       try { await fsp.unlink(tempFilePath); } catch (cleanupErr) { if (cleanupErr.code !== "ENOENT") logger.warn(`[Receipts] Geçici dosya silinemedi: ${tempFilePath}`); }
     }
   }
-});
+}));
 
 module.exports = router;

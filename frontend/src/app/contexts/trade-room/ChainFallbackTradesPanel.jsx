@@ -13,6 +13,26 @@ export const ChainFallbackNotice = ({ lang = 'EN', className = 'mb-4' }) => (
   </p>
 );
 
+// [TR] Yedek mod ödeme bildirimi: dekont seçilir, SHA-256 özeti cihazda hesaplanır; dosya karşı tarafa ya da
+//      sunucuya gitmez. Yalnız özet zincire yazılır.
+// [EN] Backup-mode payment report: the receipt is hashed on-device; only the digest goes on-chain.
+export const ChainFallbackReceiptPicker = ({ lang = 'EN', hash = '', onSelect }) => (
+  <div data-testid="chain-fallback-receipt">
+    <input type="file" onChange={onSelect} accept="image/*,.pdf" className="hidden" id="receipt-local" />
+    <label htmlFor="receipt-local" className={`w-full px-4 py-3 rounded-lg border text-sm flex items-center justify-center gap-2 cursor-pointer transition ${hash ? 'border-success/40 bg-success/10 text-success' : 'border-dashed border-borderStrong bg-elevated text-textPrimary hover:border-brand'}`}>
+      {hash
+        ? t(lang, 'Dekont özeti hazır (değiştirmek için dokun)', 'Receipt digest ready (tap to change)')
+        : t(lang, 'Dekont seç (cihazda özetlenir)', 'Select receipt (hashed on this device)')}
+    </label>
+    {hash && <p data-testid="chain-fallback-receipt-hash" className="mt-1 text-[11px] font-mono text-textMuted text-center break-all">{hash.length > 28 ? `${hash.slice(0, 26)}…` : hash}</p>}
+    <p data-testid="chain-fallback-receipt-warning" role="note" className="mt-2 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-textPrimary">
+      {t(lang,
+        'Dekont karşı tarafa iletilmeyecek; yalnızca özeti zincire yazılır. Dekontu sakla, uyuşmazlıkta göstermen gerekebilir.',
+        'The receipt will not be sent to the counterparty; only its digest is written on-chain. Keep the receipt, you may need to show it in a dispute.')}
+    </p>
+  </div>
+);
+
 const manualMessage = (status, lang) => {
   switch (status) {
     case 'invalid': return t(lang, 'Geçerli bir işlem numarası girin (pozitif tam sayı).', 'Enter a valid trade number (positive integer).');
@@ -35,7 +55,8 @@ export const ChainFallbackTradesPanel = ({ lang = 'EN', chainFallback, compact =
   const [pending, setPending] = React.useState(false);
   const [message, setMessage] = React.useState(null);
   if (!chainFallback?.active) return null;
-  const { trades = [], loading = false, loadedAt = 0, submitManualId, openTrade } = chainFallback;
+  const { trades = [], loading = false, loadedAt = 0, failedIds = [], submitManualId, openTrade } = chainFallback;
+  const failedCount = Array.isArray(failedIds) ? failedIds.length : 0;
 
   const onSubmit = async (e) => {
     e.preventDefault();
@@ -63,6 +84,14 @@ export const ChainFallbackTradesPanel = ({ lang = 'EN', chainFallback, compact =
           'Sunucu işlem listesini veremiyor. Bu cihazda bilinen işlem numaraları doğrudan kontrattan okunur; kontrat son söz sahibidir.',
           'The server cannot provide your trade list. Trade numbers known on this device are read directly from the contract, which has the final say.')}
       </p>
+
+      {failedCount > 0 && (
+        <p data-testid="chain-fallback-failed" role="status" className="mt-3 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-textPrimary">
+          {t(lang,
+            `${failedCount} işlem okunamadı, bilgiler eski olabilir.`,
+            `${failedCount} ${failedCount === 1 ? 'trade' : 'trades'} could not be read, information may be outdated.`)}
+        </p>
+      )}
 
       <ul className="mt-3 space-y-2" data-testid="chain-fallback-list" aria-busy={loading ? 'true' : 'false'}>
         {trades.map((trade) => (

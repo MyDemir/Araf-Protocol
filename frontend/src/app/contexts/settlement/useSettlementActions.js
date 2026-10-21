@@ -58,15 +58,22 @@ export const useSettlementActions = ({
     try {
       setIsContractLoading(true);
       await fn();
-      showToast(successMessage, 'success');
-      await refreshTradesAfterTx();
-      return true;
     } catch (err) {
       showToast(getErrorMessage(err, lang), 'error');
+      setIsContractLoading(false);
       return false;
+    }
+    // [TR] F3-05: Tx zincirde başarılı; liste yenileme hatası "işlem başarısız" olarak gösterilmez.
+    // [EN] F3-05: the tx succeeded on-chain; a list-refresh failure must not surface as "transaction failed".
+    showToast(successMessage, 'success');
+    try {
+      await refreshTradesAfterTx();
+    } catch {
+      showToast(lang === 'TR' ? 'İşlem başarılı; liste yenilenemedi, sayfayı yenileyin.' : 'Transaction succeeded; the list could not be refreshed, please reload.', 'info');
     } finally {
       setIsContractLoading(false);
     }
+    return true;
   }, [lang, refreshTradesAfterTx, setIsContractLoading, showToast]);
 
   const block = React.useCallback((message) => {
@@ -89,6 +96,7 @@ export const useSettlementActions = ({
       tradeId: context.onchainTradeId,
       makerShareBps,
       expiresAt,
+      nowTs: chainNowSec(),
       lang,
     });
     if (validationError) return block(validationError);
