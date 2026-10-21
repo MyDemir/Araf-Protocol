@@ -22,6 +22,13 @@ export const toUnixSeconds = (value) => {
   return Number.isFinite(asDateMs) ? Math.floor(asDateMs / 1000) : 0;
 };
 
+// [TR] F3-04: Teklif süresi doldu mu? Kontrat: now > expiresAt (sınır saniyesi canlı). Zincir saati çağırandan gelir.
+// [EN] F3-04: has the offer expired? Contract: now > expiresAt (boundary second is still live). Chain time comes from the caller.
+export const isSettlementProposalExpired = (proposal, nowTs = Math.floor(Date.now() / 1000)) => {
+  const expiresAt = toUnixSeconds(proposal?.expiresAt ?? proposal?.expires_at ?? 0);
+  return expiresAt > 0 && nowTs > expiresAt;
+};
+
 export const normalizeAddress = (address) => address?.toLowerCase?.() || null;
 
 export const getSettlementActionContext = ({ activeTrade, userRole, address, nowTs = Math.floor(Date.now() / 1000) }) => {
