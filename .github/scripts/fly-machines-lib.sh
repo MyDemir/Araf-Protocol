@@ -14,13 +14,21 @@ for m in d:
     print(m.get("id",""), m.get("state",""))'
 }
 
-# Başlangıçta started olan makineleri IDS'e yazar (sonda yalnız bunlar başlatılır). Liste hatası => 1.
+# K4-13: Geçiş durumundaki (starting/replacing/restarting/stopping/created/updating) makine varsa en çok WAIT_TIMEOUT_S
+# bekler (süre dolarsa mevcut listeyle devam eder). Başlangıçta çalışan ya da çalışmaya geçen (started/starting/replacing)
+# makineleri IDS'e yazar (sonda yalnız bunlar başlatılır). stopped/suspended/destroyed bilerek alınmaz: bilerek kapalı
+# makine açılmasın. Liste hatası => 1. Kararlı durumda tek liste çağrısı yapar.
 capture_started() {
-  local initial id state
-  initial="$(list_machines)" || return 1
+  local initial id state start=$SECONDS
+  while :; do
+    initial="$(list_machines)" || return 1
+    if awk '$2 ~ /^(starting|replacing|restarting|stopping|created|updating)$/ {t++} END {exit (t>0)}' <<<"$initial"; then break; fi
+    [ $((SECONDS - start)) -lt "${WAIT_TIMEOUT_S:-60}" ] || break
+    sleep "${WAIT_INTERVAL_S:-5}"
+  done
   IDS=()
   while read -r id state; do
-    if [ -n "$id" ] && [ "$state" = "started" ]; then IDS+=("$id"); fi
+    case "$state" in started|starting|replacing) if [ -n "$id" ]; then IDS+=("$id"); fi ;; esac
   done <<<"$initial"
 }
 
