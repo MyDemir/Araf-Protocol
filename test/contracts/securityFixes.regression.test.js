@@ -304,9 +304,14 @@ describe("Security fixes regression (K1–K14, G1/G2)", function () {
       await c.escrow.connect(c.taker).autoRelease(tid);
 
       expect((await c.escrow.getTrade(tid)).state).to.equal(TradeState.RESOLVED);
-      // AUTO_RELEASE_PENALTY (2% of each bond) applies as before and is a non-zero amount here.
-      const makerPenalty = (tr0.makerBond * 200n) / 10_000n;
-      const takerPenalty = (tr0.takerBond * 200n) / 10_000n;
+      // K2-01: each side's cut is max(AUTO_RELEASE_PENALTY = 2% of its bond, its releaseFunds fee); non-zero here.
+      const makerFeeQ = (tr0.cryptoAmount * tr0.makerFeeBpsSnapshot) / 10_000n;
+      const makerFee = makerFeeQ > tr0.makerBond ? tr0.makerBond : makerFeeQ;
+      const takerFee = (tr0.cryptoAmount * tr0.takerFeeBpsSnapshot) / 10_000n;
+      const makerBondPenalty = (tr0.makerBond * 200n) / 10_000n;
+      const takerBondPenalty = (tr0.takerBond * 200n) / 10_000n;
+      const makerPenalty = makerBondPenalty > makerFee ? makerBondPenalty : makerFee;
+      const takerPenalty = takerBondPenalty > takerFee ? takerBondPenalty : takerFee;
       expect(makerPenalty).to.be.gt(0n);
       expect(takerPenalty).to.be.gt(0n);
       // Maker gets the bond back minus the penalty; taker gets the crypto + bond minus the penalty.

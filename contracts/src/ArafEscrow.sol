@@ -871,11 +871,13 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
     /**
      * @notice LOCKED trade'de taker PAYMENT_WINDOW içinde ödeme bildirmezse kilit çözülür.
      *         Kontrat kimin haklı olduğunu yorumlamaz; yalnız zamanın dolduğunu uygular: maker envanter + bond'unu
-     *         geri alır, taker bond'undan küçük bir liveness cezası kesilir ve taker'a negatif sinyal yazılır.
+     *         geri alır, taker bond'undan küçük bir liveness cezası kesilip maker'a ödenir (K1-03) ve taker'a negatif
+     *         sinyal yazılır.
      *         Bu yol olmadan bond'suz (Tier 0) bir taker maker fonunu süresiz rehin tutabilirdi.
      * @notice If the taker does not report payment within PAYMENT_WINDOW, the lock unwinds.
      *         The contract does not judge; it only enforces elapsed time: the maker gets inventory + bond back,
-     *         a small liveness penalty is taken from the taker bond and the taker receives a negative signal.
+     *         a small liveness penalty is taken from the taker bond and paid to the maker (K1-03), and the taker
+     *         receives a negative signal.
      *         Without this path a bond-free (Tier 0) taker could hold maker funds hostage indefinitely.
      */
     function expirePaymentWindow(uint256 _tradeId)
@@ -890,8 +892,12 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
 
         t.state = TradeState.CANCELED;
 
+        // [TR] K1-03: ceza envanteri kilitlenen maker'a tazminat olarak gider (hazineye değil). Tier 0'da bond 0
+        //      olduğundan ceza 0 kalır. makerRefund maker'ın aldığı toplamdır (envanter + bond + ceza).
+        // [EN] K1-03: the penalty compensates the maker whose inventory was locked (not the treasury). Tier 0 has no
+        //      bond, so the penalty stays 0. makerRefund is the maker's total (inventory + bond + penalty).
         uint256 takerPenalty = (t.takerBond * AUTO_RELEASE_PENALTY_BPS) / BPS_DENOMINATOR;
-        uint256 makerRefund  = t.cryptoAmount + t.makerBond;
+        uint256 makerRefund  = t.cryptoAmount + t.makerBond + takerPenalty;
         uint256 takerRefund  = t.takerBond - takerPenalty;
 
         // [TR] K1-06 CEI: terminal snapshot ve itibar dış çağrılardan (hazine hook'u, transferler) önce yazılır.
@@ -899,7 +905,7 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
         _recordTerminalOutcome(_tradeId, TerminalOutcome.PAYMENT_WINDOW_EXPIRED, takerPenalty, 0);
         _recordReputation(t, ArafReputationLib.Outcome.PAYMENT_WINDOW_EXPIRED);
 
-        _payout(t, _tradeId, makerRefund, takerRefund, takerPenalty, 0, RevenueKind.AUTO_RELEASE_FEE_OR_PENALTY);
+        _payout(t, _tradeId, makerRefund, takerRefund, 0, 0, RevenueKind.AUTO_RELEASE_FEE_OR_PENALTY);
 
         emit PaymentWindowExpired(_tradeId, makerRefund, takerRefund, takerPenalty);
     }
@@ -1150,6 +1156,17 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
 
         uint256 makerPenalty = (t.makerBond * AUTO_RELEASE_PENALTY_BPS) / BPS_DENOMINATOR;
         uint256 takerPenalty = (t.takerBond * AUTO_RELEASE_PENALTY_BPS) / BPS_DENOMINATOR;
+        // [TR] K2-01: her tarafın kesintisi en az releaseFunds'ta ödeyeceği ücret kadardır (Tier 0 dahil); böylece
+        //      maker'ın susması protokol ücretini düşürmez. Maker ücreti releaseFunds'taki gibi bond ile sınırlıdır.
+        // [EN] K2-01: each side's cut is at least its releaseFunds fee (Tier 0 included), so a silent maker does not
+        //      lower protocol revenue. The maker fee is capped by the maker bond exactly as in releaseFunds.
+        {
+            uint256 takerFee = (t.cryptoAmount * t.takerFeeBpsSnapshot) / BPS_DENOMINATOR;
+            uint256 makerFee = (t.cryptoAmount * t.makerFeeBpsSnapshot) / BPS_DENOMINATOR;
+            if (makerFee > t.makerBond) makerFee = t.makerBond;
+            if (takerFee > takerPenalty) takerPenalty = takerFee;
+            if (makerFee > makerPenalty) makerPenalty = makerFee;
+        }
 
         // [TR] K1-06 CEI: kayıtlar dış çağrılardan önce. [EN] K1-06 CEI: records before external calls.
         _recordTerminalOutcome(_tradeId, TerminalOutcome.AUTO_RELEASE, takerPenalty, makerPenalty);
