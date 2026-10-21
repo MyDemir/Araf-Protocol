@@ -206,6 +206,12 @@ export const mergeChainTradeIntoRoom = (current, fresh, chainState = null) => {
     const { role, cancelStatus, ...fields } = fresh;
     let changed = false;
     const next = { ...current };
+    // [TR] İptal teklifi/geri çekme tek başına değişebilir (durum/zaman damgası aynı kalır); karşılaştırmaya dahil.
+    // [EN] A cancel proposal/revoke can change alone; include it in the comparison.
+    if ((current.cancelStatus ?? null) !== (cancelStatus ?? null)) {
+      next.cancelStatus = cancelStatus ?? null;
+      changed = true;
+    }
     for (const [key, value] of Object.entries(fields)) {
       if (TIMESTAMP_KEYS.has(key) && (value === null || value === undefined) && current[key]) continue;
       if (next[key] !== value) {
