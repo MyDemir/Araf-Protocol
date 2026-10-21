@@ -767,6 +767,12 @@ class EventWorker {
 
     const fromBlock = this._resolveReplayStartBlock(savedBlock, currentHead);
 
+    // [TR] B1-05: checkpoint yokken ilk getLogs hata verirse canlı poll 0'dan (genesis) başlamasın diye bellekteki
+    //      checkpoint, Redis'e YAZILMADAN, max(mevcut, başlangıç-1) olur. Kayıtlı checkpoint varsa değişmez.
+    // [EN] B1-05: with no checkpoint, a failing first getLogs must not leave the live poll starting at genesis;
+    //      the in-memory checkpoint becomes max(current, start-1) WITHOUT writing Redis. Unchanged when saved.
+    this._lastSafeCheckpointBlock = Math.max(this._lastSafeCheckpointBlock, fromBlock - 1);
+
     if (fromBlock > finalizedToBlock) {
       // [TR] B3: başlangıç bloğu finalized head'in üstündeyse replay ertelenir, ama bellekteki checkpoint
       //      max(başlangıç-1, mevcut) olur. Aksi halde start() canlı poll'u checkpoint 0'dan başlatır ve
