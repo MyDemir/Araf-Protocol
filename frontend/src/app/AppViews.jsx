@@ -300,7 +300,7 @@ export const buildAppViews = (ctx) => {
         {sidebarOpen && <div className="md:hidden fixed inset-0 max-w-full overflow-x-hidden bg-black/60 z-[55] backdrop-blur-sm transition-opacity" onClick={() => setSidebarOpen(false)} />}
         <aside
           aria-label={tr ? 'Filtreler ve işlemler' : 'Filters and trades'}
-          className={`fixed md:relative inset-y-0 left-0 box-border h-dvh md:h-full max-w-full bg-shell border-r border-borderSubtle flex flex-col z-[60] md:z-40 shrink-0 overflow-x-hidden overflow-y-auto overscroll-contain transition-all duration-300 ease-in-out ${sidebarOpen ? 'w-[280px] max-w-[calc(100vw_-_3rem)] pl-[calc(0.75rem_+_env(safe-area-inset-left))] pr-3 pt-[calc(1rem_+_env(safe-area-inset-top))] pb-[calc(1rem_+_env(safe-area-inset-bottom))] opacity-100' : 'w-0 p-0 opacity-0'}`}
+          className={`fixed md:relative inset-y-0 left-0 box-border h-dvh md:h-full max-w-full bg-shell border-r border-borderSubtle flex flex-col z-[60] md:z-40 shrink-0 overflow-x-hidden overflow-y-auto overscroll-contain transition-all duration-300 ease-in-out ${sidebarOpen ? 'w-[280px] max-w-[calc(100vw_-_3rem)] pl-[calc(0.75rem_+_env(safe-area-inset-left))] pr-3 pt-[calc(1rem_+_env(safe-area-inset-top))] pb-[calc(1rem_+_env(safe-area-inset-bottom))] opacity-100' : 'w-0 p-0 opacity-0 invisible'}`}
         >
           <div className="md:hidden flex items-center justify-between px-3 mb-4">
             <span className="flex items-center gap-2 text-base font-bold tracking-tight text-textPrimary"><img src="/logo-64.png" alt="" width="28" height="28" className="w-7 h-7 shrink-0" />Araf</span>
@@ -668,6 +668,9 @@ export const buildAppViews = (ctx) => {
               // [TR] K6: SELL emrinde emir sahibi (maker) kısıtlıysa kontrat fill'i MakerBanActive ile reddeder. Bilgi varsa
               //      buton kapanır; bilinmiyorsa (null) tx denenir ve revert mesajı çevrilir.
               const ownerBanKnown = isSellSide && Number.isFinite(order.ownerBannedUntil);
+              // [TR] F3-13: İzleyicinin kendi banı (zincirden okunan itibar, ctx.isBanned): kontrat fill'de iki rol için de
+              //      TakerBanActive/MakerBanActive ile reddeder. Yalnız erken ipucu; asıl engel handleStartTrade ve kontrattır.
+              const isViewerBanned = isConnected && isAuthenticated && !ctx.labProfile && Boolean(ctx.isBanned);
               const isOwnerBanned = ownerBanKnown && order.ownerBannedUntil > Math.floor((Number.isFinite(chainNowMs) ? chainNowMs : Date.now() + chainOffsetMs) / 1000);
               // [TR] Ödeme profili kapısı: kayıtlı profilin yoksa (ya da durum bilinmiyorsa) ve emir sahibinin profili yoksa doldurma kapalı.
               const needsOwnProfile = isConnected && isAuthenticated && !isPayoutProfileSaved(hasPayoutProfile);
@@ -677,7 +680,7 @@ export const buildAppViews = (ctx) => {
               // [TR] Yalnız ipucu (fail-open): BUY emrinin sahibi 2 günlük yaşı doldurmadıysa kontrat fill'i WalletTooYoung ile reddeder.
               const ownerAgeSec = ownerAgeRemainingSec(order);
               const notFillableYet = ownerAgeSec != null;
-              const finalCanTakeOrder = canTakeOrder && !notFillableYet && !needsOwnProfile && !ownerProfileMissing && !ownerRailDisabled && !isOwnerBanned && isCooldownOk && isFunded && isAged && !newTxBlocked && isTokenConfigured && isCorrectChain;
+              const finalCanTakeOrder = canTakeOrder && !notFillableYet && !needsOwnProfile && !ownerProfileMissing && !ownerRailDisabled && !isOwnerBanned && !isViewerBanned && isCooldownOk && isFunded && isAged && !newTxBlocked && isTokenConfigured && isCorrectChain;
               // [TR] Oturum yoksa buton pasif "Kilitli" yerine giriş akışını başlatır.
               const needsSignIn = !isConnected || !isAuthenticated;
               const isDisabled = needsSignIn ? false : (!finalCanTakeOrder || isContractLoading);
@@ -690,6 +693,7 @@ export const buildAppViews = (ctx) => {
                 !isCorrectChain     ? <>{icon(Unplug)} {tr ? 'Yanlış ağ' : 'Wrong network'}</> :
                 !isTokenConfigured  ? <>{icon(Settings)} {tr ? 'Token ayarlanmadı' : 'Token not set'}</> :
                 isMyOwnAd           ? <>{tr ? 'Sizin emriniz' : 'Your order'}</> :
+                isViewerBanned      ? <>{icon(Lock)} {tr ? 'Kısıtlısınız' : 'You are restricted'}</> :
                 isTierLocked        ? <>{icon(Lock)} {tr ? `Tier ${order.tier} gerekli` : `Tier ${order.tier} required`}</> :
                 needsOwnProfile     ? <>{icon(Lock)} {tr ? 'Profil gerekli' : 'Profile needed'}</> :
                 ownerProfileMissing ? <>{icon(Lock)} {tr ? 'Profil yok' : 'No profile'}</> :
@@ -860,7 +864,10 @@ export const buildAppViews = (ctx) => {
     const isMaker = userRole === 'maker';
 
     const tradeTokenDecimals = activeTrade?.tokenDecimals ?? (tokenDecimalsMap[activeTrade?.crypto || 'USDT'] ?? null);
-    const rawCryptoAmt = activeTrade?.cryptoAmountRaw
+    // [TR] F3-08: Ondalık bilinmiyorsa (yeni/desteklenmeyen token) miktar 0 DEĞİL "—" gösterilir.
+    // [EN] F3-08: with unknown decimals (new/unsupported token) the amount shows "—", never 0.
+    const amountUnknown = Boolean(activeTrade?.cryptoAmountRaw) && !(Number.isInteger(tradeTokenDecimals) && tradeTokenDecimals >= 0 && tradeTokenDecimals <= 36);
+    const rawCryptoAmt = amountUnknown ? null : activeTrade?.cryptoAmountRaw
       ? rawTokenToDisplayNumber(activeTrade.cryptoAmountRaw, tradeTokenDecimals)
       : (Number(activeTrade?.max) > 0 && Number(activeTrade?.rate) > 0 ? Number(activeTrade.max) / Number(activeTrade.rate) : 0);
     // [TR] Ücret, global config değil trade'in kilitlendiği andaki fee snapshot'ından hesaplanır.
@@ -870,10 +877,10 @@ export const buildAppViews = (ctx) => {
       ? Number(activeTrade.takerFeeBps)
       : (isKnownNumber(takerFeeBps) ? Number(takerFeeBps) : null);
     const feeUnknown = effectiveTakerFeeBps === null;
-    const protocolFee  = feeUnknown ? 0 : rawCryptoAmt * (effectiveTakerFeeBps / 10000);
-    const netAmount    = rawCryptoAmt - protocolFee;
+    const protocolFee  = rawCryptoAmt === null ? null : (feeUnknown ? 0 : rawCryptoAmt * (effectiveTakerFeeBps / 10000));
+    const netAmount    = rawCryptoAmt === null ? null : rawCryptoAmt - protocolFee;
     const asset        = activeTrade?.crypto || 'USDT';
-    const fmt = (value, digits = 2) => fmtNum(value, lang, digits);
+    const fmt = (value, digits = 2) => (value === null ? '—' : fmtNum(value, lang, digits));
     const feeBreakdownText = feeUnknown
       ? (lang === 'TR' ? `Kilitli ${fmt(rawCryptoAmt)} ${asset} · Ücret bilinmiyor` : `Locked ${fmt(rawCryptoAmt)} ${asset} · Fee unknown`)
       : lang === 'TR'
@@ -983,7 +990,7 @@ export const buildAppViews = (ctx) => {
               <div className="mb-4 rounded-xl border border-danger/30 bg-danger/5 p-4" data-testid="bleeding-meter">
                 <div className="mb-3">
                   <p className="flex items-center gap-1.5 text-sm font-bold text-danger"><Flame className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />{lang === 'TR' ? 'Eriyen emanet' : 'Bleeding escrow'}</p>
-                  <p className="mt-0.5 text-xs text-textSecondary">{lang === 'TR' ? 'Eriyen toplam' : 'Total burned'}: <span className="font-semibold text-danger tabular-nums">{bleedingAmounts ? `${formatTokenAmountFromRaw(bleedingAmounts.totalDecayed ?? 0n, tradeTokenDecimals, 4, lang)} ${asset}` : (lang === 'TR' ? 'hesaplanıyor…' : 'calculating…')}</span></p>
+                  <p className="mt-0.5 text-xs text-textSecondary">{lang === 'TR' ? 'Eriyen toplam' : 'Total decayed'}: <span className="font-semibold text-danger tabular-nums">{bleedingAmounts ? `${formatTokenAmountFromRaw(bleedingAmounts.totalDecayed ?? 0n, tradeTokenDecimals, 4, lang)} ${asset}` : (lang === 'TR' ? 'hesaplanıyor…' : 'calculating…')}</span></p>
                 </div>
                 <div className="space-y-2.5">
                   {rows.map((row) => (
