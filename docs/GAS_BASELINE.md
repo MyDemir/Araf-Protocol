@@ -174,3 +174,29 @@ Measured with `npm --prefix contracts run gas:baseline` (3 runs, identical outpu
 gain ~71 gas (extra internal call from splitting the DUST/cooldown part out of `_enforceTakerEntry`).
 `createBuyOrder`, yaş karşılaştırmasını kaybedip kayıt kontrolünü kazandığı için net -61 gas; fill yolları ~71
 gas artar (DUST/cooldown kısmının ayrı iç fonksiyona alınması).
+
+## Wave 2: setTreasury vault match + decay rule (2026-10-21) / Dalga 2: setTreasury vault eşleşmesi + af kuralı
+
+- K1-02: `setTreasury` now staticcalls `escrow()` on the new treasury and requires `address(this)`
+  (`TreasuryEscrowMismatch`). K3-01: `decayReputation` also requires `now > lastNegativeEventAt + cleanPeriod`.
+- K1-02: `setTreasury` yeni hazinede `escrow()` çağırıp `address(this)` ister (`TreasuryEscrowMismatch`).
+  K3-01: `decayReputation` ayrıca `now > lastNegativeEventAt + cleanPeriod` ister.
+
+`npm --prefix contracts run gas:baseline` before/after: all 26 measured operations are identical (neither function
+is on a measured path). / 26 ölçülen işlemin hepsi aynı (iki fonksiyon da ölçülen yolda değil).
+
+The two changed functions, measured separately (Hardhat network, same wiring as the baseline, one ban via five
+mutual cancels, decay called after `bannedUntil + cleanPeriod`):
+
+| Operation | Before | After | Δ gas | Δ % |
+|---|---:|---:|---:|---:|
+| `setTreasury` (vault) | 31,444 | 35,373 | +3,929 | +12.5% |
+| `decayReputation` | 58,009 | 58,215 | +206 | +0.4% |
+
+`setTreasury` pays for the external `staticcall` (cold account + the vault's immutable getter); it is a rare
+owner call. `decayReputation` reads `lastNegativeEventAt` from the reputation slot it already loads.
+
+| Bytecode (deployed) | Before | After | Δ | EIP-170 headroom |
+|---|---:|---:|---:|---:|
+| `ArafEscrow` | 22,137 | 22,273 | +136 | 2,303 |
+| `ArafReputationLib` | 4,705 | 4,732 | +27 | 19,844 |
