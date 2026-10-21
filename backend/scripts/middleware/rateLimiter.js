@@ -95,12 +95,16 @@ function onLimitReached(req) {
  * [EN] When Redis is down, sensitive surfaces such as auth / PII do not fail-open.
  *      They fall back to a process-local temporary counter.
  */
+// B2-14: Redis kesintisi uzarsa benzersiz anahtarlar belleği şişirmesin (limiter başına üst sınır).
+const IN_MEMORY_MAX_KEYS = 50_000;
+
 function makeInMemoryLimiter({
   label,
   windowMs,
   max,
   keyGenerator,
   errorMessage,
+  maxKeys = IN_MEMORY_MAX_KEYS,
 }) {
   const bucket = new Map(); // key -> { count, resetAt }
 
@@ -122,7 +126,7 @@ function makeInMemoryLimiter({
 
   let fallbackModeLogged = false;
 
-  return function inMemoryLimiter(req, res, next) {
+  const inMemoryLimiter = function inMemoryLimiter(req, res, next) {
     const now = Date.now();
     const key = keyGenerator(req);
     const current = bucket.get(key);
@@ -133,6 +137,14 @@ function makeInMemoryLimiter({
     }
 
     if (!current || now > current.resetAt) {
+      if (!current && bucket.size >= maxKeys) {
+        cleanupExpiredEntries();
+        // [TR] Hâlâ doluysa en eski anahtar (Map ekleme sırası) atılır.
+        if (bucket.size >= maxKeys) {
+          const oldest = bucket.keys().next().value;
+          bucket.delete(oldest);
+        }
+      }
       bucket.set(key, { count: 1, resetAt: now + windowMs });
       return next();
     }
@@ -146,6 +158,10 @@ function makeInMemoryLimiter({
 
     return next();
   };
+
+  // [TR] Redis geri geldiğinde çağrılır; sonraki kesintide uyarı yeniden yazılır.
+  inMemoryLimiter.onRedisRecovered = () => { fallbackModeLogged = false; };
+  return inMemoryLimiter;
 }
 
 /**
@@ -158,6 +174,7 @@ function makeSensitiveLimiter({
 }) {
   return (req, res, next) => {
     if (isReady()) {
+      if (typeof inMemoryLimiter.onRedisRecovered === "function") inMemoryLimiter.onRedisRecovered();
       return redisLimiter(req, res, next);
     }
     return inMemoryLimiter(req, res, next);
@@ -734,6 +751,7 @@ module.exports = {
   clientLogLimiter,
   feedbackLimiter,
   __private: {
+    makeInMemoryLimiter,
     clampTier,
     normalizeTierFromMirror,
     resolveRequestTier,
