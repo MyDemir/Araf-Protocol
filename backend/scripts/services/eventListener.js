@@ -2971,35 +2971,56 @@ class EventWorker {
     const { epoch, token, amount } = event.args;
     const tx_hash = event.transactionHash;
     const log_index = Number(_logIndexOf(event) || 0);
-    const insertResult = await RewardEpochAllocationEvent.findOneAndUpdate(
-      { tx_hash, log_index },
-      { $setOnInsert: { tx_hash, log_index, epoch: _toStr(epoch), token: token?.toLowerCase?.() || null, amount: _toStr(amount) } },
-      // [TR] Mongoose 8'de rawResult kaldırıldı; includeResultMetadata olmadan replay'de
-      //      updatedExisting okunamaz ve epoch havuzu iki kez sayılırdı.
-      // [EN] rawResult was removed in Mongoose 8; without includeResultMetadata the replay
-      //      guard never fires and the epoch pool is double counted.
-      { upsert: true, new: false, includeResultMetadata: true }
-    );
-    if (insertResult?.lastErrorObject?.updatedExisting) return;
+    // [TR] B1-04: RPC çağrısı (getBlock) transaction ve allocation kaydından ÖNCE yapılır; hata olursa
+    //      hiçbir şey yazılmamış olur ve tekrar denemede havuz eksik kalmaz.
+    // [EN] B1-04: the RPC call runs before the transaction/allocation insert, so a failure writes nothing.
+    const indexedAt = await this._getEventDate(event);
 
-    const key = { epoch: _toStr(epoch), token: token?.toLowerCase?.() || null };
-    const existing = await RewardEpoch.findOne(key).lean();
-    const prev = BigInt(existing?.epoch_pool || "0");
-    const next = (prev + BigInt(_toStr(amount))).toString();
-    await RewardEpoch.findOneAndUpdate(
-      key,
-      {
-        $set: {
-          epoch_pool: next,
-          indexed_at: await this._getEventDate(event),
+    // [TR] Allocation kaydı + epoch_pool artışı TEK transaction'da: arada hata olursa ikisi de geri alınır,
+    //      retry/DLQ tekrarında kayıt "zaten var" görünmez.
+    // [EN] Allocation insert + epoch_pool increment in ONE transaction; any failure rolls back both.
+    const session = await mongoose.startSession();
+    session.startTransaction();
+    try {
+      const insertResult = await RewardEpochAllocationEvent.findOneAndUpdate(
+        { tx_hash, log_index },
+        { $setOnInsert: { tx_hash, log_index, epoch: _toStr(epoch), token: token?.toLowerCase?.() || null, amount: _toStr(amount) } },
+        // [TR] Mongoose 8'de rawResult kaldırıldı; includeResultMetadata olmadan replay'de
+        //      updatedExisting okunamaz ve epoch havuzu iki kez sayılırdı.
+        // [EN] rawResult was removed in Mongoose 8; without includeResultMetadata the replay
+        //      guard never fires and the epoch pool is double counted.
+        { upsert: true, new: false, includeResultMetadata: true, session }
+      );
+      if (insertResult?.lastErrorObject?.updatedExisting) {
+        await session.commitTransaction();
+        return;
+      }
+
+      const key = { epoch: _toStr(epoch), token: token?.toLowerCase?.() || null };
+      const existing = await RewardEpoch.findOne(key).session(session).lean();
+      const prev = BigInt(existing?.epoch_pool || "0");
+      const next = (prev + BigInt(_toStr(amount))).toString();
+      await RewardEpoch.findOneAndUpdate(
+        key,
+        {
+          $set: {
+            epoch_pool: next,
+            indexed_at: indexedAt,
+          },
+          $setOnInsert: {
+            status: "OPEN",
+            total_weight: null,
+          },
         },
-        $setOnInsert: {
-          status: "OPEN",
-          total_weight: null,
-        },
-      },
-      { upsert: true }
-    );
+        { upsert: true, session }
+      );
+      await session.commitTransaction();
+    } catch (err) {
+      await session.abortTransaction();
+      throw err;
+    } finally {
+      await session.endSession();
+    }
   }
 
   async _onTradeOutcomeRecorded(event) {
