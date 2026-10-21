@@ -152,6 +152,41 @@ describe('contract lifecycle action builders', () => {
     expect(deps.setIsWalletRegistered).toHaveBeenCalledWith(true);
   });
 
+  describe('handleRegisterWallet error branches', () => {
+    const makeDeps = (registerWallet) => ({
+      lang: 'EN', isContractLoading: false, isRegisteringWallet: false, isWalletRegistered: false,
+      registerWallet, showToast: vi.fn(), setIsRegisteringWallet: vi.fn(), setIsWalletRegistered: vi.fn(),
+    });
+    const timeoutErr = () => Object.assign(new Error('Timed out while waiting for transaction'), { name: 'WaitForTransactionReceiptTimeoutError' });
+
+    it('B3: receipt timeout shows the verifying message, not a failure, and does not mark registered', async () => {
+      const deps = makeDeps(vi.fn().mockRejectedValue(timeoutErr()));
+      await buildProfileActions(deps).handleRegisterWallet();
+      expect(deps.showToast).toHaveBeenLastCalledWith('Transaction sent, verifying on-chain.', 'info');
+      expect(deps.setIsWalletRegistered).not.toHaveBeenCalled();
+      expect(deps.setIsRegisteringWallet).toHaveBeenLastCalledWith(false);
+    });
+
+    it('B3: TR timeout message', async () => {
+      const deps = { ...makeDeps(vi.fn().mockRejectedValue(timeoutErr())), lang: 'TR' };
+      await buildProfileActions(deps).handleRegisterWallet();
+      expect(deps.showToast).toHaveBeenLastCalledWith('İşlem gönderildi, zincirde doğrulanıyor.', 'info');
+    });
+
+    it('B3: user rejection keeps the cancelled message', async () => {
+      const deps = makeDeps(vi.fn().mockRejectedValue(new Error('User rejected the request')));
+      await buildProfileActions(deps).handleRegisterWallet();
+      expect(deps.showToast).toHaveBeenLastCalledWith('Transaction cancelled.', 'error');
+    });
+
+    it('AlreadyRegistered marks registered with an info toast', async () => {
+      const deps = makeDeps(vi.fn().mockRejectedValue(Object.assign(new Error('revert'), { arafErrorName: 'AlreadyRegistered' })));
+      await buildProfileActions(deps).handleRegisterWallet();
+      expect(deps.setIsWalletRegistered).toHaveBeenCalledWith(true);
+      expect(deps.showToast).toHaveBeenLastCalledWith('Wallet already registered.', 'info');
+    });
+  });
+
   it('release skips the chargeback-ack call when the backend id is not known yet and names the real token (F15)', async () => {
     const deps = makeTradeRoomDeps({ activeTrade: { onchainId: '9', id: null, crypto: 'USDC' } });
     await buildTradeRoomActions(deps).handleRelease();
