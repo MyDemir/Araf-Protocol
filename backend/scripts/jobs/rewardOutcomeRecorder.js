@@ -135,11 +135,19 @@ async function runRewardOutcomeRecorder(opts = {}) {
 
   if (pending.length === 0) return { success: true, candidates: candidates.length, recorded: 0 };
 
+  // [TR] D1: Redis iş kilidi kaybolduysa tx gönderilmez (başka makine aynı relayer ile çalışıyor olabilir).
+  // [EN] D1: if the Redis job lock was lost, no tx is sent.
+  if (typeof opts?.isLockLost === "function" && opts.isLockLost()) {
+    logger.error("[RewardRecorder] İş kilidi kaybedildi; tx gönderilmeden duruldu.");
+    return { success: false, candidates: candidates.length, recorded: 0, error: "lock_lost" };
+  }
+
   try {
     const tx = await contract.recordTradeOutcomes(pending);
-    const receipt = await tx.wait();
+    const receipt = await _waitForReceipt(tx);
     logger.info(`[RewardRecorder] ${pending.length} trade için kayıt gönderildi: tx=${tx.hash} block=${receipt?.blockNumber || "n/a"}`);
   } catch (err) {
+    if (err?.code === "TX_WAIT_TIMEOUT") logger.warn(`[RewardRecorder] ${err.message}`);
     logger.error(`[RewardRecorder] recordTradeOutcomes başarısız: ${err.reason || err.message}`);
     return { success: false, candidates: candidates.length, recorded: 0 };
   }
@@ -155,6 +163,27 @@ async function runRewardOutcomeRecorder(opts = {}) {
   }
 
   return { success: true, candidates: candidates.length, recorded: pending.length };
+}
+
+
+// [TR] tx.wait() için üst süre: takılan tx iş kilidini (app.js jobLocks) kalıcı tutmasın.
+// [EN] Upper bound for tx.wait() so a stuck tx cannot hold the scheduler lock forever.
+const TX_WAIT_TIMEOUT_MS = 120_000;
+
+async function _waitForReceipt(tx, timeoutMs = TX_WAIT_TIMEOUT_MS) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const e = new Error(`tx.wait zaman aşımı (${timeoutMs} ms) tx=${tx?.hash || "n/a"}`);
+      e.code = "TX_WAIT_TIMEOUT";
+      reject(e);
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([tx.wait(1, timeoutMs), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 module.exports = { runRewardOutcomeRecorder, REWARDABLE_RESOLUTION_TYPES };
