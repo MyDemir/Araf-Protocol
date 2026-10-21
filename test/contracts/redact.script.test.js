@@ -12,6 +12,14 @@ describe('contracts/scripts/lib/redact (K4-10)', () => {
     expect(out).to.not.contain('AbCdEf0123456789');
   });
 
+  it('does not mask 0x+40 hex addresses but still masks 64 hex', function () {
+    const addr = '0x' + 'ab'.repeat(20);
+    expect(redactText('owner()=' + addr, {})).to.equal('owner()=' + addr);
+    const out = redactText('k=' + 'cd'.repeat(32) + ' k2=0x' + 'cd'.repeat(32), {});
+    expect(out).to.not.contain('cdcd');
+    expect(redactText('x=0x' + 'ab'.repeat(21), {})).to.not.contain('abab');
+  });
+
   it('masks exact secret env values even without a recognizable shape', () => {
     expect(redactText('boom secretvalue123 end', { DEPLOYER_PRIVATE_KEY: 'secretvalue123' })).to.equal('boom [redacted] end');
   });

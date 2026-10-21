@@ -17,7 +17,8 @@ function redactText(input, env = process.env) {
   return s
     .replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s"'<>)]+/gi, "[redacted-url]")
     .replace(/\b(?:0x)?[0-9a-fA-F]{64}\b/g, "[redacted-hex64]")
-    .replace(/\b[A-Za-z0-9_-]{32,}\b/g, "[redacted-token]");
+    // Adresler (0x + tam 40 hex) tanı için korunur; diğer uzun token'lar maskelenir.
+    .replace(/\b[A-Za-z0-9_-]{32,}\b/g, (t) => (/^0x[0-9a-fA-F]{40}$/.test(t) ? t : "[redacted-token]"));
 }
 
 // [TR] "Ad [kod]: maskelenmiş ilk satır". Stack ve ham nesne (info/request alanları URL taşıyabilir) basılmaz.
