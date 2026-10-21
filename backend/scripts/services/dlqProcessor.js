@@ -181,7 +181,8 @@ async function capQuarantine(redis) {
   }
 }
 
-async function processDLQ() {
+async function processDLQ(lockCtx = {}) {
+  const lockLost = () => typeof lockCtx?.isLockLost === "function" && lockCtx.isLockLost();
   try {
     // [TR] Worker henüz bağlanmadıysa (arka plan start) re-drive zincir okuyamaz; deneme hakkı yakılmaz.
     // [EN] While the worker is still connecting (background start) a re-drive cannot read the chain; do not
@@ -214,6 +215,12 @@ async function processDLQ() {
 
     for (const raw of entries) {
       if (processedCount >= BATCH_SIZE) break;
+      // [TR] D1: Redis iş kilidi kaybolduysa başka makine de çalışıyor olabilir; yeni öğe işlenmez.
+      // [EN] D1: if the Redis job lock was lost another machine may be running; process no further entries.
+      if (lockLost()) {
+        logger.error("[DLQ] İş kilidi kaybedildi; kalan girdiler işlenmeden duruldu.");
+        return { success: false, error: "lock_lost", processed: processedCount };
+      }
       let entry;
       try {
         entry = parseEntry(raw);

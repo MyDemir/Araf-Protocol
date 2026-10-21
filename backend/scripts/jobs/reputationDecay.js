@@ -83,7 +83,8 @@ function getDecayContract() {
   return { contract: decayContract };
 }
 
-async function runReputationDecay() {
+async function runReputationDecay(lockCtx = {}) {
+  const lockLost = () => typeof lockCtx?.isLockLost === "function" && lockCtx.isLockLost();
   logger.info("[DecayJob] V3 itibar temizleme görevi başlatıldı...");
 
   const resolved = getDecayContract();
@@ -173,6 +174,12 @@ async function runReputationDecay() {
   logger.info(`[DecayJob] ${usersToClean.length} kullanıcı için decayReputation() denenecek.`);
 
   for (const wallet of usersToClean) {
+    // [TR] D1: Redis iş kilidi kaybolduysa yeni tx gönderilmez (başka makine aynı relayer ile çalışıyor olabilir).
+    // [EN] D1: if the Redis job lock was lost, no new tx is sent (another machine may use the same relayer).
+    if (lockLost()) {
+      logger.error("[DecayJob] İş kilidi kaybedildi; kalan kullanıcılar için tx gönderilmeden duruldu.");
+      return { success: false, candidates: candidates.length, processed: 0, error: "lock_lost" };
+    }
     try {
       const tx = await contract.decayReputation(wallet);
       const receipt = await _waitForReceipt(tx);

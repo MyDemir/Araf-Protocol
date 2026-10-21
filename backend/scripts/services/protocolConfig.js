@@ -80,18 +80,33 @@ function _bondEntry(makerBps, takerBps) {
 //      değişiminden sonra eşleşmeyen (ya da bağ bilgisi olmayan eski) girdi yok sayılır; zincirden yeniden yüklenir.
 // [EN] B4-01: a cache entry is bound to the escrow address + chainId it was written for. After a rotation or an
 //      environment change a mismatching (or unbound legacy) entry is ignored and the config reloads from chain.
+// [TR] D3: escrow ya da chainId boşsa bağ null'dır: önbellek ne yazılır ne okunur (her zaman zincirden yüklenir).
 function _cacheBinding() {
-  const escrow = String(process.env.ARAF_ESCROW_ADDRESS || "").toLowerCase();
-  const chainId = String(process.env.EXPECTED_CHAIN_ID || "");
+  const escrow = String(process.env.ARAF_ESCROW_ADDRESS || "").trim().toLowerCase();
+  const chainId = String(process.env.EXPECTED_CHAIN_ID || "").trim();
+  if (!escrow || !chainId) return null;
   return `${escrow}|${chainId}`;
 }
 
 function _isCacheBound(parsed) {
-  return Boolean(parsed) && parsed.cache_binding === _cacheBinding();
+  const binding = _cacheBinding();
+  return Boolean(parsed) && binding !== null && parsed.cache_binding === binding;
+}
+
+// [TR] cache_binding yalnız önbellek meta verisidir; bellekteki config'e ve getConfig() çıktısına girmez.
+function _stripBinding(parsed) {
+  const { cache_binding: _omit, ...rest } = parsed;
+  return rest;
 }
 
 async function _writeCache(redis, value) {
-  const bound = JSON.stringify({ ...value, cache_binding: _cacheBinding() });
+  const binding = _cacheBinding();
+  if (binding === null) {
+    logger.warn("[Config] Escrow adresi ya da EXPECTED_CHAIN_ID boş; config önbelleğe yazılmadı.");
+    return;
+  }
+  const { cache_binding: _drop, ...clean } = value;
+  const bound = JSON.stringify({ ...clean, cache_binding: binding });
   try {
     await redis.setEx(CONFIG_CACHE_KEY, configCacheTtl(), bound);
   } catch (err) {
@@ -119,7 +134,7 @@ async function loadStaleProtocolConfig() {
       logger.warn("[Config] Son bilinen config başka escrow/chainId'ye ait ya da bağsız; yok sayıldı.");
       return null;
     }
-    protocolConfig = parsed;
+    protocolConfig = _stripBinding(parsed);
     configIsStale = true;
     return protocolConfig;
   } catch (err) {
@@ -136,7 +151,7 @@ async function loadProtocolConfig() {
     if (cached) {
       const parsed = JSON.parse(cached);
       if (_isCacheBound(parsed)) {
-        protocolConfig = parsed;
+        protocolConfig = _stripBinding(parsed);
         configIsStale = false;
         logger.info("[Config] V3 protokol parametreleri Redis önbelleğinden yüklendi.");
         return protocolConfig;

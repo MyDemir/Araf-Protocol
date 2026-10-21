@@ -52,10 +52,10 @@ describe("jobLock (B4-05)", () => {
     expect(job2).not.toHaveBeenCalled();
 
     releaseJob1();
-    expect(await p1).toEqual({ ran: true, result: "j1" });
+    expect(await p1).toMatchObject({ ran: true, result: "j1" });
 
     // m1 bitirince kilit serbest: m2 artık çalışabilir.
-    expect(await m2.runExclusive("dlq", job2)).toEqual({ ran: true, result: "j2" });
+    expect(await m2.runExclusive("dlq", job2)).toMatchObject({ ran: true, result: "j2" });
     expect(job2).toHaveBeenCalledTimes(1);
   });
 
@@ -67,7 +67,7 @@ describe("jobLock (B4-05)", () => {
     const wait = new Promise((r) => { gate = r; });
     const p = m1.runExclusive("dlq", () => wait);
     await new Promise((r) => setImmediate(r));
-    expect(await m2.runExclusive("rewardRecorder", async () => 1)).toEqual({ ran: true, result: 1 });
+    expect(await m2.runExclusive("rewardRecorder", async () => 1)).toMatchObject({ ran: true, result: 1 });
     gate();
     await p;
   });

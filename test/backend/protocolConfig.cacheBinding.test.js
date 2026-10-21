@@ -94,6 +94,36 @@ describe("protocolConfig cache binding (B4-01)", () => {
     expect(await same.mod.loadStaleProtocolConfig()).not.toBeNull();
   });
 
+  it("D3: chainId boşsa önbellek ne yazılır ne okunur", async () => {
+    const store = new Map();
+    const first = load({ escrow: ESCROW_A, chainId: "", store, takerFee: 25 });
+    await first.mod.loadProtocolConfig();
+    expect(store.size).toBe(0); // hiçbir şey yazılmadı
+
+    // Eski/elle konmuş bir girdi (binding'i "…|" biçiminde) boş chainId ile eşleşse bile okunmaz.
+    store.set(CACHE_KEY, JSON.stringify({
+      bondMap: {}, feeConfig: { takerFeeBps: 1, makerFeeBps: 1 }, cooldownConfig: {}, tokenMap: {}, cache_binding: `${ESCROW_A}|`,
+    }));
+    const second = load({ escrow: ESCROW_A, chainId: "", store, takerFee: 25 });
+    const cfg = await second.mod.loadProtocolConfig();
+    expect(second.methods.getFeeConfig).toHaveBeenCalled();
+    expect(cfg.feeConfig.takerFeeBps).toBe(25);
+  });
+
+  it("D3: cache_binding alanı bellekteki config'e ve getConfig() çıktısına sızmaz", async () => {
+    const store = new Map();
+    await load({ escrow: ESCROW_A, chainId: 8453, store, takerFee: 25 }).mod.loadProtocolConfig();
+    expect(JSON.parse(store.get(CACHE_KEY)).cache_binding).toBeTruthy(); // önbellekte var
+
+    const again = load({ escrow: ESCROW_A, chainId: 8453, store, takerFee: 25 });
+    await again.mod.loadProtocolConfig(); // önbellekten
+    expect(again.mod.getConfig()).not.toHaveProperty("cache_binding");
+    await again.mod.updateCachedFeeConfig(30, 10); // yeniden yazım da tek binding yazar
+    expect(again.mod.getConfig()).not.toHaveProperty("cache_binding");
+    const stale = load({ escrow: ESCROW_A, chainId: 8453, store, takerFee: 25 });
+    expect(await stale.mod.loadStaleProtocolConfig()).not.toHaveProperty("cache_binding");
+  });
+
   it("paymentRiskConfig önbellekten değil koddan gelir", async () => {
     const store = new Map();
     const l = load({ escrow: ESCROW_A, chainId: 8453, store, takerFee: 25 });

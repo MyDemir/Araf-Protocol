@@ -135,6 +135,13 @@ async function runRewardOutcomeRecorder(opts = {}) {
 
   if (pending.length === 0) return { success: true, candidates: candidates.length, recorded: 0 };
 
+  // [TR] D1: Redis iş kilidi kaybolduysa tx gönderilmez (başka makine aynı relayer ile çalışıyor olabilir).
+  // [EN] D1: if the Redis job lock was lost, no tx is sent.
+  if (typeof opts?.isLockLost === "function" && opts.isLockLost()) {
+    logger.error("[RewardRecorder] İş kilidi kaybedildi; tx gönderilmeden duruldu.");
+    return { success: false, candidates: candidates.length, recorded: 0, error: "lock_lost" };
+  }
+
   try {
     const tx = await contract.recordTradeOutcomes(pending);
     const receipt = await _waitForReceipt(tx);

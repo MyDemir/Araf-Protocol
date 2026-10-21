@@ -300,8 +300,10 @@ async function bootstrap() {
     try {
       let result;
       if (DISTRIBUTED_LOCK_JOBS.has(jobKey)) {
-        const locked = await runExclusiveJob(jobKey, jobFn);
+        // [TR] jobFn'e { isLockLost } verilir: kilit kaybolursa iş yeni öğe/tx başlatmadan durur.
+        const locked = await runExclusiveJob(jobKey, (ctx) => jobFn(ctx));
         if (!locked.ran) return { success: true, skipped: locked.skipped };
+        if (locked.lost) logger.error(`[Scheduler] ${jobKey} çalışırken Redis kilidi kaybedildi; sonuç güvenilmez.`);
         result = locked.result;
       } else {
         result = await jobFn();

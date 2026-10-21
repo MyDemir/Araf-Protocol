@@ -53,7 +53,12 @@ function createJobLock({ getClient, token, ttlMs, commandTimeoutMs } = {}) {
     //      devre dışı sayılır; gerçek node-redis istemcisinde set her zaman vardır.
     // [EN] A client without SET (unit-test doubles only) disables the coordination layer; real node-redis
     //      clients always have it.
-    if (!redis || typeof redis.set !== "function") return { status: "unsupported" };
+    if (!redis) throw new Error("Redis istemcisi yok");
+    if (typeof redis.set !== "function") {
+      // [TR] D2: bu dal yalnız NODE_ENV=test'te kabul edilir; aksi hâlde fail-closed (iş atlanır).
+      if (process.env.NODE_ENV === "test") return { status: "unsupported" };
+      throw new Error("Redis istemcisi SET desteklemiyor");
+    }
     const res = await _withTimeout(
       redis.set(keyOf(jobKey), lockToken, { NX: true, PX: ttl() }),
       cmdTimeout(),
@@ -90,25 +95,34 @@ function createJobLock({ getClient, token, ttlMs, commandTimeoutMs } = {}) {
       return { ran: false, skipped: "lock_held_elsewhere" };
     }
     if (acquired.status === "unsupported") {
-      return { ran: true, result: await fn() };
+      return { ran: true, result: await fn({ isLockLost: () => false }), lost: false };
     }
 
+    // [TR] D1: yenileme 0 dönerse, hata verirse ya da zaman aşımına uğrarsa kilit KAYBEDİLMİŞ sayılır (sticky).
+    //      İş fn'e verilen isLockLost() ile bunu kontrol edip yeni iş/tx başlatmadan durmalıdır.
+    // [EN] D1: a renewal that returns 0, errors or times out marks the lock LOST (sticky). The job must poll
+    //      isLockLost() and stop before starting new work/txs.
     let lost = false;
-    const renewTimer = setInterval(async () => {
+    let renewTimer = null;
+    const markLost = (why) => {
+      if (lost) return;
+      lost = true;
+      if (renewTimer) clearInterval(renewTimer);
+      logger.error(`[JobLock][ALARM] ${jobKey} kilidi kaybedildi (${why}); iş yeni adım başlatmadan duracak.`);
+    };
+    renewTimer = setInterval(async () => {
       try {
         const ok = await renew(jobKey);
-        if (Number(ok) !== 1 && !lost) {
-          lost = true;
-          logger.error(`[JobLock][ALARM] ${jobKey} kilidi yenilenemedi: başka bir sahip aldı ya da süresi doldu.`);
-        }
+        if (Number(ok) !== 1) markLost("yenileme reddedildi");
       } catch (err) {
-        logger.warn(`[JobLock] ${jobKey} kilit yenileme hatası: ${err.message}`);
+        markLost(`yenileme hatası: ${err.message}`);
       }
     }, Math.max(1, Math.floor(ttl() / 3)));
     if (typeof renewTimer.unref === "function") renewTimer.unref();
 
     try {
-      return { ran: true, result: await fn() };
+      const result = await fn({ isLockLost: () => lost });
+      return { ran: true, result, lost };
     } finally {
       clearInterval(renewTimer);
       try {
