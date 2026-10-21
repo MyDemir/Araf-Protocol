@@ -2189,35 +2189,42 @@ class EventWorker {
     const makerProfile = makerUser?.payout_profile || null;
     const takerProfile = takerUser?.payout_profile || null;
 
+    // [TR] B1-01: kontrol canlı yolda da HER ZAMAN çalışır (advancedStatus null olsa bile).
     // [TR] İLKE: işlem sırasında değişmiş bilgi ASLA snapshot'a girmez. Kilit anı geçmişse (PAID/CHALLENGED)
     //      snapshot ancak iki tarafın profili de kilit anından ÖNCE son değiştiyse (sıkı <) alınır. Zaman
     //      damgası yoksa ya da kilitten sonra/aynı anda ise kanıt yoktur: snapshot alınmaz, eksik işaretlenir
     //      ve reconciliation raporuna düşer.
     // [EN] PRINCIPLE: info changed during the trade NEVER enters the snapshot. Past the lock (PAID/CHALLENGED),
     //      capture only if both profiles last changed strictly before the lock; otherwise leave it missing.
-    if (advancedStatus) {
+    {
       const unchangedSinceLock = (user) => {
         const profile = user?.payout_profile;
-        if (!user || !profile) return false;
+        // [TR] Profil yoksa snapshot'a girecek bilgi de yoktur (canlı yolda eksik snapshot olarak yazılır).
+        if (!user || !profile) return !advancedStatus;
         const stamps = [profile.updated_at, profile.fingerprint?.last_changed_at, user.lastBankChangeAt]
           .filter(Boolean)
           .map((d) => new Date(d).getTime());
         const hasData = Boolean(profile.payout_details_enc || profile.fingerprint?.hash || profile.rail);
-        if (hasData && !profile.updated_at) return false;
-        const limit = lockedAt.getTime() - PROFILE_PROOF_SAFETY_MARGIN_MS;
+        // [TR] Backfill'de damgasız dolu profil kanıtsızdır. Canlı yolda damga yoksa (eski profil) değişiklik
+        //      kanıtı da yoktur: PATCH her zaman updated_at yazar; damga varsa aşağıda sıkı < ile denetlenir.
+        if (advancedStatus && hasData && !profile.updated_at) return false;
+        // [TR] Canlı yolda (advancedStatus yok) güvenlik payı yok: damga kilit anından önce olmalı (sıkı <).
+        const limit = lockedAt.getTime() - (advancedStatus ? PROFILE_PROOF_SAFETY_MARGIN_MS : 0);
         return stamps.every((t) => t < limit);
       };
       const makerOk = !normalizedMaker || unchangedSinceLock(makerUser);
       const takerOk = !normalizedTaker || unchangedSinceLock(takerUser);
       if (!makerOk || !takerOk) {
-        const reason = "backfill_profile_change_after_lock_unprovable";
+        const reason = advancedStatus
+          ? "backfill_profile_change_after_lock_unprovable"
+          : "live_profile_change_after_lock_unprovable";
         logger.error(
-          `[Worker] LOCKED snapshot SKIPPED (backfill, status=${advancedStatus}): trade=${tradeIdNum} reason=${reason}`
+          `[Worker] LOCKED snapshot SKIPPED (${advancedStatus ? "backfill" : "live"}, status=${advancedStatus || "LOCKED"}): trade=${tradeIdNum} reason=${reason}`
         );
         await Trade.findOneAndUpdate(
           {
             ..._buildIdentityLookup("onchain_escrow_id", tradeIdNum),
-            status: { $in: [advancedStatus] },
+            status: { $in: advancedStatus ? [advancedStatus] : ["OPEN", "LOCKED"] },
             "payout_snapshot.captured_at": null,
           },
           { $set: { "payout_snapshot.is_complete": false, "payout_snapshot.incomplete_reason": reason } },
