@@ -33,7 +33,29 @@ export const buildTelegramHref = (handle) => {
   return clean ? `https://t.me/${encodeURIComponent(clean)}` : null;
 };
 
-export const buildContactHref = (channel, value) => {
+// [TR] F4-16: Düğme hedefi göstermeden t.me/mailto/tel açmasın diye hedefin kısmen maskeli hali ekranda gösterilir
+//      (ham değer ekrana yazılmaz; PII yüzeyi küçük kalır, kullanıcı yine de yanlış kanalı fark edebilir).
+// [EN] F4-16: show a partially masked contact target so the button does not open a link blind.
+export const maskContact = (channel, value) => {
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+  if (channel === 'email') {
+    const at = raw.lastIndexOf('@');
+    if (at < 1) return null;
+    return `${raw.slice(0, Math.min(2, at))}***${raw.slice(at)}`;
+  }
+  if (channel === 'phone') {
+    const digits = raw.replace(/\D/g, '');
+    return digits.length >= 3 ? `***${digits.slice(-3)}` : null;
+  }
+  if (channel === 'telegram') {
+    const handle = raw.replace(/^@/, '');
+    return handle ? `@${handle.slice(0, 2)}***` : null;
+  }
+  return null;
+};
+
+export const buildContactHref =(channel, value) => {
   if (!channel || value == null) return null;
   const raw = String(value).trim();
   if (!raw) return null;
@@ -114,36 +136,38 @@ export default function PIIDisplay({ tradeId, lang = 'tr', authenticatedFetch })
     if (!rawValue) return;
     const cleanValue = String(rawValue).replace(/\s/g, '');
 
-    // [TR] Güvenli bağlam kontrolü (HTTPS veya localhost)
-    if (!window.isSecureContext) {
-      // [TR] HTTP ortamı — otomatik kopyalama API'si çalışmaz, kullanıcıyı uyar
-      setCopyState({ status: 'error', field: fieldKey });
-      setTimeout(() => setCopyState({ status: 'idle', field: null }), 3000);
-      return;
-    }
-
-    try {
-      await navigator.clipboard.writeText(cleanValue);
-      setCopyState({ status: 'success', field: fieldKey });
-      setTimeout(() => setCopyState({ status: 'idle', field: null }), 2000);
-    } catch (_err) {
-      // [TR] İzin reddedildi veya başka clipboard hatası — fallback: seçim yöntemi
+    // [TR] F4-16: Güvenli bağlam dışında (HTTP) ya da Clipboard API yoksa da başlıkta belgelenen seçim+execCommand
+    //      yedeği denenir; yalnız o da başarısızsa hata gösterilir. Başarısızlık sessiz kalmaz.
+    const copyViaSelection = () => {
+      let textArea = null;
       try {
-        const textArea = document.createElement('textarea');
+        textArea = document.createElement('textarea');
         textArea.value = cleanValue;
         textArea.style.position = 'fixed';
         textArea.style.opacity = '0';
         document.body.appendChild(textArea);
         textArea.focus();
         textArea.select();
-        const success = document.execCommand('copy');
-        document.body.removeChild(textArea);
-        setCopyState({ status: success ? 'success' : 'error', field: fieldKey });
+        return document.execCommand('copy') === true;
       } catch {
-        setCopyState({ status: 'error', field: fieldKey });
+        return false;
+      } finally {
+        if (textArea?.parentNode) textArea.parentNode.removeChild(textArea);
       }
-      setTimeout(() => setCopyState({ status: 'idle', field: null }), 3000);
+    };
+
+    if (window.isSecureContext && navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(cleanValue);
+        setCopyState({ status: 'success', field: fieldKey });
+        setTimeout(() => setCopyState({ status: 'idle', field: null }), 2000);
+        return;
+      } catch (_err) {
+        // [TR] İzin reddedildi veya başka clipboard hatası — yedek yönteme düşülür.
+      }
     }
+    setCopyState({ status: copyViaSelection() ? 'success' : 'error', field: fieldKey });
+    setTimeout(() => setCopyState({ status: 'idle', field: null }), 3000);
   };
 
   const getContactCtaLabel = (channel) => {
@@ -166,6 +190,7 @@ export default function PIIDisplay({ tradeId, lang = 'tr', authenticatedFetch })
   };
 
   const contactHref = buildContactHref(pii?.payoutProfile?.contact?.channel, pii?.payoutProfile?.contact?.value);
+  const contactMasked = contactHref ? maskContact(pii?.payoutProfile?.contact?.channel, pii?.payoutProfile?.contact?.value) : null;
 
   // ── Kilitli görünüm ──────────────────────────────────────────────────────
   if (!revealed) {
@@ -301,6 +326,7 @@ export default function PIIDisplay({ tradeId, lang = 'tr', authenticatedFetch })
             >
               <MessageCircle className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />
               <span>{getContactCtaLabel(pii?.payoutProfile?.contact?.channel)}</span>
+              {contactMasked && <span className="font-mono text-xs opacity-80" data-testid="pii-contact-masked">{contactMasked}</span>}
             </a>
           ) : (
             <div className="flex items-center justify-center space-x-2 w-full py-2 rounded-xl bg-elevated border border-borderSubtle text-textMuted text-xs mb-3">
