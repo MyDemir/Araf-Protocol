@@ -156,7 +156,7 @@ async function runReputationDecay(lockCtx = {}) {
       //      (block.timestamp <= lastNeg + cleanPeriod); aday yalnız lastNeg + cleanPeriod < şimdi ise seçilir.
       // [EN] K3-01: the contract reverts on equality, so a candidate needs lastNeg + cleanPeriod < now.
       const lastNegativeMs = lastNegativeEventAt * 1000;
-      if (bannedUntilMs <= cutoffMs && lastNegativeMs < cutoffMs) {
+      if (bannedUntilMs < cutoffMs && lastNegativeMs < cutoffMs) {
         usersToClean.push(user.wallet_address);
       }
       if (usersToClean.length >= txLimit) break;
