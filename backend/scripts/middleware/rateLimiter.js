@@ -153,7 +153,6 @@ function makeInMemoryLimiter({
  * [EN] Uses Redis-backed limiter when Redis is ready, otherwise falls back to in-memory protection.
  */
 function makeSensitiveLimiter({
-  label,
   redisLimiter,
   inMemoryLimiter,
 }) {

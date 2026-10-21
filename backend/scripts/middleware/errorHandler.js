@@ -23,7 +23,7 @@ const SENSITIVE_VALUE_PATTERNS = [
   /\b\d{4,17}\b/g, // account-like
   /0x[a-fA-F0-9]{40}/g, // wallet
   /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, // email
-  /(bearer\s+)[a-zA-Z0-9\-\._~\+\/]+=*/gi, // bearer
+  /(bearer\s+)[a-zA-Z0-9\-._~+/]+=*/gi, // bearer
   /\b(eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9._-]+\.[A-Za-z0-9._-]+)\b/g, // jwt
 ];
 

@@ -210,7 +210,7 @@ const PROFILE_SCHEMA = Joi.object({
       account_holder_name: Joi.string()
         .min(2)
         .max(100)
-        .pattern(/^[A-Za-zÀ-ÖØ-öø-ÿĀ-žĞğİıŞşÇçÑñŒœȘșȚțŽž\s.'’\-]+$/, "geçerli isim karakterleri")
+        .pattern(/^[A-Za-zÀ-ÖØ-öø-ÿĀ-žĞğİıŞşÇçÑñŒœȘșȚțŽž\s.'’-]+$/, "geçerli isim karakterleri")
         .required()
         .messages({
           "string.pattern.name": "Hesap sahibi adı harf, boşluk, apostrof, nokta ve tire içerebilir.",
@@ -336,7 +336,7 @@ router.post("/verify", authLimiter, async (req, res) => {
       const parsedSiwe = new SiweMessage(value.message);
       clauseVersion = parseTermsAcceptance(parsedSiwe.statement);
       siweChainId = Number(parsedSiwe.chainId) || null;
-    } catch (_) {
+    } catch {
       clauseVersion = null;
     }
     if (clauseVersion && !ACCEPTED_TERMS_VERSIONS.has(clauseVersion)) {
@@ -509,7 +509,7 @@ router.post("/logout", authLimiter, async (req, res, next) => {
           wallet = payload.sub.toLowerCase();
           jwtIsAuthoritative = true;
         }
-      } catch (_) {
+      } catch {
         // imza geçersiz → JWT'den kimlik türetilmez; refresh çerezine bakılır.
       }
     }
@@ -557,7 +557,7 @@ router.get("/me", requireAuth, async (req, res) => {
 
       try {
         await revokeRefreshToken(req.wallet);
-      } catch (_) {
+      } catch {
         // revoke hatası mismatch cevabını engellemez
       }
 
