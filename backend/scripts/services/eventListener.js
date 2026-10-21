@@ -50,6 +50,19 @@ const { readPendingMarketMeta } = require("./orderMarketMeta");
 
 const CHECKPOINT_KEY = "worker:last_block";
 const LAST_SAFE_BLOCK_KEY = "worker:last_safe_block";
+// [TR] KEYS[1]=last_safe, KEYS[2]=last_block; ARGV[1]=yeni blok. Mevcut = last_safe, yoksa last_block, yoksa 0.
+const CHECKPOINT_ADVANCE_LUA = `
+local cur = tonumber(redis.call('get', KEYS[1]))
+if cur == nil then cur = tonumber(redis.call('get', KEYS[2])) end
+if cur == nil then cur = 0 end
+local nxt = tonumber(ARGV[1])
+if nxt > cur then
+  redis.call('set', KEYS[1], ARGV[1])
+  redis.call('set', KEYS[2], ARGV[1])
+  return 1
+end
+return 0
+`;
 const DLQ_KEY = "worker:dlq";
 const APPLIED_ORDER_KEY_PREFIX = "worker:applied_order:";
 // [TR] DLQ idempotencyKey indeksleri (Redis SET): canlı DLQ, arşiv (7 gün TTL) ve kalıcı karantina.
@@ -1297,11 +1310,27 @@ class EventWorker {
 
   async _updateSafeCheckpointIfHigher(blockNumber) {
     const redis = getRedisClient();
-    const current = parseInt(await redis.get(LAST_SAFE_BLOCK_KEY) || await redis.get(CHECKPOINT_KEY) || "0");
+    let advanced;
+    if (typeof redis.eval === "function") {
+      // [TR] B1-10: karşılaştır + iki anahtarı yaz TEK Lua'da (atomik); çoklu yazarda checkpoint geriye gitmez ve
+      //      iki anahtar ayrışmaz. Dönüş 1: ilerletildi, 0: mevcut değer >= blockNumber.
+      // [EN] B1-10: compare + write both keys in ONE Lua script (atomic); a checkpoint never moves backwards and
+      //      the two keys cannot diverge.
+      advanced = Number(await redis.eval(CHECKPOINT_ADVANCE_LUA, {
+        keys: [LAST_SAFE_BLOCK_KEY, CHECKPOINT_KEY],
+        arguments: [blockNumber.toString()],
+      })) === 1;
+    } else {
+      // [TR] Yalnız eval'i olmayan istemci (birim test taklitleri) için eski get-compare-set yolu.
+      const current = parseInt(await redis.get(LAST_SAFE_BLOCK_KEY) || await redis.get(CHECKPOINT_KEY) || "0");
+      advanced = blockNumber > current;
+      if (advanced) {
+        await redis.set(LAST_SAFE_BLOCK_KEY, blockNumber.toString());
+        await redis.set(CHECKPOINT_KEY, blockNumber.toString());
+      }
+    }
 
-    if (blockNumber > current) {
-      await redis.set(LAST_SAFE_BLOCK_KEY, blockNumber.toString());
-      await redis.set(CHECKPOINT_KEY, blockNumber.toString());
+    if (advanced) {
       this._lastSafeCheckpointBlock = blockNumber;
       // [TR] Checkpoint geçilen bloklar artık kalıcı; bellekteki ack/unsafe kayıtları da temizlenir.
       // [EN] Blocks behind the checkpoint are durable now; drop their in-memory ack/unsafe records too.
@@ -3414,5 +3443,6 @@ worker.getDiagnostics = function getDiagnostics() {
 };
 
 worker._ARAF_ABI_FOR_TESTS = ARAF_ABI;
+worker._CHECKPOINT_ADVANCE_LUA_FOR_TESTS = CHECKPOINT_ADVANCE_LUA;
 
 module.exports = worker;

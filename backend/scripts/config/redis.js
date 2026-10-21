@@ -5,9 +5,29 @@ const { createClient } = require("redis");
 const logger = require("../utils/logger");
 
 let redisClient = null;
-let listenersAttached = false;
 let connectPromise = null;
 const REDIS_READY_WAIT_MS = Number(process.env.REDIS_READY_WAIT_MS || 5000);
+
+// [TR] B4-14: yeniden bağlanma gecikmesi: 100ms * deneme, en çok 3 sn (sınırsız deneme; node-redis varsayılanıyla aynı).
+// [EN] B4-14: reconnect delay 100ms * attempt, capped at 3s (unbounded attempts, same as the node-redis default).
+function reconnectStrategy(retries) {
+  return Math.min((Number(retries) + 1) * 100, 3000);
+}
+
+// [TR] B4-14: proje kuralı IP loglanmaz. node-redis ECONNREFUSED mesajı "host:port" içerir.
+// [EN] B4-14: project rule: IPs are never logged. node-redis ECONNREFUSED messages carry "host:port".
+const IPV4_RE = /\b(?:\d{1,3}\.){3}\d{1,3}\b/g;
+const IPV6_RE = /\[?(?:[0-9a-fA-F]{1,4}:){2,7}[0-9a-fA-F]{0,4}\]?/g;
+function redactIps(text) {
+  return String(text ?? "").replace(IPV4_RE, "[ip]").replace(IPV6_RE, "[ip]");
+}
+
+function attachListeners(client) {
+  client.on("error",        (err) => logger.error(`[Redis] Hata: ${redactIps(err && err.message)}`));
+  client.on("connect",      ()    => logger.info("[Redis] Bağlantı kuruldu."));
+  client.on("reconnecting", ()    => logger.warn("[Redis] Yeniden bağlanıyor..."));
+  client.on("ready",        ()    => logger.info("[Redis] Hazır."));
+}
 
 function waitForReady(client, timeoutMs = REDIS_READY_WAIT_MS) {
   if (!client || client.isReady) return Promise.resolve(client);
@@ -104,10 +124,19 @@ async function connectRedis() {
     throw new Error("[Redis][SEC] Production'da Redis TLS zorunludur (rediss:// veya REDIS_TLS=true).");
   }
 
-  const clientOptions = { url };
+  // [TR] B4-14: disableOfflineQueue: bağlantı yokken komutlar sınırsız kuyruğa girip asılmaz, hemen hata verir
+  //      (kilit/önbellek çağıranları hatayı zaten yakalar). connect() kuyruğu kullanmaz; başlangıç etkilenmez.
+  // [EN] B4-14: with the offline queue disabled, commands issued while disconnected fail fast instead of piling
+  //      up unbounded. node-redis 4.x has no per-command timeout option, so this is the bounded-wait mechanism.
+  const clientOptions = {
+    url,
+    disableOfflineQueue: true,
+    socket: { reconnectStrategy, connectTimeout: Number(process.env.REDIS_CONNECT_TIMEOUT_MS || 10000) },
+  };
 
   if (useTLS) {
     clientOptions.socket = {
+      ...clientOptions.socket,
       tls: true,
       // [TR] REDIS_TLS_SKIP_VERIFY sadece self-signed sertifikaları olan
       // geliştirme ortamları için. PRODUCTION'DA KULLANMAYIN.
@@ -118,13 +147,9 @@ async function connectRedis() {
 
   redisClient = createClient(clientOptions);
 
-  if (!listenersAttached) {
-    redisClient.on("error",        (err) => logger.error(`[Redis] Hata: ${err.message}`));
-    redisClient.on("connect",      ()    => logger.info("[Redis] Bağlantı kuruldu."));
-    redisClient.on("reconnecting", ()    => logger.warn("[Redis] Yeniden bağlanıyor..."));
-    redisClient.on("ready",        ()    => logger.info("[Redis] Hazır."));
-    listenersAttached = true;
-  }
+  // [TR] B4-14: dinleyiciler HER yeni istemciye eklenir (başarısız connect sonrası yeniden denemede de).
+  // [EN] B4-14: listeners are attached to EVERY new client (also on a retry after a failed connect).
+  attachListeners(redisClient);
 
   connectPromise = redisClient.connect()
     .then(() => redisClient)
@@ -178,9 +203,8 @@ async function closeRedis() {
     logger.warn(`[Redis] Kapatma hatası: ${err.message}`);
   } finally {
     redisClient = null;
-    listenersAttached = false;
     connectPromise = null;
   }
 }
 
-module.exports = { connectRedis, getRedisClient, isReady, closeRedis };
+module.exports = { connectRedis, getRedisClient, isReady, closeRedis, redactIps, reconnectStrategy };
