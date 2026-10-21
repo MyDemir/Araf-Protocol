@@ -894,10 +894,12 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
         uint256 makerRefund  = t.cryptoAmount + t.makerBond;
         uint256 takerRefund  = t.takerBond - takerPenalty;
 
-        _payout(t, _tradeId, makerRefund, takerRefund, takerPenalty, 0, RevenueKind.AUTO_RELEASE_FEE_OR_PENALTY);
-
+        // [TR] K1-06 CEI: terminal snapshot ve itibar dış çağrılardan (hazine hook'u, transferler) önce yazılır.
+        // [EN] K1-06 CEI: terminal snapshot and reputation are written before external calls (treasury hook, transfers).
         _recordTerminalOutcome(_tradeId, TerminalOutcome.PAYMENT_WINDOW_EXPIRED, takerPenalty, 0);
         _recordReputation(t, ArafReputationLib.Outcome.PAYMENT_WINDOW_EXPIRED);
+
+        _payout(t, _tradeId, makerRefund, takerRefund, takerPenalty, 0, RevenueKind.AUTO_RELEASE_FEE_OR_PENALTY);
 
         emit PaymentWindowExpired(_tradeId, makerRefund, takerRefund, takerPenalty);
     }
@@ -931,16 +933,7 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
         uint256 makerFee       = (currentCrypto * t.makerFeeBpsSnapshot) / BPS_DENOMINATOR;
         uint256 actualMakerFee = currentMakerBond > makerFee ? makerFee : currentMakerBond;
 
-        _payout(
-            t,
-            _tradeId,
-            currentMakerBond - actualMakerFee,
-            currentCrypto - takerFee + currentTakerBond,
-            decayed + takerFee + actualMakerFee,
-            decayed,
-            disputed ? RevenueKind.DISPUTED_RELEASE_FEE : RevenueKind.MANUAL_RELEASE_FEE
-        );
-
+        // [TR] K1-06 CEI: terminal snapshot ve itibar dış çağrılardan önce yazılır. [EN] K1-06 CEI: records before external calls.
         if (disputed) {
             // [TR] CHALLENGED→RESOLVED yolu maker'ın challenge iddiasının başarısızlığı olarak sınıflanır.
             // [EN] CHALLENGED→RESOLVED path is classified as maker challenge-loss semantics.
@@ -950,6 +943,16 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
             _recordTerminalOutcome(_tradeId, TerminalOutcome.CLEAN_RELEASE, takerFee, actualMakerFee);
             _recordReputation(t, ArafReputationLib.Outcome.MANUAL_RELEASE);
         }
+
+        _payout(
+            t,
+            _tradeId,
+            currentMakerBond - actualMakerFee,
+            currentCrypto - takerFee + currentTakerBond,
+            decayed + takerFee + actualMakerFee,
+            decayed,
+            disputed ? RevenueKind.DISPUTED_RELEASE_FEE : RevenueKind.MANUAL_RELEASE_FEE
+        );
 
         emit EscrowReleased(_tradeId, t.maker, t.taker, takerFee, actualMakerFee);
     }
@@ -1087,10 +1090,11 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
 
         t.state = TradeState.BURNED;
 
-        _payout(t, _tradeId, 0, 0, totalBurn, 0, RevenueKind.BURN_RESIDUAL);
-
+        // [TR] K1-06 CEI: kayıtlar dış çağrılardan önce. [EN] K1-06 CEI: records before external calls.
         _recordTerminalOutcome(_tradeId, TerminalOutcome.BURNED, 0, 0);
         _recordReputation(t, ArafReputationLib.Outcome.BURN);
+
+        _payout(t, _tradeId, 0, 0, totalBurn, 0, RevenueKind.BURN_RESIDUAL);
 
         emit EscrowBurned(_tradeId, totalBurn);
     }
@@ -1147,6 +1151,10 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
         uint256 makerPenalty = (t.makerBond * AUTO_RELEASE_PENALTY_BPS) / BPS_DENOMINATOR;
         uint256 takerPenalty = (t.takerBond * AUTO_RELEASE_PENALTY_BPS) / BPS_DENOMINATOR;
 
+        // [TR] K1-06 CEI: kayıtlar dış çağrılardan önce. [EN] K1-06 CEI: records before external calls.
+        _recordTerminalOutcome(_tradeId, TerminalOutcome.AUTO_RELEASE, takerPenalty, makerPenalty);
+        _recordReputation(t, ArafReputationLib.Outcome.AUTO_RELEASE);
+
         _payout(
             t,
             _tradeId,
@@ -1156,9 +1164,6 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
             0,
             RevenueKind.AUTO_RELEASE_FEE_OR_PENALTY
         );
-
-        _recordTerminalOutcome(_tradeId, TerminalOutcome.AUTO_RELEASE, takerPenalty, makerPenalty);
-        _recordReputation(t, ArafReputationLib.Outcome.AUTO_RELEASE);
 
         // Event payload order must stay aligned with EscrowReleased(takerFee, makerFee)
         // so off-chain listeners book penalties to the correct party.
@@ -1258,12 +1263,12 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
         sp.state = SettlementProposalState.FINALIZED;
         t.state = TradeState.RESOLVED;
 
-        // [TR] CEI korunur: state güncellendi, ardından dış transferler yapılır.
-        // [EN] CEI preserved: state is updated before external transfers.
-        _payout(t, _tradeId, makerPayout, takerPayout, decayed + makerFee + takerFee, decayed, RevenueKind.PARTIAL_SETTLEMENT_FEE);
-
+        // [TR] CEI (K1-06): state, terminal snapshot ve itibar güncellendi, ardından dış transferler yapılır.
+        // [EN] CEI (K1-06): state, terminal snapshot and reputation are updated before external transfers.
         _recordTerminalOutcome(_tradeId, TerminalOutcome.PARTIAL_SETTLEMENT, takerFee, makerFee);
         _recordReputation(t, ArafReputationLib.Outcome.PARTIAL_SETTLEMENT);
+
+        _payout(t, _tradeId, makerPayout, takerPayout, decayed + makerFee + takerFee, decayed, RevenueKind.PARTIAL_SETTLEMENT_FEE);
 
         emit SettlementFinalized(_tradeId, sp.id, makerPayout, takerPayout, takerFee, makerFee);
     }
@@ -1297,6 +1302,10 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
         uint256 makerRefund = currentCrypto + currentMakerBond - makerFee;
         uint256 takerRefund = currentTakerBond - takerFee;
 
+        // [TR] K1-06 CEI: kayıtlar dış çağrılardan önce. [EN] K1-06 CEI: records before external calls.
+        _recordTerminalOutcome(_tradeId, TerminalOutcome.MUTUAL_CANCEL, takerFee, makerFee);
+        _recordReputation(t, ArafReputationLib.Outcome.MUTUAL_CANCEL);
+
         _payout(
             t,
             _tradeId,
@@ -1306,9 +1315,6 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
             decayed,
             currentState == TradeState.CHALLENGED ? RevenueKind.DISPUTED_RELEASE_FEE : RevenueKind.MANUAL_RELEASE_FEE
         );
-
-        _recordTerminalOutcome(_tradeId, TerminalOutcome.MUTUAL_CANCEL, takerFee, makerFee);
-        _recordReputation(t, ArafReputationLib.Outcome.MUTUAL_CANCEL);
 
         emit EscrowCanceled(_tradeId, makerRefund, takerRefund);
     }
