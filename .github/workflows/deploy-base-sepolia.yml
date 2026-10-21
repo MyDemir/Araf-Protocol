@@ -162,12 +162,19 @@ jobs:
         shell: bash
         env:
           MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          VAR_ESCROW_ADDRESS: ${{ vars.ARAF_ESCROW_ADDRESS }}
         run: |
           set -euo pipefail
           out="$(node .github/scripts/escrow-registry.js --status)"
           state="$(printf '%s\n' "$out" | sed -n 's/^registry_state=//p')"
           case "$state" in
-            none|ACTIVE) echo "REGISTRY_STATE=$state" >> "$GITHUB_ENV"; echo "Escrow registry state: $state" ;;
+            none)
+              # K4-02: registry yok ama variable dolu = ilk kurulum DEĞİL (adopt edilmemiş mevcut escrow). Arşiv/precheck/pause/açık işlem kontrolü atlanmasın.
+              if [ -n "${VAR_ESCROW_ADDRESS:-}" ]; then
+                echo "::error::Escrow registry state is none but vars.ARAF_ESCROW_ADDRESS is set (an existing escrow is not adopted). This is not a first install; archive, precheck, pause and open-trade checks would be skipped. Run escrow-registry-adopt.yml first, then re-run this deploy. Note: if the GH_VARIABLES_TOKEN secret is missing the variable is never written after a deploy and an empty variable gives a false negative; confirm the variable by hand."; exit 1
+              fi
+              echo "REGISTRY_STATE=none" >> "$GITHUB_ENV"; echo "Escrow registry state: none" ;;
+            ACTIVE) echo "REGISTRY_STATE=$state" >> "$GITHUB_ENV"; echo "Escrow registry state: $state" ;;
             ROTATING) echo "::error::Escrow registry is ROTATING (an earlier rotation is incomplete). No contract is deployed. Complete it with the rotate-escrow.yml workflow (mode=rotate), then re-run this deploy."; exit 1 ;;
             *) echo "::error::Could not determine escrow registry state."; exit 1 ;;
           esac

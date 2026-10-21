@@ -126,7 +126,8 @@ vi.mock('../../frontend/src/app/useAppSessionData', () => ({
 }));
 
 vi.mock('../../frontend/src/app/AppViews', () => ({
-  buildAppViews: () => ({
+  buildAppViews: (ctx) => ({
+    __ctx: (globalThis.__lastViewsCtx = ctx),
     renderHome: () => <div data-testid="home-view">home-view</div>,
     renderMarket: () => null,
     renderTradeRoom: () => null,
@@ -153,6 +154,13 @@ import AppProviders from '../../frontend/src/app/providers/AppProviders.jsx';
 import App from '../../frontend/src/App.jsx';
 
 describe('App smoke', () => {
+  it('passes getWalletRegisteredAt to buildAppViews (market owner-age hint wiring)', () => {
+    globalThis.__lastViewsCtx = undefined;
+    const view = render(<AppProviders><App /></AppProviders>);
+    view.unmount();
+    expect(typeof globalThis.__lastViewsCtx?.getWalletRegisteredAt).toBe('function');
+  });
+
   it('mounts and renders the home view without hitting ErrorBoundary path', () => {
     render(<AppProviders><App /></AppProviders>);
     expect(screen.getByTestId('home-view')).toBeInTheDocument();
