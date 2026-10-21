@@ -39,9 +39,21 @@ int_in_range() { # name min max
 
 address_ok() { [[ "$1" =~ $ADDRESS_RE && "${1,,}" != "$ZERO_ADDRESS" ]]; }
 
+# K4-14: yalın host[:port]; küçük harf, boşluk/satır sonu yok (değer SIWE_*/ALLOWED_ORIGINS ve flyctl import satırlarına girer).
+DOMAIN_RE='^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?$'
+check_frontend_domain() {
+  local d; d="$(val FRONTEND_DOMAIN)"
+  [[ "$d" =~ $DOMAIN_RE ]] || die "FRONTEND_DOMAIN must be a lowercase bare host[:port] (no scheme, path, spaces or newlines)."
+  [[ "${d%%:*}" != "localhost" ]] || die "FRONTEND_DOMAIN cannot be localhost."
+}
+
 cmd_validate() {
   local n v
   for n in ESCROW USDT USDC; do address_ok "$(val "$n")" || die "$n is missing or invalid."; done
+  [ "$(val ESCROW | tr '[:upper:]' '[:lower:]')" != "$(val USDT | tr '[:upper:]' '[:lower:]')" ] || die "ESCROW and USDT must differ."
+  [ "$(val ESCROW | tr '[:upper:]' '[:lower:]')" != "$(val USDC | tr '[:upper:]' '[:lower:]')" ] || die "ESCROW and USDC must differ."
+  [ "$(val USDT | tr '[:upper:]' '[:lower:]')" != "$(val USDC | tr '[:upper:]' '[:lower:]')" ] || die "USDT and USDC must differ."
+  check_frontend_domain
   [[ "$(val DEPLOY_BLOCK)" =~ ^[1-9][0-9]*$ ]] || die "DEPLOY_BLOCK (ARAF_DEPLOYMENT_BLOCK) is missing or invalid."
   for n in REVENUE_VAULT REWARDS; do
     v="$(val "$n")"
@@ -81,6 +93,7 @@ cmd_fly_secret_lines() {
   for n in MONGODB_URI REDIS_URL JWT_SECRET MASTER_ENCRYPTION_KEY BASE_SEPOLIA_RPC_URL BASE_SEPOLIA_WS_RPC_URL ESCROW USDT USDC DEPLOY_BLOCK FRONTEND_DOMAIN; do
     [ -n "$(val "$n")" ] || die "$n is required for Fly secrets."
   done
+  check_frontend_domain
   printf '%s=%s\n' NODE_ENV production
   printf '%s=%s\n' MONGODB_URI "$MONGODB_URI"
   printf '%s=%s\n' REDIS_URL "$REDIS_URL"
@@ -177,8 +190,11 @@ cmd_vercel_deploy() {
   local entries args=() e
   entries="$(cmd_vercel_build_env)"
   while IFS= read -r e; do [ -n "$e" ] && args+=(--build-env "$e"); done <<< "$entries"
-  vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
-  vercel deploy --prod --yes --token="$VERCEL_TOKEN" "${args[@]}"
+  # K4-05: token argv'ye girmez; Vercel CLI VERCEL_TOKEN env'ini okur (export: alt süreçlere geçsin).
+  # [kaynak: https://vercel.com/docs/cli/global-options#token]
+  export VERCEL_TOKEN
+  vercel pull --yes --environment=production
+  vercel deploy --prod --yes "${args[@]}"
 }
 
 # /health 200 olmalı (yoksa deploy başarısız). /ready 503 + "degraded":true ise uyarı; deploy başarılı sayılır.
@@ -186,12 +202,12 @@ cmd_health() {
   local base="${HEALTH_BASE_URL:-https://$(val FLY_APP_NAME).fly.dev}"
   local retries="${HEALTH_RETRIES:-12}" delay="${HEALTH_RETRY_DELAY:-10}"
   [ "${HEALTH_INITIAL_SLEEP:-15}" = "0" ] || sleep "${HEALTH_INITIAL_SLEEP:-15}"
-  curl --fail --show-error --silent --retry "$retries" --retry-delay "$delay" --retry-all-errors "$base/health" >/dev/null \
+  curl --connect-timeout 5 --max-time 15 --fail --show-error --silent --retry "$retries" --retry-delay "$delay" --retry-all-errors "$base/health" >/dev/null \
     || die "Backend /health did not return 200 at $base/health."
   echo "Backend /health OK."
   local tmp code
   tmp="$(mktemp)"
-  code="$(curl --silent --show-error --output "$tmp" --write-out '%{http_code}' "$base/ready" || true)"
+  code="$(curl --connect-timeout 5 --max-time 15 --silent --show-error --output "$tmp" --write-out '%{http_code}' "$base/ready" || true)"
   if [ "$code" = "200" ]; then
     echo "Backend /ready OK."
   elif [ "$code" = "503" ] && grep -Eq '"degraded"[[:space:]]*:[[:space:]]*true' "$tmp"; then
