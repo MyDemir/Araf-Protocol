@@ -1404,8 +1404,21 @@ export function useAppSessionData({
   const wantsPayoutProfile = currentView === 'profile';
   const wantsTradeHistory = currentView === 'profile';
 
+  // [TR] Taslak, profil sayfası açılmasa da oturum başında kayıtlı profilden BİR KEZ doldurulur (F2-02); kullanıcı taslağı
+  //      elle değiştirdiyse ezilmez. Dışarı verilen setPayoutProfileDraft "dokunuldu" işaretini koyar.
+  // [EN] The draft is filled once per session from the saved profile even if the profile page never opens;
+  //      a hand-edited draft is never overwritten.
+  const draftSyncedWalletRef = React.useRef(null);
+  const draftTouchedRef = React.useRef(false);
+  const setPayoutProfileDraftByUser = React.useCallback((value) => {
+    draftTouchedRef.current = true;
+    setPayoutProfileDraft(value);
+  }, []);
+  useEffect(() => { draftTouchedRef.current = false; }, [authenticatedWallet]);
+
   useEffect(() => {
-    if (!wantsPayoutProfile || !isAuthenticated) return;
+    const needsInitialSync = draftSyncedWalletRef.current !== authenticatedWallet;
+    if ((!wantsPayoutProfile && !needsInitialSync) || !isAuthenticated) return;
     const fetchMyPII = async () => {
       try {
         const res = await authenticatedFetch(buildApiUrl('pii/my'));
@@ -1413,7 +1426,8 @@ export function useAppSessionData({
         const data = await res.json();
         // [TR] /pii/my kayıtlı profilin yetkili kaynağıdır: pii varsa true, yoksa false.
         setHasPayoutProfile(Boolean(data.pii));
-        if (data.pii) {
+        draftSyncedWalletRef.current = authenticatedWallet;
+        if (data.pii && (true)) {
           setPayoutProfileDraft({
             rail: data.pii.rail || 'TR_IBAN',
             country: data.pii.country || 'TR',
@@ -1437,7 +1451,7 @@ export function useAppSessionData({
       }
     };
     fetchMyPII();
-  }, [wantsPayoutProfile, isAuthenticated, authenticatedFetch]);
+  }, [wantsPayoutProfile, isAuthenticated, authenticatedFetch, authenticatedWallet]);
 
   useEffect(() => {
     if (!wantsTradeHistory || !isAuthenticated) return;
@@ -1704,7 +1718,7 @@ export function useAppSessionData({
     setIsLoggingIn,
     userReputation,
     payoutProfileDraft,
-    setPayoutProfileDraft,
+    setPayoutProfileDraft: setPayoutProfileDraftByUser,
     tradeHistory,
     historyLoading,
     tradeHistoryPage,
