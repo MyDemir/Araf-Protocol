@@ -53,10 +53,10 @@ describe("Dalga 2 K1-02: setTreasury vault eşleşme kontrolü", function () {
       .to.be.revertedWithCustomError(escrow, "TreasuryEscrowMismatch").withArgs(addr);
   });
 
-  it("sıfır adres eskisi gibi OwnableInvalidOwner ile reddedilir", async function () {
+  it("sıfır adres ZeroAddress ile reddedilir (K2-07; eskiden OwnableInvalidOwner)", async function () {
     const { escrow } = await loadFixture(fixture);
     await expect(escrow.setTreasury(ethers.ZeroAddress))
-      .to.be.revertedWithCustomError(escrow, "OwnableInvalidOwner").withArgs(ethers.ZeroAddress);
+      .to.be.revertedWithCustomError(escrow, "ZeroAddress");
   });
 
   it("owner yetkisi değişmedi: owner olmayan eşleşen vault'la bile reddedilir", async function () {

@@ -52,6 +52,8 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
     // ═══════════════════════════════════════════════════
 
     enum TradeState {
+        // [TR] K1-07: V3'te hiçbir trade OPEN'a atanmaz; boş mapping'in varsayılanıdır. ABI uyumu için korunur.
+        // [EN] K1-07: no V3 trade is ever set to OPEN; it is the empty-mapping default, kept for ABI compatibility.
         OPEN,
         LOCKED,
         PAID,
@@ -280,8 +282,9 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
     uint256 internal constant WALLET_AGE_MIN       =   2 days;
     uint256 internal constant DEFAULT_TIER0_TRADE_COOLDOWN = 4 hours;
     uint256 internal constant DEFAULT_TIER1_TRADE_COOLDOWN = 4 hours;
-    uint256 internal constant MAX_CANCEL_DEADLINE  =   7 days;
-    uint256 internal constant MIN_SETTLEMENT_EXPIRY = 10 minutes;
+    // [TR] K1-07/K2-09: kullanılmayan MAX_CANCEL_DEADLINE ve MIN_SETTLEMENT_EXPIRY kaldırıldı; settlement süre
+    //      sınırlarının tek kaynağı ArafSettlementLib'dir. [EN] Unused constants removed; ArafSettlementLib is the
+    //      single source of the settlement deadline bounds.
     uint256 public constant MIN_ACTIVE_PERIOD    =  15 days;
     // [TR] Reputation'a sayılan en küçük trade (6 ondalığa normalize, 20 USD). [EN] Smallest trade counted for reputation.
     uint256 internal constant MIN_REPUTATION_NOTIONAL = 20e6;
@@ -432,6 +435,13 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
         bool allowSellOrders,
         bool allowBuyOrders
     );
+    // [TR] K2-08: setTokenConfig'in decimals ve tier limitleri (TokenConfigUpdated'ın imzası geriye uyum için aynı kalır).
+    // [EN] K2-08: decimals and tier limits of setTokenConfig (TokenConfigUpdated keeps its signature for compatibility).
+    event TokenLimitsUpdated(
+        address indexed token,
+        uint8 decimals,
+        uint256[4] tierMaxAmountsBaseUnit
+    );
     event SettlementProposed(
         uint256 indexed tradeId,
         uint256 indexed proposalId,
@@ -486,7 +496,7 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
     constructor(address _treasury)
         Ownable(msg.sender)
     {
-        if (_treasury == address(0)) revert OwnableInvalidOwner(address(0));
+        if (_treasury == address(0)) revert ZeroAddress();
         treasury = _treasury;
 
         // [TR] Mutable fee / cooldown için varsayılan başlangıç değerleri
@@ -1778,7 +1788,7 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
      *         escrow revert with TreasuryEscrowMismatch. The constructor path is unchanged.
      */
     function setTreasury(address _treasury) external onlyOwner {
-        if (_treasury == address(0)) revert OwnableInvalidOwner(address(0));
+        if (_treasury == address(0)) revert ZeroAddress();
         (bool ok, bytes memory ret) = _treasury.staticcall(abi.encodeWithSignature("escrow()"));
         if (!ok || ret.length < 32 || abi.decode(ret, (bytes32)) != bytes32(uint256(uint160(address(this))))) {
             revert TreasuryEscrowMismatch(_treasury);
@@ -1841,7 +1851,7 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
         uint8 _decimals,
         uint256[4] calldata _tierMaxAmountsBaseUnit
     ) external onlyOwner {
-        if (_token == address(0)) revert OwnableInvalidOwner(address(0));
+        if (_token == address(0)) revert ZeroAddress();
         if (_decimals == 0 || _decimals > 18) revert InvalidDecimals();
         // [TR] K14: girilen ondalık token'ın kendi decimals() değeriyle aynı olmalı; çağrı başarısızsa (kod yok,
         //      fonksiyon yok, kısa dönüş) da revert. Yanlış decimals tier limitlerini ve reward notional'ını bozar.
@@ -1861,6 +1871,7 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
         cfg.tierMaxAmountsBaseUnit = _tierMaxAmountsBaseUnit;
 
         emit TokenConfigUpdated(_token, _supported, _allowSellOrders, _allowBuyOrders);
+        emit TokenLimitsUpdated(_token, _decimals, _tierMaxAmountsBaseUnit);
     }
 
     /**
