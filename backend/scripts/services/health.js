@@ -323,8 +323,11 @@ function _readyCacheTtlMs() {
 }
 
 let _readyCache = { at: 0, value: null, promise: null };
+// [TR] B4-11: invalidate sonrası uçuştaki eski hesap önbelleği yeniden doldurmasın (runtimeSettings'teki generation gibi).
+let _readyGeneration = 0;
 
 function invalidateReadinessCache() {
+  _readyGeneration += 1;
   _readyCache = { at: 0, value: null, promise: null };
 }
 
@@ -343,13 +346,14 @@ async function getCachedReadiness({ worker, provider } = {}) {
   if (_readyCache.value && now - _readyCache.at < _readyCacheTtlMs()) return _readyCache.value;
   if (_readyCache.promise) return _readyCache.promise;
 
+  const startGen = _readyGeneration;
   const promise = getReadiness({ worker, provider })
     .then((value) => {
-      _readyCache = { at: Date.now(), value, promise: null };
+      if (startGen === _readyGeneration) _readyCache = { at: Date.now(), value, promise: null };
       return value;
     })
     .catch((err) => {
-      _readyCache.promise = null;
+      if (startGen === _readyGeneration) _readyCache.promise = null;
       throw err;
     });
   _readyCache.promise = promise;
