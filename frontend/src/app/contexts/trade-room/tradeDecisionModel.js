@@ -177,7 +177,10 @@ export function buildTradeDecisionModel({
   if (!isConnected) globalDisabledReasons.push(t(lang, 'Cüzdan bağlı değil.', 'Wallet not connected.'));
   if (!isAuthenticated) globalDisabledReasons.push(t(lang, 'Oturum doğrulanmamış.', 'Session is not authenticated.'));
   if (!isSupportedChain) globalDisabledReasons.push(t(lang, 'Desteklenmeyen ağ.', 'Unsupported network.'));
-  if (isPaused) globalDisabledReasons.push(t(lang, 'Sistem bakım modunda.', 'System is in maintenance mode.'));
+  // [TR] F3-01: Kontratta yalnız createSellOrder/fillSellOrder/createBuyOrder/fillBuyOrder whenNotPaused'tır.
+  //      Pause'da release/ping/itiraz/iptal/yakım kapanmaz; bu yüzden isPaused kapı nedeni değil, yalnız bilgidir.
+  // [EN] F3-01: only order create/fill are whenNotPaused on-chain. Exit actions stay open during a pause, so
+  //      isPaused is an informational notice here, not a disabled reason.
 
   const primaryDisabledReasons = [...globalDisabledReasons];
 
@@ -202,7 +205,14 @@ export function buildTradeDecisionModel({
         requiresPaymentProof: !paymentIpfsHash,
       },
     );
-    if (chainFallback) primaryDisabledReasons.push(t(lang,
+    // [TR] Yedek mod + kontratta yaşayan (onchainId'li) LOCKED işlem + taker: ödeme bildirimi açılır; dekont cihazda
+    //      özetlenir (localReceiptHash.js). Bu yalnız ipucudur; süre ve durum kararı reportPayment'ta kontrattadır.
+    // [EN] Backup mode + live on-chain LOCKED trade + taker: reporting opens with a device-side digest (hint only).
+    const hasOnchainId = trade?.onchainId !== null && trade?.onchainId !== undefined && trade?.onchainId !== '';
+    const localReportOpen = chainFallback && hasOnchainId && !paymentWindowExpired;
+    if (localReportOpen) {
+      if (!paymentIpfsHash) primaryDisabledReasons.push(t(lang, 'Dekont dosyası seçin (cihazda özetlenir).', 'Select the receipt file (hashed on this device).'));
+    } else if (chainFallback) primaryDisabledReasons.push(t(lang,
       'Sunucuya ulaşılamadığı için ödeme bildirilemiyor (dekont sunucuya yüklenir). Ödeme penceresi dolmadan sunucu dönmezse: ödeme yaptıysanız karşı tarafla karşılıklı iptali birlikte onaylayın.',
       'Payment cannot be reported while the server is unreachable (the receipt is uploaded to the server). If the server does not return before the payment window ends and you have paid, agree on a mutual cancel with the counterparty.'));
     else if (!paymentIpfsHash) primaryDisabledReasons.push(t(lang, 'Dekont gerekli.', 'Payment proof is required.'));
@@ -249,7 +259,9 @@ export function buildTradeDecisionModel({
     // [TR] Maker itiraz sonrası da her an serbest bırakabilir; taker'ın yolu uzlaşma kartıdır.
     // [EN] The maker can still release at any time; the taker's path is the settlement card.
     primaryAction = normalizedRole === 'maker'
-      ? action('contract', 'release_funds', t(lang, 'Ödemeyi Onayla', 'Release Funds'), null)
+      ? action('contract', 'release_funds', t(lang, 'Ödemeyi Onayla', 'Release Funds'), t(lang,
+        'Ödemeyi onaylarsanız itirazınızdan vazgeçmiş olursunuz: işlem "itirazlı serbest bırakma" olarak kapanır ve itibar kaydınıza işlenir. Göndermeden önce onay penceresi açılır.',
+        'Releasing abandons your challenge: the trade closes as a disputed release and is recorded in your reputation. A confirmation step opens before anything is sent.'))
       : chainFallback
         ? action('waiting', 'chain_fallback_exits', t(lang, 'Uzlaşma teklifleri şu an gösterilemiyor', 'Settlement offers cannot be shown right now'), t(lang,
           'Sunucuya ulaşılamıyor. Kontrattaki çıkışlar açık: karşılıklı iptal teklif edebilirsiniz; satıcı her an serbest bırakabilir; 240 saatlik süre dolunca yakım herkes tarafından tetiklenebilir.',
@@ -285,6 +297,12 @@ export function buildTradeDecisionModel({
     primaryAction = action('info', 'trade_closed', '', null);
     secondaryActions = [];
     primaryDisabledReasons.length = 0;
+  }
+
+  if (isPaused && !TERMINAL_TRADE_STATES.includes(normalizedState)) {
+    guidance.push(t(lang,
+      'Sistem bakım modunda: yeni işlem açılamaz, mevcut işlemler kapanabilir.',
+      'System is paused: new trades cannot be opened, existing trades can still be closed.'));
   }
 
   const decisionSummary = buildDecisionSummary(normalizedState, normalizedRole, lang);

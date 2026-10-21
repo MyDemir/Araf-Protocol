@@ -7,6 +7,7 @@ const { clientLogLimiter } = require("../middleware/rateLimiter");
 // [TR] CR/LF ve diğer kontrol karakterleri log satırı sahteciliği için kullanılabilir; tek boşluğa çevrilir.
 function stripLogControlChars(value) {
   if (typeof value !== "string") return value;
+  // eslint-disable-next-line no-control-regex -- E1-06: kontrol karakterlerini temizlemek kasıtlı
   return value.replace(/[\u0000-\u001f\u007f\u0085\u2028\u2029]+/g, " ");
 }
 
@@ -19,7 +20,7 @@ function scrubClientErrorText(value) {
     .replace(/\b\d{4,17}\b/g, "[REDACTED]")
     .replace(/0x[a-fA-F0-9]{40}/g, "[REDACTED]")
     .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, "[REDACTED]")
-    .replace(/(bearer\s+)[a-zA-Z0-9\-\._~\+\/]+=*/gi, "$1[REDACTED]")
+    .replace(/(bearer\s+)[a-zA-Z0-9\-._~+/]+=*/gi, "$1[REDACTED]")
     .replace(/\b(eyJ[^\s]+)\b/g, "[REDACTED]");
 }
 

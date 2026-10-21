@@ -28,6 +28,7 @@ const { ethers, artifacts, network } = hre;
 const fs = require("fs");
 const path = require("path");
 const { retryRead, settleDeployment, blockOverrides } = require("./lib/waitForCode");
+const { formatError } = require("./lib/redact");
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const PUBLIC_CHAIN_IDS = new Set([8453, 84532]);
@@ -351,7 +352,8 @@ async function main() {
   const isPublic = deployMode === "public";
   const isLocal = deployMode === "local";
 
-  if (isPublic && process.env.CONFIRM_PUBLIC_DEPLOY !== "yes") {
+  // [TR] "custom" (bilinmeyen zincir) de public kadar korunur: yalnız yerel ağ onaysız çalışır (K4-19d).
+  if (!isLocal && process.env.CONFIRM_PUBLIC_DEPLOY !== "yes") {
     throw new Error(
       "❌ Public chain deploy guard aktif. Devam etmek için CONFIRM_PUBLIC_DEPLOY=yes ver."
     );
@@ -544,7 +546,7 @@ if (require.main === module) {
   main()
     .then(() => process.exit(0))
     .catch((err) => {
-      console.error(err);
+      console.error(formatError(err));
       process.exit(1);
     });
 }
