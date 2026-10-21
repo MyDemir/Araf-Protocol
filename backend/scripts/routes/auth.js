@@ -468,10 +468,18 @@ router.post("/refresh", authLimiter, async (req, res) => {
     logger.info(`[Auth] Token yenilendi: ${result.wallet}`);
     return res.json({ wallet: result.wallet });
   } catch (err) {
-    logger.warn(`[Auth] Refresh başarısız: ${err.message}`);
-    res.clearCookie("araf_jwt", { ...COOKIE_OPTIONS_BASE, path: "/" });
-    res.clearCookie("araf_refresh", { ...COOKIE_OPTIONS_BASE, path: "/api/auth" });
-    return res.status(401).json({ error: err.message, ...(err.code === "TERMS_NOT_ACCEPTED" ? { code: err.code } : {}) });
+    // [TR] Yalnız AuthError (geçersiz/iptal/süresi dolmuş token) oturumu sonlandırır: 401 + çerez silme.
+    //      Altyapı hatası (Redis/DB kesintisi) 503 + sabit kod döner, çerezler SİLİNMEZ; böylece geçici
+    //      kesinti toplu logout yaratmaz ve ham hata mesajı istemciye sızmaz.
+    // [EN] Only AuthError ends the session (401 + clear cookies). Infra errors → 503, cookies kept.
+    if (_isExpectedAuthError(err)) {
+      logger.warn(`[Auth] Refresh reddedildi: ${err.code || "AUTH_FAILED"}`);
+      res.clearCookie("araf_jwt", { ...COOKIE_OPTIONS_BASE, path: "/" });
+      res.clearCookie("araf_refresh", { ...COOKIE_OPTIONS_BASE, path: "/api/auth" });
+      return res.status(401).json({ error: err.message, ...(err.code === "TERMS_NOT_ACCEPTED" ? { code: err.code } : {}) });
+    }
+    logger.error(`[Auth] /refresh altyapı hatası: ${err?.name || "Error"}: ${err?.message || err}`);
+    return res.status(503).json({ error: "AUTH_REFRESH_UNAVAILABLE" });
   }
 });
 
