@@ -478,7 +478,8 @@ router.post("/refresh", authLimiter, async (req, res) => {
       res.clearCookie("araf_refresh", { ...COOKIE_OPTIONS_BASE, path: "/api/auth" });
       return res.status(401).json({ error: err.message, ...(err.code === "TERMS_NOT_ACCEPTED" ? { code: err.code } : {}) });
     }
-    logger.error(`[Auth] /refresh altyapı hatası: ${err?.name || "Error"}: ${err?.message || err}`);
+    // [TR] Ham err.message loglanmaz (bağlantı dizesi/kimlik bilgisi içerebilir); yalnız ad ve kod.
+    logger.error(`[Auth] /refresh altyapı hatası: ${err?.name || "Error"} ${err?.code || ""}`.trim());
     return res.status(503).json({ error: "AUTH_REFRESH_UNAVAILABLE" });
   }
 });

@@ -5,6 +5,8 @@
 const express = require("express");
 const request = require("supertest");
 
+const mockLogger = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() };
+
 function loadApp(rotateRefreshToken) {
   let router;
   jest.isolateModules(() => {
@@ -29,6 +31,7 @@ function loadApp(rotateRefreshToken) {
     jest.doMock("../../backend/scripts/services/encryption", () => ({}));
     jest.doMock("../../backend/scripts/models/User", () => ({ findOneAndUpdate: jest.fn(), findOne: jest.fn() }));
     jest.doMock("../../backend/scripts/models/Trade", () => ({ exists: jest.fn() }));
+    jest.doMock("../../backend/scripts/utils/logger", () => mockLogger);
     router = require("../../backend/scripts/routes/auth");
   });
   const app = express();
@@ -46,6 +49,16 @@ function authError(code) {
 
 describe("POST /api/auth/refresh hata ayrımı (B2-03)", () => {
   afterEach(() => jest.resetModules());
+
+  test("503 yolunda log çağrılarına bağlantı dizesi sırrı girmez", async () => {
+    mockLogger.error.mockClear(); mockLogger.warn.mockClear();
+    const err = Object.assign(new Error("connect failed redis://user:pw@host:6379"), { code: "ECONNREFUSED" });
+    const res = await request(loadApp(jest.fn().mockRejectedValue(err))).post("/api/auth/refresh").send({});
+    expect(res.status).toBe(503);
+    expect(mockLogger.error).toHaveBeenCalled();
+    const logged = JSON.stringify([...mockLogger.error.mock.calls, ...mockLogger.warn.mock.calls]);
+    expect(logged).not.toMatch(/pw|redis:\/\//);
+  });
 
   test("AuthError -> 401 ve çerezler silinir", async () => {
     const res = await request(loadApp(jest.fn().mockRejectedValue(authError("REFRESH_INVALID")))).post("/api/auth/refresh").send({});
