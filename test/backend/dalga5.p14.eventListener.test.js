@@ -89,21 +89,21 @@ describe("B1-08: DLQ last_error redaksiyonu", () => {
 });
 
 describe("B1-09: DLQ kayıt sırası", () => {
-  it("sAdd 0 dönerse (eşzamanlı yazar anahtarı eklemiş) rPush yapılmaz", async () => {
-    mockRedis.sAdd.mockResolvedValueOnce(0);
-    const added = await worker._addToDLQ(mkEvent("FeeConfigUpdated", 5, 1), "err");
-    expect(added).toBe(false);
-    expect(mockRedis.rPush).not.toHaveBeenCalled();
-    expect(L(DLQ)).toHaveLength(0);
-  });
-
-  it("rPush hata verirse anahtar set'ten geri alınır (set'te olup kuyrukta olmayan anahtar kalmaz)", async () => {
+  it("rPush ve sRem birlikte reddedilse bile anahtar kuyruksuz set'te kalmaz; sonraki çağrı olayı kuyruğa alır", async () => {
     mockRedis.rPush.mockRejectedValueOnce(new Error("conn lost"));
+    mockRedis.sRem.mockRejectedValueOnce(new Error("conn lost"));
     await expect(worker._addToDLQ(mkEvent("FeeConfigUpdated", 5, 1), "err")).rejects.toThrow("conn lost");
     expect(S(LIVE_SET).size).toBe(0);
-    // sonraki başarısızlıkta aynı event tekrar kuyruğa girebilir (kaybolmaz)
     expect(await worker._addToDLQ(mkEvent("FeeConfigUpdated", 5, 1), "err")).toBe(true);
     expect(L(DLQ)).toHaveLength(1);
+  });
+
+  it("rPush başarılı, sAdd reddedilirse girdi kuyrukta kalır (kaybolmaz); sonraki çağrı yinelenen girdi ekleyebilir", async () => {
+    mockRedis.sAdd.mockRejectedValueOnce(new Error("conn lost"));
+    await expect(worker._addToDLQ(mkEvent("FeeConfigUpdated", 5, 1), "err")).rejects.toThrow("conn lost");
+    expect(L(DLQ)).toHaveLength(1);
+    expect(await worker._addToDLQ(mkEvent("FeeConfigUpdated", 5, 1), "err")).toBe(true);
+    expect(L(DLQ)).toHaveLength(2);
   });
 });
 

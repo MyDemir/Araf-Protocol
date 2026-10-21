@@ -1648,18 +1648,15 @@ class EventWorker {
       last_error: _safeDlqError(errorMsg),
     });
 
-    // [TR] B1-09: önce sAdd (dönüşüyle tekilleştirme), sonra rPush. rPush hatasında anahtar geri alınır ki
-    //      set'te olup kuyrukta olmayan anahtar kalmasın; eşzamanlı yazar anahtarı eklediyse (0) atlanır.
-    // [EN] B1-09: sAdd first (its return value dedupes), then rPush. If rPush fails the key is rolled back so it
-    //      is not left in the set without a queue entry; a concurrent writer that added the key (0) wins.
-    const added = await redis.sAdd(DLQ_LIVE_KEYS_SET, idempotencyKey);
-    if (added === 0) return false;
-    try {
-      await redis.rPush(DLQ_KEY, entry);
-    } catch (err) {
-      try { await redis.sRem(DLQ_LIVE_KEYS_SET, idempotencyKey); } catch { /* best-effort geri alma */ }
-      throw err;
-    }
+    // [TR] B1-09: sıra rPush -> sAdd. Hangi komut ya da süreç çökmesi olursa olsun olay kaybolmaz ve anahtar
+    //      kuyruksuz set'te kalmaz (kalsa sonraki her çağrı sIsMember ile atlanır, blok sonsuza dek unsafe kalırdı).
+    //      En kötü durum yinelenen girdi: re-drive idempotent (dlqProcessor B4-05), ilk başarıda sRem anahtarı siler.
+    // [EN] B1-09: order is rPush -> sAdd. Whatever command or process fails, the event is never lost and a key is
+    //      never left in the set without a queue entry (that would make every later call skip via sIsMember and
+    //      freeze the block as unsafe forever). Worst case is a duplicate entry: re-drive is idempotent
+    //      (dlqProcessor B4-05) and the first success removes the key.
+    await redis.rPush(DLQ_KEY, entry);
+    await redis.sAdd(DLQ_LIVE_KEYS_SET, idempotencyKey);
     return true;
   }
 
