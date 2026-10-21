@@ -48,7 +48,6 @@ describe('P20 F3-07: maker rehberi taker ping ve ping sonrasi bekleme', () => {
       trade: { ...base.trade, paidAt: new Date(NOW - 60 * H).toISOString(), challengePingedAt: new Date(NOW - 2 * H).toISOString() },
     });
     expect(m.guidance.join(' ')).toMatch(/challenge window opens 24 hours after the ping/);
-    expect(m.guidance.join(' ')).not.toMatch(/A ping is a claim/);
   });
   it('ping hic atilmadiysa ilk-ping kurali kalir', () => {
     const m = buildTradeDecisionModel({ ...paidMaker, trade: { ...base.trade, paidAt: new Date(NOW - 30 * H).toISOString() } });

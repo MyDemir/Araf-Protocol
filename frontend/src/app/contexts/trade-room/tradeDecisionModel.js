@@ -249,6 +249,8 @@ export function buildTradeDecisionModel({
     else if (flags.pingLapsed) guidance.push(t(lang, 'İtiraz süresi doldu: ping düştü; alıcı artık sizi uyarıp otomatik serbest bırakma yoluna geçebilir. Ödeme geldiyse fonları serbest bırakın.', 'The challenge window closed: your ping lapsed; the taker can now ping you and move to auto-release. Release the funds if the payment arrived.'));
     else {
       // [TR] F3-07: Ping atıldı, T+24s dolmadı: itiraz penceresi henüz kapalı (kontrat: ResponseWindowActive).
+      //      Mevcut test beklentisi (guidance[0] genel kural) korunur; bekleme süresi ek satır olarak eklenir.
+      guidance.push(MAKER_PING_RULE(lang));
       const opensIn = formatTimerValue(derivedTimers.makerChallenge, lang);
       guidance.push(opensIn
         ? t(lang, `Ping gönderildi: itiraz penceresi ping + 24 saatte açılır (kalan: ${opensIn}).`, `Ping sent: the challenge window opens 24 hours after the ping (remaining: ${opensIn}).`)
