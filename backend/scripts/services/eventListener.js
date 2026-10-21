@@ -45,6 +45,15 @@ const {
 const { assertProviderExpectedChainOrThrow } = require("./expectedChain");
 const { getSharedProvider, classifyRpcError } = require("./rpcProvider");
 const { redactRpcSecrets } = require("../utils/logRedaction");
+
+// [TR] B1-08: DLQ girdisine yazılan hata metni Redis'e ve dlqProcessor üzerinden geri taşınır; ethers hata
+//      mesajları RPC URL'si (anahtar dahil) içerebilir. URL'ler maskelenir, uzunluk sınırlanır.
+// [EN] B1-08: the error text stored in a DLQ entry is persisted to Redis and carried back by dlqProcessor;
+//      ethers error messages can embed the RPC URL (key included). URLs are masked and length is capped.
+const DLQ_ERROR_MAX_LENGTH = 500;
+function _safeDlqError(message) {
+  return redactRpcSecrets(message).slice(0, DLQ_ERROR_MAX_LENGTH);
+}
 const { inferCryptoAssetFromTokenAddress } = require("./tokenEnv");
 const { readPendingMarketMeta } = require("./orderMarketMeta");
 
@@ -533,6 +542,7 @@ class EventWorker {
     this._retrySuccessCount = 0;
     this._retryFailureCount = 0;
     this._blockAcks = new Map();
+    this._ackCoverage = null;
     this._lastSeenBlock = 0;
     this._lastBlockSeenAt = 0;
     this._stopRequested = false;
@@ -830,7 +840,7 @@ class EventWorker {
           try {
             await this._processEvent(event);
           } catch (err) {
-            logger.error(`[Worker] Replay event işleme hatası: ${event.eventName} - ${err.message}`);
+            logger.error(`[Worker] Replay event işleme hatası: ${event.eventName} - ${redactRpcSecrets(err.message)}`);
             await this._addToDLQOrRequeueArchived(event, err.message);
             failedEvents += 1;
           }
@@ -1257,7 +1267,6 @@ class EventWorker {
 
       try {
         const allEvents = await this._fetchRangeEvents(from, to);
-        this._seedAckStateForRange(from, to);
 
         for (const event of allEvents) {
           // [TR] B1-06: yeniden bağlanma sonrası eski epoch'taki döngü yeni event işlemeye devam etmez.
@@ -1277,8 +1286,11 @@ class EventWorker {
           //      completes and gives no signal, so a real stall is not masked.
           if (epoch === this._liveEpoch) this._lastBlockSeenAt = Date.now();
         }
+        // [TR] B1-11: boş bloklar için kayıt tutulmaz; aralığın tamamı okunup işlendiyse yalnız kapsama işaretlenir.
+        // [EN] B1-11: no per-block record for empty blocks; once the whole range was read and processed only the
+        //      coverage interval is noted.
+        this._noteAckCoverage(from, to);
       } catch (err) {
-        this._seedAckStateForRange(from, to);
         this._markRangeUnsafe(from, to);
         throw err;
       }
@@ -1294,6 +1306,29 @@ class EventWorker {
     const state = { seen: new Set(), acked: new Set(), failed: new Set(), unsafe: false, rangeUnsafe: false };
     this._blockAcks.set(blockNumber, state);
     return state;
+  }
+
+  // [TR] B1-11: tamamen okunup işlenmiş blok aralığı (tek bitişik aralık). Bu aralıkta kaydı olmayan blok
+  //      "event yok" demektir (seen=0) ve checkpoint ilerletilirken güvenli sayılır; kayıt yalnız event/unsafe
+  //      bloklarda tutulur. Bitişik/örtüşen aralıklar birleşir, ayrık gelen eskisinin yerini alır
+  //      (kapsam dışı blok güvenli sayılmaz).
+  // [EN] B1-11: the block interval that was fully read and processed (one contiguous interval). A block without a
+  //      record inside it means "no events" (seen=0) and is safe when advancing the checkpoint; records are kept
+  //      only for blocks with events or an unsafe flag. Adjacent/overlapping intervals merge, a disjoint one
+  //      replaces the old one (a block outside the coverage is never treated as safe).
+  _noteAckCoverage(fromBlock, toBlock) {
+    const cover = this._ackCoverage;
+    if (cover && fromBlock <= cover.to + 1 && toBlock >= cover.from - 1) {
+      cover.from = Math.min(cover.from, fromBlock);
+      cover.to = Math.max(cover.to, toBlock);
+    } else {
+      this._ackCoverage = { from: fromBlock, to: toBlock };
+    }
+  }
+
+  _isBlockCoveredEmpty(blockNumber) {
+    const cover = this._ackCoverage;
+    return Boolean(cover) && blockNumber >= cover.from && blockNumber <= cover.to;
   }
 
   _seedAckStateForRange(fromBlock, toBlock) {
@@ -1482,7 +1517,13 @@ class EventWorker {
 
     for (let block = this._lastSafeCheckpointBlock + 1; block <= finalizedUpTo; block += 1) {
       const state = this._blockAcks.get(block);
-      if (!state) break;
+      if (!state) {
+        if (this._isBlockCoveredEmpty(block)) {
+          nextSafe = block;
+          continue;
+        }
+        break;
+      }
       if (state.unsafe || state.acked.size < state.seen.size) break;
       nextSafe = block;
     }
@@ -1544,7 +1585,7 @@ class EventWorker {
       this._retrySuccessCount += 1;
       return true;
     } catch (err) {
-      logger.error(`[Worker] ${event.eventName} başarısız (deneme ${attempt}): ${err.message}`);
+      logger.error(`[Worker] ${event.eventName} başarısız (deneme ${attempt}): ${redactRpcSecrets(err.message)}`);
       if (attempt < MAX_RETRIES) {
         await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * attempt));
         return this._processEventWithRetry(event, attempt + 1);
@@ -1565,7 +1606,7 @@ class EventWorker {
         await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * attempt));
         return this._processEventWithRetryNoDLQ(event, attempt + 1);
       }
-      return { success: false, error: err.message };
+      return { success: false, error: _safeDlqError(err.message) };
     }
   }
 
@@ -1604,11 +1645,21 @@ class EventWorker {
       attempt: 0,
       next_retry_at: nowIso,
       first_seen_at: nowIso,
-      last_error: errorMsg,
+      last_error: _safeDlqError(errorMsg),
     });
 
-    await redis.rPush(DLQ_KEY, entry);
-    await redis.sAdd(DLQ_LIVE_KEYS_SET, idempotencyKey);
+    // [TR] B1-09: önce sAdd (dönüşüyle tekilleştirme), sonra rPush. rPush hatasında anahtar geri alınır ki
+    //      set'te olup kuyrukta olmayan anahtar kalmasın; eşzamanlı yazar anahtarı eklediyse (0) atlanır.
+    // [EN] B1-09: sAdd first (its return value dedupes), then rPush. If rPush fails the key is rolled back so it
+    //      is not left in the set without a queue entry; a concurrent writer that added the key (0) wins.
+    const added = await redis.sAdd(DLQ_LIVE_KEYS_SET, idempotencyKey);
+    if (added === 0) return false;
+    try {
+      await redis.rPush(DLQ_KEY, entry);
+    } catch (err) {
+      try { await redis.sRem(DLQ_LIVE_KEYS_SET, idempotencyKey); } catch { /* best-effort geri alma */ }
+      throw err;
+    }
     return true;
   }
 
@@ -2517,15 +2568,14 @@ class EventWorker {
       //      gelmesi DISPUTED_RESOLUTION sınıflandırmasını deterministik yapar, backend otoritesi oluşturmaz.
       // [EN] CHALLENGED is an on-chain mirrored lifecycle state, so mapping EscrowReleased from CHALLENGED
       //      to DISPUTED_RESOLUTION is deterministic read-model classification, not backend authority.
-      if (existingTrade.status === "CHALLENGED") {
-        releaseResolutionType = "DISPUTED_RESOLUTION";
-      } else {
-        // [TR] Manuel/otomatik ayrımı heuristikle değil, kontratın terminal snapshot'ından okunur.
-        //      Okuma hatası throw eder (B13): kalıcı "UNKNOWN" yazılmaz, event retry/DLQ'ya gider.
-        // [EN] Manual vs auto is read from the contract's terminal snapshot, never inferred. A read error
-        //      throws (B13): no permanent "UNKNOWN" is written, the event goes to retry/DLQ.
-        releaseResolutionType = await this._fetchTerminalResolutionType(tradeIdNum) || "UNKNOWN";
-      }
+      // [TR] B1-14: sınıf her durumda kontratın terminal snapshot'ından okunur (karar mercii kontrat); mirror
+      //      CHALLENGED ise yalnız zincir görünümü yoksa (null) DISPUTED_RESOLUTION'a düşülür.
+      //      Okuma hatası throw eder (B13): kalıcı "UNKNOWN" yazılmaz, event retry/DLQ'ya gider.
+      // [EN] B1-14: the class is always read from the contract's terminal snapshot (the contract decides); a
+      //      CHALLENGED mirror only falls back to DISPUTED_RESOLUTION when no chain view is available (null).
+      //      A read error throws (B13): no permanent "UNKNOWN" is written, the event goes to retry/DLQ.
+      releaseResolutionType = await this._fetchTerminalResolutionType(tradeIdNum)
+        || (existingTrade.status === "CHALLENGED" ? "DISPUTED_RESOLUTION" : "UNKNOWN");
 
       const trade = await this._applyTerminalTransition({
         tradeIdNum,
@@ -2815,6 +2865,11 @@ class EventWorker {
     const expiresAtDate = _toDateOrNull(expiresAt);
     const tradeLookup = _buildIdentityLookup("onchain_escrow_id", tradeId);
 
+    // [TR] B1-07: sıralama koruması; DLQ re-drive / replay ile gelen eski bir settlement event'i yeni teklifi ezmez.
+    // [EN] B1-07: ordering guard; an older settlement event arriving via DLQ re-drive / replay cannot overwrite a newer proposal.
+    const orderScope = this._settlementOrderScope(tradeId);
+    if (await this._isStaleOrderedEvent(orderScope, event)) return;
+
     const mirrored = await Trade.findOneAndUpdate(
       {
         ...tradeLookup,
@@ -2848,11 +2903,28 @@ class EventWorker {
       if (existingTrade?.settlement_proposal?.state === "FINALIZED") return;
       throw new Error("SettlementProposed mirror güncellemesi başarısız.");
     }
+    await this._markSettlementOrderApplied(orderScope, event);
+  }
+
+  _settlementOrderScope(tradeId) {
+    return `Settlement:${_toIdentityString(tradeId)}`;
+  }
+
+  // [TR] İşaret yazımı en iyi çabadır: yazılamazsa mirror yazımı zaten bitmiştir, event DLQ'ya düşürülmez.
+  // [EN] Marking is best-effort: if it fails the mirror write already succeeded, so the event must not go to the DLQ.
+  async _markSettlementOrderApplied(scope, event) {
+    try {
+      await this._markOrderedEventApplied(scope, event);
+    } catch (err) {
+      logger.warn(`[Worker] Settlement sıralama işareti yazılamadı: scope=${scope} ${redactRpcSecrets(err?.message)}`);
+    }
   }
 
   // [TR] B15: FINALIZED'a takılan filtre "zaten işlenmiş"tir (idempotent); trade mirror hiç yoksa throw edilir.
   // [EN] B15: being filtered out by FINALIZED means "already processed" (idempotent); a missing trade mirror throws.
-  async _updateSettlementProposalMirror(eventName, tradeId, set) {
+  async _updateSettlementProposalMirror(eventName, tradeId, set, event = null) {
+    const orderScope = this._settlementOrderScope(tradeId);
+    if (event && await this._isStaleOrderedEvent(orderScope, event)) return;
     const updated = await Trade.findOneAndUpdate(
       {
         ..._buildIdentityLookup("onchain_escrow_id", tradeId),
@@ -2863,12 +2935,12 @@ class EventWorker {
     if (!updated) {
       await this._requireTradeMirror(tradeId, eventName);
     }
+    if (event) await this._markSettlementOrderApplied(orderScope, event);
   }
 
   async _onSettlementRejected(event) {
     const { tradeId, proposalId, rejecter } = event.args;
     void rejecter;
-    await this._getEventDate(event);
     const txHash = event?.transactionHash || null;
 
     await this._updateSettlementProposalMirror("SettlementRejected", tradeId, {
@@ -2877,13 +2949,12 @@ class EventWorker {
       "settlement_proposal.tx_hash": txHash,
       "settlement_proposal.last_event_name": "SettlementRejected",
       "settlement_proposal.finalized_at": null,
-    });
+    }, event);
   }
 
   async _onSettlementWithdrawn(event) {
     const { tradeId, proposalId, proposer } = event.args;
     void proposer;
-    await this._getEventDate(event);
     const txHash = event?.transactionHash || null;
 
     await this._updateSettlementProposalMirror("SettlementWithdrawn", tradeId, {
@@ -2892,7 +2963,7 @@ class EventWorker {
       "settlement_proposal.tx_hash": txHash,
       "settlement_proposal.last_event_name": "SettlementWithdrawn",
       "settlement_proposal.finalized_at": null,
-    });
+    }, event);
   }
 
   async _onSettlementExpired(event) {
@@ -2909,7 +2980,7 @@ class EventWorker {
       "settlement_proposal.finalized_at": null,
       "settlement_proposal.tx_hash": txHash,
       "settlement_proposal.last_event_name": "SettlementExpired",
-    });
+    }, event);
   }
 
   async _onSettlementFinalized(event) {
@@ -3125,10 +3196,17 @@ class EventWorker {
     //      tekrar göndermemesi için kayıt anı işaretlenir.
     // [EN] Weights are not persisted as authority; only the record time is marked so the recorder skips it.
     const { tradeId } = event.args;
-    await Trade.updateOne(
+    const result = await Trade.updateOne(
       { ..._buildIdentityLookup("onchain_escrow_id", tradeId), "timers.reward_recorded_at": null },
       { $set: { "timers.reward_recorded_at": await this._getEventDate(event) } }
     );
+    // [TR] B1-13: eşleşme yoksa "mirror yok" ile "zaten işaretli" ayrılır; mirror yoksa throw (retry/DLQ),
+    //      böylece reward_recorded_at sessizce kaybolmaz.
+    // [EN] B1-13: with no match, "mirror missing" is told apart from "already marked"; a missing mirror throws
+    //      (retry/DLQ) so reward_recorded_at is not silently lost.
+    if (result && result.matchedCount === 0) {
+      await this._requireTradeMirror(tradeId, "TradeOutcomeRecorded");
+    }
   }
 
   async _onRewardClaimed(event) {
@@ -3414,7 +3492,7 @@ worker.reprocessDLQEntry = async function reprocessDLQEntry(entry) {
     await worker._processEvent(syntheticEvent);
     return true;
   } catch (err) {
-    logger.error(`[Worker] DLQ re-drive başarısız: ${entry.eventName} tx=${entry.txHash} err=${err.message}`);
+    logger.error(`[Worker] DLQ re-drive başarısız: ${entry.eventName} tx=${entry.txHash} err=${redactRpcSecrets(err.message)}`);
     return false;
   }
 };
