@@ -7,7 +7,8 @@ function redactText(s) {
   return String(s == null ? '' : s)
     .replace(/[a-z][a-z0-9+.-]*:\/\/\S+/gi, '[redacted-url]')
     .replace(/0x[a-fA-F0-9]{64,}/g, '[redacted-hex]')
-    .replace(/[A-Za-z0-9_-]{32,}/g, '[redacted]')
+    // 0x + tam 40 hex (adres) korunur; diğer 32+ karakterlik anahtar benzeri dizgiler maskelenir.
+    .replace(/(?<![A-Za-z0-9_-])(?!0x[a-fA-F0-9]{40}(?![A-Za-z0-9_-]))[A-Za-z0-9_-]{32,}/g, '[redacted]')
     .replace(/[\r\n]+/g, ' ')
     .slice(0, 300);
 }

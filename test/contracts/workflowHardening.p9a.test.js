@@ -135,6 +135,15 @@ describe('lib/redact.js (K4-10)', function () {
     expect(out).to.not.match(/alchemy|ABCDEFGHIJKLMNOP|secret\.example|\n/);
     expect(out).to.include('[redacted-url]');
   });
+  it('0x + 40 hex adres korunur; 0x + 64 hex maskelenir; adres yaninda uzun anahtar yine maskelenir', function () {
+    const { redactText } = require('../../.github/scripts/lib/redact.js');
+    const addr = '0x' + 'ab'.repeat(20);
+    const key = '0x' + 'cd'.repeat(32);
+    expect(redactText(`escrow ${addr} failed`)).to.equal(`escrow ${addr} failed`);
+    expect(redactText(`pk ${key}`)).to.equal('pk [redacted-hex]');
+    expect(redactText(`${addr} ${'A1b2'.repeat(10)}`)).to.equal(`${addr} [redacted]`);
+    expect(redactText(`0x${'ab'.repeat(21)}`)).to.include('[redacted]');
+  });
   it('workflow Export adimi redactError kullanir ve e.message dogrudan basilmaz', function () {
     const wf = require('js-yaml').load(fs.readFileSync(path.join(ROOT, '.github/workflows/deploy-base-sepolia.yml'), 'utf8'));
     const run = wf.jobs.deploy.steps.find((s) => s.name === 'Export deployment values').run;

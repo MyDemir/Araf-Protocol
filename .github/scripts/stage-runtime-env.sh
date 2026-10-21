@@ -191,7 +191,8 @@ cmd_vercel_deploy() {
   entries="$(cmd_vercel_build_env)"
   while IFS= read -r e; do [ -n "$e" ] && args+=(--build-env "$e"); done <<< "$entries"
   # K4-05: token argv'ye girmez; Vercel CLI VERCEL_TOKEN env'ini okur (export: alt süreçlere geçsin).
-  # [kaynak: https://vercel.com/docs/cli/global-options#token]
+  # [kaynak: vercel/vercel packages/cli/src/index.ts:352-353 (process.env.VERCEL_TOKEN okunur; denetçi doğruladı)]
+  # [kaynak: https://vercel.com/docs/cli/global-options (Token bölümü: env değişkeni --token'a alternatif, CI için önerilir)]
   export VERCEL_TOKEN
   vercel pull --yes --environment=production
   vercel deploy --prod --yes "${args[@]}"
