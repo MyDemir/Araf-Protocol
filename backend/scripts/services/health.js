@@ -11,18 +11,8 @@ const { EXPECTED_CHAIN_ENV, resolveExpectedChainIdOrThrow } = require("./expecte
 const CHECKPOINT_KEY = "worker:last_block";
 const LAST_SAFE_BLOCK_KEY = "worker:last_safe_block";
 
-// [TR] Worker ne kadar block gerideyse unhealthy sayılacağı.
-// [EN] Max acceptable worker lag in blocks before readiness turns false.
-function _parseMaxWorkerLag(rawValue) {
-  const parsed = Number.parseInt(String(rawValue ?? ""), 10);
-  if (Number.isInteger(parsed) && parsed >= 0) return parsed;
-  return 25;
-}
-
 const { runtimeValueSync } = require("../utils/runtimeValue");
 
-// [TR] Env/varsayılan değer (geriye dönük dışa aktarım); gerçek eşik her kullanımda çalışma ayarından okunur.
-const MAX_WORKER_LAG_BLOCKS = _parseMaxWorkerLag(process.env.WORKER_MAX_LAG_BLOCKS);
 function _maxWorkerLagBlocks() {
   return runtimeValueSync("WORKER_MAX_LAG_BLOCKS");
 }
@@ -68,6 +58,17 @@ function _collectProductionCorsConfigDiagnostics(rawAllowedOrigins) {
   return diagnostics;
 }
 
+const READINESS_RPC_TIMEOUT_MS = 4_000;
+
+// [TR] /ready RPC çağrıları takılırsa istek asılı kalmasın: üst süre aşılırsa provider hazır değil sayılır.
+function _withReadinessTimeout(promise, ms = READINESS_RPC_TIMEOUT_MS) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`readiness rpc timeout (${ms} ms)`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 async function getReadiness({ worker, provider } = {}) {
   const isProduction = process.env.NODE_ENV === "production";
   const mongoReady = mongoose.connection.readyState === 1;
@@ -79,17 +80,17 @@ async function getReadiness({ worker, provider } = {}) {
   //      Now state and lag are also part of readiness.
   const workerRunning = Boolean(worker?.isRunning);
 
-  let providerReady = false;
+  let providerReady;
   let currentBlock = null;
   let providerChainId = null;
   let expectedChainId = null;
-  let chainIdReady = false;
+  let chainIdReady;
 
   try {
     if (provider) {
-      currentBlock = await provider.getBlockNumber();
+      currentBlock = await _withReadinessTimeout(provider.getBlockNumber());
       providerReady = Number.isInteger(currentBlock);
-      const network = await provider.getNetwork();
+      const network = await _withReadinessTimeout(provider.getNetwork());
       providerChainId = Number(network?.chainId);
     } else {
       providerReady = Boolean(worker?.provider);
@@ -122,7 +123,7 @@ async function getReadiness({ worker, provider } = {}) {
     chainIdReady =
       expectedChainId === null ||
       (Number.isInteger(providerChainId) && providerChainId === expectedChainId);
-  } catch (_err) {
+  } catch {
     chainIdReady = false;
     missingConfig.push(EXPECTED_CHAIN_ENV);
   }
@@ -157,7 +158,7 @@ async function getReadiness({ worker, provider } = {}) {
       configuredStartRaw !== null &&
       configuredStartRaw !== "";
 
-    let hasCheckpoint = false;
+    let hasCheckpoint;
 
     try {
       const redis = getRedisClient();
@@ -392,7 +393,7 @@ function createReadyHandler({ worker, getProvider }) {
     let readiness;
     try {
       readiness = await getCachedReadiness({ worker, provider: getProvider ? getProvider() : worker?.provider });
-    } catch (_err) {
+    } catch {
       return res.status(503).json({ ok: false, error: "readiness_unavailable" });
     }
     // [TR] Yalnız bilgi alanı: relayer anahtarı var mı (değer/adres yok); durum kodunu etkilemez.

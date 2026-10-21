@@ -210,7 +210,7 @@ const PROFILE_SCHEMA = Joi.object({
       account_holder_name: Joi.string()
         .min(2)
         .max(100)
-        .pattern(/^[A-Za-zÀ-ÖØ-öø-ÿĀ-žĞğİıŞşÇçÑñŒœȘșȚțŽž\s.'’\-]+$/, "geçerli isim karakterleri")
+        .pattern(/^[A-Za-zÀ-ÖØ-öø-ÿĀ-žĞğİıŞşÇçÑñŒœȘșȚțŽž\s.'’-]+$/, "geçerli isim karakterleri")
         .required()
         .messages({
           "string.pattern.name": "Hesap sahibi adı harf, boşluk, apostrof, nokta ve tire içerebilir.",
@@ -336,7 +336,7 @@ router.post("/verify", authLimiter, async (req, res) => {
       const parsedSiwe = new SiweMessage(value.message);
       clauseVersion = parseTermsAcceptance(parsedSiwe.statement);
       siweChainId = Number(parsedSiwe.chainId) || null;
-    } catch (_) {
+    } catch {
       clauseVersion = null;
     }
     if (clauseVersion && !ACCEPTED_TERMS_VERSIONS.has(clauseVersion)) {
@@ -468,10 +468,19 @@ router.post("/refresh", authLimiter, async (req, res) => {
     logger.info(`[Auth] Token yenilendi: ${result.wallet}`);
     return res.json({ wallet: result.wallet });
   } catch (err) {
-    logger.warn(`[Auth] Refresh başarısız: ${err.message}`);
-    res.clearCookie("araf_jwt", { ...COOKIE_OPTIONS_BASE, path: "/" });
-    res.clearCookie("araf_refresh", { ...COOKIE_OPTIONS_BASE, path: "/api/auth" });
-    return res.status(401).json({ error: err.message, ...(err.code === "TERMS_NOT_ACCEPTED" ? { code: err.code } : {}) });
+    // [TR] Yalnız AuthError (geçersiz/iptal/süresi dolmuş token) oturumu sonlandırır: 401 + çerez silme.
+    //      Altyapı hatası (Redis/DB kesintisi) 503 + sabit kod döner, çerezler SİLİNMEZ; böylece geçici
+    //      kesinti toplu logout yaratmaz ve ham hata mesajı istemciye sızmaz.
+    // [EN] Only AuthError ends the session (401 + clear cookies). Infra errors → 503, cookies kept.
+    if (_isExpectedAuthError(err)) {
+      logger.warn(`[Auth] Refresh reddedildi: ${err.code || "AUTH_FAILED"}`);
+      res.clearCookie("araf_jwt", { ...COOKIE_OPTIONS_BASE, path: "/" });
+      res.clearCookie("araf_refresh", { ...COOKIE_OPTIONS_BASE, path: "/api/auth" });
+      return res.status(401).json({ error: err.message, ...(err.code === "TERMS_NOT_ACCEPTED" ? { code: err.code } : {}) });
+    }
+    // [TR] Ham err.message loglanmaz (bağlantı dizesi/kimlik bilgisi içerebilir); yalnız ad ve kod.
+    logger.error(`[Auth] /refresh altyapı hatası: ${err?.name || "Error"} ${err?.code || ""}`.trim());
+    return res.status(503).json({ error: "AUTH_REFRESH_UNAVAILABLE" });
   }
 });
 
@@ -500,7 +509,7 @@ router.post("/logout", authLimiter, async (req, res, next) => {
           wallet = payload.sub.toLowerCase();
           jwtIsAuthoritative = true;
         }
-      } catch (_) {
+      } catch {
         // imza geçersiz → JWT'den kimlik türetilmez; refresh çerezine bakılır.
       }
     }
@@ -548,7 +557,7 @@ router.get("/me", requireAuth, async (req, res) => {
 
       try {
         await revokeRefreshToken(req.wallet);
-      } catch (_) {
+      } catch {
         // revoke hatası mismatch cevabını engellemez
       }
 

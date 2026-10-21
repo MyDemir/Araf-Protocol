@@ -1,5 +1,6 @@
 import { CircleCheck, Info, MessageSquare, TriangleAlert, Wallet, X } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
+import { safeStorage } from './app/safeStorage';
 import { isWalletProviderDisconnectedError, walletDisconnectedToast } from './app/walletDisconnect';
 import { useAccount, useConnect, useDisconnect, useSignMessage, useSwitchChain, useChainId, usePublicClient } from 'wagmi';
 import { canonicalizePayoutProfileDraft, formatTokenAmount as formatTokenAmountFromRaw, tokenToNumber as rawTokenToDisplayNumber } from './app/orderUiModel';
@@ -179,7 +180,7 @@ function App() {
   // [EN] Persist language changes so refresh keeps the same locale.
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
-    window.localStorage.setItem(APP_LANG_STORAGE_KEY, lang);
+    safeStorage.set(APP_LANG_STORAGE_KEY, lang);
   }, [lang]);
 
   // [TR] <html lang> seçili dille eşlenir: CSS uppercase "i/İ" ve ekran okuyucu doğru çalışır.
@@ -310,6 +311,10 @@ function App() {
     formatAddress,
     filteredOrders,
     marketOrdersTotal,
+    marketHasMore,
+    marketLoadingMore,
+    marketLoadMoreError,
+    loadMoreMarketOrders,
     activeEscrowCounts,
     chainOffsetMs,
     canMakerStartChallengeFlow,
@@ -941,6 +946,7 @@ function App() {
 
   const {
     handleFileUpload,
+    handleLocalReceiptSelect,
     handleReportPayment,
     handleProposeCancel,
     handleRevokeCancel,
@@ -1092,6 +1098,10 @@ function App() {
     setMarketFilter,
     resetMarketFilters,
     marketOrdersTotal,
+    marketHasMore,
+    marketLoadingMore,
+    marketLoadMoreError,
+    loadMoreMarketOrders,
     filteredOrders,
     orders,
     ordersFeedError,
@@ -1137,6 +1147,7 @@ function App() {
     setChargebackAccepted,
     paymentIpfsHash: room.paymentIpfsHash,
     handleFileUpload,
+    handleLocalReceiptSelect,
     handleReportPayment,
     handleProposeCancel,
     handleRevokeCancel,
@@ -1151,6 +1162,7 @@ function App() {
     // [TR] Gerçek sayaçlar saat sınırında (AppViews/NowBoundary) türetilir; burada yalnız lab geçersiz kılmaları taşınır.
     tradeTimers: labTradeRoom ? labTradeRoom.timers : undefined,
     chainOffsetMs,
+    getWalletRegisteredAt,
     canMakerStartChallengeFlow,
     canMakerChallenge,
     // [TR] Lab'da kontrat okuması yok; eriyen tutar kontrat formülünün aynasıyla tahmin edilir.
