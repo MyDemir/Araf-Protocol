@@ -32,7 +32,7 @@ function _errText(err) {
   const parts = [err?.message, err?.shortMessage, err?.info?.responseBody, err?.info?.error?.message, err?.error?.message];
   try {
     if (err?.info?.response?.statusCode !== undefined) parts.push(`status ${err.info.response.statusCode}`);
-  } catch (_) { /* ignore */ }
+  } catch { /* ignore */ }
   return parts.filter((p) => typeof p === "string").join(" | ");
 }
 
@@ -350,7 +350,7 @@ function _expectedNetworkOrNull() {
       surface: "RpcProvider",
     });
     return id && ethers.Network ? ethers.Network.from(id) : null;
-  } catch (_) {
+  } catch {
     return null;
   }
 }

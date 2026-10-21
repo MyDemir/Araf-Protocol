@@ -1236,7 +1236,7 @@ class EventWorker {
       let fragment;
       try {
         fragment = source.interface.getEvent(log.topics[0]);
-      } catch (_) {
+      } catch {
         fragment = null;
       }
       if (!fragment || !EVENT_NAME_SET.has(fragment.name)) continue;
@@ -1509,7 +1509,7 @@ class EventWorker {
         try {
           oldProvider.removeAllListeners();
           if (oldProvider.destroy) await oldProvider.destroy();
-        } catch (_) { /* best-effort: eski provider temizliği */ }
+        } catch { /* best-effort: eski provider temizliği */ }
         this.contract = null;
         this.vaultContract = null;
         this.rewardsContract = null;
@@ -2060,7 +2060,7 @@ class EventWorker {
     let missingTerminalCount = missingTerminalTimestamp.length;
     try {
       missingTerminalCount = Math.max(missingTerminalCount, Number(await Trade.countDocuments(missingFilter)) || 0);
-    } catch (_) {
+    } catch {
       // [TR] Sayım başarısızsa örneklem uzunluğu kullanılır.
       // [EN] If counting fails the sample length is used.
     }
@@ -2107,7 +2107,7 @@ class EventWorker {
         "payout_snapshot.captured_at": null,
         "payout_snapshot.is_complete": false,
       })) || 0;
-    } catch (_) {
+    } catch {
       snapshotMissingCount = 0;
     }
 

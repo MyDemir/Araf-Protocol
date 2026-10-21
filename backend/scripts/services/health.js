@@ -123,7 +123,7 @@ async function getReadiness({ worker, provider } = {}) {
     chainIdReady =
       expectedChainId === null ||
       (Number.isInteger(providerChainId) && providerChainId === expectedChainId);
-  } catch (_err) {
+  } catch {
     chainIdReady = false;
     missingConfig.push(EXPECTED_CHAIN_ENV);
   }
@@ -393,7 +393,7 @@ function createReadyHandler({ worker, getProvider }) {
     let readiness;
     try {
       readiness = await getCachedReadiness({ worker, provider: getProvider ? getProvider() : worker?.provider });
-    } catch (_err) {
+    } catch {
       return res.status(503).json({ ok: false, error: "readiness_unavailable" });
     }
     // [TR] Yalnız bilgi alanı: relayer anahtarı var mı (değer/adres yok); durum kodunu etkilemez.

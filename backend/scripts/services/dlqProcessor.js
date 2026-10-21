@@ -131,7 +131,7 @@ async function archiveOverflow(redis, length) {
     let key;
     try {
       key = JSON.parse(entry)?.idempotencyKey;
-    } catch (_) {
+    } catch {
       key = null;
     }
     if (key) {

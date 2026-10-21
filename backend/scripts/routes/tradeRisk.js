@@ -122,7 +122,7 @@ function _computePartialSettlementRatioSemantics(reputationCounters) {
   };
 }
 
-function buildTradeHealthSignals(trade, makerUser, _takerUser) {
+function buildTradeHealthSignals(trade, makerUser) {
   const payoutSnapshot = trade?.payout_snapshot || {};
   const makerSnapshot = payoutSnapshot?.maker || {};
   const makerReputationContextAtLock = makerSnapshot?.reputation_context_at_lock || {};
