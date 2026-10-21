@@ -76,14 +76,29 @@ function _bondEntry(makerBps, takerBps) {
   };
 }
 
+// [TR] B4-01: önbellek girdisi yazıldığı escrow adresine + chainId'ye bağlanır. Rotasyondan ya da ortam
+//      değişiminden sonra eşleşmeyen (ya da bağ bilgisi olmayan eski) girdi yok sayılır; zincirden yeniden yüklenir.
+// [EN] B4-01: a cache entry is bound to the escrow address + chainId it was written for. After a rotation or an
+//      environment change a mismatching (or unbound legacy) entry is ignored and the config reloads from chain.
+function _cacheBinding() {
+  const escrow = String(process.env.ARAF_ESCROW_ADDRESS || "").toLowerCase();
+  const chainId = String(process.env.EXPECTED_CHAIN_ID || "");
+  return `${escrow}|${chainId}`;
+}
+
+function _isCacheBound(parsed) {
+  return Boolean(parsed) && parsed.cache_binding === _cacheBinding();
+}
+
 async function _writeCache(redis, value) {
+  const bound = JSON.stringify({ ...value, cache_binding: _cacheBinding() });
   try {
-    await redis.setEx(CONFIG_CACHE_KEY, configCacheTtl(), JSON.stringify(value));
+    await redis.setEx(CONFIG_CACHE_KEY, configCacheTtl(), bound);
   } catch (err) {
     logger.warn(`[Config] Redis yazma hatası: ${err.message}`);
   }
   try {
-    if (typeof redis.set === "function") await redis.set(CONFIG_LAST_KNOWN_KEY, JSON.stringify(value));
+    if (typeof redis.set === "function") await redis.set(CONFIG_LAST_KNOWN_KEY, bound);
   } catch (err) {
     logger.warn(`[Config] Redis son-bilinen yazma hatası: ${err.message}`);
   }
@@ -100,6 +115,10 @@ async function loadStaleProtocolConfig() {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!_isConfigLoaded(parsed)) return null;
+    if (!_isCacheBound(parsed)) {
+      logger.warn("[Config] Son bilinen config başka escrow/chainId'ye ait ya da bağsız; yok sayıldı.");
+      return null;
+    }
     protocolConfig = parsed;
     configIsStale = true;
     return protocolConfig;
@@ -115,10 +134,14 @@ async function loadProtocolConfig() {
   try {
     const cached = await redis.get(CONFIG_CACHE_KEY);
     if (cached) {
-      protocolConfig = JSON.parse(cached);
-      configIsStale = false;
-      logger.info("[Config] V3 protokol parametreleri Redis önbelleğinden yüklendi.");
-      return protocolConfig;
+      const parsed = JSON.parse(cached);
+      if (_isCacheBound(parsed)) {
+        protocolConfig = parsed;
+        configIsStale = false;
+        logger.info("[Config] V3 protokol parametreleri Redis önbelleğinden yüklendi.");
+        return protocolConfig;
+      }
+      logger.warn("[Config] Redis önbelleği başka escrow/chainId'ye ait ya da bağsız; yok sayıldı, zincirden yüklenecek.");
     }
   } catch (err) {
     logger.warn(`[Config] Redis önbellek okuma hatası, on-chain load devam ediyor: ${err.message}`);
@@ -339,7 +362,8 @@ function getConfig() {
   }
   return {
     ...protocolConfig,
-    paymentRiskConfig: protocolConfig.paymentRiskConfig || PAYMENT_RISK_CONFIG,
+    // [TR] B4-01: risk yapılandırması her zaman koddaki güncel değerdir; önbellekten gelen eski kopya tercih edilmez.
+    paymentRiskConfig: PAYMENT_RISK_CONFIG,
   };
 }
 

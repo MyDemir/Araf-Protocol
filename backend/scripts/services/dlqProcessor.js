@@ -163,8 +163,8 @@ async function quarantineUnparseable(redis, raw) {
     quarantined_at: new Date().toISOString(),
     raw: String(raw).slice(0, MAX_RAW_QUARANTINE_BYTES),
   });
-  await redis.lRem(DLQ_KEY, 1, raw);
   await redis.lPush(DLQ_QUARANTINE_KEY, wrapped);
+  await redis.lRem(DLQ_KEY, 1, raw);
   _parseQuarantined += 1;
   await capQuarantine(redis);
   logger.error(
@@ -267,14 +267,17 @@ async function processDLQ() {
         last_error: result.error || entry.last_error || "Re-drive sırasında hata",
       };
 
-      await redis.lRem(DLQ_KEY, 1, raw);
-
+      // [TR] B4-05: sıra YAZ-sonra-SİL: eskiden lRem->rPush arasında çökme girdiyi kaybettirirdi; şimdi en kötü
+      //      durumda girdi iki kez kalır (re-drive idempotency anahtarıyla zararsız), asla kaybolmaz.
+      // [EN] B4-05: write-then-remove: a crash between the two used to lose the entry; now the worst case is a
+      //      duplicate (harmless: re-drive is idempotent), never a loss.
       if (nextAttempt >= MAX_REDRIVE_ATTEMPTS) {
         // [TR] Kalıcı poison: karantinaya taşı (DLQ'dan çıkar), event "acked-poison" sayılsın ki checkpoint
         //      sonsuza dek takılmasın. Alarm: logger.error + worker sayaç (getDiagnostics.quarantinedEvents).
         // [EN] Permanent poison: move to quarantine (out of the DLQ) and mark the event "acked-poison" so the
         //      checkpoint is not frozen forever. Alarm: logger.error + worker counter.
         await redis.lPush(DLQ_QUARANTINE_KEY, toRaw(updated));
+        await redis.lRem(DLQ_KEY, 1, raw);
         await capQuarantine(redis);
         await redis.sAdd(DLQ_QUARANTINE_KEYS_SET, idempotencyKey);
         await redis.sRem(DLQ_LIVE_KEYS_SET, idempotencyKey);
@@ -288,6 +291,7 @@ async function processDLQ() {
       }
 
       await redis.rPush(DLQ_KEY, toRaw(updated));
+      await redis.lRem(DLQ_KEY, 1, raw);
 
       logger.warn(
         `[DLQ] Re-drive başarısız event=${entry.eventName} key=${idempotencyKey} ` +
