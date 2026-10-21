@@ -1,9 +1,10 @@
+import { safeStorage } from './safeStorage';
 import React, { useEffect, useMemo, useState } from 'react';
 import { deriveTradeTimeline } from './contexts/trade-room/tradeTimeline';
 import { shortAddress } from './copy';
 import { getChainNowMs, setClockOffset } from './clock';
 import { toUnixSeconds } from './contexts/settlement/settlementActionModel';
-import { buildMarketOrdersQuery, hasMoreMarketOrders, MARKET_FILTER_DEFAULTS, matchesMarketFilters, mergeOrdersById } from './contexts/marketplace/marketFilters';
+import { buildMarketOrdersQuery, hasMoreMarketOrders, MARKET_FILTER_DEFAULTS, MARKET_POLL_MAX_PAGES, matchesMarketFilters, mergeOrdersById } from './contexts/marketplace/marketFilters';
 import { mapApiOrderToUi, formatTokenAmount as formatTokenAmountFromRaw, tokenToNumber as rawTokenToDisplayNumber } from './orderUiModel';
 import { buildApiUrl } from './apiConfig';
 import { fetchWithTimeout, isTimeoutError, DEFAULT_FETCH_TIMEOUT_MS, WRITE_FETCH_TIMEOUT_MS } from './fetchWithTimeout';
@@ -448,7 +449,7 @@ export function useAppSessionData({
     draftTouchedRef.current = false;
     setPaymentIpfsHashState((prev) => (prev.onchainId === null && prev.hash === '' ? prev : { onchainId: null, hash: '' }));
     if (clearPendingTx && typeof window !== 'undefined') {
-      localStorage.removeItem('araf_pending_tx');
+      safeStorage.remove('araf_pending_tx');
     }
   }, [setCurrentView, setShowMakerModal, setActiveTrade, setActiveEscrows]);
 
@@ -488,7 +489,7 @@ export function useAppSessionData({
       } catch (err) {
         if (isWrite && isTimeoutError(err)) {
           err.writeMayHaveCompleted = true;
-          showToast(
+          showToastRef.current(
             langRef.current === 'TR'
               ? 'İstek zaman aşımına uğradı; işlem sunucuda tamamlanmış olabilir. Sayfayı yenileyip kontrol edin.'
               : 'The request timed out; the action may have completed on the server. Refresh and check before retrying.',
@@ -515,8 +516,8 @@ export function useAppSessionData({
       clearLocalSessionState({ navigateHome: false, closeModals: true });
       if (!suppressAuthToast && !sessionToastShownRef.current) {
         sessionToastShownRef.current = true;
-        showToast(
-          lang === 'TR'
+        showToastRef.current(
+          langRef.current === 'TR'
             ? 'Oturum cüzdan uyuşmazlığı nedeniyle sonlandırıldı. Lütfen yeniden giriş yapın.'
             : 'Session ended due to wallet mismatch. Please sign in again.',
           'error'
@@ -542,8 +543,8 @@ export function useAppSessionData({
       if (!refreshRes.ok && refreshRes.status !== 401) {
         if (!suppressAuthToast && !refreshTransientToastShownRef.current) {
           refreshTransientToastShownRef.current = true;
-          showToast(
-            lang === 'TR'
+          showToastRef.current(
+            langRef.current === 'TR'
               ? 'Geçici bağlantı sorunu, tekrar deneyin.'
               : 'Temporary connection problem, please try again.',
             'error'
@@ -556,8 +557,8 @@ export function useAppSessionData({
         clearLocalSessionState({ navigateHome: false, closeModals: true });
         if (!suppressAuthToast && !sessionToastShownRef.current) {
           sessionToastShownRef.current = true;
-          showToast(
-            lang === 'TR'
+          showToastRef.current(
+            langRef.current === 'TR'
               ? 'Oturumunuz sona erdi. Lütfen tekrar imzalayın.'
               : 'Session expired. Please sign in again.',
             'error'
@@ -579,7 +580,7 @@ export function useAppSessionData({
     } catch (_) {
       return res;
     }
-  }, [connectedWallet, address, clearLocalSessionState, lang, showToast]);
+  }, [connectedWallet, address, clearLocalSessionState]);
 
   useEffect(() => {
     // [TR] Dedupe bayrağını yalnız doğrulanmış auth geri geldiğinde sıfırlarız.
@@ -1067,17 +1068,43 @@ export function useAppSessionData({
         const data = await res.json();
         if (isStale()) return;
         if (!Array.isArray(data.orders)) throw new Error('Malformed orders payload');
-        // [TR] Yoklama yalnız 1. sayfayı yeniler; daha önce yüklenen 2+. sayfa emirleri id ile tekilleştirilip sona eklenir.
-        const firstPage = mapOrders(data.orders);
-        const moreIds = marketMoreIdsRef.current;
-        setOrders((prev) => (moreIds.size
-          ? mergeOrdersById(firstPage, prev.filter((o) => moreIds.has(o?.id)))
-          : firstPage));
-        const total = Number.isFinite(data.total) ? data.total : null;
+        // [TR] Yoklama yüklü sayfa sayısı kadar sayfayı (en çok MARKET_POLL_MAX_PAGES) yeniden çeker ve listeyi
+        //      id bazlı baştan kurar: artık dönmeyen (iptal/dolan) emirler 2+. sayfalardan da düşer.
+        // [EN] The poll re-fetches as many pages as are loaded (max MARKET_POLL_MAX_PAGES) and rebuilds the list
+        //      by id, so orders no longer returned (canceled/filled) drop from pages 2+ too.
+        const pagesAtStart = marketPageRef.current;
+        const pollPages = Math.min(pagesAtStart, MARKET_POLL_MAX_PAGES);
+        let rebuilt = mapOrders(data.orders);
+        let lastPageCount = data.orders.length;
+        let total = Number.isFinite(data.total) ? data.total : null;
+        const laterIds = new Set();
+        if (pollPages > 1) {
+          const extra = await Promise.all(Array.from({ length: pollPages - 1 }, async (_, i) => {
+            const pageRes = await fetchWithTimeout(() => buildApiUrl(`${marketOrdersQuery}&page=${i + 2}`), { credentials: 'include', signal: controller?.signal, infra: 'backend' });
+            if (!pageRes.ok) throw new Error(`HTTP ${pageRes.status}`);
+            const pageData = await pageRes.json();
+            if (!Array.isArray(pageData.orders)) throw new Error('Malformed orders payload');
+            return pageData;
+          }));
+          if (isStale()) return;
+          // [TR] Yoklama sürerken "daha fazla yükle" bir sayfa eklediyse bu tur atlanır; sonraki tur kurar.
+          //      Uçuşta "daha fazla yükle" varsa da atlanır: sayfa sayısını daraltıp 6-7. sayfaları boşlukta bırakmasın.
+          if (marketPageRef.current !== pagesAtStart || marketMoreBusyRef.current) return;
+          extra.forEach((pageData) => {
+            const mapped = mapOrders(pageData.orders);
+            mapped.forEach((o) => { if (o?.id !== undefined && o?.id !== null) laterIds.add(o.id); });
+            rebuilt = mergeOrdersById(rebuilt, mapped);
+            lastPageCount = pageData.orders.length;
+            if (Number.isFinite(pageData.total)) total = pageData.total;
+          });
+          marketPageRef.current = pollPages;
+        }
+        marketMoreIdsRef.current = laterIds;
+        setOrders(rebuilt);
         setMarketOrdersTotal(total);
         marketTotalRef.current = total;
-        if (marketPageRef.current === 1) marketLastCountRef.current = data.orders.length;
-        setMarketHasMore(hasMoreMarketOrders({ total, page: marketPageRef.current, lastPageCount: marketLastCountRef.current }));
+        marketLastCountRef.current = lastPageCount;
+        setMarketHasMore(hasMoreMarketOrders({ total, page: marketPageRef.current, lastPageCount }));
         setOrdersFeedError(false);
         ordersLoadedRef.current = true;
       } catch (err) {
@@ -1118,6 +1145,8 @@ export function useAppSessionData({
       const data = await res.json();
       if (seq !== marketMoreSeqRef.current) return;
       if (!Array.isArray(data.orders)) throw new Error('Malformed orders payload');
+      // [TR] Yoklama yüklü sayfa sayısını değiştirdiyse (daralttıysa) bu sonuç atılır; aksi halde sayfalar arasında boşluk kalır.
+      if (marketPageRef.current !== nextPage - 1) return;
       const incoming = mapMarketOrdersRef.current(data.orders);
       incoming.forEach((o) => { if (o?.id !== undefined && o?.id !== null) marketMoreIdsRef.current.add(o.id); });
       setOrders((prev) => mergeOrdersById(prev, incoming));
@@ -1504,35 +1533,35 @@ export function useAppSessionData({
     if (!publicClient || !isConnected) return;
     if (pendingTxCheckedRef.current) return;
     pendingTxCheckedRef.current = true;
-    const raw = localStorage.getItem('araf_pending_tx');
+    const raw = safeStorage.get('araf_pending_tx');
     if (!raw) return;
 
     let parsed;
     try {
       parsed = JSON.parse(raw);
     } catch {
-      localStorage.removeItem('araf_pending_tx');
+      safeStorage.remove('araf_pending_tx');
       return;
     }
 
     if (!parsed?.hash) {
-      localStorage.removeItem('araf_pending_tx');
+      safeStorage.remove('araf_pending_tx');
       return;
     }
     const isValidHash = /^0x[a-fA-F0-9]{64}$/.test(parsed.hash);
     if (!isValidHash) {
-      localStorage.removeItem('araf_pending_tx');
+      safeStorage.remove('araf_pending_tx');
       return;
     }
     if (parsed.createdAt && (Date.now() - Number(parsed.createdAt) > 24 * 3600 * 1000)) {
-      localStorage.removeItem('araf_pending_tx');
+      safeStorage.remove('araf_pending_tx');
       return;
     }
     if (parsed.chainId && Number(parsed.chainId) !== Number(chainId)) return;
 
     publicClient.getTransactionReceipt({ hash: parsed.hash })
       .then((receipt) => {
-        localStorage.removeItem('araf_pending_tx');
+        safeStorage.remove('araf_pending_tx');
         // [TR] Receipt'in status'u kontrol edilir: reverted işlem "onaylandı" diye gösterilmez (F7).
         if (receipt && receipt.status && receipt.status !== 'success') {
           showToast(

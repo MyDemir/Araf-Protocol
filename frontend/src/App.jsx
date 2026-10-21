@@ -1,5 +1,6 @@
 import { CircleCheck, Info, MessageSquare, TriangleAlert, Wallet, X } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
+import { safeStorage } from './app/safeStorage';
 import { isWalletProviderDisconnectedError, walletDisconnectedToast } from './app/walletDisconnect';
 import { useAccount, useConnect, useDisconnect, useSignMessage, useSwitchChain, useChainId, usePublicClient } from 'wagmi';
 import { canonicalizePayoutProfileDraft, formatTokenAmount as formatTokenAmountFromRaw, tokenToNumber as rawTokenToDisplayNumber } from './app/orderUiModel';
@@ -179,7 +180,7 @@ function App() {
   // [EN] Persist language changes so refresh keeps the same locale.
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
-    window.localStorage.setItem(APP_LANG_STORAGE_KEY, lang);
+    safeStorage.set(APP_LANG_STORAGE_KEY, lang);
   }, [lang]);
 
   // [TR] <html lang> seçili dille eşlenir: CSS uppercase "i/İ" ve ekran okuyucu doğru çalışır.
@@ -376,9 +377,10 @@ function App() {
     trades: chainFallbackState.trades,
     loading: chainFallbackState.loading,
     loadedAt: chainFallbackState.loadedAt,
+    failedIds: chainFallbackState.failedIds,
     submitManualId: chainFallbackState.submitManualId,
     openTrade: openChainFallbackTrade,
-  }), [chainFallbackEnabled, chainFallbackState.trades, chainFallbackState.loading, chainFallbackState.loadedAt, chainFallbackState.submitManualId, openChainFallbackTrade]);
+  }), [chainFallbackEnabled, chainFallbackState.trades, chainFallbackState.loading, chainFallbackState.loadedAt, chainFallbackState.failedIds, chainFallbackState.submitManualId, openChainFallbackTrade]);
 
   // [TR] Açık yedek odayı zincirle eşitler; cüzdan değişip görüntüleyen artık aynı rolde taraf değilse odayı kapatır.
   useChainFallbackRoomSync({
