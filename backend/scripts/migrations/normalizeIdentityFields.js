@@ -26,7 +26,6 @@ function parseArgs(argv = process.argv.slice(2)) {
   const apply = argv.includes("--apply");
   const legacyDry = argv.includes("--dry-run");
   if (legacyDry) {
-    // eslint-disable-next-line no-console
     console.warn("[migrate:identity] UYARI: --dry-run artık varsayılan; yazmak için --apply kullanın.");
   }
   return { dryRun: legacyDry || !apply };
@@ -126,7 +125,7 @@ async function detectLogicalCollisions(Model, field, { allowNull = false, batchS
         try {
           normalized = normalizeIdentityValue(doc[field], { allowZero: true, toNullOnZero: false });
         } catch (err) {
-          throw new Error(`IDENTITY_COLLISION_PREFLIGHT_INVALID:${field}:${doc._id}:${err.message}`);
+          throw new Error(`IDENTITY_COLLISION_PREFLIGHT_INVALID:${field}:${doc._id}:${err.message}`, { cause: err });
         }
         if (normalized == null) continue;
         counts.set(normalized, (counts.get(normalized) || 0) + 1);
@@ -235,12 +234,10 @@ if (require.main === module) {
   const args = parseArgs();
   run(args)
     .then((report) => {
-      // eslint-disable-next-line no-console
       console.log(JSON.stringify(report, null, 2));
       process.exit(0);
     })
     .catch((err) => {
-      // eslint-disable-next-line no-console
       console.error(err.message || err);
       process.exit(1);
     });

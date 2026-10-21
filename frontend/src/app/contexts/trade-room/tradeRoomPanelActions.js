@@ -107,7 +107,16 @@ export const buildTradeRoomPanelCallbacks = ({
         ? [tr ? 'Süre doldu: 48 saatlik ödeme süresi bitti, ödeme artık bildirilemez.' : 'Time expired: the 48h payment window is over; payment can no longer be reported.']
         : [],
     }),
-    release_funds: withGuard(handleRelease, {
+    // [TR] F3-03: CHALLENGED'da maker'ın serbest bırakması kontratta DISPUTED_RELEASE + itibar kaydıdır;
+    //      tek tıkla gitmez, önce açıklayan onay istenir.
+    // [EN] F3-03: a maker release from CHALLENGED is DISPUTED_RELEASE + a reputation record on-chain,
+    //      so it asks for an explaining confirmation first.
+    release_funds: withGuard((...args) => {
+      if (isMaker && roomState === 'CHALLENGED' && !askConfirm(tr
+        ? 'İtirazlı serbest bırakma: ödemeyi onaylarsanız kendi itirazınızdan vazgeçmiş olursunuz. İşlem "itirazlı serbest bırakma" olarak kapanır ve itibar kaydınıza işlenir. Onaylıyor musunuz?'
+        : 'Disputed release: releasing abandons your own challenge. The trade closes as a disputed release and is recorded in your reputation. Confirm?')) return undefined;
+      return handleRelease(...args);
+    }, {
       disabled: isContractLoading || (isMaker && roomState === 'PAID' && !chargebackAccepted),
       disabledReasons: isMaker && roomState === 'PAID' && !chargebackAccepted
         ? [lang === 'TR' ? 'Chargeback onayı gerekli.' : 'Chargeback acknowledgement is required.']
