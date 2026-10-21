@@ -188,3 +188,10 @@ export const decorateContractError = (error, lang = readLang()) => {
   }
   return error;
 };
+
+/**
+ * [TR] Gönderim SONRASI receipt beklerken oluşan belirsiz sonuç hataları (viem). Gönderim öncesi HTTP timeout'ları
+ *      (HttpRequestTimeoutError, TimeoutError) bilerek hariçtir: tx gönderilmemiştir, "gönderildi" denmemeli.
+ * [EN] Post-submit receipt-wait errors only; pre-submit HTTP timeouts are excluded on purpose.
+ */
+export const RECEIPT_UNCERTAIN_NAMES = /^(WaitForTransactionReceiptTimeoutError|TransactionReceiptNotFoundError)$/;

@@ -11,6 +11,7 @@ import { checkTokenBalance } from './balanceGuard';
 import { buildFillConfirmSummary } from '../fillConfirmSummary';
 import { clearAppHashRoute } from './tradeNavigationActions';
 import { getChainNowMs } from '../clock';
+import { RECEIPT_UNCERTAIN_NAMES } from '../contractErrors';
 import { isUserRejection } from '../walletRpcDiagnosis';
 import { isOwnerRailDisabled, ownerRailDisabledMessage, isOwnerPayoutProfileMissing, isPayoutProfileSaved, ownerProfileMissingMessage, profileRequiredMessage } from '../payoutProfileGate';
 
@@ -463,7 +464,7 @@ const getTxErrorMessage = (err, fallback) => err?.shortMessage || err?.reason ||
 // [EN] F2-05: detect rejection from the error object, not a "rejected" substring in the message.
 export const isUserRejectedError = (err) => isUserRejection(err);
 // [TR] F2-06: receipt zaman aşımı/bulunamadı = tx gönderildi, sonuç belirsiz; "başarısız" denmez, tekrar denetilmez.
-export const isReceiptUncertainError = (err) => /Timeout|NotFound/i.test(String(err?.name || ''));
+export const isReceiptUncertainError = (err) => RECEIPT_UNCERTAIN_NAMES.test(String(err?.name || ''));
 export const receiptUncertainMessage = (lang) => (lang === 'TR'
   ? 'İşlem gönderildi, zincirde doğrulanıyor. Tekrar göndermeden önce birkaç dakika bekleyip durumu kontrol edin.'
   : 'Transaction sent, verifying on-chain. Wait a few minutes and check the status before sending it again.');
@@ -1000,7 +1001,7 @@ export const buildProfileActions = ({
         showToast(lang === 'TR' ? 'Cüzdan zaten kayıtlı.' : 'Wallet already registered.', 'info');
       } else if (isUserRejectedError(err)) {
         showToast(lang === 'TR' ? 'İşlem iptal edildi.' : 'Transaction cancelled.', 'error');
-      } else if (/Timeout|NotFound/i.test(String(err?.name || ''))) {
+      } else if (RECEIPT_UNCERTAIN_NAMES.test(String(err?.name || ''))) {
         // [TR] Receipt beklerken zaman aşımı/RPC hatası: tx gönderildi, sonucu belirsiz (useArafContract pending kaydını
         //      aynı sınıflandırmayla saklar). "Başarısız" denmez; kayıt durumu setIsRegisteringWallet(false) ile yeniden okunur.
         showToast(lang === 'TR' ? 'İşlem gönderildi, zincirde doğrulanıyor.' : 'Transaction sent, verifying on-chain.', 'info');
