@@ -33,6 +33,28 @@ export const buildTelegramHref = (handle) => {
   return clean ? `https://t.me/${encodeURIComponent(clean)}` : null;
 };
 
+// [TR] F4-16: Düğme hedefi göstermeden t.me/mailto/tel açmasın diye hedefin kısmen maskeli hali ekranda gösterilir
+//      (ham değer ekrana yazılmaz; PII yüzeyi küçük kalır, kullanıcı yine de yanlış kanalı fark edebilir).
+// [EN] F4-16: show a partially masked contact target so the button does not open a link blind.
+export const maskContact = (channel, value) => {
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+  if (channel === 'email') {
+    const at = raw.lastIndexOf('@');
+    if (at < 1) return null;
+    return `${raw.slice(0, Math.min(2, at))}***${raw.slice(at)}`;
+  }
+  if (channel === 'phone') {
+    const digits = raw.replace(/\D/g, '');
+    return digits.length >= 3 ? `***${digits.slice(-3)}` : null;
+  }
+  if (channel === 'telegram') {
+    const handle = raw.replace(/^@/, '');
+    return handle ? `@${handle.slice(0, 2)}***` : null;
+  }
+  return null;
+};
+
 export const buildContactHref = (channel, value) => {
   if (!channel || value == null) return null;
   const raw = String(value).trim();
@@ -95,40 +117,57 @@ export default function PIIDisplay({ tradeId, lang = 'tr', authenticatedFetch })
   };
 
   // ORTA-15 Fix: Clipboard kopyalama güvenli ve hata toleranslı
+  // [TR] Üç kopyalama düğmesi için ortak başarı/hata görünümü (hata sessiz kalmaz).
+  // [EN] Shared success/error look for all three copy buttons (a failure is never silent).
+  const copyButtonTone = (field) => {
+    if (copyState.field !== field) return 'bg-elevated hover:bg-surface text-textSecondary border-borderStrong';
+    if (copyState.status === 'success') return 'bg-success/10 text-success border-success/40';
+    if (copyState.status === 'error') return 'bg-danger/10 text-danger border-danger/40';
+    return 'bg-elevated hover:bg-surface text-textSecondary border-borderStrong';
+  };
+  const copyButtonLabel = (field, idleLabel) => {
+    if (copyState.field !== field) return idleLabel;
+    if (copyState.status === 'success') return t.copied;
+    if (copyState.status === 'error') return t.copyError;
+    return idleLabel;
+  };
+
   const handleCopyField = async (fieldKey, rawValue) => {
     if (!rawValue) return;
     const cleanValue = String(rawValue).replace(/\s/g, '');
 
-    // [TR] Güvenli bağlam kontrolü (HTTPS veya localhost)
-    if (!window.isSecureContext) {
-      // [TR] HTTP ortamı — otomatik kopyalama API'si çalışmaz, kullanıcıyı uyar
-      setCopyState({ status: 'error', field: fieldKey });
-      setTimeout(() => setCopyState({ status: 'idle', field: null }), 3000);
-      return;
-    }
-
-    try {
-      await navigator.clipboard.writeText(cleanValue);
-      setCopyState({ status: 'success', field: fieldKey });
-      setTimeout(() => setCopyState({ status: 'idle', field: null }), 2000);
-    } catch (_err) {
-      // [TR] İzin reddedildi veya başka clipboard hatası — fallback: seçim yöntemi
+    // [TR] F4-16: Güvenli bağlam dışında (HTTP) ya da Clipboard API yoksa da başlıkta belgelenen seçim+execCommand
+    //      yedeği denenir; yalnız o da başarısızsa hata gösterilir. Başarısızlık sessiz kalmaz.
+    const copyViaSelection = () => {
+      let textArea = null;
       try {
-        const textArea = document.createElement('textarea');
+        textArea = document.createElement('textarea');
         textArea.value = cleanValue;
         textArea.style.position = 'fixed';
         textArea.style.opacity = '0';
         document.body.appendChild(textArea);
         textArea.focus();
         textArea.select();
-        const success = document.execCommand('copy');
-        document.body.removeChild(textArea);
-        setCopyState({ status: success ? 'success' : 'error', field: fieldKey });
+        return document.execCommand('copy') === true;
       } catch {
-        setCopyState({ status: 'error', field: fieldKey });
+        return false;
+      } finally {
+        if (textArea?.parentNode) textArea.parentNode.removeChild(textArea);
       }
-      setTimeout(() => setCopyState({ status: 'idle', field: null }), 3000);
+    };
+
+    if (window.isSecureContext && navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(cleanValue);
+        setCopyState({ status: 'success', field: fieldKey });
+        setTimeout(() => setCopyState({ status: 'idle', field: null }), 2000);
+        return;
+      } catch (_err) {
+        // [TR] İzin reddedildi veya başka clipboard hatası — yedek yönteme düşülür.
+      }
     }
+    setCopyState({ status: copyViaSelection() ? 'success' : 'error', field: fieldKey });
+    setTimeout(() => setCopyState({ status: 'idle', field: null }), 3000);
   };
 
   const getContactCtaLabel = (channel) => {
@@ -151,6 +190,7 @@ export default function PIIDisplay({ tradeId, lang = 'tr', authenticatedFetch })
   };
 
   const contactHref = buildContactHref(pii?.payoutProfile?.contact?.channel, pii?.payoutProfile?.contact?.value);
+  const contactMasked = contactHref ? maskContact(pii?.payoutProfile?.contact?.channel, pii?.payoutProfile?.contact?.value) : null;
 
   // ── Kilitli görünüm ──────────────────────────────────────────────────────
   if (!revealed) {
@@ -248,34 +288,24 @@ export default function PIIDisplay({ tradeId, lang = 'tr', authenticatedFetch })
             {['TR_IBAN', 'SEPA_IBAN'].includes(pii?.payoutProfile?.rail) && (
               <button
                 onClick={() => handleCopyField('iban', pii?.payoutProfile?.fields?.iban)}
-                className={`flex-1 text-xs font-medium py-2 rounded-lg transition border ${
-                  copyState.status === 'success' && copyState.field === 'iban'
-                    ? 'bg-success/10 text-success border-success/40'
-                    : copyState.status === 'error' && copyState.field === 'iban'
-                    ? 'bg-danger/10 text-danger border-danger/40'
-                    : 'bg-elevated hover:bg-surface text-textSecondary border-borderStrong'
-                }`}
+                className={`flex-1 text-xs font-medium py-2 rounded-lg transition border ${copyButtonTone('iban')}`}
               >
-                {copyState.status === 'success' && copyState.field === 'iban'
-                  ? t.copied
-                  : copyState.status === 'error' && copyState.field === 'iban'
-                  ? t.copyError
-                  : t.copyIban}
+                {copyButtonLabel('iban', t.copyIban)}
               </button>
             )}
             {pii?.payoutProfile?.rail === 'US_ACH' && (
               <>
                 <button
                   onClick={() => handleCopyField('routing_number', pii?.payoutProfile?.fields?.routing_number)}
-                  className="flex-1 text-xs font-medium py-2 rounded-lg transition border bg-elevated hover:bg-surface text-textSecondary border-borderStrong"
+                  className={`flex-1 text-xs font-medium py-2 rounded-lg transition border ${copyButtonTone('routing_number')}`}
                 >
-                  {copyState.status === 'success' && copyState.field === 'routing_number' ? t.copied : t.copyRouting}
+                  {copyButtonLabel('routing_number', t.copyRouting)}
                 </button>
                 <button
                   onClick={() => handleCopyField('account_number', pii?.payoutProfile?.fields?.account_number)}
-                  className="flex-1 text-xs font-medium py-2 rounded-lg transition border bg-elevated hover:bg-surface text-textSecondary border-borderStrong"
+                  className={`flex-1 text-xs font-medium py-2 rounded-lg transition border ${copyButtonTone('account_number')}`}
                 >
-                  {copyState.status === 'success' && copyState.field === 'account_number' ? t.copied : t.copyAccount}
+                  {copyButtonLabel('account_number', t.copyAccount)}
                 </button>
               </>
             )}
@@ -296,6 +326,7 @@ export default function PIIDisplay({ tradeId, lang = 'tr', authenticatedFetch })
             >
               <MessageCircle className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />
               <span>{getContactCtaLabel(pii?.payoutProfile?.contact?.channel)}</span>
+              {contactMasked && <span className="font-mono text-xs opacity-80" data-testid="pii-contact-masked">{contactMasked}</span>}
             </a>
           ) : (
             <div className="flex items-center justify-center space-x-2 w-full py-2 rounded-xl bg-elevated border border-borderSubtle text-textMuted text-xs mb-3">

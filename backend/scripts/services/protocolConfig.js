@@ -55,6 +55,9 @@ const CONFIG_ABI = [
 let protocolConfig = null;
 // [TR] true: bellekteki config Redis son-bilinen kopyasından geldi (zincirden doğrulanmadı).
 let configIsStale = false;
+// [TR] B4-10: son zincir yüklemesi kısmi tokenMap içeriyorsa true; bu durumda event yamaları Redis'e yazılmaz.
+let configIsPartial = false;
+let lastBuildPartial = false;
 const PAYMENT_RISK_CONFIG = getPaymentRailRiskConfig();
 
 function _isConfigLoaded(cfg) {
@@ -76,14 +79,46 @@ function _bondEntry(makerBps, takerBps) {
   };
 }
 
+// [TR] B4-01: önbellek girdisi yazıldığı escrow adresine + chainId'ye bağlanır. Rotasyondan ya da ortam
+//      değişiminden sonra eşleşmeyen (ya da bağ bilgisi olmayan eski) girdi yok sayılır; zincirden yeniden yüklenir.
+// [EN] B4-01: a cache entry is bound to the escrow address + chainId it was written for. After a rotation or an
+//      environment change a mismatching (or unbound legacy) entry is ignored and the config reloads from chain.
+// [TR] D3: escrow ya da chainId boşsa bağ null'dır: önbellek ne yazılır ne okunur (her zaman zincirden yüklenir).
+function _cacheBinding() {
+  const escrow = String(process.env.ARAF_ESCROW_ADDRESS || "").trim().toLowerCase();
+  const chainId = String(process.env.EXPECTED_CHAIN_ID || "").trim();
+  if (!escrow || !chainId) return null;
+  return `${escrow}|${chainId}`;
+}
+
+function _isCacheBound(parsed) {
+  const binding = _cacheBinding();
+  return Boolean(parsed) && binding !== null && parsed.cache_binding === binding;
+}
+
+// [TR] cache_binding yalnız önbellek meta verisidir; bellekteki config'e ve getConfig() çıktısına girmez.
+function _stripBinding(parsed) {
+  const rest = { ...parsed };
+  delete rest.cache_binding;
+  return rest;
+}
+
 async function _writeCache(redis, value) {
+  const binding = _cacheBinding();
+  if (binding === null) {
+    logger.warn("[Config] Escrow adresi ya da EXPECTED_CHAIN_ID boş; config önbelleğe yazılmadı.");
+    return;
+  }
+  const clean = { ...value };
+  delete clean.cache_binding;
+  const bound = JSON.stringify({ ...clean, cache_binding: binding });
   try {
-    await redis.setEx(CONFIG_CACHE_KEY, configCacheTtl(), JSON.stringify(value));
+    await redis.setEx(CONFIG_CACHE_KEY, configCacheTtl(), bound);
   } catch (err) {
     logger.warn(`[Config] Redis yazma hatası: ${err.message}`);
   }
   try {
-    if (typeof redis.set === "function") await redis.set(CONFIG_LAST_KNOWN_KEY, JSON.stringify(value));
+    if (typeof redis.set === "function") await redis.set(CONFIG_LAST_KNOWN_KEY, bound);
   } catch (err) {
     logger.warn(`[Config] Redis son-bilinen yazma hatası: ${err.message}`);
   }
@@ -100,7 +135,11 @@ async function loadStaleProtocolConfig() {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!_isConfigLoaded(parsed)) return null;
-    protocolConfig = parsed;
+    if (!_isCacheBound(parsed)) {
+      logger.warn("[Config] Son bilinen config başka escrow/chainId'ye ait ya da bağsız; yok sayıldı.");
+      return null;
+    }
+    protocolConfig = _stripBinding(parsed);
     configIsStale = true;
     return protocolConfig;
   } catch (err) {
@@ -115,10 +154,15 @@ async function loadProtocolConfig() {
   try {
     const cached = await redis.get(CONFIG_CACHE_KEY);
     if (cached) {
-      protocolConfig = JSON.parse(cached);
-      configIsStale = false;
-      logger.info("[Config] V3 protokol parametreleri Redis önbelleğinden yüklendi.");
-      return protocolConfig;
+      const parsed = JSON.parse(cached);
+      if (_isCacheBound(parsed)) {
+        protocolConfig = _stripBinding(parsed);
+        configIsStale = false;
+        configIsPartial = false;
+        logger.info("[Config] V3 protokol parametreleri Redis önbelleğinden yüklendi.");
+        return protocolConfig;
+      }
+      logger.warn("[Config] Redis önbelleği başka escrow/chainId'ye ait ya da bağsız; yok sayıldı, zincirden yüklenecek.");
     }
   } catch (err) {
     logger.warn(`[Config] Redis önbellek okuma hatası, on-chain load devam ediyor: ${err.message}`);
@@ -127,6 +171,7 @@ async function loadProtocolConfig() {
   const next = await _buildConfigFromChain({ strictTokens: false });
   protocolConfig = next;
   configIsStale = false;
+  configIsPartial = lastBuildPartial;
   return protocolConfig;
 }
 
@@ -183,6 +228,7 @@ async function _buildConfigFromChain({ strictTokens }) {
     surface: "ProtocolConfig",
   });
   const tokenMap = {};
+  let partialTokens = false; // [TR] B4-10: bir token okuması düştüyse kısmi config önbelleğe yazılmaz.
 
   for (const token of trackedTokens) {
     try {
@@ -199,6 +245,7 @@ async function _buildConfigFromChain({ strictTokens }) {
     } catch (err) {
       logger.warn(`[Config] tokenConfig load başarısız: token=${token} err=${err.message}`);
       if (strictTokens) throw err;
+      partialTokens = true;
       tokenMap[token] = {
         supported: false,
         allowSellOrders: false,
@@ -236,6 +283,12 @@ async function _buildConfigFromChain({ strictTokens }) {
     reputationPolicy: previousReputationPolicy,
   };
 
+  lastBuildPartial = partialTokens;
+  if (partialTokens) {
+    // [TR] B4-10: geçici token hatası TTL boyunca (ve last_known'a) kalıcılaşmasın; bellekte fail-closed kalır.
+    logger.warn("[Config] Bazı token okumaları başarısız; kısmi config önbelleğe yazılmadı (bellekte fail-closed).");
+    return built;
+  }
   await _writeCache(redis, built);
   logger.info(`[Config] V3 on-chain parametreler yüklendi ve cache'lendi (TTL=${configCacheTtl()}s).`);
   return built;
@@ -253,6 +306,7 @@ async function refreshProtocolConfig() {
   if (!next) return protocolConfig;
   protocolConfig = next;
   configIsStale = false;
+  configIsPartial = false; // strict yükleme kısmi olamaz
   return protocolConfig;
 }
 
@@ -265,6 +319,11 @@ async function _patchAndPersist(mutator) {
   }
   mutator(protocolConfig);
   protocolConfig.loaded_at = new Date().toISOString();
+  // [TR] B4-10: last_known'dan yüklenmiş (bayat) config taze TTL anahtarına yazılmaz; yoksa sonraki yükleme onu taze sayar.
+  if (configIsStale || configIsPartial) {
+    logger.warn("[Config] Config bayat ya da kısmi; event yaması yalnız bellekte uygulandı, önbelleğe yazılmadı.");
+    return protocolConfig;
+  }
   await _writeCache(redis, protocolConfig);
   return protocolConfig;
 }
@@ -339,7 +398,8 @@ function getConfig() {
   }
   return {
     ...protocolConfig,
-    paymentRiskConfig: protocolConfig.paymentRiskConfig || PAYMENT_RISK_CONFIG,
+    // [TR] B4-01: risk yapılandırması her zaman koddaki güncel değerdir; önbellekten gelen eski kopya tercih edilmez.
+    paymentRiskConfig: PAYMENT_RISK_CONFIG,
   };
 }
 

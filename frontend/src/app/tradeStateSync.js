@@ -13,7 +13,7 @@ const TERMINAL = new Set(['RESOLVED', 'CANCELED', 'BURNED']);
 // [TR] Ayna gecikmesi için üst süre; sonrasında pin bırakılır (ayna/zincir farkı kalıcı olmasın).
 export const TRADE_STATE_PIN_TTL_MS = 90_000;
 
-export const tradeStateRank = (state) => (state in RANK ? RANK[state] : -1);
+export const tradeStateRank = (state) => (Object.hasOwn(RANK, state) ? RANK[state] : -1);
 export const isTerminalTradeState = (state) => TERMINAL.has(state);
 
 /** getTrade çıktısından (isimli ya da tuple) durum adını okur; okunamazsa null. */

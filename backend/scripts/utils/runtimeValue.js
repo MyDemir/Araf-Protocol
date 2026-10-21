@@ -10,7 +10,8 @@ const defs = require("../config/runtimeSettingDefs");
 let _svc;
 function _service() {
   if (_svc === undefined) {
-    try { _svc = require("../services/runtimeSettings"); } catch { _svc = null; }
+    // B2-21: yükleme hatası kalıcı önbelleklenmez (_svc undefined kalır); sonraki çağrı yeniden dener.
+    try { _svc = require("../services/runtimeSettings"); } catch { return null; }
   }
   return _svc;
 }

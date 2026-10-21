@@ -19,7 +19,13 @@ const { PAYMENT_RAIL_RISK_CONFIG, SEPA_COUNTRY_ALLOWLIST } = require("../config/
 const logger = require("../utils/logger");
 
 const SETTING_KEY = "payment_rails";
-const CACHE_TTL_MS = Math.min(Number(process.env.PAYMENT_RAILS_CACHE_TTL_MS ?? 15_000), 30_000);
+// [TR] B4-09: geçersiz (sayı olmayan/negatif/boş) env değeri 15 sn'ye döner; 0 bilinçli "önbellek kapalı"dır.
+function _ttlFromEnv(raw, fallback = 15_000, max = 30_000) {
+  if (raw === undefined || raw === null || String(raw).trim() === "") return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.min(n, max) : fallback;
+}
+const CACHE_TTL_MS = _ttlFromEnv(process.env.PAYMENT_RAILS_CACHE_TTL_MS);
 
 const RAIL_NAMES = {
   TR_IBAN: { TR: "Türkiye Banka Havalesi (IBAN)", EN: "Turkey Bank Transfer (IBAN)" },
@@ -230,15 +236,22 @@ async function setRailEnabled(rawCode, enabled, { wallet, reason = "", ipHash = 
     logger.error(`[PaymentRails] audit yazılamadı, değişiklik geri alınıyor: ${auditErr.message}`);
     // Geri alma yalnız kendi yazdığımız version'a koşulludur: arada başka admin yazdıysa onun değişikliği ezilmez.
     let rollbackRes = null;
+    let rollbackFailed = false;
     try {
       rollbackRes = await PaymentRailSetting.updateOne(
         { key: SETTING_KEY, version: currentVersion + 1 },
         { $set: { [`rails.${code}`]: states[code] }, $inc: { version: 1 } }
       );
     } catch (rollbackErr) {
+      rollbackFailed = true;
       logger.error(`[PaymentRails] geri alma başarısız: ${rollbackErr.message}`);
     }
     invalidateRailCache();
+    if (rollbackFailed) {
+      // [TR] B4-08: değişiklik DB'de uygulanmış ve denetimsiz kaldı; "uygulanmadı" denemez.
+      logger.error(`[PaymentRails] UNAUDITED CHANGE: rail=${code} enabled=${enabled} uygulandı, audit yazılamadı ve geri alınamadı; elle kontrol edin.`);
+      throw _err("RAIL_AUDIT_FAILED_APPLIED", "Denetim kaydı yazılamadı ve geri alma başarısız; değişiklik uygulanmış olabilir, durumu kontrol edin.");
+    }
     if (rollbackRes && rollbackRes.matchedCount === 0) {
       logger.error(`[PaymentRails] PAYMENT_RAIL_ROLLBACK_CONFLICT: audit yazılamadı ve araya başka değişiklik girdi (rail=${code}); geri alma uygulanmadı.`);
       throw _err("RAIL_CONFLICT", "Eşzamanlı değişiklik; denetim kaydı yazılamadı, yeniden deneyin.");

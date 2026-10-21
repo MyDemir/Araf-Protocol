@@ -2,12 +2,13 @@ import { keccak256, stringToHex } from 'viem';
 import { normalizeOrderSide, resolveOrderActionFns, resolvePaymentRiskEntry } from '../orderUiModel';
 import { buildApiUrl } from '../apiConfig';
 import { fmtNum } from '../copy';
+import { getOrderRiskGateMessage } from '../copy/paymentRisk';
 import { computeCreateAllowance } from './allowanceMath';
 import { checkTokenBalance } from './balanceGuard';
 import { computeMinFillRaw, parseDecimalToUnits } from './decimalUnits';
 import { isPayoutProfileSaved, profileRequiredMessage } from '../payoutProfileGate';
 import { enforceTxGate } from '../txGate';
-import { WALLET_AGE_MIN_DAYS } from '../walletAge';
+import { showTxError } from './contractLifecycleActions';
 
 export const MAKER_ORDER_DEFAULTS = {
   makerTier: 0,
@@ -58,9 +59,6 @@ export const getMakerOrderValidationError = ({
   tierMaxAmounts = MAKER_TIER_MAX_AMOUNTS,
   // [TR] Cüzdanın kontrattaki efektif tier'ı (_getEffectiveTier). null = kontrol yok (yalnız saf yardımcı çağrıları).
   effectiveTier = null,
-  // [TR] Cüzdan yaşı (true/false/null=bilinmiyor). Yalnız false iken ALIŞ emri engellenir; null = engel yok (kontrat son söz sahibi).
-  walletAged = null,
-  walletAgeRemainingDays = null,
   lang = 'EN',
 }) => {
   const cryptoAmtNum = parseFloat(makerAmount) || 0;
@@ -74,13 +72,7 @@ export const getMakerOrderValidationError = ({
   if (tokenPolicy && tokenPolicy.supported === false) return lang === 'TR' ? `${makerToken} şu an kontratta desteklenmiyor.` : `${makerToken} is not supported by the contract right now.`;
   if (tokenPolicy && makerSide === 'SELL_CRYPTO' && tokenPolicy.allowSellOrders === false) return lang === 'TR' ? `${makerToken} için satış emri şu an kapalı.` : `Sell orders are closed for ${makerToken}.`;
   if (tokenPolicy && makerSide === 'BUY_CRYPTO' && tokenPolicy.allowBuyOrders === false) return lang === 'TR' ? `${makerToken} için alış emri şu an kapalı.` : `Buy orders are closed for ${makerToken}.`;
-  // [TR] Kontrat createBuyOrder → _enforceTakerEntry: yaş dolmamışsa WalletTooYoung. Satış emri yaş istemez.
-  if (makerSide === 'BUY_CRYPTO' && walletAged === false) {
-    const days = walletAgeRemainingDays ?? '?';
-    return lang === 'TR'
-      ? `Alış emri için cüzdan yaşı dolmadı (kayıttan sonra ${WALLET_AGE_MIN_DAYS} gün). Kalan: ~${days} gün. Satış emri açabilirsiniz.`
-      : `Wallet age requirement not met for buy orders (${WALLET_AGE_MIN_DAYS} days after registration). Remaining: ~${days} day(s). You can still open sell orders.`;
-  }
+  // [TR] createBuyOrder cüzdan yaşı istemez (ArafEscrow.sol:626-633; yaş fillBuyOrder'da emir sahibi için uygulanır): UI engellemez.
   // [TR] Kontrat: _tier > _getEffectiveTier(msg.sender) → TierNotAllowed. Approve'dan önce ön kontrol (kontrat son söz sahibi).
   if (effectiveTier !== null && effectiveTier !== undefined && makerTier > effectiveTier) {
     return lang === 'TR'
@@ -153,9 +145,6 @@ export const buildCreateOrderAction = ({
   txGate = null,
   // [TR] Efektif tier (okunamazsa 0). Tier uygun değilse approve'a hiç gidilmez.
   effectiveTier = 0,
-  // [TR] Cüzdan yaşı durumu; false ise alış emri approve'dan önce engellenir. null = engel yok.
-  walletAged = null,
-  walletAgeRemainingDays = null,
 }) => async () => {
   if (txGate && !enforceTxGate(txGate, showToast)) return;
   if (!requireSignedSessionForActiveWallet()) return;
@@ -179,7 +168,7 @@ export const buildCreateOrderAction = ({
     makerFiat,
   } = formState;
 
-  const validationError = getMakerOrderValidationError({ ...formState, tierMaxAmounts, tokenPolicy, effectiveTier, walletAged, walletAgeRemainingDays, lang });
+  const validationError = getMakerOrderValidationError({ ...formState, tierMaxAmounts, tokenPolicy, effectiveTier, lang });
   if (validationError) {
     showToast(validationError, 'error');
     return;
@@ -217,7 +206,29 @@ export const buildCreateOrderAction = ({
     return;
   }
 
-  const canonicalPayoutProfile = canonicalizePayoutProfileDraft(payoutProfileDraft || {});
+  // [TR] Risk ve RESTRICTED kontrolü KAYITLI profilden (pii/my) türer, taslaktan değil. Taslağın rail/country'si
+  //      kayıtlıdan farklıysa emir açılmaz. authenticatedFetch yoksa (yalnız eski/test bağlantısı) taslak kullanılır.
+  // [EN] Risk and RESTRICTED derive from the SAVED profile (pii/my), not the draft. A differing draft is blocked.
+  const canonicalDraftProfile = canonicalizePayoutProfileDraft(payoutProfileDraft || {});
+  let canonicalPayoutProfile = canonicalDraftProfile;
+  if (typeof authenticatedFetch === 'function') {
+    let savedPii = null;
+    try {
+      const piiRes = await authenticatedFetch(buildApiUrl('pii/my'));
+      if (piiRes?.ok) savedPii = (await piiRes.json())?.pii || null;
+    } catch (_) { savedPii = null; }
+    if (!savedPii) {
+      showToast(getOrderRiskGateMessage('savedProfileUnavailable', lang), 'error');
+      return;
+    }
+    canonicalPayoutProfile = canonicalizePayoutProfileDraft(savedPii);
+    const norm = (v) => String(v || '').toUpperCase();
+    if (norm(canonicalDraftProfile?.rail) !== norm(canonicalPayoutProfile?.rail)
+      || norm(canonicalDraftProfile?.country) !== norm(canonicalPayoutProfile?.country)) {
+      showToast(getOrderRiskGateMessage('saveProfileFirst', lang), 'error');
+      return;
+    }
+  }
   const { selectedRiskEntry, isRestricted } = getRestrictedPaymentRiskEntry({
     paymentRiskConfig,
     canonicalPayoutProfile,
@@ -229,6 +240,12 @@ export const buildCreateOrderAction = ({
         : 'This rail/country pair is restricted by availability config. Order creation blocked.',
       'error'
     );
+    return;
+  }
+  // [TR] Risk config'i yoksa "MEDIUM" varsayılmaz: kapalı davranılır.
+  const selectedPaymentRiskLevel = String(selectedRiskEntry?.riskLevel || '').toUpperCase();
+  if (!['LOW', 'MEDIUM', 'HIGH'].includes(selectedPaymentRiskLevel)) {
+    showToast(getOrderRiskGateMessage('riskConfigMissing', lang), 'error');
     return;
   }
 
@@ -309,7 +326,6 @@ export const buildCreateOrderAction = ({
 
     const { createFn } = resolveOrderActionFns(normalizedSide, { fillBuyOrder, fillSellOrder, createBuyOrder, createSellOrder, cancelBuyOrder, cancelSellOrder });
     const createLabel = normalizedSide === 'BUY_CRYPTO' ? 'Buy' : 'Sell';
-    const selectedPaymentRiskLevel = String(selectedRiskEntry?.riskLevel || 'MEDIUM').toUpperCase();
 
     setLoadingText(
       lang === 'TR'
@@ -353,11 +369,7 @@ export const buildCreateOrderAction = ({
         : ' Note: Tier 1+ also requires a 15-day active period after first successful trade.';
     }
 
-    if (errorMessage.includes('rejected') || errorMessage.includes('User rejected')) {
-      showToast(lang === 'TR' ? 'İşlem iptal edildi.' : 'Transaction cancelled.', 'error');
-    } else {
-      showToast(errorMessage, 'error');
-    }
+    showTxError(showToast, err, errorMessage, lang, lang === 'TR' ? 'İşlem iptal edildi.' : 'Transaction cancelled.');
   } finally {
     setIsContractLoading(false);
     setLoadingText('');

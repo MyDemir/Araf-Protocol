@@ -31,7 +31,7 @@ function _scaleByTokenDecimals(rows = [], field) {
   let tokenMap = {};
   try {
     tokenMap = getConfig().tokenMap || {};
-  } catch (_) {
+  } catch {
     tokenMap = {};
   }
   return rows.reduce((acc, row) => {

@@ -87,7 +87,7 @@ describe('live wiring regressions', () => {
   });
 
   it('order creation publishes the maker rate/fiat to the backend after the contract tx', async () => {
-    const authenticatedFetch = vi.fn().mockResolvedValue({ ok: true });
+    const authenticatedFetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ pii: { rail: 'TR_IBAN', country: 'TR' } }) });
     const state = { makerTier: 1, makerAmount: '100', makerRate: '34', makerMinLimit: '', makerFiat: 'TRY', makerToken: 'USDT', makerSide: 'SELL_CRYPTO' };
     await buildCreateOrderAction({
       getFormState: () => state,
@@ -110,11 +110,11 @@ describe('live wiring regressions', () => {
       createBuyOrder: vi.fn(),
       canonicalizePayoutProfileDraft: (v) => v,
       payoutProfileDraft: { rail: 'TR_IBAN', country: 'TR' },
-      paymentRiskConfig: {},
+      paymentRiskConfig: { TR: { TR_IBAN: { riskLevel: 'MEDIUM', enabled: true } } },
       authenticatedFetch,
     })();
 
-    const [url, init] = authenticatedFetch.mock.calls[0];
+    const [url, init] = authenticatedFetch.mock.calls.find(([u]) => String(u).includes('orders/market-meta'));
     expect(url).toContain('orders/market-meta');
     const body = JSON.parse(init.body);
     expect(body).toEqual(expect.objectContaining({ fiatCurrency: 'TRY', exchangeRate: 34 }));
