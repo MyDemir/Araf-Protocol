@@ -750,13 +750,14 @@ describe('trade room under infra failure (fail-closed gate scope)', () => {
     expect(screen.queryByText('System is in maintenance mode.')).toBeNull();
   });
 
-  it('real contract pause keeps the old behaviour (maintenance reason, no infra notice)', () => {
+  it('real contract pause: exit actions stay open, an info notice explains it (no infra notice)', () => {
     const views = buildAppViews({
       ...baseCtx, currentView: 'tradeRoom', activeTrade: lockedTrade, isPaused: true,
       txGate: resolveNewTxGate({ isPaused: true, rpcChecked: true }),
     });
     render(<div>{views.renderTradeRoom()}</div>);
-    expect(screen.getAllByText('System is in maintenance mode.').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/new trades cannot be opened, existing trades can still be closed/).length).toBeGreaterThan(0);
+    expect(screen.queryByText('System is in maintenance mode.')).toBeNull();
     expect(screen.queryByTestId('trade-room-infra-notice')).toBeNull();
   });
 

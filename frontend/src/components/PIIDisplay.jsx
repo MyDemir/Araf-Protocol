@@ -95,6 +95,21 @@ export default function PIIDisplay({ tradeId, lang = 'tr', authenticatedFetch })
   };
 
   // ORTA-15 Fix: Clipboard kopyalama güvenli ve hata toleranslı
+  // [TR] Üç kopyalama düğmesi için ortak başarı/hata görünümü (hata sessiz kalmaz).
+  // [EN] Shared success/error look for all three copy buttons (a failure is never silent).
+  const copyButtonTone = (field) => {
+    if (copyState.field !== field) return 'bg-elevated hover:bg-surface text-textSecondary border-borderStrong';
+    if (copyState.status === 'success') return 'bg-success/10 text-success border-success/40';
+    if (copyState.status === 'error') return 'bg-danger/10 text-danger border-danger/40';
+    return 'bg-elevated hover:bg-surface text-textSecondary border-borderStrong';
+  };
+  const copyButtonLabel = (field, idleLabel) => {
+    if (copyState.field !== field) return idleLabel;
+    if (copyState.status === 'success') return t.copied;
+    if (copyState.status === 'error') return t.copyError;
+    return idleLabel;
+  };
+
   const handleCopyField = async (fieldKey, rawValue) => {
     if (!rawValue) return;
     const cleanValue = String(rawValue).replace(/\s/g, '');
@@ -248,34 +263,24 @@ export default function PIIDisplay({ tradeId, lang = 'tr', authenticatedFetch })
             {['TR_IBAN', 'SEPA_IBAN'].includes(pii?.payoutProfile?.rail) && (
               <button
                 onClick={() => handleCopyField('iban', pii?.payoutProfile?.fields?.iban)}
-                className={`flex-1 text-xs font-medium py-2 rounded-lg transition border ${
-                  copyState.status === 'success' && copyState.field === 'iban'
-                    ? 'bg-success/10 text-success border-success/40'
-                    : copyState.status === 'error' && copyState.field === 'iban'
-                    ? 'bg-danger/10 text-danger border-danger/40'
-                    : 'bg-elevated hover:bg-surface text-textSecondary border-borderStrong'
-                }`}
+                className={`flex-1 text-xs font-medium py-2 rounded-lg transition border ${copyButtonTone('iban')}`}
               >
-                {copyState.status === 'success' && copyState.field === 'iban'
-                  ? t.copied
-                  : copyState.status === 'error' && copyState.field === 'iban'
-                  ? t.copyError
-                  : t.copyIban}
+                {copyButtonLabel('iban', t.copyIban)}
               </button>
             )}
             {pii?.payoutProfile?.rail === 'US_ACH' && (
               <>
                 <button
                   onClick={() => handleCopyField('routing_number', pii?.payoutProfile?.fields?.routing_number)}
-                  className="flex-1 text-xs font-medium py-2 rounded-lg transition border bg-elevated hover:bg-surface text-textSecondary border-borderStrong"
+                  className={`flex-1 text-xs font-medium py-2 rounded-lg transition border ${copyButtonTone('routing_number')}`}
                 >
-                  {copyState.status === 'success' && copyState.field === 'routing_number' ? t.copied : t.copyRouting}
+                  {copyButtonLabel('routing_number', t.copyRouting)}
                 </button>
                 <button
                   onClick={() => handleCopyField('account_number', pii?.payoutProfile?.fields?.account_number)}
-                  className="flex-1 text-xs font-medium py-2 rounded-lg transition border bg-elevated hover:bg-surface text-textSecondary border-borderStrong"
+                  className={`flex-1 text-xs font-medium py-2 rounded-lg transition border ${copyButtonTone('account_number')}`}
                 >
-                  {copyState.status === 'success' && copyState.field === 'account_number' ? t.copied : t.copyAccount}
+                  {copyButtonLabel('account_number', t.copyAccount)}
                 </button>
               </>
             )}

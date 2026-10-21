@@ -1,5 +1,13 @@
 {
   "worktree": {
     "baseRef": "head"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(git merge --no-ff claude/project-thread-o0zy56)",
+      "Bash(npm --prefix backend ci)",
+      "Bash(npm --prefix frontend ci)",
+      "Bash(npm --prefix contracts ci)"
+    ]
   }
 }

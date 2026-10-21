@@ -30,6 +30,13 @@ const blocked = function () {
   "updateOne", "updateMany", "findOneAndUpdate", "findOneAndReplace", "replaceOne",
   "deleteOne", "deleteMany", "findOneAndDelete", "findOneAndRemove",
 ].forEach((op) => paymentRailAuditSchema.pre(op, blocked));
+// [TR] B4-18: Model.bulkWrite query hook'larını atlar; yalnız insertOne içeren toplu yazıma izin verilir
+//      (append-only), update/delete/replace içeren her bulkWrite reddedilir.
+paymentRailAuditSchema.pre("bulkWrite", function (next, ops) {
+  const list = Array.isArray(ops) ? ops : [];
+  if (list.some((op) => !op || !op.insertOne)) return next(new Error(IMMUTABLE_MSG));
+  return next();
+});
 paymentRailAuditSchema.pre("save", function (next) {
   if (!this.isNew) return next(new Error(IMMUTABLE_MSG));
   return next();

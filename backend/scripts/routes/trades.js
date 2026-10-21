@@ -3,11 +3,14 @@
 const express = require("express");
 const { parsePositiveOnchainId: _parsePositiveOnchainId } = require("../utils/onchain");
 const Joi = require("joi");
-const crypto = require("crypto");
 const { ethers } = require("ethers");
+const { asyncHandler } = require("../utils/asyncHandler");
 const router = express.Router();
 
-const { requireAuth, requireSessionWalletMatch } = require("../middleware/auth");
+const { requireAuth: _requireAuth, requireSessionWalletMatch: _requireSessionWalletMatch } = require("../middleware/auth");
+// [TR] B2-17: async auth middleware'leri de reddi next(err)'e iletecek şekilde sarılır.
+const requireAuth = asyncHandler(_requireAuth);
+const requireSessionWalletMatch = asyncHandler(_requireSessionWalletMatch);
 const { roomReadLimiter, coordinationWriteLimiter } = require("../middleware/rateLimiter");
 const Trade = require("../models/Trade");
 const User = require("../models/User");
@@ -16,6 +19,7 @@ const { hmacDigest } = require("../services/encryption");
 const { buildBankProfileRisk, buildTradeHealthSignals } = require("./tradeRisk");
 const { assertProviderExpectedChainOrThrow } = require("../services/expectedChain");
 const { getSharedProvider } = require("../services/rpcProvider");
+const { resolveClientIp } = require("../utils/clientIp");
 
 // [TR] Yalnız settlement preview için okunan on-chain yüzey. İptal koordinasyonu artık tamamen on-chain:
 //      her taraf proposeOrApproveCancel(tradeId) çağırır, worker CancelProposed event'ini mirror'lar.
@@ -69,6 +73,16 @@ function _buildPreviewUnavailableError(message, rootCause = null) {
   return err;
 }
 
+// [TR] B3-16: RPC yavaşlarsa istek sarkmasın; süre dolunca PREVIEW_UNAVAILABLE (503) döner.
+const PREVIEW_RPC_TIMEOUT_MS = 4_000;
+function _withPreviewTimeout(promise, ms = PREVIEW_RPC_TIMEOUT_MS) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("preview rpc timeout")), ms); }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 async function _getOnchainCurrentAmountsForPreview(onchainEscrowId) {
   const verifier = await _getPreviewReadContract();
   if (!verifier) {
@@ -77,7 +91,7 @@ async function _getOnchainCurrentAmountsForPreview(onchainEscrowId) {
 
   try {
     const { contract } = verifier;
-    const result = await contract.getCurrentAmounts(BigInt(onchainEscrowId));
+    const result = await _withPreviewTimeout(Promise.resolve(contract.getCurrentAmounts(BigInt(onchainEscrowId))));
     const currentCrypto = BigInt(result.currentCrypto ?? result[0] ?? 0);
     const currentMakerBond = BigInt(result.currentMakerBond ?? result[1] ?? 0);
     const currentTakerBond = BigInt(result.currentTakerBond ?? result[2] ?? 0);
@@ -211,14 +225,6 @@ function _parseBpsOrNull(raw) {
   return n;
 }
 
-function _toBigIntStringSafe(raw) {
-  try {
-    return BigInt(raw ?? 0).toString();
-  } catch {
-    return "0";
-  }
-}
-
 function _extractSafeSettlementProposalPayload(trade) {
   const sp = trade?.settlement_proposal || {};
   return {
@@ -285,7 +291,8 @@ async function _attachBankProfileRisk(trades) {
 
     // [TR] Internal snapshot alanlarını response'ta doğrudan açmıyoruz;
     //      onun yerine türetilmiş risk nesnesi veriyoruz.
-    const { payout_snapshot, ...safeTrade } = trade;
+    const safeTrade = { ...trade };
+    delete safeTrade.payout_snapshot;
 
     return {
       ...safeTrade,
@@ -296,7 +303,7 @@ async function _attachBankProfileRisk(trades) {
 }
 
 // ─── GET /api/trades/my ───────────────────────────────────────────────────────
-router.get("/my", requireAuth, requireSessionWalletMatch, roomReadLimiter, async (req, res, next) => {
+router.get("/my", requireAuth, requireSessionWalletMatch, roomReadLimiter, asyncHandler(async (req, res, next) => {
   try {
     const schema = Joi.object({
       page: Joi.number().integer().min(1).default(1),
@@ -326,10 +333,10 @@ router.get("/my", requireAuth, requireSessionWalletMatch, roomReadLimiter, async
   } catch (err) {
     next(err);
   }
-});
+}));
 
 // ─── GET /api/trades/history ──────────────────────────────────────────────────
-router.get("/history", requireAuth, requireSessionWalletMatch, roomReadLimiter, async (req, res, next) => {
+router.get("/history", requireAuth, requireSessionWalletMatch, roomReadLimiter, asyncHandler(async (req, res, next) => {
   try {
     const schema = Joi.object({
       page: Joi.number().integer().min(1).default(1),
@@ -367,12 +374,12 @@ router.get("/history", requireAuth, requireSessionWalletMatch, roomReadLimiter, 
   } catch (err) {
     next(err);
   }
-});
+}));
 
 // ─── GET /api/trades/by-escrow/:onchainId ────────────────────────────────────
 // [TR] GET /:id'den önce tanımlanmalı — yoksa Express yanlış route'a girebilir.
 // [TR] Buradaki kimlik parent order id değil, child trade / escrow id'dir.
-router.get("/by-escrow/:onchainId", requireAuth, requireSessionWalletMatch, roomReadLimiter, async (req, res, next) => {
+router.get("/by-escrow/:onchainId", requireAuth, requireSessionWalletMatch, roomReadLimiter, asyncHandler(async (req, res, next) => {
   try {
     const onchainId = _parsePositiveOnchainId(req.params.onchainId);
     if (!onchainId) {
@@ -396,13 +403,13 @@ router.get("/by-escrow/:onchainId", requireAuth, requireSessionWalletMatch, room
   } catch (err) {
     next(err);
   }
-});
+}));
 
 // ─── GET /api/trades/:id/settlement-proposal ─────────────────────────────────
 // [TR] Settlement proposal read-model endpoint'i yalnız bilgilendirme amaçlıdır.
 //      Backend proposal outcome üretmez; authority kontrattadır.
 // [EN] Settlement proposal read-model endpoint is informational-only.
-router.get("/:id/settlement-proposal", requireAuth, requireSessionWalletMatch, roomReadLimiter, async (req, res, next) => {
+router.get("/:id/settlement-proposal", requireAuth, requireSessionWalletMatch, roomReadLimiter, asyncHandler(async (req, res, next) => {
   try {
     if (!/^[a-fA-F0-9]{24}$/.test(req.params.id)) {
       return res.status(400).json({ error: "Geçersiz trade ID formatı." });
@@ -423,12 +430,12 @@ router.get("/:id/settlement-proposal", requireAuth, requireSessionWalletMatch, r
   } catch (err) {
     next(err);
   }
-});
+}));
 
 // ─── POST /api/trades/:id/settlement-proposal/preview ───────────────────────
 // [TR] Preview hesaplama informational-only'dir ve on-chain authority üretmez.
 // [EN] Preview computation is informational-only and never authoritative.
-router.post("/:id/settlement-proposal/preview", requireAuth, requireSessionWalletMatch, roomReadLimiter, async (req, res, next) => {
+router.post("/:id/settlement-proposal/preview", requireAuth, requireSessionWalletMatch, roomReadLimiter, asyncHandler(async (req, res, next) => {
   try {
     if (!/^[a-fA-F0-9]{24}$/.test(req.params.id)) {
       return res.status(400).json({ error: "Geçersiz trade ID formatı." });
@@ -508,10 +515,10 @@ router.post("/:id/settlement-proposal/preview", requireAuth, requireSessionWalle
     }
     next(err);
   }
-});
+}));
 
 // ─── GET /api/trades/:id ──────────────────────────────────────────────────────
-router.get("/:id", requireAuth, requireSessionWalletMatch, roomReadLimiter, async (req, res, next) => {
+router.get("/:id", requireAuth, requireSessionWalletMatch, roomReadLimiter, asyncHandler(async (req, res, next) => {
   try {
     if (!/^[a-fA-F0-9]{24}$/.test(req.params.id)) {
       return res.status(400).json({ error: "Geçersiz trade ID formatı." });
@@ -534,7 +541,7 @@ router.get("/:id", requireAuth, requireSessionWalletMatch, roomReadLimiter, asyn
   } catch (err) {
     next(err);
   }
-});
+}));
 
 // ─── POST /api/trades/:id/chargeback-ack ─────────────────────────────────────
 // [TR] Bu endpoint yalnızca audit/log içindir. On-chain release akışına veto uygulamaz.
@@ -542,18 +549,16 @@ router.get("/:id", requireAuth, requireSessionWalletMatch, roomReadLimiter, asyn
 
 /**
  * Gerçek IP belirleme fonksiyonu.
- * app.js'de trust proxy aktif olduğunda req.ip zaten doğru IP'yi döndürür.
- * Bu fonksiyon ek güvence katmanı sağlar.
+ * [TR] Varsayılan olarak req.ip (app.js'de trust proxy açık). x-real-ip yalnızca
+ *      ORIGIN_SHARED_SECRET tanımlı ve x-araf-origin-secret başlığı eşleşirse güvenilir
+ *      (bkz. utils/clientIp.js). Ham x-forwarded-for'a güvenilmez.
+ * [EN] Defaults to req.ip; x-real-ip is trusted only when the shared origin secret matches.
  */
 function _getRealIP(req) {
-  // [TR] x-forwarded-for header'ını doğrudan güvenmeyiz.
-  //      app.js'de trust proxy açık; Express req.ip'i güvenli şekilde normalize eder.
-  // [EN] Do not trust raw x-forwarded-for header directly.
-  //      trust proxy is enabled in app.js, so req.ip is the normalized source.
-  return req.ip || req.socket?.remoteAddress || "unknown";
+  return resolveClientIp(req) || req.socket?.remoteAddress || "unknown";
 }
 
-router.post("/:id/chargeback-ack", requireAuth, requireSessionWalletMatch, coordinationWriteLimiter, async (req, res, next) => {
+router.post("/:id/chargeback-ack", requireAuth, requireSessionWalletMatch, coordinationWriteLimiter, asyncHandler(async (req, res, next) => {
   try {
     if (!/^[a-fA-F0-9]{24}$/.test(req.params.id)) {
       return res.status(400).json({ error: "Geçersiz trade ID formatı." });
@@ -599,7 +604,7 @@ router.post("/:id/chargeback-ack", requireAuth, requireSessionWalletMatch, coord
       return res.status(400).json({ error: `Chargeback onayı bu durumda yapılamaz (mevcut: ${existing.status}).` });
     }
 
-    logger.info(`[ChargebackAck] Kaydedildi: maker=${req.wallet} trade=${req.params.id}`);
+    logger.info(`[ChargebackAck] Kaydedildi: maker=${String(req.wallet).slice(0, 10)}... trade=${req.params.id}`);
     return res.status(201).json({
       success: true,
       acknowledged_at: updatedTrade.chargeback_ack.acknowledged_at,
@@ -608,7 +613,7 @@ router.post("/:id/chargeback-ack", requireAuth, requireSessionWalletMatch, coord
   } catch (err) {
     next(err);
   }
-});
+}));
 
 // [TR] __resetCancelVerifier / __getCancelVerifierCacheKey kaldırıldı: iptal koordinasyonu tamamen
 //      on-chain olduğundan cancelVerify* değişkenleri yoktu (tanımsız değişkenlere atama).
