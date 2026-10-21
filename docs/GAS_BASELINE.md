@@ -150,3 +150,56 @@ sütunuyla birebir aynı. Bytecode boyutları yukarıdaki gibidir.
 - `Math.mulDiv` in reward weight: the product cannot overflow (6-decimal notional × 25,000 × 13,000). Not needed.
 - Batch claim: with a 30-day epoch and a 7-day claim window at most one epoch is claimable at a time.
 - `uint128` amounts: would save a further ~22–44k per fill/order but exceeded the 24,576-byte EIP-170 limit.
+
+## Buy order wallet-age relaxation (2026-10-20) / Alış emri cüzdan yaşı gevşetmesi
+
+- `createBuyOrder` no longer checks the 2-day wallet age; it still checks ban, registration (`WalletTooYoung` when
+  never registered), DUST and cooldown, in that order. `fillBuyOrder` still runs the full `_enforceTakerEntry`,
+  so an under-age owner's order is rejected there with `WalletTooYoung`.
+- `createBuyOrder` artık 2 günlük cüzdan yaşına bakmaz; ban, kayıt (hiç kayıt yoksa `WalletTooYoung`), DUST ve
+  cooldown kontrolleri bu sırayla sürer. `fillBuyOrder` tam `_enforceTakerEntry` çağırmaya devam eder.
+
+Measured with `npm --prefix contracts run gas:baseline` (3 runs, identical output). Only rows that changed:
+
+| Operation | Before | After | Δ gas | Δ % |
+|---|---:|---:|---:|---:|
+| `createBuyOrder_t2` | 262,853 | 262,792 | -61 | -0.0% |
+| `fillBuyOrder_t2` | 276,564 | 276,635 | +71 | +0.0% |
+| `fillSellOrder_t0` | 203,737 | 203,809 | +72 | +0.0% |
+| `fillSellOrder_t2` | 273,327 | 273,398 | +71 | +0.0% |
+| `fillSellOrder_t2_partial` | 280,348 | 280,419 | +71 | +0.0% |
+| `createSellOrder_t2` | 277,796 | 277,795 | -1 | -0.0% |
+
+`createBuyOrder` loses the age comparison but gains the registration check, so the net is -61. The fill paths
+gain ~71 gas (extra internal call from splitting the DUST/cooldown part out of `_enforceTakerEntry`).
+`createBuyOrder`, yaş karşılaştırmasını kaybedip kayıt kontrolünü kazandığı için net -61 gas; fill yolları ~71
+gas artar (DUST/cooldown kısmının ayrı iç fonksiyona alınması).
+
+## Wave 2: setTreasury vault match + decay rule (2026-10-21) / Dalga 2: setTreasury vault eşleşmesi + af kuralı
+
+- K1-02: `setTreasury` now staticcalls `escrow()` on the new treasury and requires `address(this)`
+  (`TreasuryEscrowMismatch`). K3-01: `decayReputation` also requires `now > lastNegativeEventAt + cleanPeriod`.
+- K1-02: `setTreasury` yeni hazinede `escrow()` çağırıp `address(this)` ister (`TreasuryEscrowMismatch`).
+  K3-01: `decayReputation` ayrıca `now > lastNegativeEventAt + cleanPeriod` ister.
+
+`npm --prefix contracts run gas:baseline` before/after: all 26 measured operations are identical (neither function
+is on a measured path). / 26 ölçülen işlemin hepsi aynı (iki fonksiyon da ölçülen yolda değil).
+
+The two changed functions, measured separately (Hardhat network, same wiring as the baseline, one ban via five
+mutual cancels, decay called after `bannedUntil + cleanPeriod`):
+
+| Operation | Before | After | Δ gas | Δ % |
+|---|---:|---:|---:|---:|
+| `setTreasury` (vault) | 31,444 | 35,373 | +3,929 | +12.5% |
+| `decayReputation` | 58,009 | 58,215 | +206 | +0.4% |
+
+`setTreasury` pays for the external `staticcall` (cold account + the vault's immutable getter); it is a rare
+owner call. `lastNegativeEventAt` sits in a separate storage slot, but `ReputationUpdated` already read it in the
+same call, so the earlier read only moves the cold access forward (+206 net).
+`lastNegativeEventAt` ayrı slotta; `ReputationUpdated` aynı çağrıda zaten okuduğu için soğuk erişim yalnız öne
+kayar (net +206).
+
+| Bytecode (deployed) | Before | After | Δ | EIP-170 headroom |
+|---|---:|---:|---:|---:|
+| `ArafEscrow` | 22,137 | 22,273 | +136 | 2,303 |
+| `ArafReputationLib` | 4,705 | 4,732 | +27 | 19,844 |

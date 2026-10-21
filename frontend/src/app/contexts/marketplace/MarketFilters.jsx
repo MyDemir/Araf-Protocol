@@ -288,6 +288,7 @@ function SideSegment({ tr, value, onPick }) {
 export default function MarketFilters({
   lang = 'TR', filters: rawFilters, setFilter, onReset, activeFilterCount = 0, sortOptions = [], sortValue,
   viewerTier = null, canHideOwn = false, result = {}, closedRailCount = 0, trailing = null, children,
+  hasMore = false, loadingMore = false, loadMoreError = false, onLoadMore = null,
 }) {
   const tr = lang === 'TR';
   const filters = { ...MARKET_FILTER_DEFAULTS, ...rawFilters };
@@ -357,6 +358,22 @@ export default function MarketFilters({
         </div>
       </section>
       {children}
+      {hasMore && typeof onLoadMore === 'function' && (
+        <div className="mt-4 flex flex-col items-center gap-2">
+          {loadMoreError && (
+            <p role="alert" className="text-xs text-textSecondary">{tr ? 'Daha fazla emir yüklenemedi.' : 'Could not load more orders.'}</p>
+          )}
+          <button
+            type="button"
+            data-testid="market-load-more"
+            disabled={loadingMore}
+            onClick={onLoadMore}
+            className="inline-flex min-h-[44px] items-center justify-center rounded-full border border-borderSubtle bg-elevated px-5 text-sm font-semibold text-textPrimary disabled:opacity-60"
+          >
+            {loadingMore ? (tr ? 'Yükleniyor...' : 'Loading...') : (loadMoreError ? (tr ? 'Tekrar dene' : 'Retry') : (tr ? 'Daha fazla yükle' : 'Load more'))}
+          </button>
+        </div>
+      )}
     </>
   );
 }

@@ -103,9 +103,22 @@ function globalErrorHandler(err, req, res, next) {
 
   logger.error("[SERVER ERROR]", errorDetails);
 
-  // 2. Mongoose Validation Hataları
+  // 1b. Multer (dekont yükleme) hataları — sabit kod, iç mesaj sızmaz
+  if (err.code === "UNSUPPORTED_MIME") {
+    return res.status(415).json({ error: "Desteklenmeyen dosya tipi. İzin verilenler: JPEG, PNG, WebP, GIF, PDF", code: "RECEIPT_UNSUPPORTED_TYPE" });
+  }
+  if (err.name === "MulterError") {
+    if (err.code === "LIMIT_FILE_SIZE") {
+      return res.status(413).json({ error: "Dosya boyutu 5 MB sınırını aşıyor.", code: "RECEIPT_TOO_LARGE" });
+    }
+    return res.status(400).json({ error: "Geçersiz dosya yükleme isteği.", code: "RECEIPT_UPLOAD_INVALID" });
+  }
+
+  // 2. Mongoose / Joi Validation Hataları (B2-07: Joi'de errors yok, details var)
   if (err.name === "ValidationError") {
-    const messages = Object.values(err.errors).map((e) => e.message);
+    const messages = err.errors
+      ? Object.values(err.errors).map((e) => e.message)
+      : (Array.isArray(err.details) ? err.details.map((d) => d.message) : []);
     return res.status(400).json({ error: "Doğrulama başarısız.", details: messages });
   }
 
