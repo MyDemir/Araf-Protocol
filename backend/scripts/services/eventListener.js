@@ -1231,6 +1231,7 @@ class EventWorker {
     if (!this.contract || fromBlock > toBlock) return;
 
     const batchSize = this._cfg("WORKER_BLOCK_BATCH_SIZE");
+    const epoch = this._liveEpoch;
     for (let from = fromBlock; from <= toBlock; from += batchSize) {
       const to = Math.min(from + batchSize - 1, toBlock);
 
@@ -1239,12 +1240,22 @@ class EventWorker {
         this._seedAckStateForRange(from, to);
 
         for (const event of allEvents) {
+          // [TR] B1-06: yeniden bağlanma sonrası eski epoch'taki döngü yeni event işlemeye devam etmez.
+          // [EN] B1-06: after a reconnect a loop from an older epoch must not keep processing events.
+          if (epoch !== this._liveEpoch || this._stopRequested) return;
           this._trackLiveEventSeen(event);
           // [TR] Karantinadaki event işlenmez, ack'lenmiş (acked-poison) sayılır.
           // [EN] A quarantined event is not processed and counts as acked (acked-poison).
           const success = (await this._isQuarantined(event)) || (await this._processEventWithRetry(event));
           if (success) this._trackLiveEventAck(event);
           else this._markBlockUnsafe(event.blockNumber, this._getEventId(event));
+          // [TR] B1-06: İlerleme sinyali YALNIZ bir event gerçekten sonuçlandığında (işlendi ya da DLQ'ya yazıldı)
+          //      verilir; olay başına ~20 sn retry beklemesi watchdog'u yanlış tetiklemesin. Askıda kalan bir
+          //      çağrı sonuçlanmadığı için sinyal vermez, gerçek takılma maskelenmez.
+          // [EN] B1-06: the progress signal is given ONLY when an event actually completes (processed or written
+          //      to the DLQ), so ~20s of retry waiting per event does not trip the watchdog. A hung call never
+          //      completes and gives no signal, so a real stall is not masked.
+          if (epoch === this._liveEpoch) this._lastBlockSeenAt = Date.now();
         }
       } catch (err) {
         this._seedAckStateForRange(from, to);
