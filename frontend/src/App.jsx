@@ -377,9 +377,10 @@ function App() {
     trades: chainFallbackState.trades,
     loading: chainFallbackState.loading,
     loadedAt: chainFallbackState.loadedAt,
+    failedIds: chainFallbackState.failedIds,
     submitManualId: chainFallbackState.submitManualId,
     openTrade: openChainFallbackTrade,
-  }), [chainFallbackEnabled, chainFallbackState.trades, chainFallbackState.loading, chainFallbackState.loadedAt, chainFallbackState.submitManualId, openChainFallbackTrade]);
+  }), [chainFallbackEnabled, chainFallbackState.trades, chainFallbackState.loading, chainFallbackState.loadedAt, chainFallbackState.failedIds, chainFallbackState.submitManualId, openChainFallbackTrade]);
 
   // [TR] Açık yedek odayı zincirle eşitler; cüzdan değişip görüntüleyen artık aynı rolde taraf değilse odayı kapatır.
   useChainFallbackRoomSync({

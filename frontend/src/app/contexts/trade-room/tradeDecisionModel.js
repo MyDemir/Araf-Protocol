@@ -177,6 +177,12 @@ export function buildTradeDecisionModel({
   if (!isConnected) globalDisabledReasons.push(t(lang, 'Cüzdan bağlı değil.', 'Wallet not connected.'));
   if (!isAuthenticated) globalDisabledReasons.push(t(lang, 'Oturum doğrulanmamış.', 'Session is not authenticated.'));
   if (!isSupportedChain) globalDisabledReasons.push(t(lang, 'Desteklenmeyen ağ.', 'Unsupported network.'));
+  // [TR] F2-04: Zincirden okunamayan işlemin korunan (eski) kaydı: zincire yazan aksiyonlar arayüzde kapalı.
+  //      Karar kontrattadır; bu yalnız eski bilgiyle yanlış aksiyonu önleyen kapıdır.
+  // [EN] F2-04: kept (stale) record of a trade whose chain read failed: on-chain actions are disabled in the UI only.
+  if (trade?.stale === true) globalDisabledReasons.push(t(lang,
+    'İşlem bilgisi zincirden yenilenemedi (eski olabilir); yenilenene kadar işlem yapılamaz.',
+    'Trade data could not be refreshed from the chain (it may be outdated); actions are disabled until it refreshes.'));
   // [TR] F3-01: Kontratta yalnız createSellOrder/fillSellOrder/createBuyOrder/fillBuyOrder whenNotPaused'tır.
   //      Pause'da release/ping/itiraz/iptal/yakım kapanmaz; bu yüzden isPaused kapı nedeni değil, yalnız bilgidir.
   // [EN] F3-01: only order create/fill are whenNotPaused on-chain. Exit actions stay open during a pause, so
