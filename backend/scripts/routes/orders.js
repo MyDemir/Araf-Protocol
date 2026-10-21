@@ -71,7 +71,7 @@ function _buildMinRemainingClauses(minAmount, tokenAddress) {
   let tokenMap;
   try {
     tokenMap = getConfig().tokenMap || {};
-  } catch (_) {
+  } catch {
     return null;
   }
   const byAddress = Object.fromEntries(Object.entries(tokenMap).map(([addr, cfg]) => [addr.toLowerCase(), cfg]));

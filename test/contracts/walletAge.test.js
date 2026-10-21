@@ -28,4 +28,16 @@ describe("ArafEscrow wallet age gate", function () {
     await time.increase(180);
     await expect(escrow.connect(taker).fillSellOrder(orderId, u(100), ref("age-c2"))).to.emit(escrow, "OrderFilled");
   });
+
+  // [TR] Çift kayıt: ikinci registerWallet AlreadyRegistered ile geri döner ve ilk kayıt zamanı değişmez.
+  it("reverts a second registerWallet with AlreadyRegistered and keeps the first timestamp", async function () {
+    const [, treasury, , taker] = await ethers.getSigners();
+    const escrow = (await deployEscrowWithLibraries(treasury.address)).escrow;
+    await escrow.connect(taker).registerWallet();
+    const first = await escrow.walletRegisteredAt(taker.address);
+    expect(first).to.be.gt(0n);
+    await time.increase(100);
+    await expect(escrow.connect(taker).registerWallet()).to.be.revertedWithCustomError(escrow, "AlreadyRegistered");
+    expect(await escrow.walletRegisteredAt(taker.address)).to.equal(first);
+  });
 });

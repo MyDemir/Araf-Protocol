@@ -25,6 +25,7 @@ import { getSupportedChainsMap, isConfiguredTestToken, isFaucetChainId, isMintTo
 import { ARAF_CONTRACT_ERROR_ABI, decorateContractError } from '../app/contractErrors';
 import { diagnoseWriteError, applyDiagnosis, stripAddresses, isUserRejection } from '../app/walletRpcDiagnosis';
 import { addKnownTradeIds } from '../app/knownTrades';
+import { prepareTxParams } from '../app/txGasFee';
 
 const ArafEscrowABI = parseAbi([
   'function registerWallet()',
@@ -389,6 +390,11 @@ export function useArafContract({ expectedChainId = null } = {}) {
       // İşlem göndermeden önce tüm kontrolleri yap
       preflightChecks();
 
+      const txParams = await prepareTxParams({
+        publicClient, account: walletClient.account?.address,
+        address: getAddress(ESCROW_ADDRESS), abi: ArafEscrowABI, functionName, args,
+      });
+
       writeAttempted = true;
       const hash = await walletClient.writeContract({
         //Adresin geçerli ve checksum formatında olduğundan emin ol.
@@ -396,6 +402,7 @@ export function useArafContract({ expectedChainId = null } = {}) {
         abi:     ArafEscrowABI,
         functionName,
         args,
+        ...txParams,
       });
 
       submittedHash = hash;
@@ -452,7 +459,7 @@ export function useArafContract({ expectedChainId = null } = {}) {
       // [TR] Kullanıcı cüzdanda reddettiyse hata değildir: backend'e log gönderilmez.
       // [EN] Wallet rejection is not an error: nothing is sent to the backend.
       const logUrl = resolveClientErrorLogUrl();
-      if (!isUserRejection(error)) fetch(logUrl, {
+      if (!isUserRejection(error) && !error?.arafPreflight) fetch(logUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -610,11 +617,17 @@ export function useArafContract({ expectedChainId = null } = {}) {
     if (!_isValidAddress) throw new Error("VITE_ESCROW_ADDRESS tanımlı değil.");
 
     try {
+      const approveArgs = [getAddress(ESCROW_ADDRESS), amount];
+      const txParams = await prepareTxParams({
+        publicClient, account: walletClient.account?.address,
+        address: getAddress(tokenAddress), abi: ERC20_ABI, functionName: 'approve', args: approveArgs,
+      });
       const hash = await walletClient.writeContract({
         address: getAddress(tokenAddress),
         abi: ERC20_ABI,
         functionName: 'approve',
-        args: [getAddress(ESCROW_ADDRESS), amount],
+        args: approveArgs,
+        ...txParams,
       });
       return assertReceiptSucceeded(await publicClient.waitForTransactionReceipt({ hash }), 'approve');
     } catch (error) {
@@ -622,7 +635,7 @@ export function useArafContract({ expectedChainId = null } = {}) {
       // Token Onayı iptallerini backend'e logla
       const errorMessage = error.shortMessage || error.message || "Bilinmeyen Onay Hatası";
       const logUrl = resolveClientErrorLogUrl();
-      if (!isUserRejection(error)) fetch(logUrl, {
+      if (!isUserRejection(error) && !error?.arafPreflight) fetch(logUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -653,17 +666,23 @@ export function useArafContract({ expectedChainId = null } = {}) {
     _validateChain();
     
     try {
+      const mintAbi = parseAbi(['function mint()']); // Sabit parametresiz mint işlemi
+      const txParams = await prepareTxParams({
+        publicClient, account: walletClient.account?.address,
+        address: getAddress(tokenAddress), abi: mintAbi, functionName: 'mint', args: [],
+      });
       const hash = await walletClient.writeContract({
         address: getAddress(tokenAddress),
-        abi: parseAbi(['function mint()']), // Sabit parametresiz mint işlemi
+        abi: mintAbi,
         functionName: 'mint',
+        ...txParams,
       });
       return assertReceiptSucceeded(await publicClient.waitForTransactionReceipt({ hash }), 'mint');
     } catch (error) {
        // Faucet iptallerini backend'e logla
        const errorMessage = error.shortMessage || error.message || "Bilinmeyen Faucet Hatası";
        const logUrl = resolveClientErrorLogUrl();
-       if (!isUserRejection(error)) fetch(logUrl, {
+       if (!isUserRejection(error) && !error?.arafPreflight) fetch(logUrl, {
          method: 'POST',
          headers: { 'Content-Type': 'application/json' },
          body: JSON.stringify({
