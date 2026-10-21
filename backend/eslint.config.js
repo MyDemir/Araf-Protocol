@@ -35,6 +35,9 @@ module.exports = [
     },
     rules: {
       ...js.configs.recommended.rules,
+      "no-eval": "error",
+      "no-implied-eval": "error",
+      "no-new-func": "error",
       "no-unused-vars": [
         "error",
         { args: "after-used", argsIgnorePattern: "^_", caughtErrors: "none" },
