@@ -45,7 +45,7 @@ function buildCandidateQuery() {
  * Bu job:
  *   - 30 günden eski bank_change_history kayıtlarını budar
  *   - rolling sayaçları yeniden üretir
- *   - yalnız gerçekten değişen belgeleri kaydeder
+ *   - yalnız gerçekten değişen belgeleri koşullu atomik updateOne ile yazar
  */
 async function runUserBankRiskMetadataCleanup(now = new Date()) {
   let scanned = 0;
@@ -63,6 +63,11 @@ async function runUserBankRiskMetadataCleanup(now = new Date()) {
       scanned += 1;
 
       try {
+        // [TR] B4-04: okunan ham durum, atomik güncellemenin koşulu olur.
+        const beforeHistory = Array.isArray(user.bank_change_history)
+          ? user.bank_change_history.map((d) => (d instanceof Date ? d : new Date(d)))
+          : [];
+        const beforeLastRaw = user.lastBankChangeAt || null;
         const beforeHistoryLength = Array.isArray(user.bank_change_history)
           ? user.bank_change_history.length
           : 0;
@@ -89,8 +94,29 @@ async function runUserBankRiskMetadataCleanup(now = new Date()) {
           continue;
         }
 
-        await user.save();
-        updated += 1;
+        // [TR] B4-04: User şeması versionKey:false; save() eşzamanlı profil değişikliğini ezerdi.
+        //      Okunan dizi/sayaçlar koşul: araya yeni değişiklik girdiyse eşleşme olmaz, bu tur atlanır
+        //      (sonraki çalıştırmada yeniden denenir). profileVersion'a dokunulmaz.
+        // [EN] Conditional atomic update; a concurrent profile change makes the filter miss, so nothing is overwritten.
+        const counterCond = (v) => (v === 0 ? { $in: [0, null] } : v);
+        const res = await User.updateOne(
+          {
+            _id: user._id,
+            bank_change_history: beforeHistory,
+            bankChangeCount7d: counterCond(beforeCount7d),
+            bankChangeCount30d: counterCond(beforeCount30d),
+            lastBankChangeAt: beforeLastRaw,
+          },
+          {
+            $set: {
+              bank_change_history: user.bank_change_history,
+              bankChangeCount7d: afterCount7d,
+              bankChangeCount30d: afterCount30d,
+              lastBankChangeAt: user.lastBankChangeAt || null,
+            },
+          }
+        );
+        if ((res?.matchedCount ?? res?.n ?? 0) > 0) updated += 1;
       } catch (perUserErr) {
         logger.warn(
           `[Job:UserBankRiskCleanup] Kullanıcı atlandı: wallet=${user.wallet_address || "unknown"} err=${perUserErr.message}`
