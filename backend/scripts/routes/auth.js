@@ -807,7 +807,9 @@ router.put("/profile", requireAuth, requireSessionWalletMatch, authLimiter, asyn
             bankChangeCount30d: user.bankChangeCount30d,
             lastBankChangeAt: user.lastBankChangeAt || null,
           },
-        }
+        },
+        // save() ile eşdeğerlik: şema enum/min doğrulamaları updateOne yolunda da çalışır.
+        { runValidators: true }
       );
       if (!writeResult || writeResult.matchedCount === 0) return conflictResponse();
     }

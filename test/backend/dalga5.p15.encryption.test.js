@@ -71,7 +71,8 @@ describe("encryption AWS KMS (Dalga 5 P15)", () => {
     await new Promise((r) => setImmediate(r));
     encryption.blockKeyLoadingUntilSelfTest();
     release();
-    await expect(pending).rejects.toThrow();
+    // sarmalanan hata da KMS_UNAVAILABLE_DEGRADED kodunu korur
+    await expect(pending).rejects.toMatchObject({ code: "KMS_UNAVAILABLE_DEGRADED" });
     await expect(encryption.encryptField("y", WALLET)).rejects.toMatchObject({ code: "KMS_UNAVAILABLE_DEGRADED" });
   });
 });

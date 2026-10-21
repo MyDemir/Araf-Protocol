@@ -119,6 +119,30 @@ function build() {
 
 afterEach(() => jest.resetModules());
 
+describe("PUT /profile updateOne doğrulayıcıları", () => {
+  test("updateOne runValidators:true ile çağrılır (save() ile eşdeğer enum/min kontrolü)", async () => {
+    const { app } = build();
+    const User = require("../../backend/scripts/models/User");
+    // iki istek okuma kapısını birlikte açar
+    await Promise.all([
+      request(app).put("/api/auth/profile").send(body("TR330006100519786457841326")),
+      request(app).put("/api/auth/profile").send(body("TR963456789012345678901234")),
+    ]);
+    expect(User.updateOne).toHaveBeenCalled();
+    for (const call of User.updateOne.mock.calls) {
+      expect(call[2]).toMatchObject({ runValidators: true });
+    }
+  });
+
+  test("gerçek User şeması geçersiz rail enum'unu $set içinde reddeder", async () => {
+    const mongoose = require("mongoose");
+    const UserModel = jest.requireActual("../../backend/scripts/models/User");
+    const q = UserModel.updateOne({ wallet_address: WALLET }, { $set: { "payout_profile.rail": "BAD_RAIL" } }, { runValidators: true });
+    await expect(q.exec()).rejects.toThrow(/BAD_RAIL|enum|validation/i);
+    expect(mongoose).toBeDefined();
+  });
+});
+
 describe("PUT /profile eşzamanlı yazım (kayıp güncelleme yok)", () => {
   test("iki eşzamanlı banka değişikliği: ya ikisi de uygulanır ya kaybeden 409 alır; sürüm başarı sayısına eşit", async () => {
     const { app, store } = build();

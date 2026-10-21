@@ -212,7 +212,10 @@ async function _getMasterKey() {
       logger.info("[Encryption] ✅ Master key AWS KMS'ten başarıyla çözüldü.");
       return _masterKeyCache;
     } catch (err) {
-      throw new Error(`AWS KMS master key çözme hatası: ${err.message}`, { cause: err });
+      const wrapped = new Error(`AWS KMS master key çözme hatası: ${err.message}`, { cause: err });
+      // Kısıtlı mod kodu sarmalamada kaybolmaz (çağıranlar err.code ile ayırt eder).
+      if (err?.code === "KMS_UNAVAILABLE_DEGRADED") wrapped.code = err.code;
+      throw wrapped;
     }
   }
 
