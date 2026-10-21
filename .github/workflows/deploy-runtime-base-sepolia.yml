@@ -229,6 +229,12 @@ jobs:
         shell: bash
         run: bash .github/scripts/stage-runtime-env.sh health
 
+      # K4-01: canlı /ready escrowRegistry.mode == enforce doğrulaması (warn/off ise job düşer).
+      - name: Verify registry guard mode (enforce)
+        if: ${{ inputs.deploy_backend }}
+        shell: bash
+        run: bash .github/scripts/stage-runtime-env.sh guard-mode
+
       - name: Validate Vercel config
         if: ${{ inputs.deploy_frontend }}
         shell: bash

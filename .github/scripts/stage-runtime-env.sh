@@ -10,6 +10,7 @@
 #   stage-runtime-env.sh fly-secrets     # NAME=VALUE satırlarını flyctl secrets import --stage'e verir
 #   stage-runtime-env.sh vercel-deploy   # vercel deploy --prod (build-env listesiyle)
 #   stage-runtime-env.sh health          # /health zorunlu (200), /ready degraded ise ::warning::
+#   stage-runtime-env.sh guard-mode     # K4-01: canlı /ready escrowRegistry.mode == "enforce" değilse ::error:: + çıkış 1
 #   stage-runtime-env.sh rewards-binding # vault/rewards ESCROW'a bağlı mı (eth_call); ON_MISMATCH=error|clear
 #                                        # clear: REVENUE_VAULT/REWARDS boşaltılır, REWARDS_UNBOUND=1 (Fly/Vercel'de silinir)
 #   stage-runtime-env.sh fly-secret-lines | vercel-build-env   # yalnız test içindir; workflow'da kullanılmaz
@@ -110,6 +111,9 @@ cmd_fly_secret_lines() {
   printf '%s=%s\n' BASE_SEPOLIA_USDT_ADDRESS "$USDT"
   printf '%s=%s\n' BASE_SEPOLIA_USDC_ADDRESS "$USDC"
   printf '%s=%s\n' ARAF_DEPLOYMENT_BLOCK "$DEPLOY_BLOCK"
+  # K4-01: Base Sepolia'da escrow registry bekçisi zorlayıcı (kod varsayılanı warn; yerel geliştirme etkilenmez).
+  # Doğrulama: `guard-mode` komutu (canlı /ready). Sıra/ilk kurulum notu: docs/*/DEPLOYMENT_GUIDE.md "İlk kurulum sırası".
+  printf '%s=%s\n' ESCROW_REGISTRY_GUARD_MODE enforce
   printf '%s=%s\n' SIWE_DOMAIN "$FRONTEND_DOMAIN"
   printf '%s=%s\n' SIWE_URI "https://$FRONTEND_DOMAIN"
   printf '%s=%s\n' ALLOWED_ORIGINS "https://$FRONTEND_DOMAIN"
@@ -219,6 +223,27 @@ cmd_health() {
   rm -f "$tmp"
 }
 
+# K4-01: Deploy edilmiş backend'in registry bekçisi modu "enforce" olmalı. /ready kimliksiz görünümde `escrowRegistry.mode`
+# gövdede her durum kodunda (200/503) bulunur; enforce + uyumsuzluk 503'ü beklenen durumdur, bu yüzden yalnız mod okunur.
+# Mod okunamıyorsa (erişilemez, JSON değil, alan yok) doğrulanamadığı için de hata. Gizli değer okunmaz/basılmaz.
+cmd_guard_mode() {
+  local base="${HEALTH_BASE_URL:-https://$(val FLY_APP_NAME).fly.dev}"
+  local retries="${HEALTH_RETRIES:-12}" delay="${HEALTH_RETRY_DELAY:-10}"
+  local tmp mode i=0 code
+  tmp="$(mktemp)"
+  while :; do
+    code="$(curl --connect-timeout 5 --max-time 15 --silent --output "$tmp" --write-out '%{http_code}' "$base/ready" || true)"
+    mode="$(grep -Eo '"escrowRegistry"[[:space:]]*:[[:space:]]*\{[^}]*\}' "$tmp" | grep -Eo '"mode"[[:space:]]*:[[:space:]]*"[a-z]*"' | head -n1 | sed -E 's/.*:[[:space:]]*"([a-z]*)"/\1/' || true)"
+    [ -n "$mode" ] && break
+    [ "$i" -lt "$retries" ] || break
+    i=$((i + 1)); sleep "$delay"
+  done
+  rm -f "$tmp"
+  [ -n "$mode" ] || die "Could not read escrowRegistry.mode from $base/ready (HTTP ${code:-n/a}); cannot verify ESCROW_REGISTRY_GUARD_MODE=enforce."
+  [ "$mode" = "enforce" ] || die "ESCROW_REGISTRY_GUARD_MODE must be enforce on Base Sepolia, but the live backend reports '$mode'. Re-run deploy-runtime-base-sepolia (it stages enforce) and check the Fly secrets."
+  echo "Escrow registry guard mode: enforce (verified via /ready)."
+}
+
 case "${1:-}" in
   validate) cmd_validate ;;
   validate-optional) cmd_validate_optional; echo "Optional runtime env validated." ;;
@@ -227,6 +252,7 @@ case "${1:-}" in
   vercel-build-env) cmd_vercel_build_env ;;
   vercel-deploy) cmd_vercel_deploy ;;
   health) cmd_health ;;
+  guard-mode) cmd_guard_mode ;;
   rewards-binding) cmd_rewards_binding ;;
-  *) die "usage: $0 validate|fly-secrets|vercel-deploy|health" ;;
+  *) die "usage: $0 validate|fly-secrets|vercel-deploy|health|guard-mode" ;;
 esac
