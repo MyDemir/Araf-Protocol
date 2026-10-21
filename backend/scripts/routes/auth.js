@@ -210,7 +210,7 @@ const PROFILE_SCHEMA = Joi.object({
       account_holder_name: Joi.string()
         .min(2)
         .max(100)
-        .pattern(/^[A-Za-zÀ-ÖØ-öø-ÿĀ-žĞğİıŞşÇçÑñŒœȘșȚțŽž\s.'’\-]+$/, "geçerli isim karakterleri")
+        .pattern(/^[A-Za-zÀ-ÖØ-öø-ÿĀ-žĞğİıŞşÇçÑñŒœȘșȚțŽž\s.'’-]+$/, "geçerli isim karakterleri")
         .required()
         .messages({
           "string.pattern.name": "Hesap sahibi adı harf, boşluk, apostrof, nokta ve tire içerebilir.",

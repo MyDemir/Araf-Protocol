@@ -11,18 +11,8 @@ const { EXPECTED_CHAIN_ENV, resolveExpectedChainIdOrThrow } = require("./expecte
 const CHECKPOINT_KEY = "worker:last_block";
 const LAST_SAFE_BLOCK_KEY = "worker:last_safe_block";
 
-// [TR] Worker ne kadar block gerideyse unhealthy sayılacağı.
-// [EN] Max acceptable worker lag in blocks before readiness turns false.
-function _parseMaxWorkerLag(rawValue) {
-  const parsed = Number.parseInt(String(rawValue ?? ""), 10);
-  if (Number.isInteger(parsed) && parsed >= 0) return parsed;
-  return 25;
-}
-
 const { runtimeValueSync } = require("../utils/runtimeValue");
 
-// [TR] Env/varsayılan değer (geriye dönük dışa aktarım); gerçek eşik her kullanımda çalışma ayarından okunur.
-const MAX_WORKER_LAG_BLOCKS = _parseMaxWorkerLag(process.env.WORKER_MAX_LAG_BLOCKS);
 function _maxWorkerLagBlocks() {
   return runtimeValueSync("WORKER_MAX_LAG_BLOCKS");
 }
@@ -90,11 +80,11 @@ async function getReadiness({ worker, provider } = {}) {
   //      Now state and lag are also part of readiness.
   const workerRunning = Boolean(worker?.isRunning);
 
-  let providerReady = false;
+  let providerReady;
   let currentBlock = null;
   let providerChainId = null;
   let expectedChainId = null;
-  let chainIdReady = false;
+  let chainIdReady;
 
   try {
     if (provider) {
@@ -168,7 +158,7 @@ async function getReadiness({ worker, provider } = {}) {
       configuredStartRaw !== null &&
       configuredStartRaw !== "";
 
-    let hasCheckpoint = false;
+    let hasCheckpoint;
 
     try {
       const redis = getRedisClient();

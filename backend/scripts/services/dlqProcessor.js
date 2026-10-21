@@ -128,7 +128,7 @@ async function archiveOverflow(redis, length) {
     multi.lPush(DLQ_ARCHIVE_KEY, entry);
     // [TR] Arşivlenen girdinin anahtarı arşiv indeksine geçer: aynı event tekrar DLQ'ya eklenmez.
     // [EN] The archived entry's key moves to the archive index so the same event is not re-added to the DLQ.
-    let key = null;
+    let key;
     try {
       key = JSON.parse(entry)?.idempotencyKey;
     } catch (_) {

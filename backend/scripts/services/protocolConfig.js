@@ -95,7 +95,8 @@ function _isCacheBound(parsed) {
 
 // [TR] cache_binding yalnız önbellek meta verisidir; bellekteki config'e ve getConfig() çıktısına girmez.
 function _stripBinding(parsed) {
-  const { cache_binding: _omit, ...rest } = parsed;
+  const rest = { ...parsed };
+  delete rest.cache_binding;
   return rest;
 }
 
@@ -105,7 +106,8 @@ async function _writeCache(redis, value) {
     logger.warn("[Config] Escrow adresi ya da EXPECTED_CHAIN_ID boş; config önbelleğe yazılmadı.");
     return;
   }
-  const { cache_binding: _drop, ...clean } = value;
+  const clean = { ...value };
+  delete clean.cache_binding;
   const bound = JSON.stringify({ ...clean, cache_binding: binding });
   try {
     await redis.setEx(CONFIG_CACHE_KEY, configCacheTtl(), bound);

@@ -3,7 +3,6 @@
 const express = require("express");
 const { parsePositiveOnchainId: _parsePositiveOnchainId } = require("../utils/onchain");
 const Joi = require("joi");
-const crypto = require("crypto");
 const { ethers } = require("ethers");
 const router = express.Router();
 
@@ -212,14 +211,6 @@ function _parseBpsOrNull(raw) {
   return n;
 }
 
-function _toBigIntStringSafe(raw) {
-  try {
-    return BigInt(raw ?? 0).toString();
-  } catch {
-    return "0";
-  }
-}
-
 function _extractSafeSettlementProposalPayload(trade) {
   const sp = trade?.settlement_proposal || {};
   return {
@@ -286,7 +277,8 @@ async function _attachBankProfileRisk(trades) {
 
     // [TR] Internal snapshot alanlarını response'ta doğrudan açmıyoruz;
     //      onun yerine türetilmiş risk nesnesi veriyoruz.
-    const { payout_snapshot, ...safeTrade } = trade;
+    const safeTrade = { ...trade };
+    delete safeTrade.payout_snapshot;
 
     return {
       ...safeTrade,

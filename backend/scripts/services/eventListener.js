@@ -1233,7 +1233,7 @@ class EventWorker {
     for (const log of logs || []) {
       const source = sources.get(String(log.address || "").toLowerCase());
       if (!source || !log.topics?.length) continue;
-      let fragment = null;
+      let fragment;
       try {
         fragment = source.interface.getEvent(log.topics[0]);
       } catch (_) {
@@ -1509,7 +1509,7 @@ class EventWorker {
         try {
           oldProvider.removeAllListeners();
           if (oldProvider.destroy) await oldProvider.destroy();
-        } catch (_) {}
+        } catch (_) { /* best-effort: eski provider temizliği */ }
         this.contract = null;
         this.vaultContract = null;
         this.rewardsContract = null;
@@ -1785,7 +1785,7 @@ class EventWorker {
     if (!orderDoc?.refs?.order_ref || Number(currentMarket?.exchange_rate) > 0) return currentMarket;
 
     const owner = String(orderDoc.owner_address || "").toLowerCase();
-    let intent = null;
+    let intent;
     try {
       intent = await readPendingMarketMeta(orderDoc.refs.order_ref, owner);
     } catch (err) {
@@ -2086,7 +2086,7 @@ class EventWorker {
       .filter(([, state]) => Boolean(state?.unsafe))
       .map(([block]) => Number(block));
 
-    let dlqPending = null;
+    let dlqPending;
     try {
       const redis = getRedisClient();
       dlqPending = Number(await redis.lLen(DLQ_KEY));
@@ -2100,7 +2100,7 @@ class EventWorker {
 
     // [TR] Backfill'de kanıtlanamadığı için snapshot'sız kalan PAID/CHALLENGED trade'ler.
     // [EN] PAID/CHALLENGED trades left without a snapshot because the backfill could not prove the profile unchanged.
-    let snapshotMissingCount = 0;
+    let snapshotMissingCount;
     try {
       snapshotMissingCount = Number(await Trade.countDocuments({
         status: { $in: ["PAID", "CHALLENGED"] },
@@ -2491,7 +2491,7 @@ class EventWorker {
     const { tradeId } = event.args;
     const resolvedAt = await this._getEventDate(event);
     const tradeIdNum = _toIdentityString(tradeId);
-    let releaseResolutionType = "UNKNOWN";
+    let releaseResolutionType;
 
     const session = await mongoose.startSession();
     session.startTransaction();
