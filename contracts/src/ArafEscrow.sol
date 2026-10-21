@@ -1746,9 +1746,20 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
      *         Treasury payout yönü protokol ekonomisinin canonical parçasıdır.
      * @notice Updates the treasury address.
      *         Treasury payout routing is a canonical part of the protocol economy.
+     * @dev    [TR] K1-02: yeni hazine bu escrow'a bağlı bir ArafRevenueVault olmalı: `escrow()` getter'ı
+     *         address(this) döndürmeli. EOA, kodsuz adres, getter'ı olmayan/revert eden ya da başka escrow'a
+     *         bağlı kontrat TreasuryEscrowMismatch ile reddedilir. Low-level staticcall kullanılır ki kodsuz
+     *         adres ve bozuk dönüş de custom error ile reddedilsin. Constructor yolu değişmedi.
+     *         [EN] K1-02: the new treasury must be an ArafRevenueVault wired to this escrow (`escrow()` returns
+     *         address(this)). EOAs, code-less addresses, contracts without/reverting the getter or wired to another
+     *         escrow revert with TreasuryEscrowMismatch. The constructor path is unchanged.
      */
     function setTreasury(address _treasury) external onlyOwner {
         if (_treasury == address(0)) revert OwnableInvalidOwner(address(0));
+        (bool ok, bytes memory ret) = _treasury.staticcall(abi.encodeWithSignature("escrow()"));
+        if (!ok || ret.length < 32 || abi.decode(ret, (bytes32)) != bytes32(uint256(uint160(address(this))))) {
+            revert TreasuryEscrowMismatch(_treasury);
+        }
         treasury = _treasury;
         emit TreasuryUpdated(_treasury);
     }
