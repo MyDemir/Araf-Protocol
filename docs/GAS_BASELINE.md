@@ -194,7 +194,10 @@ mutual cancels, decay called after `bannedUntil + cleanPeriod`):
 | `decayReputation` | 58,009 | 58,215 | +206 | +0.4% |
 
 `setTreasury` pays for the external `staticcall` (cold account + the vault's immutable getter); it is a rare
-owner call. `decayReputation` reads `lastNegativeEventAt` from the reputation slot it already loads.
+owner call. `lastNegativeEventAt` sits in a separate storage slot, but `ReputationUpdated` already read it in the
+same call, so the earlier read only moves the cold access forward (+206 net).
+`lastNegativeEventAt` ayrı slotta; `ReputationUpdated` aynı çağrıda zaten okuduğu için soğuk erişim yalnız öne
+kayar (net +206).
 
 | Bytecode (deployed) | Before | After | Δ | EIP-170 headroom |
 |---|---:|---:|---:|---:|
