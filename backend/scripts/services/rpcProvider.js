@@ -212,6 +212,10 @@ function _withRequestTimeout(promise, payload) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
+function _isLocalRateLimit(err) {
+  return err?.code === "RPC_LOCAL_RATE_LIMIT";
+}
+
 function _safeError(err) {
   return redactRpcSecrets(err?.message || String(err));
 }
@@ -297,6 +301,8 @@ function createRpcPool({ urls, surface = "RpcPool", probeFor = createChainProbe,
           lastErr = lastErr || err; // asıl (birincil) hata öncelikli
           continue;
         }
+        // [TR] B4-03: yerel yoğunluk reddi sağlayıcı arızası değildir; sağlıklı URL soğumaya alınmaz.
+        if (_isLocalRateLimit(err)) throw err;
         markCooldown(entry, err);
         lastErr = err;
         continue;
@@ -309,6 +315,7 @@ function createRpcPool({ urls, surface = "RpcPool", probeFor = createChainProbe,
         return result;
       } catch (err) {
         lastErr = err;
+        if (_isLocalRateLimit(err)) throw err; // [TR] B4-03: soğuma yok, hata doğrudan iletilir.
         if (entries.length > 1 && (isRateLimitError(err) || isNetworkError(err))) {
           markCooldown(entry, err);
           continue;
@@ -330,6 +337,8 @@ function createRpcPool({ urls, surface = "RpcPool", probeFor = createChainProbe,
         if (isChainGuardError(err)) {
           if (entry.index === 0) throw err;
           entry.rejected = true;
+        } else if (_isLocalRateLimit(err)) {
+          throw err;
         } else {
           markCooldown(entry, err);
         }
