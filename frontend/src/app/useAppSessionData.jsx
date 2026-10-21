@@ -4,7 +4,7 @@ import { deriveTradeTimeline } from './contexts/trade-room/tradeTimeline';
 import { shortAddress } from './copy';
 import { getChainNowMs, setClockOffset } from './clock';
 import { toUnixSeconds } from './contexts/settlement/settlementActionModel';
-import { buildMarketOrdersQuery, hasMoreMarketOrders, MARKET_FILTER_DEFAULTS, matchesMarketFilters, mergeOrdersById } from './contexts/marketplace/marketFilters';
+import { buildMarketOrdersQuery, hasMoreMarketOrders, MARKET_FILTER_DEFAULTS, MARKET_POLL_MAX_PAGES, matchesMarketFilters, mergeOrdersById } from './contexts/marketplace/marketFilters';
 import { mapApiOrderToUi, formatTokenAmount as formatTokenAmountFromRaw, tokenToNumber as rawTokenToDisplayNumber } from './orderUiModel';
 import { buildApiUrl } from './apiConfig';
 import { fetchWithTimeout, isTimeoutError, DEFAULT_FETCH_TIMEOUT_MS, WRITE_FETCH_TIMEOUT_MS } from './fetchWithTimeout';
@@ -1068,17 +1068,43 @@ export function useAppSessionData({
         const data = await res.json();
         if (isStale()) return;
         if (!Array.isArray(data.orders)) throw new Error('Malformed orders payload');
-        // [TR] Yoklama yalnız 1. sayfayı yeniler; daha önce yüklenen 2+. sayfa emirleri id ile tekilleştirilip sona eklenir.
-        const firstPage = mapOrders(data.orders);
-        const moreIds = marketMoreIdsRef.current;
-        setOrders((prev) => (moreIds.size
-          ? mergeOrdersById(firstPage, prev.filter((o) => moreIds.has(o?.id)))
-          : firstPage));
-        const total = Number.isFinite(data.total) ? data.total : null;
+        // [TR] Yoklama yüklü sayfa sayısı kadar sayfayı (en çok MARKET_POLL_MAX_PAGES) yeniden çeker ve listeyi
+        //      id bazlı baştan kurar: artık dönmeyen (iptal/dolan) emirler 2+. sayfalardan da düşer.
+        // [EN] The poll re-fetches as many pages as are loaded (max MARKET_POLL_MAX_PAGES) and rebuilds the list
+        //      by id, so orders no longer returned (canceled/filled) drop from pages 2+ too.
+        const pagesAtStart = marketPageRef.current;
+        const pollPages = Math.min(pagesAtStart, MARKET_POLL_MAX_PAGES);
+        let rebuilt = mapOrders(data.orders);
+        let lastPageCount = data.orders.length;
+        let total = Number.isFinite(data.total) ? data.total : null;
+        const laterIds = new Set();
+        if (pollPages > 1) {
+          const extra = await Promise.all(Array.from({ length: pollPages - 1 }, async (_, i) => {
+            const pageRes = await fetchWithTimeout(() => buildApiUrl(`${marketOrdersQuery}&page=${i + 2}`), { credentials: 'include', signal: controller?.signal, infra: 'backend' });
+            if (!pageRes.ok) throw new Error(`HTTP ${pageRes.status}`);
+            const pageData = await pageRes.json();
+            if (!Array.isArray(pageData.orders)) throw new Error('Malformed orders payload');
+            return pageData;
+          }));
+          if (isStale()) return;
+          // [TR] Yoklama sürerken "daha fazla yükle" bir sayfa eklediyse bu tur atlanır; sonraki tur kurar.
+          //      Uçuşta "daha fazla yükle" varsa da atlanır: sayfa sayısını daraltıp 6-7. sayfaları boşlukta bırakmasın.
+          if (marketPageRef.current !== pagesAtStart || marketMoreBusyRef.current) return;
+          extra.forEach((pageData) => {
+            const mapped = mapOrders(pageData.orders);
+            mapped.forEach((o) => { if (o?.id !== undefined && o?.id !== null) laterIds.add(o.id); });
+            rebuilt = mergeOrdersById(rebuilt, mapped);
+            lastPageCount = pageData.orders.length;
+            if (Number.isFinite(pageData.total)) total = pageData.total;
+          });
+          marketPageRef.current = pollPages;
+        }
+        marketMoreIdsRef.current = laterIds;
+        setOrders(rebuilt);
         setMarketOrdersTotal(total);
         marketTotalRef.current = total;
-        if (marketPageRef.current === 1) marketLastCountRef.current = data.orders.length;
-        setMarketHasMore(hasMoreMarketOrders({ total, page: marketPageRef.current, lastPageCount: marketLastCountRef.current }));
+        marketLastCountRef.current = lastPageCount;
+        setMarketHasMore(hasMoreMarketOrders({ total, page: marketPageRef.current, lastPageCount }));
         setOrdersFeedError(false);
         ordersLoadedRef.current = true;
       } catch (err) {
@@ -1119,6 +1145,8 @@ export function useAppSessionData({
       const data = await res.json();
       if (seq !== marketMoreSeqRef.current) return;
       if (!Array.isArray(data.orders)) throw new Error('Malformed orders payload');
+      // [TR] Yoklama yüklü sayfa sayısını değiştirdiyse (daralttıysa) bu sonuç atılır; aksi halde sayfalar arasında boşluk kalır.
+      if (marketPageRef.current !== nextPage - 1) return;
       const incoming = mapMarketOrdersRef.current(data.orders);
       incoming.forEach((o) => { if (o?.id !== undefined && o?.id !== null) marketMoreIdsRef.current.add(o.id); });
       setOrders((prev) => mergeOrdersById(prev, incoming));

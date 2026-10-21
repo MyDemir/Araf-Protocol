@@ -55,7 +55,8 @@ export const ChainFallbackTradesPanel = ({ lang = 'EN', chainFallback, compact =
   const [pending, setPending] = React.useState(false);
   const [message, setMessage] = React.useState(null);
   if (!chainFallback?.active) return null;
-  const { trades = [], loading = false, loadedAt = 0, submitManualId, openTrade } = chainFallback;
+  const { trades = [], loading = false, loadedAt = 0, failedIds = [], submitManualId, openTrade } = chainFallback;
+  const failedCount = Array.isArray(failedIds) ? failedIds.length : 0;
 
   const onSubmit = async (e) => {
     e.preventDefault();
@@ -83,6 +84,14 @@ export const ChainFallbackTradesPanel = ({ lang = 'EN', chainFallback, compact =
           'Sunucu işlem listesini veremiyor. Bu cihazda bilinen işlem numaraları doğrudan kontrattan okunur; kontrat son söz sahibidir.',
           'The server cannot provide your trade list. Trade numbers known on this device are read directly from the contract, which has the final say.')}
       </p>
+
+      {failedCount > 0 && (
+        <p data-testid="chain-fallback-failed" role="status" className="mt-3 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-textPrimary">
+          {t(lang,
+            `${failedCount} işlem okunamadı, bilgiler eski olabilir.`,
+            `${failedCount} ${failedCount === 1 ? 'trade' : 'trades'} could not be read, information may be outdated.`)}
+        </p>
+      )}
 
       <ul className="mt-3 space-y-2" data-testid="chain-fallback-list" aria-busy={loading ? 'true' : 'false'}>
         {trades.map((trade) => (
