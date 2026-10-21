@@ -219,6 +219,12 @@ export const mergeChainTradeIntoRoom = (current, fresh, chainState = null) => {
         changed = true;
       }
     }
+    // [TR] F2-04: taze (stale olmayan) okuma odadaki `stale` işaretini kaldırır; yoksa oda kalıcı kilitli kalır.
+    // [EN] F2-04: a fresh (non-stale) read clears the room's `stale` flag, otherwise the room stays locked.
+    if (fresh.stale !== true && 'stale' in next) {
+      delete next.stale;
+      changed = true;
+    }
     return changed ? next : current;
   }
   if (chainState && isTerminalTradeState(chainState) && current.state !== chainState && tradeStateRank(chainState) >= currentRank) {

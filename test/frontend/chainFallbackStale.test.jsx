@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import ChainFallbackTradesPanel from '../../frontend/src/app/contexts/trade-room/ChainFallbackTradesPanel';
 import { buildTradeDecisionModel } from '../../frontend/src/app/contexts/trade-room/tradeDecisionModel';
+import { mergeChainTradeIntoRoom } from '../../frontend/src/app/chainFallback';
 import { PrimaryActionPanel } from '../../frontend/src/app/contexts/trade-room/PrimaryActionPanel';
 import { SecondaryActionsPanel } from '../../frontend/src/app/contexts/trade-room/SecondaryActionsPanel';
 
@@ -75,5 +76,20 @@ describe('F2-04 stale kayitta aksiyonlar', () => {
   it('stale TR metni', () => {
     const model = buildTradeDecisionModel({ ...base, lang: 'TR', trade: { ...base.trade, stale: true } });
     expect(model.globalDisabledReasons.join(' ')).toMatch(/yenilenemedi/);
+  });
+});
+
+describe('F2-04 stale odadan taze okumayla kalkar', () => {
+  it('merge(stale) sonra merge(taze): stale kalkar, model release yeniden acar', () => {
+    const room = { id: null, onchainId: '11', state: 'PAID', _chainFallback: true, paidAt: 5 };
+    const staleRoom = mergeChainTradeIntoRoom(room, { ...room, role: 'maker', stale: true });
+    expect(staleRoom.stale).toBe(true);
+    const freshRoom = mergeChainTradeIntoRoom(staleRoom, { ...room, role: 'maker' });
+    expect(freshRoom.stale).toBeUndefined();
+    expect(freshRoom).not.toBe(staleRoom);
+    expect(buildTradeDecisionModel({ ...base, trade: staleRoom }).globalDisabledReasons.length).toBe(1);
+    expect(buildTradeDecisionModel({ ...base, trade: freshRoom }).globalDisabledReasons.length).toBe(0);
+    // Degisiklik yoksa ayni nesne donmeye devam eder.
+    expect(mergeChainTradeIntoRoom(freshRoom, { ...room, role: 'maker' })).toBe(freshRoom);
   });
 });
