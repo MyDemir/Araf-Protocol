@@ -12,8 +12,9 @@
  *
  * Bu görev:
  *   1. Geniş bir aday havuzu çıkarır (mirror/cache yardımcıdır)
- *   2. Her aday için kontrattan güncel bannedUntil + consecutiveBans okur
- *   3. 90 günlük clean-slate eşiği dolmuşsa decayReputation() çağırır
+ *   2. Her aday için kontrattan güncel bannedUntil + consecutiveBans + lastNegativeEventAt okur
+ *   3. Temiz dönem (cleanPeriod) hem ban bitiminden hem son olumsuz olaydan sonra dolmuşsa
+ *      decayReputation() çağırır (K3-01; kontrat aynı koşulu zorlar, backend yalnız boşuna tx göndermez)
  *   4. ReputationUpdated event'i eventListener tarafından mirror'a yansıtılır
  */
 
@@ -105,17 +106,32 @@ async function runReputationDecay() {
   // [EN] Mirror fields may be stale. This query only builds a candidate pool.
   const candidateLimit = await runtimeValue("REPUTATION_DECAY_CANDIDATE_LIMIT");
   const txLimit = await runtimeValue("REPUTATION_DECAY_TX_LIMIT");
+  const cutoffDate = new Date(cutoffMs);
   const candidates = await User.find({
     consecutive_bans: { $gt: 0 },
-    // [TR] banned_until ban bitince null'lanır; bu yüzden kalıcı last_ban_ends_at esas alınır
-    //      (banned_until yalnız eski kayıtlar için yedek).
-    // [EN] banned_until is nulled on expiry, so the persistent last_ban_ends_at is the primary key.
-    $or: [
-      { last_ban_ends_at: { $ne: null, $lte: new Date(cutoffMs) } },
-      { banned_until: { $ne: null, $lte: new Date(cutoffMs) } },
+    $and: [
+      // [TR] banned_until ban bitince null'lanır; bu yüzden kalıcı last_ban_ends_at esas alınır
+      //      (banned_until yalnız eski kayıtlar için yedek).
+      // [EN] banned_until is nulled on expiry, so the persistent last_ban_ends_at is the primary key.
+      {
+        $or: [
+          { last_ban_ends_at: { $ne: null, $lte: cutoffDate } },
+          { banned_until: { $ne: null, $lte: cutoffDate } },
+        ],
+      },
+      // [TR] K3-01: son olumsuz olaydan sonra temiz dönem dolmamış cüzdan havuzu doldurmasın (eski banlılar
+      //      sıralamada önde olduğu için uygun adayları aç bırakırdı). Ayna zincirin gerisinde kalır, önüne
+      //      geçmez; bu yüzden filtre uygun adayı dışlamaz. Alan yoksa (null) aday kalır, karar zincirde.
+      // [EN] K3-01: wallets whose last negative event is inside the clean period must not fill the pool.
+      {
+        $or: [
+          { "reputation_breakdown.last_negative_event_at": null },
+          { "reputation_breakdown.last_negative_event_at": { $lte: cutoffDate } },
+        ],
+      },
     ],
   })
-    .select("wallet_address consecutive_bans banned_until last_ban_ends_at")
+    .select("wallet_address consecutive_bans banned_until last_ban_ends_at reputation_breakdown.last_negative_event_at")
     .sort({ last_ban_ends_at: 1, banned_until: 1, wallet_address: 1 })
     .limit(candidateLimit)
     .lean();
@@ -131,10 +147,14 @@ async function runReputationDecay() {
       const rep = await contract.getReputation(user.wallet_address);
       const bannedUntil = Number(rep.bannedUntil || 0);
       const consecutiveBans = Number(rep.consecutiveBans || 0);
+      const lastNegativeEventAt = Number(rep.lastNegativeEventAt || 0);
 
       if (!bannedUntil || consecutiveBans <= 0) continue;
       const bannedUntilMs = bannedUntil * 1000;
-      if (bannedUntilMs <= cutoffMs) {
+      // [TR] K3-01: kontrat temiz dönemi son olumsuz olaydan da sayar; dolmadıysa tx revert eder, gönderilmez.
+      // [EN] K3-01: the contract also counts the clean period from the last negative event; skip otherwise.
+      const lastNegativeMs = lastNegativeEventAt * 1000;
+      if (bannedUntilMs <= cutoffMs && lastNegativeMs <= cutoffMs) {
         usersToClean.push(user.wallet_address);
       }
       if (usersToClean.length >= txLimit) break;
