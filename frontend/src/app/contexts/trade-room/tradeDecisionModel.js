@@ -177,7 +177,10 @@ export function buildTradeDecisionModel({
   if (!isConnected) globalDisabledReasons.push(t(lang, 'Cüzdan bağlı değil.', 'Wallet not connected.'));
   if (!isAuthenticated) globalDisabledReasons.push(t(lang, 'Oturum doğrulanmamış.', 'Session is not authenticated.'));
   if (!isSupportedChain) globalDisabledReasons.push(t(lang, 'Desteklenmeyen ağ.', 'Unsupported network.'));
-  if (isPaused) globalDisabledReasons.push(t(lang, 'Sistem bakım modunda.', 'System is in maintenance mode.'));
+  // [TR] F3-01: Kontratta yalnız createSellOrder/fillSellOrder/createBuyOrder/fillBuyOrder whenNotPaused'tır.
+  //      Pause'da release/ping/itiraz/iptal/yakım kapanmaz; bu yüzden isPaused kapı nedeni değil, yalnız bilgidir.
+  // [EN] F3-01: only order create/fill are whenNotPaused on-chain. Exit actions stay open during a pause, so
+  //      isPaused is an informational notice here, not a disabled reason.
 
   const primaryDisabledReasons = [...globalDisabledReasons];
 
@@ -256,7 +259,9 @@ export function buildTradeDecisionModel({
     // [TR] Maker itiraz sonrası da her an serbest bırakabilir; taker'ın yolu uzlaşma kartıdır.
     // [EN] The maker can still release at any time; the taker's path is the settlement card.
     primaryAction = normalizedRole === 'maker'
-      ? action('contract', 'release_funds', t(lang, 'Ödemeyi Onayla', 'Release Funds'), null)
+      ? action('contract', 'release_funds', t(lang, 'Ödemeyi Onayla', 'Release Funds'), t(lang,
+        'Ödemeyi onaylarsanız itirazınızdan vazgeçmiş olursunuz: işlem "itirazlı serbest bırakma" olarak kapanır ve itibar kaydınıza işlenir. Göndermeden önce onay penceresi açılır.',
+        'Releasing abandons your challenge: the trade closes as a disputed release and is recorded in your reputation. A confirmation step opens before anything is sent.'))
       : chainFallback
         ? action('waiting', 'chain_fallback_exits', t(lang, 'Uzlaşma teklifleri şu an gösterilemiyor', 'Settlement offers cannot be shown right now'), t(lang,
           'Sunucuya ulaşılamıyor. Kontrattaki çıkışlar açık: karşılıklı iptal teklif edebilirsiniz; satıcı her an serbest bırakabilir; 240 saatlik süre dolunca yakım herkes tarafından tetiklenebilir.',
@@ -292,6 +297,12 @@ export function buildTradeDecisionModel({
     primaryAction = action('info', 'trade_closed', '', null);
     secondaryActions = [];
     primaryDisabledReasons.length = 0;
+  }
+
+  if (isPaused && !TERMINAL_TRADE_STATES.includes(normalizedState)) {
+    guidance.push(t(lang,
+      'Sistem bakım modunda: yeni işlem açılamaz, mevcut işlemler kapanabilir.',
+      'System is paused: new trades cannot be opened, existing trades can still be closed.'));
   }
 
   const decisionSummary = buildDecisionSummary(normalizedState, normalizedRole, lang);
