@@ -397,6 +397,7 @@ export function useAppSessionData({
   const showToastRef = React.useRef(showToast);
   const langRef = React.useRef(lang);
   const sessionToastShownRef = React.useRef(false);
+  const refreshTransientToastShownRef = React.useRef(false);
   // [TR] Yarış koruması: oturum dönemi (logout/cüzdan değişimi) ve istek sıra numaraları (F10).
   const sessionEpochRef = React.useRef(0);
   const tradesSeqRef = React.useRef(0);
@@ -527,6 +528,22 @@ export function useAppSessionData({
         body: JSON.stringify({ wallet: address?.toLowerCase() }),
       });
 
+      // [TR] Yalnız 401 oturumun bittiği anlamına gelir. 503/diğer hatalar geçici altyapı sorunudur:
+      //      oturum korunur, tekrar deneme yapılmaz, orijinal 401 yanıtı çağırana döner.
+      // [EN] Only 401 ends the session; 503/other failures keep it, no retry, original response returned.
+      if (!refreshRes.ok && refreshRes.status !== 401) {
+        if (!suppressAuthToast && !refreshTransientToastShownRef.current) {
+          refreshTransientToastShownRef.current = true;
+          showToast(
+            lang === 'TR'
+              ? 'Geçici bağlantı sorunu, tekrar deneyin.'
+              : 'Temporary connection problem, please try again.',
+            'error'
+          );
+        }
+        return res;
+      }
+
       if (!refreshRes.ok) {
         clearLocalSessionState({ navigateHome: false, closeModals: true });
         if (!suppressAuthToast && !sessionToastShownRef.current) {
@@ -544,6 +561,7 @@ export function useAppSessionData({
       // [TR] Oturum başarıyla yenilendiğinde auth-toast dalgası sıfırlanır.
       // [EN] Reset auth-toast wave only after successful session refresh.
       sessionToastShownRef.current = false;
+      refreshTransientToastShownRef.current = false;
 
       return timedFetch(url, {
         ...requestOptions,
