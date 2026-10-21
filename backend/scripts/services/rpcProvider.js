@@ -24,6 +24,9 @@ const RPC_RATE_KEY = "RPC_MAX_REQUESTS_PER_SEC";
 const RATE_WINDOW_MS = 1_000;
 const RATE_QUEUE_MAX = 200;
 const RATE_QUEUE_MAX_WAIT_MS = 30_000;
+// [TR] HTTP istek üst süresi (ethers varsayılanı 300 sn). Büyük eth_getLogs için ayrı, daha uzun süre.
+const RPC_REQUEST_TIMEOUT_MS = 10_000;
+const RPC_LOGS_REQUEST_TIMEOUT_MS = 60_000;
 
 function _errText(err) {
   const parts = [err?.message, err?.shortMessage, err?.info?.responseBody, err?.info?.error?.message, err?.error?.message];
@@ -93,12 +96,13 @@ function getRpcUrls(env = process.env) {
   return urls;
 }
 
-function _newFetchRequest(url) {
+function _newFetchRequest(url, timeoutMs = RPC_REQUEST_TIMEOUT_MS) {
   if (typeof ethers.FetchRequest !== "function") return url; // (yalnız ethers'ı taklit eden testler)
   const req = new ethers.FetchRequest(url);
   // [TR] ethers'ın dahili 429 yeniden denemesi KAPALI (maxAttempts: 1): iç yeniden deneme hız sınırlayıcıyı atlar
   //      ve 429 fırtınası yaratır. Yeniden deneme/geri çekilme havuzun soğuma + fallback mantığına bırakılır.
   req.setThrottleParams({ maxAttempts: 1, slotInterval: 250 });
+  req.timeout = timeoutMs;
   return req;
 }
 
@@ -186,6 +190,26 @@ function createRateLimiter({
   }
 
   return { acquire, get queued() { return queue.length; } };
+}
+
+/** [TR] eth_getLogs içeren yük mü? (daha uzun üst süre) */
+function _hasGetLogs(payload) {
+  const items = Array.isArray(payload) ? payload : [payload];
+  return items.some((p) => p?.method === "eth_getLogs");
+}
+
+/** [TR] Yük başına üst süre: getLogs uzun, diğerleri kısa. Aşılırsa TIMEOUT kodlu hata (ağ hatası sınıfı). */
+function _withRequestTimeout(promise, payload) {
+  const ms = _hasGetLogs(payload) ? RPC_LOGS_REQUEST_TIMEOUT_MS : RPC_REQUEST_TIMEOUT_MS;
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const e = new Error(`[RpcPool] RPC isteği zaman aşımı (${ms} ms)`);
+      e.code = "TIMEOUT";
+      reject(e);
+    }, ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 function _safeError(err) {
@@ -279,7 +303,7 @@ function createRpcPool({ urls, surface = "RpcPool", probeFor = createChainProbe,
       }
       try {
         await entry.limiter.acquire();
-        const result = await innerFor(entry)._send(payload);
+        const result = await _withRequestTimeout(Promise.resolve(innerFor(entry)._send(payload)), payload);
         const soft = _jsonRpcLevelError(result);
         if (soft) throw soft;
         return result;
@@ -332,7 +356,8 @@ function _expectedNetworkOrNull() {
 }
 
 function _buildJsonRpcProvider(url, network) {
-  const req = _newFetchRequest(url);
+  // [TR] HTTP katmanı en uzun süreye (getLogs) göre; kısa istekler _withRequestTimeout ile 10 sn'de kesilir.
+  const req = _newFetchRequest(url, RPC_LOGS_REQUEST_TIMEOUT_MS);
   // [TR] batchMaxCount: 1 -> toplu JSON-RPC yok; her istek ayrı gider ve hız sınırlayıcıdan ayrı ayrı geçer.
   return network
     ? new ethers.JsonRpcProvider(req, network, { staticNetwork: network, batchMaxCount: 1 })
@@ -393,6 +418,8 @@ module.exports = {
   createChainProbe,
   createRateLimiter,
   _buildJsonRpcProvider,
+  RPC_REQUEST_TIMEOUT_MS,
+  RPC_LOGS_REQUEST_TIMEOUT_MS,
   getRpcUrls,
   classifyRpcError,
   isRateLimitError,

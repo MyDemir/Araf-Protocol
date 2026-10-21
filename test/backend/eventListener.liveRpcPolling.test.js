@@ -30,7 +30,7 @@ describe("eventListener timer-driven live polling", () => {
     worker._lastSafeCheckpointBlock = 100;
     worker.provider = { on: jest.fn(), getBlockNumber: jest.fn().mockResolvedValue(125) };
     worker._pollLiveRange = jest.fn().mockResolvedValue(undefined);
-    worker._computeFinalizedUpTo = jest.fn().mockReturnValue(0);
+    worker._computeFinalizedUpTo = jest.fn((h) => h - 5); // B1-02: canlı tur head - derinlik (5) kadar okur
     worker._shouldTriggerLiveReplay = jest.fn().mockReturnValue(false);
   });
 
@@ -51,11 +51,11 @@ describe("eventListener timer-driven live polling", () => {
     worker._stopWatchdog();
   });
 
-  it("one tick = one eth_blockNumber; range [last+1, head] is split by WORKER_BLOCK_BATCH_SIZE", async () => {
+  it("one tick = one eth_blockNumber; range [last+1, head - depth] is split by WORKER_BLOCK_BATCH_SIZE", async () => {
     await worker._liveTick();
     expect(worker.provider.getBlockNumber).toHaveBeenCalledTimes(1);
-    expect(worker._pollLiveRange.mock.calls).toEqual([[101, 110], [111, 120], [121, 125]]);
-    expect(worker._lastLivePolledBlock).toBe(125);
+    expect(worker._pollLiveRange.mock.calls).toEqual([[101, 110], [111, 120]]);
+    expect(worker._lastLivePolledBlock).toBe(120);
   });
 
   it("ticks fire at the interval (default 15s), not per block", async () => {
@@ -81,8 +81,8 @@ describe("eventListener timer-driven live polling", () => {
     expect(firstBackoff).toBe(30_000); // 15s x2
 
     await worker._liveTick(); // hâlâ 429 yok: toparlandı mı?
-    expect(worker._pollLiveRange).toHaveBeenLastCalledWith(121, 125);
-    expect(worker._lastLivePolledBlock).toBe(125);
+    expect(worker._pollLiveRange).toHaveBeenLastCalledWith(111, 120);
+    expect(worker._lastLivePolledBlock).toBe(120);
     expect(worker._pollLiveRange).toHaveBeenCalledWith(111, 120); // kaçan aralık yeniden okundu
     expect(worker._rpcRateLimited).toBe(false);
   });
