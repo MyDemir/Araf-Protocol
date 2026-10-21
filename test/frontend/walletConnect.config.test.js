@@ -46,12 +46,21 @@ describe('WalletConnect project id validation', () => {
     expect(o).toEqual({
       projectId: ID,
       showQrModal: true,
-      metadata: { name: 'Araf Protocol', description: 'Araf Protocol', url: 'https://araf.example.app', icons: ['https://araf.example.app/icon-192.png'] },
+      metadata: { name: 'Araf Protocol', description: 'Araf Protocol', url: 'https://araf.example.app', icons: ['https://araf.example.app/icon-192.png'], redirect: { universal: 'https://araf.example.app' } },
     });
     const p = resolveWalletConnectOptions({ VITE_WALLETCONNECT_PROJECT_ID: ID, VITE_PUBLIC_URL: 'https://pub.example.app/' }, { location: { origin: 'https://other.app' } });
     expect(p.metadata.url).toBe('https://pub.example.app');
     expect(p.metadata.icons).toEqual(['https://pub.example.app/icon-192.png']);
     expect(buildWalletConnectMetadata({ origin: '' }).icons).toEqual([]);
+  });
+
+  it('metadata.redirect.universal equals url when base exists; no redirect (and no native) otherwise', () => {
+    const m = buildWalletConnectMetadata({ publicUrl: 'https://pub.example.app/', origin: 'https://o.app' });
+    expect(m.redirect).toEqual({ universal: 'https://pub.example.app' });
+    expect(m.redirect.universal).toBe(m.url);
+    expect(m.redirect).not.toHaveProperty('native');
+    expect('redirect' in buildWalletConnectMetadata({ origin: '' })).toBe(false);
+    expect('redirect' in buildWalletConnectMetadata()).toBe(false);
   });
 });
 

@@ -117,7 +117,7 @@ describe("auth refresh + nonce hardening", () => {
   });
 
   it("refresh route fails closed and clears cookies on expectedWallet mismatch", async () => {
-    const rotateRefreshToken = jest.fn().mockRejectedValue(new Error("Token/wallet uyuşmazlığı. Güvenlik ihlali tespit edildi."));
+    const rotateRefreshToken = jest.fn().mockRejectedValue(Object.assign(new Error("Token/wallet uyuşmazlığı. Güvenlik ihlali tespit edildi."), { isAuthError: true, code: "TOKEN_WALLET_MISMATCH" }));
     let authRouter;
     jest.isolateModules(() => {
       jest.doMock("../../backend/scripts/middleware/rateLimiter", () => ({
@@ -165,7 +165,7 @@ describe("auth refresh + nonce hardening", () => {
   it("concurrent refresh calls for same token cannot both succeed", async () => {
     let consumed = false;
     const rotateRefreshToken = jest.fn(async () => {
-      if (consumed) throw new Error("Refresh token geçersiz veya süresi dolmuş. Lütfen yeniden giriş yapın.");
+      if (consumed) throw Object.assign(new Error("Refresh token geçersiz veya süresi dolmuş. Lütfen yeniden giriş yapın."), { isAuthError: true, code: "REFRESH_INVALID" });
       consumed = true;
       return {
         token: "new.jwt.token",

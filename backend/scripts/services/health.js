@@ -68,6 +68,17 @@ function _collectProductionCorsConfigDiagnostics(rawAllowedOrigins) {
   return diagnostics;
 }
 
+const READINESS_RPC_TIMEOUT_MS = 4_000;
+
+// [TR] /ready RPC çağrıları takılırsa istek asılı kalmasın: üst süre aşılırsa provider hazır değil sayılır.
+function _withReadinessTimeout(promise, ms = READINESS_RPC_TIMEOUT_MS) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`readiness rpc timeout (${ms} ms)`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 async function getReadiness({ worker, provider } = {}) {
   const isProduction = process.env.NODE_ENV === "production";
   const mongoReady = mongoose.connection.readyState === 1;
@@ -87,9 +98,9 @@ async function getReadiness({ worker, provider } = {}) {
 
   try {
     if (provider) {
-      currentBlock = await provider.getBlockNumber();
+      currentBlock = await _withReadinessTimeout(provider.getBlockNumber());
       providerReady = Number.isInteger(currentBlock);
-      const network = await provider.getNetwork();
+      const network = await _withReadinessTimeout(provider.getNetwork());
       providerChainId = Number(network?.chainId);
     } else {
       providerReady = Boolean(worker?.provider);
