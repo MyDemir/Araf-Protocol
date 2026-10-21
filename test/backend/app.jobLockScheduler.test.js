@@ -4,6 +4,7 @@
 // kilit başka makinedeyken iş çalışmaz (fail-closed).
 
 const express = require("express");
+const { lockKey } = require("../../backend/scripts/services/jobLock");
 
 const ADDR = "0x" + "a".repeat(40);
 const ROUTES = ["logs", "auth", "orders", "trades", "pii", "feedback", "stats", "receipts", "admin", "referenceRates", "rewards", "socialLinks"];
@@ -90,8 +91,8 @@ describe("app scheduler distributed job lock (B4-05)", () => {
     const { processDLQ } = await boot(redis);
     await jest.advanceTimersByTimeAsync(61_000);
     expect(processDLQ).toHaveBeenCalledTimes(1);
-    const [key, token, opts] = redis.set.mock.calls.find((c) => c[0] === "lock:job:dlq");
-    expect(key).toBe("lock:job:dlq");
+    const [key, token, opts] = redis.set.mock.calls.find((c) => c[0] === lockKey("dlq"));
+    expect(key).toBe(lockKey("dlq"));
     expect(typeof token).toBe("string");
     expect(token.length).toBeGreaterThanOrEqual(16);
     expect(opts).toMatchObject({ NX: true });

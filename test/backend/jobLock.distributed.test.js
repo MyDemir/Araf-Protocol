@@ -4,7 +4,7 @@
 
 jest.mock("../../backend/scripts/utils/logger", () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }));
 
-const { createJobLock, RENEW_LUA } = require("../../backend/scripts/services/jobLock");
+const { createJobLock, lockKey, RENEW_LUA } = require("../../backend/scripts/services/jobLock");
 
 // Lua'yı çalıştırmayan, ama SET NX PX / compare-and-del / compare-and-pexpire anlamını birebir uygulayan sahte Redis.
 function makeFakeRedis() {
@@ -78,17 +78,17 @@ describe("jobLock (B4-05)", () => {
     const other = createJobLock({ getClient: () => redis, token: "other" });
 
     expect((await owner.acquire("dlq")).status).toBe("acquired");
-    expect(redis.kv.get("lock:job:dlq")).toBe("owner");
+    expect(redis.kv.get(lockKey("dlq"))).toBe("owner");
 
     expect(await other.release("dlq")).toBe(0);
-    expect(redis.kv.get("lock:job:dlq")).toBe("owner"); // hâlâ sahibinde
+    expect(redis.kv.get(lockKey("dlq"))).toBe("owner"); // hâlâ sahibinde
 
     // yenileme de yalnız sahibine
     expect(await other.renew("dlq")).toBe(0);
     expect(await owner.renew("dlq")).toBe(1);
 
     expect(await owner.release("dlq")).toBe(1);
-    expect(redis.kv.has("lock:job:dlq")).toBe(false);
+    expect(redis.kv.has(lockKey("dlq"))).toBe(false);
   });
 
   it("(c) Redis SET hatasında iş ÇALIŞMAZ (fail-closed)", async () => {
@@ -123,7 +123,7 @@ describe("jobLock (B4-05)", () => {
     const redis = makeFakeRedis();
     const lock = createJobLock({ getClient: () => redis, token: "m" });
     await expect(lock.runExclusive("dlq", async () => { throw new Error("boom"); })).rejects.toThrow("boom");
-    expect(redis.kv.has("lock:job:dlq")).toBe(false);
+    expect(redis.kv.has(lockKey("dlq"))).toBe(false);
   });
 
   it("uzun işte kilit periyodik yenilenir", async () => {
@@ -132,6 +132,6 @@ describe("jobLock (B4-05)", () => {
     await lock.runExclusive("dlq", () => new Promise((r) => setTimeout(r, 80)));
     const renews = redis.eval.mock.calls.filter((c) => c[0] === RENEW_LUA);
     expect(renews.length).toBeGreaterThanOrEqual(1);
-    expect(redis.kv.has("lock:job:dlq")).toBe(false);
+    expect(redis.kv.has(lockKey("dlq"))).toBe(false);
   });
 });

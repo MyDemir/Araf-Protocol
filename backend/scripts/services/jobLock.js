@@ -22,6 +22,22 @@ const logger = require("../utils/logger");
 
 const KEY_PREFIX = "lock:job:";
 
+/**
+ * [TR] ONAY 4: anahtar `lock:job:<chainId>:<escrow küçük harf>:<iş>`; aynı Redis'i paylaşan ortamlar (staging/prod,
+ *      eski/yeni escrow) birbirini engellemez. chainId ya da escrow boşsa FAIL-CLOSED (throw -> iş atlanır);
+ *      yalnız NODE_ENV==='test' iken eski kısa biçime düşer.
+ * [EN] Key is scoped by chainId + escrow. Missing either -> throws (job skipped), except under NODE_ENV=test.
+ */
+function lockKey(jobKey) {
+  const escrow = String(process.env.ARAF_ESCROW_ADDRESS || "").trim().toLowerCase();
+  const chainId = String(process.env.EXPECTED_CHAIN_ID || "").trim();
+  if (!escrow || !chainId) {
+    if (process.env.NODE_ENV === "test") return `${KEY_PREFIX}${jobKey}`;
+    throw new Error("Kilit anahtarı için ARAF_ESCROW_ADDRESS ve EXPECTED_CHAIN_ID gerekli");
+  }
+  return `${KEY_PREFIX}${chainId}:${escrow}:${jobKey}`;
+}
+
 const RELEASE_LUA =
   "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
 const RENEW_LUA =
@@ -45,7 +61,7 @@ function createJobLock({ getClient, token, ttlMs, commandTimeoutMs } = {}) {
   const lockToken = token || crypto.randomBytes(16).toString("hex");
   const ttl = () => ttlMs || _posIntEnv("JOB_LOCK_TTL_MS", 120_000);
   const cmdTimeout = () => commandTimeoutMs || _posIntEnv("JOB_LOCK_COMMAND_TIMEOUT_MS", 5_000);
-  const keyOf = (jobKey) => `${KEY_PREFIX}${jobKey}`;
+  const keyOf = lockKey;
 
   async function acquire(jobKey) {
     const redis = getClient();
@@ -149,4 +165,4 @@ function getDefaultJobLock() {
 
 const runExclusive = (jobKey, fn) => getDefaultJobLock().runExclusive(jobKey, fn);
 
-module.exports = { createJobLock, runExclusive, RELEASE_LUA, RENEW_LUA, KEY_PREFIX };
+module.exports = { createJobLock, runExclusive, lockKey, RELEASE_LUA, RENEW_LUA, KEY_PREFIX };

@@ -5,7 +5,7 @@
 
 jest.mock("../../backend/scripts/utils/logger", () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }));
 
-const { createJobLock, RENEW_LUA } = require("../../backend/scripts/services/jobLock");
+const { createJobLock, lockKey, RENEW_LUA } = require("../../backend/scripts/services/jobLock");
 
 function fakeRedis({ renew }) {
   const kv = new Map();
@@ -81,6 +81,54 @@ describe("jobLock: istemci yok / set yok (D2)", () => {
     const lock = createJobLock({ getClient: () => ({ get: jest.fn() }), token: "m" });
     const job = jest.fn(async () => 5);
     expect(await lock.runExclusive("dlq", job)).toMatchObject({ ran: true, result: 5 });
+  });
+});
+
+describe("jobLock: anahtar escrow + chainId'ye bağlı (ONAY 4)", () => {
+  const saved = { ...process.env };
+  afterEach(() => { process.env = { ...saved }; });
+  const ESC_A = "0x" + "A".repeat(40);
+  const ESC_B = "0x" + "b".repeat(40);
+
+  it("farklı escrow ya da chainId -> farklı anahtar (küçük harf)", () => {
+    process.env.EXPECTED_CHAIN_ID = "8453";
+    process.env.ARAF_ESCROW_ADDRESS = ESC_A;
+    const a = lockKey("dlq");
+    expect(a).toBe(`lock:job:8453:0x${"a".repeat(40)}:dlq`);
+    process.env.ARAF_ESCROW_ADDRESS = ESC_B;
+    expect(lockKey("dlq")).not.toBe(a);
+    process.env.EXPECTED_CHAIN_ID = "84532";
+    expect(lockKey("dlq")).toBe(`lock:job:84532:${ESC_B}:dlq`);
+  });
+
+  it("farklı escrow'daki iki ortam aynı Redis'te birbirini engellemez", async () => {
+    const redis = fakeRedis({ renew: () => 1 });
+    const lock = createJobLock({ getClient: () => redis, token: "m" });
+    process.env.EXPECTED_CHAIN_ID = "8453";
+    process.env.ARAF_ESCROW_ADDRESS = ESC_A;
+    expect((await lock.acquire("dlq")).status).toBe("acquired");
+    process.env.ARAF_ESCROW_ADDRESS = ESC_B;
+    expect((await createJobLock({ getClient: () => redis, token: "n" }).acquire("dlq")).status).toBe("acquired");
+  });
+
+  it.each([["ARAF_ESCROW_ADDRESS"], ["EXPECTED_CHAIN_ID"]])("%s boşsa (test dışı) iş atlanır, Redis'e dokunulmaz", async (name) => {
+    process.env.NODE_ENV = "production";
+    process.env.EXPECTED_CHAIN_ID = "8453";
+    process.env.ARAF_ESCROW_ADDRESS = ESC_A;
+    process.env[name] = "";
+    const redis = fakeRedis({ renew: () => 1 });
+    const lock = createJobLock({ getClient: () => redis, token: "m" });
+    const job = jest.fn();
+    expect(await lock.runExclusive("dlq", job)).toEqual({ ran: false, skipped: "lock_redis_unavailable" });
+    expect(job).not.toHaveBeenCalled();
+    expect(redis.set).not.toHaveBeenCalled();
+  });
+
+  it("NODE_ENV=test iken boş env kısa anahtara düşer", () => {
+    process.env.NODE_ENV = "test";
+    process.env.ARAF_ESCROW_ADDRESS = "";
+    process.env.EXPECTED_CHAIN_ID = "";
+    expect(lockKey("dlq")).toBe("lock:job:dlq");
   });
 });
 
