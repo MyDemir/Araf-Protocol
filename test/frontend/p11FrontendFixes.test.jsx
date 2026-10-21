@@ -75,3 +75,37 @@ describe('F4-05: PII metinleri uçtan uca şifreleme iddia etmez', () => {
     expect(piiCopy.en.encryptedBadge).toBe('Encrypted at rest and sent over TLS');
   });
 });
+
+describe('C2: panoya yazma reddedilir ve execCommand false döner -> hata etiketi', () => {
+  it('Copy Routing "Copy failed" gösterir', async () => {
+    const user = userEvent.setup();
+    Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true });
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) }, configurable: true });
+    document.execCommand = vi.fn(() => false);
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ piiToken: 't' }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ payoutProfile: { rail: 'US_ACH', fields: { account_holder_name: 'John Doe', routing_number: '021000021', account_number: '000123456789' } } }) });
+    render(<PIIDisplay tradeId="trade-us" lang="EN" />);
+    await user.click(screen.getByRole('button', { name: /Reveal/i }));
+    await waitFor(() => expect(screen.getByText('John Doe')).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: /Copy Routing/i }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /Copy failed/i })).toBeInTheDocument());
+    expect(document.execCommand).toHaveBeenCalledWith('copy');
+  });
+});
+
+describe('C3: büyük değerler ve sembolsüz tutar', () => {
+  it('18 ondalık ve 2^64 üstü değer biçimlenir', () => {
+    render(<SettlementProposalCard {...cardProps({ crypto: 'DAI', tokenDecimals: 18, settlementProposal: { state: 'FINALIZED', makerPayout: '1500000000000000000', takerPayout: '18446744073709551616000000000000000000' } })} />);
+    expect(screen.getByText(/^1\.5\d? DAI$/)).toBeInTheDocument();
+    const taker = screen.getByText(/Taker payout/).querySelector('span').textContent;
+    expect(taker.endsWith(' DAI')).toBe(true);
+    expect(taker.replace(/\D/g, '').startsWith('18446744073709551616')).toBe(true);
+  });
+
+  it('sembol yoksa birimsiz sayı gösterilir', () => {
+    render(<SettlementProposalCard {...cardProps({ tokenDecimals: 6, settlementProposal: { state: 'FINALIZED', makerPayout: '950000', takerPayout: '50000' } })} />);
+    expect(screen.getByText('0.95')).toBeInTheDocument();
+    expect(screen.getByText('0.05')).toBeInTheDocument();
+  });
+});

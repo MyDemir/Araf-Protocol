@@ -74,13 +74,14 @@ export function useChainFallbackTrades({
       if (result.terminalIds.length) removeKnownTradeIds(scope, result.terminalIds);
       // [TR] Okunamayan id'ler için önceki başarılı sonuç korunur (id bazlı birleştirme); liste kısmi sonuçla ezilmez.
       // [EN] For ids that failed to read, keep the previous successful result (per-id merge).
+      //      Kept rows carry `stale: true` (cleared by any successful read) so the UI can mark them as unconfirmed.
       const failed = Array.isArray(result.failedIds) ? result.failedIds : [];
       if (failed.length) {
         const failedSet = new Set(failed);
         setTrades((prev) => {
           const kept = prev.filter((t) => failedSet.has(String(t.onchainId)));
           const freshIds = new Set(result.trades.map((t) => String(t.onchainId)));
-          return [...result.trades, ...kept.filter((t) => !freshIds.has(String(t.onchainId)))];
+          return [...result.trades, ...kept.filter((t) => !freshIds.has(String(t.onchainId))).map((t) => ({ ...t, stale: true }))];
         });
         setStates((prev) => {
           const next = { ...result.states };

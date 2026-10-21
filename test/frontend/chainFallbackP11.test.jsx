@@ -64,3 +64,33 @@ describe('F2-04: başarısız okumalar önceki sonucu korur ve failedIds açıl�
     expect(result.current.failedIds).toEqual(['2']);
   });
 });
+
+describe('C1: korunan kayıtlar stale işaretlenir, başarılı okuma işareti kaldırır', () => {
+  const ESCROW = '0x3333333333333333333333333333333333333333';
+  const scope = { wallet: ME, escrow: ESCROW, chainId: 84532 };
+  beforeEach(() => window.localStorage.clear());
+
+  it('okunamayan id stale:true olur; sonraki başarılı okumada stale kalkar', async () => {
+    addKnownTradeIds(scope, ['1', '2']);
+    let fail = false;
+    const raws = { 1: chainTrade({ id: 1, state: 'PAID', paidAt: 1_700_000_100 }), 2: chainTrade({ id: 2, state: 'PAID', paidAt: 1_700_000_100 }) };
+    const readTrade = vi.fn(async (id) => (fail && id === '2' ? null : raws[id]));
+    let now = 1_000_000;
+    const props = { enabled: true, viewActive: true, address: ME, chainId: 84532, escrowAddress: ESCROW, readTrade, supportedTokens: { USDT }, tokenDecimalsMap: { USDT: 6 }, nowFn: () => now };
+    const { result } = renderHook(() => useChainFallbackTrades(props));
+    await waitFor(() => expect(result.current.loadedAt).toBeGreaterThan(0));
+    expect(result.current.trades.some((t) => t.stale)).toBe(false);
+
+    fail = true;
+    now += 60_000;
+    await act(async () => { await result.current.refresh(); });
+    const byId = (id) => result.current.trades.find((t) => t.onchainId === id);
+    expect(byId('2').stale).toBe(true);
+    expect(byId('1').stale).toBeUndefined();
+
+    fail = false;
+    now += 60_000;
+    await act(async () => { await result.current.refresh(); });
+    expect(byId('2').stale).toBeUndefined();
+  });
+});
