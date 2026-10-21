@@ -233,6 +233,42 @@ describe('workflow YAML sertlestirmeleri (K4-03/04/08/09/20d)', function () {
   });
 });
 
+describe('action sabitleme (K4-06)', function () {
+  const dir = path.join(ROOT, '.github/workflows');
+  const files = fs.readdirSync(dir).filter((f) => /\.ya?ml$/.test(f));
+
+  it('her uses: 40 haneli commit SHA + surum yorumu tasir', function () {
+    let n = 0;
+    for (const f of files) {
+      for (const line of fs.readFileSync(path.join(dir, f), 'utf8').split('\n')) {
+        const m = line.match(/^\s*(?:-\s+)?uses:\s*(\S+)(.*)$/);
+        if (!m) continue;
+        n += 1;
+        expect(m[1], `${f}: ${line}`).to.match(/^[\w.-]+\/[\w./-]+@[0-9a-f]{40}$/);
+        expect(m[2], `${f}: ${line}`).to.match(/^\s+#\s*v?\d+(\.\d+)*\s*$/);
+      }
+    }
+    expect(n).to.be.greaterThan(10);
+  });
+
+  it('setup-flyctl adimlari sabit surum alir (latest degil)', function () {
+    const yaml = require('js-yaml');
+    let n = 0;
+    for (const f of files) {
+      const wf = yaml.load(fs.readFileSync(path.join(dir, f), 'utf8'));
+      for (const job of Object.values(wf.jobs)) {
+        for (const s of job.steps || []) {
+          if (s.uses && s.uses.includes('setup-flyctl')) {
+            n += 1;
+            expect(s.with && s.with.version, `${f}: ${s.name}`).to.match(/^\d+\.\d+\.\d+$/);
+          }
+        }
+      }
+    }
+    expect(n).to.equal(3);
+  });
+});
+
 describe('fly-machines-lib.sh: capture_started gecis durumlari (K4-13)', function () {
   const LIB = path.join(ROOT, '.github/scripts/fly-machines-lib.sh');
   function capture(states, extra = {}) {
