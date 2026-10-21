@@ -151,10 +151,11 @@ async function runReputationDecay() {
 
       if (!bannedUntil || consecutiveBans <= 0) continue;
       const bannedUntilMs = bannedUntil * 1000;
-      // [TR] K3-01: kontrat temiz dönemi son olumsuz olaydan da sayar; dolmadıysa tx revert eder, gönderilmez.
-      // [EN] K3-01: the contract also counts the clean period from the last negative event; skip otherwise.
+      // [TR] K3-01: kontrat temiz dönemi son olumsuz olaydan da sayar ve eşitlikte revert eder
+      //      (block.timestamp <= lastNeg + cleanPeriod); aday yalnız lastNeg + cleanPeriod < şimdi ise seçilir.
+      // [EN] K3-01: the contract reverts on equality, so a candidate needs lastNeg + cleanPeriod < now.
       const lastNegativeMs = lastNegativeEventAt * 1000;
-      if (bannedUntilMs <= cutoffMs && lastNegativeMs <= cutoffMs) {
+      if (bannedUntilMs <= cutoffMs && lastNegativeMs < cutoffMs) {
         usersToClean.push(user.wallet_address);
       }
       if (usersToClean.length >= txLimit) break;

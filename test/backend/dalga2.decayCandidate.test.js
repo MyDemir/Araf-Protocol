@@ -132,18 +132,21 @@ describe("dalga2: decay adayı son olumsuz olaydan sonra temiz dönemi bekler", 
     expect(res.candidates).toBe(0);
   });
 
-  it("sınır: son olumsuz olay tam cleanPeriod önce ise aday, bir saniye sonra ise değil", async () => {
+  it("sınır (kontratla aynı): lastNeg + cleanPeriod == şimdi ise aday değil, bir saniye önce ise aday", async () => {
+    // [TR] Kontrat eşitlikte revert eder (block.timestamp <= lastNeg + cleanPeriod).
     const banEnd = NOW_S - 200 * DAY_S;
-    const W_LATE = "0x" + "55".repeat(20);
-    mockUsers.push(user(W_EDGE, banEnd, NOW_S - CLEAN_S), user(W_LATE, banEnd, NOW_S - CLEAN_S + 1));
+    const W_EARLY = "0x" + "55".repeat(20);
+    const lastNegOf = { [W_EDGE]: NOW_S - CLEAN_S, [W_EARLY]: NOW_S - CLEAN_S - 1 };
+    mockUsers.push(user(W_EDGE, banEnd, lastNegOf[W_EDGE]), user(W_EARLY, banEnd, lastNegOf[W_EARLY]));
     mockGetReputation.mockImplementation(async (w) => ({
       bannedUntil: BigInt(banEnd),
       consecutiveBans: 1n,
-      lastNegativeEventAt: BigInt(w === W_EDGE ? NOW_S - CLEAN_S : NOW_S - CLEAN_S + 1),
+      lastNegativeEventAt: BigInt(lastNegOf[w]),
     }));
 
     await runReputationDecay();
+    expect(mockGetReputation).toHaveBeenCalledWith(W_EDGE);
     expect(mockDecay).toHaveBeenCalledTimes(1);
-    expect(mockDecay).toHaveBeenCalledWith(W_EDGE);
+    expect(mockDecay).toHaveBeenCalledWith(W_EARLY);
   });
 });
