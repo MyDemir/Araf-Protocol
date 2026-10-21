@@ -2,6 +2,7 @@ import { keccak256, stringToHex } from 'viem';
 import { normalizeOrderSide, resolveOrderActionFns, resolvePaymentRiskEntry } from '../orderUiModel';
 import { buildApiUrl } from '../apiConfig';
 import { fmtNum } from '../copy';
+import { getOrderRiskGateMessage } from '../copy/paymentRisk';
 import { computeCreateAllowance } from './allowanceMath';
 import { checkTokenBalance } from './balanceGuard';
 import { computeMinFillRaw, parseDecimalToUnits } from './decimalUnits';
@@ -217,7 +218,29 @@ export const buildCreateOrderAction = ({
     return;
   }
 
-  const canonicalPayoutProfile = canonicalizePayoutProfileDraft(payoutProfileDraft || {});
+  // [TR] Risk ve RESTRICTED kontrolü KAYITLI profilden (pii/my) türer, taslaktan değil. Taslağın rail/country'si
+  //      kayıtlıdan farklıysa emir açılmaz. authenticatedFetch yoksa (yalnız eski/test bağlantısı) taslak kullanılır.
+  // [EN] Risk and RESTRICTED derive from the SAVED profile (pii/my), not the draft. A differing draft is blocked.
+  const canonicalDraftProfile = canonicalizePayoutProfileDraft(payoutProfileDraft || {});
+  let canonicalPayoutProfile = canonicalDraftProfile;
+  if (typeof authenticatedFetch === 'function') {
+    let savedPii = null;
+    try {
+      const piiRes = await authenticatedFetch(buildApiUrl('pii/my'));
+      if (piiRes?.ok) savedPii = (await piiRes.json())?.pii || null;
+    } catch (_) { savedPii = null; }
+    if (!savedPii) {
+      showToast(getOrderRiskGateMessage('savedProfileUnavailable', lang), 'error');
+      return;
+    }
+    canonicalPayoutProfile = canonicalizePayoutProfileDraft(savedPii);
+    const norm = (v) => String(v || '').toUpperCase();
+    if (norm(canonicalDraftProfile?.rail) !== norm(canonicalPayoutProfile?.rail)
+      || norm(canonicalDraftProfile?.country) !== norm(canonicalPayoutProfile?.country)) {
+      showToast(getOrderRiskGateMessage('saveProfileFirst', lang), 'error');
+      return;
+    }
+  }
   const { selectedRiskEntry, isRestricted } = getRestrictedPaymentRiskEntry({
     paymentRiskConfig,
     canonicalPayoutProfile,
@@ -229,6 +252,12 @@ export const buildCreateOrderAction = ({
         : 'This rail/country pair is restricted by availability config. Order creation blocked.',
       'error'
     );
+    return;
+  }
+  // [TR] Risk config'i yoksa "MEDIUM" varsayılmaz: kapalı davranılır.
+  const selectedPaymentRiskLevel = String(selectedRiskEntry?.riskLevel || '').toUpperCase();
+  if (!['LOW', 'MEDIUM', 'HIGH'].includes(selectedPaymentRiskLevel)) {
+    showToast(getOrderRiskGateMessage('riskConfigMissing', lang), 'error');
     return;
   }
 
@@ -309,7 +338,6 @@ export const buildCreateOrderAction = ({
 
     const { createFn } = resolveOrderActionFns(normalizedSide, { fillBuyOrder, fillSellOrder, createBuyOrder, createSellOrder, cancelBuyOrder, cancelSellOrder });
     const createLabel = normalizedSide === 'BUY_CRYPTO' ? 'Buy' : 'Sell';
-    const selectedPaymentRiskLevel = String(selectedRiskEntry?.riskLevel || 'MEDIUM').toUpperCase();
 
     setLoadingText(
       lang === 'TR'

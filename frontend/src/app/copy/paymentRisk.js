@@ -68,4 +68,27 @@ export const getPaymentRiskSummaryCopy = (key, lang = 'TR') => {
   return row[lang === 'TR' ? 'TR' : 'EN'] || row.EN || row.TR || '';
 };
 
+// [TR] Emir açarken risk kapısı mesajları (kayıtlı profil esas alınır).
+// [EN] Order-creation risk gate messages (the saved profile is authoritative).
+export const orderRiskGateCopy = {
+  saveProfileFirst: {
+    TR: 'Ödeme profilindeki rail/ülke kayıtlı profilden farklı. Önce profili kaydedin, sonra emir açın.',
+    EN: 'The rail/country in your payout form differs from your saved profile. Save the profile first, then create the order.',
+  },
+  riskConfigMissing: {
+    TR: 'Bu rail/ülke için risk yapılandırması bulunamadı. Emir açılamaz.',
+    EN: 'No risk configuration found for this rail/country. Order creation blocked.',
+  },
+  savedProfileUnavailable: {
+    TR: 'Kayıtlı ödeme profili doğrulanamadı. Emir açılamaz; tekrar deneyin.',
+    EN: 'Could not verify your saved payout profile. Order creation blocked; try again.',
+  },
+};
+
+export const getOrderRiskGateMessage = (key, lang) => {
+  const row = orderRiskGateCopy[key];
+  if (!row) return '';
+  return row[lang === 'TR' ? 'TR' : 'EN'];
+};
+
 export default paymentRiskCopy;

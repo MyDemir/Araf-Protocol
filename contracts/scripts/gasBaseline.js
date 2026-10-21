@@ -8,6 +8,7 @@
 const fs = require("fs");
 const { ethers, network } = require("hardhat");
 const { deployEscrowWithLibraries } = require("./deploy");
+const { formatError } = require("./lib/redact");
 
 const D = 6;
 const u = (v) => ethers.parseUnits(String(v), D);
@@ -20,7 +21,16 @@ async function increase(sec) {
   await network.provider.send("evm_mine");
 }
 
+// [TR] Yalnız yerel ağ (K4-19b): public ağa yanlışlıkla verilirse mock token + escrow deploy etmesin.
+// [EN] Local network only: never deploy mock token + escrow if a public network is passed by mistake.
+function assertLocalNetwork(name, chainId) {
+  if (!['hardhat', 'localhost'].includes(name) && chainId !== 31337n) {
+    throw new Error(`gasBaseline yalnız yerel ağda çalışır (hardhat/localhost/31337); verilen: ${name} (${chainId})`);
+  }
+}
+
 async function main() {
+  assertLocalNetwork(network.name, (await ethers.provider.getNetwork()).chainId);
   const signers = await ethers.getSigners();
   const [owner, maker, taker, maker2, taker2] = signers;
   // [TR] Ceza üreten yollar ayrı cüzdan çiftleriyle ölçülür (ban temiz yolu bozmasın).
@@ -173,4 +183,8 @@ async function main() {
   if (process.env.GAS_BASELINE_OUT) fs.writeFileSync(process.env.GAS_BASELINE_OUT, JSON.stringify(table, null, 2));
 }
 
-main().catch((err) => { console.error(err); process.exit(1); });
+if (require.main === module) {
+  main().catch((err) => { console.error(formatError(err)); process.exit(1); });
+}
+
+module.exports = { main, assertLocalNetwork };

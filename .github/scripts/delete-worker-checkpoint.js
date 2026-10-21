@@ -23,6 +23,12 @@ function run(env = process.env) {
     const pass = decodeURIComponent(u.password || '');
     const user = decodeURIComponent(u.username || '');
     if (pass) cmds.push(user ? ['AUTH', user, pass] : ['AUTH', pass]);
+    // K4-11: URL yolu (/N) veritabanı indeksidir; node-redis ile aynı şekilde SELECT N uygulanır. Sayısal değilse reddedilir.
+    const dbPath = u.pathname.replace(/^\//, '');
+    if (dbPath !== '') {
+      if (!/^\d{1,4}$/.test(dbPath)) return reject(new Error('REDIS_URL database path must be a number'));
+      if (Number(dbPath) > 0) cmds.push(['SELECT', String(Number(dbPath))]);
+    }
     cmds.push(['DEL', ...KEYS]);
     const expected = cmds.length;
     const opts = { host: u.hostname, port, servername: u.hostname };

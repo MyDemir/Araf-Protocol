@@ -11,6 +11,7 @@
  */
 const fs = require("fs");
 const path = require("path");
+const { formatError } = require("./lib/redact");
 
 const DEPLOYMENTS_DIR = path.resolve(__dirname, "../deployments");
 
@@ -267,7 +268,7 @@ async function main() {
 
 if (require.main === module) {
   main().catch((err) => {
-    console.error(err);
+    console.error(formatError(err));
     process.exit(1);
   });
 }

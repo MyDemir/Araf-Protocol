@@ -174,7 +174,7 @@ async function _getMasterKey() {
       logger.info("[Encryption] ✅ Master key AWS KMS'ten başarıyla çözüldü.");
       return _masterKeyCache;
     } catch (err) {
-      throw new Error(`AWS KMS master key çözme hatası: ${err.message}`);
+      throw new Error(`AWS KMS master key çözme hatası: ${err.message}`, { cause: err });
     }
   }
 
@@ -240,7 +240,7 @@ async function _getMasterKey() {
       logger.info("[Encryption] ✅ Master key HashiCorp Vault transit/decrypt ile çözüldü.");
       return _masterKeyCache;
     } catch (err) {
-      throw new Error(`Vault master key alma hatası: ${err.message}`);
+      throw new Error(`Vault master key alma hatası: ${err.message}`, { cause: err });
     }
   }
 
@@ -577,7 +577,7 @@ async function decryptPayoutProfile(encProfile, walletAddress) {
     ? await decryptField(encProfile.contact.value_enc, addr)
     : null;
 
-  let details = {};
+  let details;
   try {
     details = JSON.parse(detailsJson);
   } catch {

@@ -10,6 +10,7 @@ const hre = require("hardhat");
 const fs = require("fs");
 const path = require("path");
 const { retryRead, settleDeployment, blockOverrides } = require("./lib/waitForCode");
+const { formatError } = require("./lib/redact");
 
 const ALLOWED_CHAIN_IDS = new Set([84532, 31337]);
 const PUBLIC_CHAIN_IDS = new Set([84532]);
@@ -68,7 +69,7 @@ async function main() {
 }
 
 if (require.main === module) {
-  main().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });
+  main().then(() => process.exit(0)).catch((e) => { console.error(formatError(e)); process.exit(1); });
 }
 
 module.exports = { main, assertAllowedChain, appendTokenRecord };
