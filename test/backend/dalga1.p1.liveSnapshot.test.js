@@ -60,19 +60,24 @@ describe("B1-01 canlı yol: kilit sonrası profil değişimi", () => {
     expect(mockLogger.error).toHaveBeenCalled();
   });
 
-  it("kilit anından hemen önce kaydedilmiş profil canlı yolda alınır", async () => {
-    mockState.users[MAKER] = profile("m1", at(-2));
+  it("güvenlik payından önce (120 sn) değişen profil canlı yolda alınır", async () => {
+    mockState.users[MAKER] = profile("m1", at(-120));
     mockState.users[TAKER] = profile("t1", at(-3600));
     await worker._captureLockedTradeSnapshot(liveArgs());
     expect(mockState.trade.payout_snapshot.captured_at).toEqual(LOCK);
     expect(mockState.trade.flat["payout_snapshot.maker.payout_details_enc"]).toBe("m1");
   });
 
-  it("damga == lockedAt canlı yolda kanıtsızdır (sıkı <)", async () => {
-    mockState.users[MAKER] = profile("m1", at(0));
+  it.each([
+    ["damga == lockedAt", 0],
+    ["lockedAt'ten 30 sn önce (pay içinde, saat sapması)", -30],
+  ])("canlı yolda %s kanıtsızdır", async (_n, offsetSec) => {
+    mockState.users[MAKER] = profile("m1", at(offsetSec));
     mockState.users[TAKER] = profile("t1", at(-3600));
     await worker._captureLockedTradeSnapshot(liveArgs());
     expect(mockState.trade.payout_snapshot.captured_at).toBeNull();
+    expect(mockState.trade.flat["payout_snapshot.is_complete"]).toBe(false);
+    expect(mockState.trade.flat["payout_snapshot.incomplete_reason"]).toMatch(/live_profile_change_after_lock/);
   });
 
   it("taker profili kilitten sonra değiştiyse de snapshot alınmaz", async () => {

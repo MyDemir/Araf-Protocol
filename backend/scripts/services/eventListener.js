@@ -2268,8 +2268,9 @@ class EventWorker {
         // [TR] Backfill'de damgasız dolu profil kanıtsızdır. Canlı yolda damga yoksa (eski profil) değişiklik
         //      kanıtı da yoktur: PATCH her zaman updated_at yazar; damga varsa aşağıda sıkı < ile denetlenir.
         if (advancedStatus && hasData && !profile.updated_at) return false;
-        // [TR] Canlı yolda (advancedStatus yok) güvenlik payı yok: damga kilit anından önce olmalı (sıkı <).
-        const limit = lockedAt.getTime() - (advancedStatus ? PROFILE_PROOF_SAFETY_MARGIN_MS : 0);
+        // [TR] Güvenlik payı canlı yolda da uygulanır: updated_at sunucu saati, lockedAt zincir blok zamanıdır;
+        //      saat sapmasında kilitten sonraki değişim "önce" görünmesin. Damga < lockedAt - PAY olmalı.
+        const limit = lockedAt.getTime() - PROFILE_PROOF_SAFETY_MARGIN_MS;
         return stamps.every((t) => t < limit);
       };
       const makerOk = !normalizedMaker || unchangedSinceLock(makerUser);
