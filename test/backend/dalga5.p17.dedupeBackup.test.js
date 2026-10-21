@@ -74,4 +74,21 @@ describe("dedupeRevenueEvents --backup (B4-16)", () => {
     await runDedupeRevenueEvents({ model, backupPath: file });
     expect(fs.existsSync(file)).toBe(false);
   });
+
+  it("--backup bayrağı var ama yol boş/eksik: parseArgs backupInvalid işaretler", () => {
+    expect(parseArgs(["--apply", "--backup="]).backupInvalid).toBe(true);
+    expect(parseArgs(["--apply", "--backup"]).backupInvalid).toBe(true);
+    expect(parseArgs(["--apply", "--backup", "--other"]).backupInvalid).toBe(true);
+    expect(parseArgs(["--apply", "--backup=/x.json"]).backupInvalid).toBeFalsy();
+    expect(parseArgs(["--apply"]).backupInvalid).toBeFalsy();
+  });
+
+  it.each([["--backup="], ["--backup"]])("CLI %s ile --apply: exit 1, Mongo'ya bağlanmadan çıkar", (flag) => {
+    const { spawnSync } = require("child_process");
+    const script = path.resolve(__dirname, "../../backend/scripts/migrations/dedupeRevenueEvents.js");
+    const env = { PATH: process.env.PATH, MONGODB_URI: "mongodb://127.0.0.1:1/none" };
+    const r = spawnSync(process.execPath, [script, "--apply", flag], { env, encoding: "utf8", timeout: 10000 });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/--backup/);
+  });
 });

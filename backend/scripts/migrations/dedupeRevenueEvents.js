@@ -24,12 +24,15 @@ require("dotenv").config();
 
 function parseArgs(argv = process.argv.slice(2)) {
   let backup = null;
+  let backupInvalid = false; // [TR] bayrak var ama yol boş/eksik: sessizce yedeksiz silmeye düşülmez
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a.startsWith("--backup=")) backup = a.slice("--backup=".length) || null;
     else if (a === "--backup") backup = argv[i + 1] && !argv[i + 1].startsWith("--") ? argv[i + 1] : null;
+    else continue;
+    if (!backup) backupInvalid = true;
   }
-  return { apply: argv.includes("--apply"), backup };
+  return { apply: argv.includes("--apply"), backup, backupInvalid };
 }
 
 function _isVaultRow(row) {
@@ -113,7 +116,11 @@ async function runDedupeRevenueEvents({ apply = false, model, backupPath = null,
 
 async function main() {
   const mongoose = require("mongoose");
-  const { apply, backup } = parseArgs();
+  const { apply, backup, backupInvalid } = parseArgs();
+  if (backupInvalid) {
+    console.error("[dedupeRevenueEvents] --backup bir dosya yolu gerektirir (--backup=<dosya>); hiçbir şey silinmedi.");
+    process.exit(1);
+  }
   const mongoUri = require("./_mongoUri").resolveMongoUri();
   await mongoose.connect(mongoUri);
   try {
