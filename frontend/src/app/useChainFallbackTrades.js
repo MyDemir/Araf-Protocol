@@ -33,6 +33,7 @@ export function useChainFallbackTrades({
 } = {}) {
   const [trades, setTrades] = React.useState([]);
   const [states, setStates] = React.useState({});
+  const [failedIds, setFailedIds] = React.useState([]);
   const [loading, setLoading] = React.useState(false);
   const [loadedAt, setLoadedAt] = React.useState(0);
   const lastAtRef = React.useRef(0);
@@ -53,6 +54,7 @@ export function useChainFallbackTrades({
     inFlightRef.current = false;
     setTrades([]);
     setStates({});
+    setFailedIds([]);
     setLoadedAt(0);
     setLoading(false);
   }, [scopeKey]);
@@ -70,8 +72,27 @@ export function useChainFallbackTrades({
       const result = await loadChainFallbackTrades({ ids, viewer: address, readTrade: rt, readTrades: rts, supportedTokens: tokens, tokenDecimalsMap: decimals });
       if (seq !== seqRef.current) return;
       if (result.terminalIds.length) removeKnownTradeIds(scope, result.terminalIds);
-      setTrades(result.trades);
-      setStates(result.states);
+      // [TR] Okunamayan id'ler için önceki başarılı sonuç korunur (id bazlı birleştirme); liste kısmi sonuçla ezilmez.
+      // [EN] For ids that failed to read, keep the previous successful result (per-id merge).
+      //      Kept rows carry `stale: true` (cleared by any successful read) so the UI can mark them as unconfirmed.
+      const failed = Array.isArray(result.failedIds) ? result.failedIds : [];
+      if (failed.length) {
+        const failedSet = new Set(failed);
+        setTrades((prev) => {
+          const kept = prev.filter((t) => failedSet.has(String(t.onchainId)));
+          const freshIds = new Set(result.trades.map((t) => String(t.onchainId)));
+          return [...result.trades, ...kept.filter((t) => !freshIds.has(String(t.onchainId))).map((t) => ({ ...t, stale: true }))];
+        });
+        setStates((prev) => {
+          const next = { ...result.states };
+          failed.forEach((id) => { if (prev[id] !== undefined && next[id] === undefined) next[id] = prev[id]; });
+          return next;
+        });
+      } else {
+        setTrades(result.trades);
+        setStates(result.states);
+      }
+      setFailedIds(failed);
       setLoadedAt(nowFn());
     } finally {
       if (seq === seqRef.current) {
@@ -120,7 +141,7 @@ export function useChainFallbackTrades({
     return { status: 'ok', trade };
   }, [enabled, address, scope]);
 
-  return { active: Boolean(enabled), trades, states, loading, loadedAt, refresh: load, submitManualId };
+  return { active: Boolean(enabled), trades, states, failedIds, loading, loadedAt, refresh: load, submitManualId };
 }
 
 /**

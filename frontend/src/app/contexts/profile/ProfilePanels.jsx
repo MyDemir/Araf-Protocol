@@ -7,6 +7,7 @@ import { formatTokenAmount, mapOffchainHealthToUi } from '../../orderUiModel';
 import { deriveReputationView, MIN_REPUTATION_NOTIONAL_USD } from './reputationModel';
 import { WALLET_AGE_MIN_DAYS } from '../../walletAge';
 import { fmtNum, localeOf, tx } from '../../copy';
+import TokenBalances from '../../../components/TokenBalances';
 
 export const profileTabs = [
   { key: 'account', icon: UserRound, label: { TR: 'Hesap', EN: 'Account' } },
@@ -83,7 +84,7 @@ const CheckRow = ({ ok, label, detail, pending, action }) => (
 
 export const AccountPanel = ({
   lang = 'EN', address, isConnected, isAuthenticated, userReputation, reputationPolicy,
-  sybilStatus, walletAgeRemainingDays, isWalletRegistered = null, onRetryWalletRegistration, isBanned, activeEscrows = [], myOrders = [], onNavigateTab,
+  sybilStatus, walletAgeRemainingDays, isWalletRegistered = null, onRetryWalletRegistration, isBanned, activeEscrows = [], myOrders = [], onNavigateTab, tokenDecimalsMap,
 }) => {
   const [copied, setCopied] = React.useState(false);
   const rep = deriveReputationView({ reputation: userReputation, policy: reputationPolicy });
@@ -128,6 +129,7 @@ export const AccountPanel = ({
             </button>
           )}
         </div>
+        {sessionOk && <TokenBalances lang={lang} address={address} tokenDecimalsMap={tokenDecimalsMap} />}
         <div className="grid grid-cols-2 gap-2 mt-3">
           {tiles.map((tile) => (
             <button key={tile.label} type="button" onClick={() => onNavigateTab?.(tile.key)} className="text-left bg-elevated border border-borderSubtle rounded-lg px-3 py-2 hover:border-borderStrong transition">

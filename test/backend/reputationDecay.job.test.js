@@ -57,22 +57,22 @@ describe("reputationDecay job", () => {
     expect(mockWait).toHaveBeenCalled();
   });
 
-  it("applies the 90-day clean-slate boundary (>=90 days triggers, <90 days does not)", async () => {
+  it("applies the 90-day clean-slate boundary (>90 days triggers, exactly 90 days does not: contract reverts on equality)", async () => {
     const nowMs = new Date("2026-04-21T00:00:00Z").getTime();
     const ninetyDaysMs = 90 * 24 * 60 * 60 * 1000;
     const eligible = "0x1111111111111111111111111111111111111111";
     const ineligible = "0x2222222222222222222222222222222222222222";
 
     mockCandidates = [
-      { wallet_address: eligible, consecutive_bans: 2, banned_until: new Date(nowMs - ninetyDaysMs) },
-      { wallet_address: ineligible, consecutive_bans: 2, banned_until: new Date(nowMs - ninetyDaysMs + 1000) },
+      { wallet_address: eligible, consecutive_bans: 2, banned_until: new Date(nowMs - ninetyDaysMs - 1000) },
+      { wallet_address: ineligible, consecutive_bans: 2, banned_until: new Date(nowMs - ninetyDaysMs) },
     ];
 
     mockGetReputation.mockImplementation(async (wallet) => {
       if (wallet === eligible) {
-        return { bannedUntil: Math.floor((nowMs - ninetyDaysMs) / 1000), consecutiveBans: 2 };
+        return { bannedUntil: Math.floor((nowMs - ninetyDaysMs - 1000) / 1000), consecutiveBans: 2 };
       }
-      return { bannedUntil: Math.floor((nowMs - ninetyDaysMs + 1000) / 1000), consecutiveBans: 2 };
+      return { bannedUntil: Math.floor((nowMs - ninetyDaysMs) / 1000), consecutiveBans: 2 };
     });
 
     const nowSpy = jest.spyOn(Date, "now").mockReturnValue(nowMs);
