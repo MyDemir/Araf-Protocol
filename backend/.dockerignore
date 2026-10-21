@@ -14,3 +14,8 @@ dist/
 *.md
 .vscode/
 .idea/
+.claude/
+coverage/
+jest.config.*
+eslint.config.*
+fly.toml
