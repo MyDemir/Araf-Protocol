@@ -9,6 +9,7 @@ import { computeMinFillRaw, parseDecimalToUnits } from './decimalUnits';
 import { isPayoutProfileSaved, profileRequiredMessage } from '../payoutProfileGate';
 import { enforceTxGate } from '../txGate';
 import { WALLET_AGE_MIN_DAYS } from '../walletAge';
+import { showTxError } from './contractLifecycleActions';
 
 export const MAKER_ORDER_DEFAULTS = {
   makerTier: 0,
@@ -381,11 +382,7 @@ export const buildCreateOrderAction = ({
         : ' Note: Tier 1+ also requires a 15-day active period after first successful trade.';
     }
 
-    if (errorMessage.includes('rejected') || errorMessage.includes('User rejected')) {
-      showToast(lang === 'TR' ? 'İşlem iptal edildi.' : 'Transaction cancelled.', 'error');
-    } else {
-      showToast(errorMessage, 'error');
-    }
+    showTxError(showToast, err, errorMessage, lang, lang === 'TR' ? 'İşlem iptal edildi.' : 'Transaction cancelled.');
   } finally {
     setIsContractLoading(false);
     setLoadingText('');

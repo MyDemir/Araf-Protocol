@@ -42,7 +42,10 @@ export function parseAppHashRoute(hashValue = '') {
   const params = typeof URLSearchParams !== 'undefined' ? new URLSearchParams(hash.startsWith('?') ? hash.slice(1) : '') : null;
   if (hash === '/profile/active-trades') return { view: 'profile', profileTab: 'active' };
   const tradeMatch = hash.match(/^\/trade\/([^/?#]+)/);
-  if (tradeMatch) return { view: 'tradeRoom', tradeId: decodeURIComponent(tradeMatch[1]) };
+  if (tradeMatch) {
+    // [TR] F2-07: bozuk yüzde kodlaması (#/trade/%) URIError atıp React ağacını düşürmesin; geçersiz rota yok sayılır.
+    try { return { view: 'tradeRoom', tradeId: decodeURIComponent(tradeMatch[1]) }; } catch { return null; }
+  }
   if (params?.get('view') === 'tradeRoom') return { view: 'tradeRoom', tradeId: params.get('trade') || null };
   return null;
 }

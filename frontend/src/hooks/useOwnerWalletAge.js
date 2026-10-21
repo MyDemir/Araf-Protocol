@@ -26,7 +26,9 @@ export function formatOwnerAgeRemaining(sec, lang = 'TR') {
 }
 
 // [TR] owners: BUY emirlerinin sahip adresleri (tekrarlar tekilleştirilir). Dönen: remainingSecFor(owner) -> saniye | null.
-export function useOwnerWalletAge({ owners, getWalletRegisteredAt, chainOffsetMs = 0 }) {
+// [TR] F2-16: cacheScope (örn. `${chainId}:${escrow}`) önbellek anahtarına eklenir; ağ değişince bayat kayıt okunmaz.
+export function useOwnerWalletAge({ owners, getWalletRegisteredAt, chainOffsetMs = 0, cacheScope = '' }) {
+  const scoped = useCallback((owner) => (cacheScope ? `${String(cacheScope).toLowerCase()}|${owner}` : owner), [cacheScope]);
   const [, setVersion] = useState(0);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const fnRef = useRef(getWalletRegisteredAt);
@@ -46,33 +48,33 @@ export function useOwnerWalletAge({ owners, getWalletRegisteredAt, chainOffsetMs
     const bump = () => { if (!cancelled) setVersion((v) => v + 1); };
     const now = Date.now();
     for (const owner of uniq) {
-      const hit = cache.get(owner);
+      const hit = cache.get(scoped(owner));
       if (hit && now - hit.at < OWNER_AGE_TTL_MS) continue;
-      if (inflight.has(owner)) { inflight.get(owner).then(bump); continue; }
+      if (inflight.has(scoped(owner))) { inflight.get(scoped(owner)).then(bump); continue; }
       const p = Promise.resolve()
         .then(() => fnRef.current(owner))
         .then((raw) => {
           const n = Number(raw);
           // [TR] 0n = kayıtsız/bilinmiyor → ipucu yok. [EN] 0n = unknown → no hint.
-          if (Number.isFinite(n) && n > 0) cache.set(owner, { value: n, at: Date.now() });
+          if (Number.isFinite(n) && n > 0) cache.set(scoped(owner), { value: n, at: Date.now() });
         })
         .catch(() => { /* fail-open */ })
-        .finally(() => { inflight.delete(owner); });
-      inflight.set(owner, p);
+        .finally(() => { inflight.delete(scoped(owner)); });
+      inflight.set(scoped(owner), p);
       p.then(bump);
     }
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uniqKey, hasFn]);
+  }, [uniqKey, hasFn, scoped]);
 
   const chainNowSec = (nowMs + chainOffsetMs) / 1000;
   const remainingSecFor = useCallback((owner) => {
     if (!hasFn) return null;
-    const hit = cache.get(key(owner));
+    const hit = cache.get(scoped(key(owner)));
     if (!hit) return null;
     const rem = hit.value + WALLET_AGE_MIN_SEC - chainNowSec;
     return rem > 0 ? rem : null;
-  }, [hasFn, chainNowSec]);
+  }, [hasFn, chainNowSec, scoped]);
 
   // [TR] Süre dolunca etiket kendiliğinden kalkar: en yakın bitişe (en çok 60 sn) zamanlayıcı kur.
   let nextMs = null;

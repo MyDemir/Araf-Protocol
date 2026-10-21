@@ -16,13 +16,13 @@
  * const { releaseFunds, proposeOrApproveCancel } = useArafContract();
  */
 
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { usePublicClient, useWalletClient, useChainId, useAccount } from 'wagmi';
 import { parseAbi, getAddress, decodeEventLog } from 'viem';
 import { resolveClientErrorLogUrl } from '../app/apiConfig';
 import { setMakerChallengeWindowMs } from '../app/contexts/trade-room/tradeTimeline';
 import { getSupportedChainsMap, isConfiguredTestToken, isFaucetChainId, isMintTokenEnabled } from '../app/chainPolicy';
-import { ARAF_CONTRACT_ERROR_ABI, decorateContractError } from '../app/contractErrors';
+import { ARAF_CONTRACT_ERROR_ABI, decorateContractError, describeContractErrorName, extractContractErrorName } from '../app/contractErrors';
 import { diagnoseWriteError, applyDiagnosis, stripAddresses, isUserRejection } from '../app/walletRpcDiagnosis';
 import { addKnownTradeIds } from '../app/knownTrades';
 import { safeStorage } from '../app/safeStorage';
@@ -334,7 +334,8 @@ export function useArafContract({ expectedChainId = null } = {}) {
   const account = useAccount();
   // [TR] Cüzdan bağlı değilse (chainId yok) config zincirine düşülür; yazma zaten walletClient ister.
   const chainId = account?.chainId ?? configChainId;
-  const supportedChains = getSupportedChainsMap();
+  // [TR] F2-13: getSupportedChainsMap her çağrıda yeni nesne üretir; memoize edilmezse writeContract ve türevleri her render'da değişir.
+  const supportedChains = useMemo(() => getSupportedChainsMap(), []);
   // [TR] Bilinen işlem kaydının zincir anahtarı: tx'in gönderildiği cüzdan zinciri (App/useAppSessionData ile aynı kaynak).
   const knownTradesChainId = chainId;
   const accountAddress = account?.address ?? null;
@@ -421,7 +422,27 @@ export function useArafContract({ expectedChainId = null } = {}) {
       // İşlem onayını bekle
       const receipt = await publicClient.waitForTransactionReceipt({ hash });
       safeStorage.remove("araf_pending_tx");
-      return assertReceiptSucceeded(receipt, functionName);
+      try {
+        return assertReceiptSucceeded(receipt, functionName);
+      } catch (revertErr) {
+        // [TR] F2-21: zincirde revert olan tx'in nedeni, blok öncesi durumda simülasyonla çıkarılır (yalnız teşhis).
+        try {
+          if (receipt?.blockNumber && typeof publicClient.simulateContract === 'function') {
+            await publicClient.simulateContract({
+              account: walletClient.account?.address, address: getAddress(ESCROW_ADDRESS), abi: ArafEscrowABI,
+              functionName, args, blockNumber: BigInt(receipt.blockNumber) - 1n,
+            });
+          }
+        } catch (simError) {
+          const name = extractContractErrorName(simError);
+          if (name) {
+            revertErr.arafErrorName = name;
+            const friendly = describeContractErrorName(name);
+            if (friendly) revertErr.shortMessage = friendly;
+          }
+        }
+        throw revertErr;
+      }
     } catch (error) {
       // [TR] Kesin başarısız olan işlemin izi silinir; aksi halde yenilemede "bekleyen işlem onaylandı" kurtarması
       //      başarısız işlemi de başarı gibi gösterirdi. Yalnız bu çağrının kaydı silinir; sonucu belirsiz
