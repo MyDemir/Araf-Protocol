@@ -139,15 +139,14 @@ describe('buildTradeDecisionModel', () => {
     expect(challenged.secondaryActions.map((a) => a.label)).not.toContain('burn_expired');
   });
 
-  it('wrong chain / paused / unauthenticated appear as global and primary disabled reasons', () => {
+  it('wrong chain / unauthenticated are global disabled reasons; pause is NOT (exit actions stay open)', () => {
     const model = buildTradeDecisionModel({ ...base, isSupportedChain: false, isPaused: true, isAuthenticated: false });
-    const expected = [
-      'Unsupported network.',
-      'System is in maintenance mode.',
-      'Session is not authenticated.',
-    ];
+    const expected = ['Unsupported network.', 'Session is not authenticated.'];
     expect(model.disabledReasons).toEqual(expect.arrayContaining(expected));
     expect(model.globalDisabledReasons).toEqual(expect.arrayContaining(expected));
+    expect(model.disabledReasons).not.toContain('System is in maintenance mode.');
+    expect(model.globalDisabledReasons).not.toContain('System is in maintenance mode.');
+    expect(model.guidance).toContain('System is paused: new trades cannot be opened, existing trades can still be closed.');
   });
 
   it('LOCKED+taker with payment proof can report payment without chargeback acknowledgement', () => {

@@ -35,7 +35,8 @@ router.get("/", statsReadLimiter, async (_req, res, next) => {
     const currentStatsDoc = await HistoricalStat.findOne().sort({ date: -1 }).lean();
     if (!currentStatsDoc) return res.json({ stats: {} });
 
-    const { _id, date, __v, created_at, ...currentStats } = currentStatsDoc;
+    const currentStats = { ...currentStatsDoc };
+    for (const k of ["_id", "date", "__v", "created_at"]) delete currentStats[k];
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     const dateString30d = thirtyDaysAgo.toISOString().split("T")[0];

@@ -75,6 +75,7 @@ const { parsePositiveTimerMs } = require("./utils/timeEnv");
 const { getAdminWallets } = require("./utils/adminWallets");
 const { runArchiveRetention } = require("./jobs/archiveRetention");
 const { didScheduledJobSucceed } = require("./utils/schedulerSuccess");
+const { runExclusive: runExclusiveJob } = require("./services/jobLock");
 
 // [TR] Global Express hata yakalayıcı
 // [EN] Global Express error handler
@@ -237,6 +238,11 @@ async function bootstrap() {
   // [EN] archiveRetention is NOT chain-bound: Mongo-only privacy cleanup must continue while degraded/blocked.
   const CHAIN_BOUND_JOBS = new Set(["dlq", "reputationDecay", "rewardRecorder", "reconciliation"]);
 
+  // [TR] B4-05: DLQ ve relayer tx gönderen işler birden çok makinede aynı anda çalışmamalı; bunlar için Redis
+  //      kilidi (services/jobLock.js) alınır. Redis hatasında iş o turda ÇALIŞMAZ (fail-closed).
+  // [EN] B4-05: DLQ and relayer-tx jobs must not run on several machines at once; they take a Redis lock.
+  const DISTRIBUTED_LOCK_JOBS = new Set(["dlq", "reputationDecay", "rewardRecorder"]);
+
   // [TR] Aynı job'ın üst üste binmesini engelleyen hafif scheduler lock'ları.
   // [EN] Lightweight scheduler locks to prevent overlapping runs.
   const jobLocks = {
@@ -292,7 +298,16 @@ async function bootstrap() {
 
     jobLocks[jobKey] = true;
     try {
-      const result = await jobFn();
+      let result;
+      if (DISTRIBUTED_LOCK_JOBS.has(jobKey)) {
+        // [TR] jobFn'e { isLockLost } verilir: kilit kaybolursa iş yeni öğe/tx başlatmadan durur.
+        const locked = await runExclusiveJob(jobKey, (ctx) => jobFn(ctx));
+        if (!locked.ran) return { success: true, skipped: locked.skipped };
+        if (locked.lost) logger.error(`[Scheduler] ${jobKey} çalışırken Redis kilidi kaybedildi; sonuç güvenilmez.`);
+        result = locked.result;
+      } else {
+        result = await jobFn();
+      }
       const isSuccess = didScheduledJobSucceed(result);
       if (isSuccess && typeof onSuccess === "function") {
         onSuccess();
