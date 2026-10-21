@@ -237,12 +237,25 @@ export function buildTradeDecisionModel({
     secondaryActions = [action('contract', 'start_challenge', makerPinged
       ? t(lang, 'İtiraz Başlat', 'Open Challenge')
       : t(lang, 'Ödeme Gelmedi — Alıcıyı Uyar', 'Payment Not Received — Ping Taker'), null)];
-    if (!makerPinged) guidance.push(MAKER_PING_RULE(lang));
+    // [TR] F3-07: Taker ping attıysa maker ping atamaz (ConflictingPingPath); doğru rehber "24 saat içinde serbest bırakın"dır.
+    // [EN] F3-07: once the taker pinged, the maker cannot ping (ConflictingPingPath); the right hint is "release within 24h".
+    if (flags.takerPinged) guidance.push(t(lang,
+      'Alıcı sizi uyardı: ödemeyi kontrol edip 24 saat içinde serbest bırakın; aksi halde alıcı fonları otomatik serbest bırakabilir.',
+      'The buyer pinged you: check the payment and release within 24 hours, otherwise the buyer can auto-release the funds.'));
+    else if (!makerPinged) guidance.push(MAKER_PING_RULE(lang));
     else if (makerWindowOpen) guidance.push(t(lang,
       `Şu an itiraz açabilirsin — son süre: ${makerWindowDeadline}`,
       `You can open a challenge right now — deadline: ${makerWindowDeadline}`));
     else if (flags.pingLapsed) guidance.push(t(lang, 'İtiraz süresi doldu: ping düştü; alıcı artık sizi uyarıp otomatik serbest bırakma yoluna geçebilir. Ödeme geldiyse fonları serbest bırakın.', 'The challenge window closed: your ping lapsed; the taker can now ping you and move to auto-release. Release the funds if the payment arrived.'));
-    else guidance.push(MAKER_PING_RULE(lang));
+    else {
+      // [TR] F3-07: Ping atıldı, T+24s dolmadı: itiraz penceresi henüz kapalı (kontrat: ResponseWindowActive).
+      //      Mevcut test beklentisi (guidance[0] genel kural) korunur; bekleme süresi ek satır olarak eklenir.
+      guidance.push(MAKER_PING_RULE(lang));
+      const opensIn = formatTimerValue(derivedTimers.makerChallenge, lang);
+      guidance.push(opensIn
+        ? t(lang, `Ping gönderildi: itiraz penceresi ping + 24 saatte açılır (kalan: ${opensIn}).`, `Ping sent: the challenge window opens 24 hours after the ping (remaining: ${opensIn}).`)
+        : t(lang, 'Ping gönderildi: itiraz penceresi ping + 24 saatte açılır.', 'Ping sent: the challenge window opens 24 hours after the ping.'));
+    }
   }
 
   if (normalizedState === 'PAID' && normalizedRole === 'taker') {
@@ -282,6 +295,10 @@ export function buildTradeDecisionModel({
       // [TR] K10: süre dolduktan sonra ödeme bildirilemez (PaymentWindowClosed); birincil buton kapanır.
       primaryAction = action('waiting', 'payment_window_closed', t(lang, 'Süre doldu', 'Time expired'),
         t(lang, '48 saatlik ödeme süresi doldu: ödeme artık bildirilemez, satıcı işlemi her an iptal edebilir. Ödediyseniz satıcıyla iptali birlikte onaylayın.', 'The 48h payment window has passed: payment can no longer be reported and the maker can unwind the trade at any time. If you paid, agree on a mutual cancel with the maker.'));
+      // [TR] F3-06: Süre dolunca "Dekont gerekli"/yedek mod gerekçesi anlamsızdır; yalnız genel kapı nedenleri kalır.
+      // [EN] F3-06: once the window closed, the proof/fallback reasons are moot; only global gate reasons remain.
+      primaryDisabledReasons.length = 0;
+      primaryDisabledReasons.push(...globalDisabledReasons);
       secondaryActions.push(action('contract', 'expire_payment_window', t(lang, 'Ödemedim — kilidi çöz (teminattan ceza)', 'I did not pay — unlock (bond penalty)'), null));
     } else {
       primaryAction = action('contract', 'expire_payment_window', t(lang, 'Kilidi Çöz (48 saat doldu)', 'Unlock (48h passed)'), t(lang, 'Alıcı süresinde ödeme bildirmedi. Kilidi çözerseniz fonlarınız ve teminatınız iade edilir.', 'The taker did not report payment in time. Unlocking returns your funds and bond.'));

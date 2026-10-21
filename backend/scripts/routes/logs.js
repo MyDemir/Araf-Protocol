@@ -15,7 +15,7 @@ function scrubClientErrorText(value) {
   if (!value || typeof value !== "string") return value;
   return stripLogControlChars(value)
     .replace(/TR\d{24}/gi, "[REDACTED]")
-    .replace(/\b[A-Z]{2}[A-Z0-9]{13,32}\b/g, "[REDACTED]")
+    .replace(/\b[A-Z]{2}[A-Z0-9]{13,32}\b/gi, "[REDACTED]")
     .replace(/\b\d{9}\b/g, "[REDACTED]")
     .replace(/\b\d{4,17}\b/g, "[REDACTED]")
     .replace(/0x[a-fA-F0-9]{40}/g, "[REDACTED]")
@@ -38,7 +38,7 @@ router.post("/client-error", clientLogLimiter, (req, res) => {
   if (!message || typeof message !== "string") return res.status(400).json({ error: "message alanı zorunludur." });
   logger.error("[FRONTEND-CRASH]", {
     message: scrubClientErrorText(String(message).slice(0, 500)),
-    url: url ? stripLogControlChars(String(url).slice(0, 200)) : undefined,
+    url: url ? scrubClientErrorText(String(url).slice(0, 200)) : undefined,
     stack: stack ? scrubClientErrorText(String(stack).slice(0, 2000)) : undefined,
     componentStack: componentStack ? scrubClientErrorText(String(componentStack).slice(0, 1000)) : undefined,
     ...pickDiagFields(req.body || {}),

@@ -1,6 +1,7 @@
 import { getStateLabel, langKey } from '../../copy';
 import { fmtNumber } from '../../format';
-import { normalizeSettlementState } from '../settlement/settlementActionModel';
+import { isSettlementProposalExpired, normalizeSettlementState } from '../settlement/settlementActionModel';
+import { getChainNowMs } from '../../clock';
 
 const roleCopy = {
   maker: { TR: 'Satıcı', EN: 'Maker' },
@@ -65,7 +66,7 @@ export const compareActiveTradePriority = (a = {}, b = {}) => {
   const priorityA = ACTIVE_TRADE_STATE_PRIORITY[stateA] ?? 99;
   const priorityB = ACTIVE_TRADE_STATE_PRIORITY[stateB] ?? 99;
   if (priorityA !== priorityB) return priorityA - priorityB;
-  return String(a?.id || a?.onchainId || '').localeCompare(String(b?.id || b?.onchainId || ''));
+  return String(a?.id || a?.onchainId || '').localeCompare(String(b?.id || b?.onchainId || ''), undefined, { numeric: true });
 };
 
 const resolveCardModel = (escrow = {}, lang = 'EN') => {
@@ -86,7 +87,11 @@ const resolveCardModel = (escrow = {}, lang = 'EN') => {
   let settlementCopy = null;
   if (hasSettlementProposal) {
     const waitingForViewer = proposer && viewer && String(proposer).toLowerCase() !== String(viewer).toLowerCase();
-    settlementCopy = waitingForViewer
+    // [TR] F3-04: Süresi dolan teklif için "yanıt verin" demek yanlış; kontrat artık kabul etmez.
+    const expired = settlementState === 'PROPOSED' && isSettlementProposalExpired(settlementProposal, Math.floor(getChainNowMs() / 1000));
+    settlementCopy = expired
+      ? (lang === 'TR' ? 'Uzlaşma teklifinin süresi doldu' : 'Settlement offer expired')
+      : waitingForViewer
       ? (lang === 'TR' ? 'Uzlaşma teklifine yanıt verin' : 'Settlement needs your response')
       : (lang === 'TR' ? 'Uzlaşma yanıtı bekleniyor' : 'Waiting on settlement response');
   }

@@ -18,6 +18,7 @@ const crypto = require("crypto");
 const { getRedisClient } = require("../config/redis");
 const eventWorker = require("./eventListener");
 const logger = require("../utils/logger");
+const { redactRpcSecrets } = require("../utils/logRedaction");
 
 const DLQ_KEY = "worker:dlq";
 const DLQ_ARCHIVE_KEY = "worker:dlq:archive"; // İnceleme için arşiv (7 gün TTL)
@@ -271,7 +272,8 @@ async function processDLQ(lockCtx = {}) {
         idempotencyKey,
         attempt: nextAttempt,
         next_retry_at: nextRetryAt,
-        last_error: result.error || entry.last_error || "Re-drive sırasında hata",
+        // [TR] B1-08: eski (redaksiyonsuz) girdilerin last_error değeri de geri yazılmadan maskelenir.
+        last_error: redactRpcSecrets(result.error || entry.last_error || "Re-drive sırasında hata").slice(0, 500),
       };
 
       // [TR] B4-05: sıra YAZ-sonra-SİL: eskiden lRem->rPush arasında çökme girdiyi kaybettirirdi; şimdi en kötü
