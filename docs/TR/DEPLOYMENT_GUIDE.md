@@ -616,6 +616,7 @@ CONFIRM_PUBLIC_DEPLOY=yes NODE_ENV=production npx hardhat run scripts/deploy.js 
 npm run migrate:identity:dry
 node scripts/migrations/backfillTerminalTradeStats.js            # dry-run
 node scripts/migrations/dedupeRevenueEvents.js                   # dry-run
+# --apply öncesi yedek önerilir: dedupeRevenueEvents.js --apply --backup=<dosya>
 
 # Fly.io backend logları
 fly logs --app araf-protocol-backend
@@ -749,7 +750,7 @@ Production açılışta KMS self-test çalıştırır (`runProductionKmsStartupS
 
 | Değişken | Zorunlu | Varsayılan | Not |
 |---|---|---|---|
-| `ESCROW_REGISTRY_GUARD_MODE` | hayır | `warn` | `off` · `warn` · `enforce`. Geçersiz değer = `warn` + uyarı logu. `warn`: yalnız log (tek seferlik ve değişince) ve `/ready` içinde `escrowRegistry` bilgi alanı; hiçbir şey kapanmaz, HTTP kodu değişmez. `enforce`: uyumsuzlukta (ya da kayıt okunamazsa, fail-closed) worker başlatılmaz (çalışıyorsa durdurulur), zincire bağlı zamanlanmış işler atlanır, escrow'a bağlı route'lar (orders, trades, pii, receipts, stats, rewards, admin) nedenle birlikte `503 ESCROW_MISMATCH` döner. Auth, istemci logu, sosyal bağlantılar, referans ticker, feedback ve `/health` açık kalır; `/ready` nedenle birlikte 503 döner. Çıkışlar engellenmez: kullanıcılar çıkış işlemlerini doğrudan kontrata gönderir. |
+| `ESCROW_REGISTRY_GUARD_MODE` | hayır | `warn` (production'da `enforce`) | `off` · `warn` · `enforce`. Production'da ESCROW_REGISTRY_GUARD_MODE tanımsızsa enforce. Geçersiz değer = varsayılan (`warn`, production'da `enforce`) + uyarı logu. `warn`: yalnız log (tek seferlik ve değişince) ve `/ready` içinde `escrowRegistry` bilgi alanı; hiçbir şey kapanmaz, HTTP kodu değişmez. `enforce`: uyumsuzlukta (ya da kayıt okunamazsa, fail-closed) worker başlatılmaz (çalışıyorsa durdurulur), zincire bağlı zamanlanmış işler atlanır, escrow'a bağlı route'lar (orders, trades, pii, receipts, stats, rewards, admin) nedenle birlikte `503 ESCROW_MISMATCH` döner. Auth, istemci logu, sosyal bağlantılar, referans ticker, feedback ve `/health` açık kalır; `/ready` nedenle birlikte 503 döner. Çıkışlar engellenmez: kullanıcılar çıkış işlemlerini doğrudan kontrata gönderir. |
 | `ESCROW_REGISTRY_GUARD_INTERVAL_MS` | hayır | `60000` | Yeniden kontrol aralığı. |
 
 **İlk kurulum sırası**
@@ -909,7 +910,7 @@ Script'leri `backend/` dizininden çalıştırın (`node scripts/migrations/<ad>
 | `normalizeIdentityFields.js` (`npm run migrate:identity`) | **yazar** | varsayılan dry-run; yazmak için `--apply` (`npm run migrate:identity:dry` = dry-run, `npm run migrate:identity` = `--apply`; `--dry-run` geriye dönük kabul, uyarı verir) | Legacy numeric `Order.onchain_order_id`, `Trade.onchain_escrow_id`, `Trade.parent_order_id` değerlerini kanonik string'e çevirir. |
 | `backfillTerminalTradeStats.js` | dry-run | `--apply` | Kalıcı `TerminalTradeStat` sayaçlarını mevcut terminal trade'lerden doldurur. Idempotent (`trade_key` üzerinde `$setOnInsert`). |
 | `backfillLastBanEndsAt.js` (`npm run migrate:last-ban-ends-at`; `:dry` = dry-run) | dry-run | `--apply` | `banned_until`'i daha önce null'lanmış kullanıcılar için `User.last_ban_ends_at` alanını zincirden (`getReputation().bannedUntil`) doldurur; ban affı işi bu kullanıcıları aday görsün diye. Idempotent, salt-okunur RPC (`BASE_RPC_URL`, `ARAF_ESCROW_ADDRESS`). |
-| `dedupeRevenueEvents.js` | dry-run | `--apply` | Eski worker'ın yazdığı mükerrer `RevenueEvent` satırlarını siler (aynı tx/token/amount/kind/trade için vault satırını tekrarlayan escrow satırı). Idempotent. |
+| `dedupeRevenueEvents.js` | dry-run | `--apply` (öneri: `--apply --backup=<dosya>`; silinecek belgeler önce JSON'a yazılır) | Eski worker'ın yazdığı mükerrer `RevenueEvent` satırlarını siler (aynı tx/token/amount/kind/trade için vault satırını tekrarlayan escrow satırı). Idempotent. |
 
 Yükseltme için işlem sırası:
 1. Yeni backend'den **önce**: `npm run migrate:identity:dry`, numeric id raporlarsa ardından `npm run migrate:identity`. `IDENTITY_NORMALIZATION_GUARD` production'da varsayılan `enforce`'tur; legacy id varken backend başlamaz.

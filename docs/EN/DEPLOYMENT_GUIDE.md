@@ -612,6 +612,7 @@ CONFIRM_PUBLIC_DEPLOY=yes NODE_ENV=production npx hardhat run scripts/deploy.js 
 npm run migrate:identity:dry
 node scripts/migrations/backfillTerminalTradeStats.js            # dry-run
 node scripts/migrations/dedupeRevenueEvents.js                   # dry-run
+# back up before --apply: dedupeRevenueEvents.js --apply --backup=<file>
 
 # Fly.io backend logs
 fly logs --app araf-protocol-backend
@@ -745,7 +746,7 @@ The `escrow_registry` Mongo collection holds one document, `_id: "active"`: `esc
 
 | Variable | Required | Default | Notes |
 |---|---|---|---|
-| `ESCROW_REGISTRY_GUARD_MODE` | no | `warn` | `off` · `warn` · `enforce`. Invalid value = `warn` plus a warning log. `warn`: log only (once and on change) and an `escrowRegistry` info field in `/ready`; nothing is closed and no HTTP status changes. `enforce`: on a mismatch (or an unreadable registry, fail-closed) the worker is not started (or is stopped), chain-bound scheduled jobs are skipped, and escrow-bound routes (orders, trades, pii, receipts, stats, rewards, admin) return `503 ESCROW_MISMATCH` with the reason. Auth, client logs, social links, reference ticker, feedback and `/health` stay open; `/ready` returns 503 with the reason. Exits are not blocked: users send exit transactions straight to the contract. |
+| `ESCROW_REGISTRY_GUARD_MODE` | no | `warn` (`enforce` in production) | `off` · `warn` · `enforce`. In production, if ESCROW_REGISTRY_GUARD_MODE is unset it is enforce. Invalid value = the default (`warn`, `enforce` in production) plus a warning log. `warn`: log only (once and on change) and an `escrowRegistry` info field in `/ready`; nothing is closed and no HTTP status changes. `enforce`: on a mismatch (or an unreadable registry, fail-closed) the worker is not started (or is stopped), chain-bound scheduled jobs are skipped, and escrow-bound routes (orders, trades, pii, receipts, stats, rewards, admin) return `503 ESCROW_MISMATCH` with the reason. Auth, client logs, social links, reference ticker, feedback and `/health` stay open; `/ready` returns 503 with the reason. Exits are not blocked: users send exit transactions straight to the contract. |
 | `ESCROW_REGISTRY_GUARD_INTERVAL_MS` | no | `60000` | Re-check interval. |
 
 **First-time setup order**
@@ -905,7 +906,7 @@ Run the scripts from `backend/` (`node scripts/migrations/<name>.js`). They read
 | `normalizeIdentityFields.js` (`npm run migrate:identity`) | **writes** | dry-run by default; writes only with `--apply` (`npm run migrate:identity:dry` = dry-run, `npm run migrate:identity` = `--apply`; `--dry-run` still accepted with a warning) | Converts legacy numeric `Order.onchain_order_id`, `Trade.onchain_escrow_id`, `Trade.parent_order_id` to canonical strings. |
 | `backfillTerminalTradeStats.js` | dry-run | `--apply` | Fills the permanent `TerminalTradeStat` counters from existing terminal trades. Idempotent (`$setOnInsert` on `trade_key`). |
 | `backfillLastBanEndsAt.js` (`npm run migrate:last-ban-ends-at`; `:dry` = dry-run) | dry-run | `--apply` | Fills `User.last_ban_ends_at` from chain (`getReputation().bannedUntil`) for users whose `banned_until` was nulled earlier, so the reputation-decay job can pick them up. Idempotent, read-only RPC (`BASE_RPC_URL`, `ARAF_ESCROW_ADDRESS`). |
-| `dedupeRevenueEvents.js` | dry-run | `--apply` | Removes duplicate `RevenueEvent` rows written by the old worker (escrow row duplicating the vault row for the same tx/token/amount/kind/trade). Idempotent. |
+| `dedupeRevenueEvents.js` | dry-run | `--apply` (recommended: `--apply --backup=<file>`; rows to delete are written to JSON first) | Removes duplicate `RevenueEvent` rows written by the old worker (escrow row duplicating the vault row for the same tx/token/amount/kind/trade). Idempotent. |
 
 Order of operations for an upgrade:
 1. **Before** the new backend: `npm run migrate:identity:dry`, then `npm run migrate:identity` if it reports numeric ids. `IDENTITY_NORMALIZATION_GUARD` defaults to `enforce` in production, so the backend refuses to start while legacy ids exist.
