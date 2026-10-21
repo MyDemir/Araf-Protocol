@@ -55,7 +55,7 @@ export const maskContact = (channel, value) => {
   return null;
 };
 
-export const buildContactHref =(channel, value) => {
+export const buildContactHref = (channel, value) => {
   if (!channel || value == null) return null;
   const raw = String(value).trim();
   if (!raw) return null;

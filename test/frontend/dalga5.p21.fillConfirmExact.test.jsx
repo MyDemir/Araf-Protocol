@@ -25,6 +25,12 @@ describe('F4-11: fon onay ekranında tutar birebir', () => {
     expect(screen.getByTestId('fill-confirm-amount').textContent).toContain('1.234.567,000000000000000001 DAI');
   });
 
+  it('negatif değerlerde işaret korunur (-0.5, -1.5)', () => {
+    render(<FillConfirmSheet summary={summary({ fillAmountRaw: -500_000_000_000_000_000n, bondRaw: -1_500_000_000_000_000_000n })} lang="EN" onConfirm={() => {}} onCancel={() => {}} />);
+    expect(screen.getByTestId('fill-confirm-amount').textContent).toContain('-0.5 DAI');
+    expect(screen.getByTestId('fill-confirm-bond').textContent).toContain('-1.5 DAI');
+  });
+
   it('6 ondalıklı token eski görünümü korur', () => {
     render(<FillConfirmSheet summary={summary({ decimals: 6, crypto: 'USDT', fillAmountRaw: 25_500_000n, bondRaw: 8_000_000n, lockTotalRaw: 8_000_000n })} lang="EN" onConfirm={() => {}} onCancel={() => {}} />);
     expect(screen.getByTestId('fill-confirm-amount').textContent).toContain('25.5 USDT');

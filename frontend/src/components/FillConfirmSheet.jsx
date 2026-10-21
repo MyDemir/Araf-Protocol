@@ -84,8 +84,11 @@ const tokenText = (raw, decimals, crypto, lang) => {
   try {
     // [TR] F4-11: bigint'ten birebir (Number'a çevirme/yuvarlama yok); yalnız ayırıcılar dile göre seçilir.
     // [EN] F4-11: exact from the bigint (no Number conversion/rounding); only separators depend on language.
-    const [whole, frac = ''] = formatUnits(BigInt(raw), decimals).split('.');
-    return `${fmtNumber(BigInt(whole), lang)}${frac ? `${lang === 'TR' ? ',' : '.'}${frac}` : ''} ${crypto}`;
+    // [TR] İşaret ayrı taşınır: -0.5 için BigInt('-0') === 0n işareti kaybettirirdi.
+    const big = BigInt(raw);
+    const negative = big < 0n;
+    const [whole, frac = ''] = formatUnits(negative ? -big : big, decimals).split('.');
+    return `${negative ? '-' : ''}${fmtNumber(BigInt(whole), lang)}${frac ? `${lang === 'TR' ? ',' : '.'}${frac}` : ''} ${crypto}`;
   } catch {
     return null;
   }
