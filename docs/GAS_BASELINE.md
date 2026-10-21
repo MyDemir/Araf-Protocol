@@ -203,3 +203,42 @@ kayar (net +206).
 |---|---:|---:|---:|---:|
 | `ArafEscrow` | 22,137 | 22,273 | +136 | 2,303 |
 | `ArafReputationLib` | 4,705 | 4,732 | +27 | 19,844 |
+
+## Wave 5 contract package (2026-10-21) / Dalga 5 kontrat paketi
+
+Changes: K1-06 (terminal snapshot + reputation before payout), K2-01 (autoRelease cut ≥ release fee), K1-03
+(payment-window penalty to maker), K3-02 (fee-0 side gets weight 0), K3-04 (`setRewards` binding check), K3-06
+(`outstandingExternalFunding` counter + liability), K3-07 (`SettlementExpired` on overwrite), K3-09 (intent root
+cause), K2-07 (`ZeroAddress`), K2-08 (`TokenLimitsUpdated`), K1-07/K2-09 (dead constants removed).
+Değişiklikler yukarıdaki maddelerdir; ölçüm aynı betik ve bağlantıyla, değişiklikten önce ve sonra alındı.
+
+| Operation | Before | After | Δ gas | Δ % |
+|---|---:|---:|---:|---:|
+| `releaseFunds_t0` | 193,989 | 196,141 | +2,152 | +1.1% |
+| `releaseFunds_t2` | 222,016 | 224,167 | +2,151 | +1.0% |
+| `proposeSettlement` | 147,037 | 147,004 | -33 | -0.0% |
+| `acceptSettlement` | 276,946 | 279,135 | +2,189 | +0.8% |
+| `autoRelease` | 274,724 | 277,513 | +2,789 | +1.0% |
+| `proposeOrApproveCancel_final` | 219,239 | 219,144 | -95 | -0.0% |
+| `expirePaymentWindow` | 228,141 | 182,948 | -45,193 | -19.8% |
+| `burnExpired` | 229,675 | 231,821 | +2,146 | +0.9% |
+| `recordTradeOutcome_single` | 142,975 | 143,043 | +68 | +0.0% |
+| `recordTradeOutcomes_batch10` | 573,356 | 574,036 | +680 | +0.1% |
+| `recordTradeOutcomes_perTrade` | 57,336 | 57,404 | +68 | +0.1% |
+| `finalizeEpochToken` | 54,461 | 54,483 | +22 | +0.0% |
+
+The other 14 measured operations are unchanged (create/fill/report/ping/challenge/claim). Every path that sends
+revenue to the vault pays ≈+2.1k: `onArafRevenue` now reads the cold `outstandingExternalFunding[token]` slot
+(K3-06). `autoRelease` adds ≈+0.6k for the fee floor (K2-01). `expirePaymentWindow` no longer calls the treasury
+(intent + transfer + hook) because the penalty goes to the maker (K1-03). The CEI reorder (K1-06) moves work but
+adds no measurable gas. Rewards recording pays +68 per trade for the per-side weight.
+Vault'a gelir gönderen her yol ≈+2,1k öder (K3-06 soğuk slot okuması); `autoRelease` ücret tabanı için ≈+0,6k
+(K2-01); `expirePaymentWindow` hazineye çağrı yapmadığı için -45k (K1-03).
+
+| Bytecode (deployed) | Before | After | Δ | EIP-170 headroom |
+|---|---:|---:|---:|---:|
+| `ArafEscrow` | 22,273 | 22,585 | +312 | 1,991 |
+| `ArafSettlementLib` | 2,168 | 2,394 | +226 | 22,182 |
+| `ArafRevenueVault` | 6,547 | 6,838 | +291 | 17,738 |
+| `ArafRewards` | 7,215 | 7,230 | +15 | 17,346 |
+| `ArafReputationLib` | 4,732 | 4,732 | +0 | 19,844 |

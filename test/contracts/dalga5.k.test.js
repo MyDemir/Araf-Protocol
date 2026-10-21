@@ -350,6 +350,20 @@ describe("Dalga 5 K paketi: rewards and vault", function () {
     });
   });
 
+  describe("K3-05 (documented) permissionless finalize front-runs a late allocation", function () {
+    it("after recordingDeadline anyone finalizes; a later allocateEpochRewards reverts EpochTokenFinalized", async function () {
+      const c = await loadFixture(rewardsFixture);
+      const [, , , anyone] = await ethers.getSigners();
+      const epoch = await c.rewards.currentEpoch();
+      const deadline = (epoch + 1n) * 30n * 86400n + 86400n;
+      await time.increaseTo(deadline);
+      const tokenAddr = "0x0000000000000000000000000000000000000001";
+      await c.rewards.connect(anyone).finalizeEpochToken(epoch, tokenAddr);
+      await expect(c.rewards.connect(c.owner).allocateEpochRewards(epoch, tokenAddr, 1n))
+        .to.be.revertedWithCustomError(c.rewards, "EpochTokenFinalized");
+    });
+  });
+
   describe("K3-04 setRewards only accepts a Rewards contract bound to this vault", function () {
     it("EOA and a Rewards bound to another vault are rejected; the bound one is accepted", async function () {
       const [owner, , , eoa] = await ethers.getSigners();
