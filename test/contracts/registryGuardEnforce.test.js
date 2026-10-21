@@ -109,15 +109,17 @@ describe('K4-01: registry guard enforce (Base Sepolia)', function () {
   describe('workflow wiring', function () {
     const GM = 'stage-runtime-env.sh guard-mode';
 
-    it('deploy-base-sepolia: guard-mode after Fly deploy and BEFORE rotation (ACTIVE), and again after health', function () {
+    it('deploy-base-sepolia: guard-mode inside the Fly deploy step (ACTIVE, before rotation) and again after health', function () {
       const s = steps('deploy-base-sepolia.yml');
       const fly = idx(s, (x) => x.name === 'Deploy backend to Fly');
       const rot = idx(s, (x) => x.name.startsWith('Rotate escrow state'));
       const health = idx(s, (x) => x.name === 'Check backend health');
-      const pre = idx(s, (x) => x.run.includes(GM) && x.if.includes("REGISTRY_STATE == 'ACTIVE'"));
+      // Rotasyon adımı Fly deploy'a bitişik kalmak zorunda (mevcut testler): ön kontrol Fly deploy adımının içinde.
+      expect(rot).to.equal(fly + 1);
+      expect(s[fly].run).to.include('guard-mode');
+      expect(s[fly].run).to.include('"ACTIVE"');
+      expect(s[fly].run.indexOf('flyctl deploy')).to.be.lessThan(s[fly].run.indexOf('guard-mode'));
       const post = idx(s, (x, i) => i > health && x.run.includes(GM));
-      expect(pre, 'pre-rotation guard-mode').to.be.greaterThan(fly);
-      expect(pre).to.be.lessThan(rot);
       expect(post, 'post-health guard-mode').to.be.greaterThan(health);
     });
 

@@ -410,15 +410,16 @@ jobs:
         working-directory: backend
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: flyctl deploy --remote-only -a "$FLY_APP_NAME"
-
-      # K4-01: Rotasyon (makineleri durdurma + arşivleme) ÖNCESİ canlı bekçi modu "enforce" olmalı; değilse ::error:: ile
-      # düşer, böylece ROTATING penceresinde worker'ı kapatacak bekçi gerçekten etkin olmadan arşivlemeye girilmez.
-      # Enforce + yeni ESCROW + eski registry = escrow_mismatch (beklenen engel); yalnız mod okunur.
-      - name: Verify registry guard is enforce (before rotation)
-        if: ${{ env.REGISTRY_STATE == 'ACTIVE' }}
         shell: bash
-        run: bash .github/scripts/stage-runtime-env.sh guard-mode
+        run: |
+          set -euo pipefail
+          flyctl deploy --remote-only -a "$FLY_APP_NAME"
+          # K4-01: Rotasyon (makineleri durdurma + arşivleme) ÖNCESİ canlı bekçi modu "enforce" olmalı; değilse ::error::
+          # ile düşer ve rotasyon adımı hiç başlamaz. (Ayrı adım olarak eklenemez: mevcut testler Fly deploy -> rotasyon
+          # bitişikliğini sabitler.) Enforce + yeni ESCROW + eski registry = escrow_mismatch (beklenen engel); yalnız mod okunur.
+          if [ "${REGISTRY_STATE:-}" = "ACTIVE" ]; then
+            bash ../.github/scripts/stage-runtime-env.sh guard-mode
+          fi
 
       # Arşiv Faz 2b (tasarım §3b): rotasyon, health kontrolünden önce. Makineler durdurulur ve doğrulanır; Mongo koleksiyonları
       # arşive taşınır, User aynası, Redis anahtarları ve checkpoint'ler (manifeste yazılıp silinir) işlenir; registry ROTATING -> ACTIVE
