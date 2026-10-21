@@ -141,6 +141,7 @@ const PROFILE_PROOF_SAFETY_MARGIN_MS = 60 * 1000;
 // [TR] Mirror, zincirdeki kilit anından bu süreden sonra oluşturuluyorsa (geç/backfill) kanıt şartı devreye girer.
 // [EN] If the mirror is created later than this after the on-chain lock (late/backfill), the proof requirement applies.
 const LATE_MIRROR_THRESHOLD_MS = 60 * 1000;
+const REPLAY_STALL_ALARM_THRESHOLD = 5;
 const REWARDS_EVENT_NAMES = ["EpochRewardAllocated", "TradeOutcomeRecorded", "RewardClaimed", "EpochTokenFinalizedEvent", "EpochDustRolledOver"];
 const EVENT_NAMES = [...ESCROW_EVENT_NAMES, ...VAULT_EVENT_NAMES, ...REWARDS_EVENT_NAMES];
 const EVENT_NAME_SET = new Set(EVENT_NAMES);
@@ -523,6 +524,7 @@ class EventWorker {
     this._lastBlockSeenAt = 0;
     this._stopRequested = false;
     this._quarantinedCount = 0;
+    this._archivedRequeueCount = 0;
     this._watchdogTimer = null;
     this._staleReconnects = 0;
     this._exitProcess = (code) => process.exit(code);
@@ -810,7 +812,7 @@ class EventWorker {
             await this._processEvent(event);
           } catch (err) {
             logger.error(`[Worker] Replay event işleme hatası: ${event.eventName} - ${err.message}`);
-            await this._addToDLQ(event, err.message);
+            await this._addToDLQOrRequeueArchived(event, err.message);
             failedEvents += 1;
           }
         }
@@ -853,6 +855,14 @@ class EventWorker {
   //      range every block (~2s) and hammer the DLQ/RPC.
   _noteReplayFailure() {
     this._replayFailureCount += 1;
+    // [TR] B1-03: ardışık replay başarısızlığı sessiz kalmasın; eşikten sonra her başarısızlıkta alarm.
+    // [EN] B1-03: consecutive replay failures must not be silent; alarm on every failure past the threshold.
+    if (this._replayFailureCount >= REPLAY_STALL_ALARM_THRESHOLD) {
+      logger.error(
+        `[Worker][ALARM] Replay ${this._replayFailureCount} kez üst üste başarısız; checkpoint takılı ` +
+        `(safe=${this._lastSafeCheckpointBlock}). DLQ ve RPC durumunu kontrol edin.`
+      );
+    }
     const delay = Math.min(
       this._cfg("WORKER_REPLAY_BACKOFF_BASE_MS") * 2 ** Math.min(this._replayFailureCount - 1, 30),
       this._cfg("WORKER_REPLAY_BACKOFF_MAX_MS")
@@ -1488,7 +1498,7 @@ class EventWorker {
       }
 
       this._retryFailureCount += 1;
-      await this._addToDLQ(event, err.message);
+      await this._addToDLQOrRequeueArchived(event, err.message);
       return false;
     }
   }
@@ -1547,6 +1557,39 @@ class EventWorker {
     await redis.rPush(DLQ_KEY, entry);
     await redis.sAdd(DLQ_LIVE_KEYS_SET, idempotencyKey);
     return true;
+  }
+
+  /**
+   * [TR] B1-03: Event arşiv indeksinde ise (DLQ taşmasında arşive atılmış, artık re-drive edilmiyor) ve yeniden
+   *      başarısız olduysa sessizce atlanmaz: arşiv anahtarı indeksten çıkarılıp event DLQ'ya geri alınır ve alarm
+   *      üretilir. Böylece MAX_REDRIVE_ATTEMPTS sonunda karantinaya (acked-poison) gidebilir; checkpoint sonsuza
+   *      dek takılı kalmaz. DLQ üst sınırı dlqProcessor.archiveOverflow ile korunur. Canlı DLQ ya da karantinada
+   *      olan event için davranış değişmez (zaten kuyrukta / ack'li).
+   * [EN] B1-03: if the failed event sits in the archive index (pushed out on DLQ overflow, no longer re-driven)
+   *      it is not silently dropped: the archive key is removed from the index, the event goes back to the DLQ
+   *      and an alarm is logged, so it can reach quarantine after MAX_REDRIVE_ATTEMPTS and the checkpoint is not
+   *      frozen forever. The DLQ cap stays enforced by dlqProcessor.archiveOverflow.
+   */
+  async _addToDLQOrRequeueArchived(event, errorMsg) {
+    const added = await this._addToDLQ(event, errorMsg);
+    if (added) return true;
+
+    const redis = getRedisClient();
+    const idempotencyKey = this._getEventId(event);
+    const archived = await redis.sIsMember(DLQ_ARCHIVE_KEYS_SET, idempotencyKey);
+    if (!archived) return false;
+    if ((await redis.sIsMember(DLQ_LIVE_KEYS_SET, idempotencyKey)) || (await redis.sIsMember(DLQ_QUARANTINE_KEYS_SET, idempotencyKey))) {
+      return false;
+    }
+
+    await redis.sRem(DLQ_ARCHIVE_KEYS_SET, idempotencyKey);
+    const requeued = await this._addToDLQ(event, errorMsg);
+    this._archivedRequeueCount += 1;
+    logger.error(
+      `[Worker][ALARM] Arşivlenmiş event yeniden başarısız; DLQ'ya geri alındı: ${event.eventName} ` +
+      `key=${idempotencyKey} block=${event.blockNumber} toplam_geri_alinan=${this._archivedRequeueCount}`
+    );
+    return requeued;
   }
 
   async _isQuarantined(event) {
