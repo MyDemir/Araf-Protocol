@@ -122,10 +122,6 @@ jobs:
         working-directory: backend
         run: npm ci --omit=dev --ignore-scripts
 
-      - name: Install contract dependencies
-        working-directory: contracts
-        run: npm ci
-
       - name: Setup Fly CLI
         if: ${{ inputs.mode != 'precheck' && !inputs.dry_run }}
         uses: superfly/flyctl-actions/setup-flyctl@1.5

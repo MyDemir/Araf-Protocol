@@ -13,12 +13,27 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   release:
     name: Create GitHub release
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
+      # K4-08: Yayın, aynı commit için CI workflow'unun başarılı bir koşusu olmadan yapılmaz (tag push ya da dispatch).
+      - name: Require successful CI for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          count="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&status=success&per_page=1" --jq '.total_count')"
+          if ! [[ "$count" =~ ^[0-9]+$ ]] || [ "$count" -lt 1 ]; then
+            echo "::error::No successful CI run found for commit $GITHUB_SHA. Release refused."
+            exit 1
+          fi
+          echo "CI succeeded for $GITHUB_SHA ($count run(s))."
+
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.ref }}

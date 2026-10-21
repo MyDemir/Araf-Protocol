@@ -124,6 +124,115 @@ describe('stage-runtime-env.sh: VERCEL_TOKEN argv disinda (K4-05)', function () 
   });
 });
 
+describe('lib/redact.js (K4-10)', function () {
+  const { redactError } = require('../../.github/scripts/lib/redact.js');
+  it('URL, anahtar benzeri dizgi ve satir sonu maskelenir; ham nesne basilmaz', function () {
+    const e = new Error('request failed https://base-sepolia.g.alchemy.com/v2/ABCDEFGHIJKLMNOPQRSTUVWXYZ012345 and key ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\n::error::injected');
+    e.code = 'SERVER_ERROR';
+    e.request = { url: 'https://secret.example/key123' };
+    const out = redactError(e);
+    expect(out).to.match(/^Error \(SERVER_ERROR\): /);
+    expect(out).to.not.match(/alchemy|ABCDEFGHIJKLMNOP|secret\.example|\n/);
+    expect(out).to.include('[redacted-url]');
+  });
+  it('workflow Export adimi redactError kullanir ve e.message dogrudan basilmaz', function () {
+    const wf = require('js-yaml').load(fs.readFileSync(path.join(ROOT, '.github/workflows/deploy-base-sepolia.yml'), 'utf8'));
+    const run = wf.jobs.deploy.steps.find((s) => s.name === 'Export deployment values').run;
+    expect(run).to.include('redact.js').and.to.include('redactError(e)');
+    expect(run).to.not.include('e.message');
+  });
+});
+
+describe('escrow-registry.js write filtresi (K4-20a)', function () {
+  const Module = require('module');
+  it('ROTATING belgeyi ezmez: filtre state $ne ROTATING; 11000 guvenli hataya cevrilir', async function () {
+    const resolved = require.resolve('mongodb', { paths: [path.join(ROOT, 'backend')] });
+    const saved = require.cache[resolved];
+    const calls = [];
+    let failWith = null;
+    class FakeClient {
+      constructor() {}
+      async connect() {}
+      async close() {}
+      db() { return { collection: () => ({ replaceOne: async (...a) => { calls.push(a); if (failWith) throw failWith; } }) }; }
+    }
+    require.cache[resolved] = new Module(resolved);
+    require.cache[resolved].exports = { MongoClient: FakeClient };
+    require.cache[resolved].loaded = true;
+    try {
+      const { createMongoStore } = require('../../.github/scripts/escrow-registry.js');
+      const store = createMongoStore('mongodb://x');
+      await store.write({ _id: 'active', state: 'ACTIVE' });
+      expect(calls[0][0]).to.deep.equal({ _id: 'active', state: { $ne: 'ROTATING' } });
+      expect(calls[0][2]).to.deep.equal({ upsert: true });
+      failWith = Object.assign(new Error('E11000 dup key host=secret'), { code: 11000 });
+      let err;
+      try { await store.write({ _id: 'active' }); } catch (e) { err = e; }
+      expect(err.safe).to.equal(true);
+      expect(err.message).to.match(/ROTATING/).and.to.not.match(/secret/);
+    } finally {
+      if (saved) require.cache[resolved] = saved; else delete require.cache[resolved];
+    }
+  });
+});
+
+describe('workflow YAML sertlestirmeleri (K4-03/04/08/09/20d)', function () {
+  const yaml = require('js-yaml');
+  const load = (f) => yaml.load(fs.readFileSync(path.join(ROOT, '.github/workflows', f), 'utf8'));
+  const deploySteps = () => load('deploy-base-sepolia.yml').jobs.deploy.steps;
+  const idx = (steps, n) => steps.findIndex((s) => s.name === n);
+
+  it('K4-03: verify adimi health kontrolunden sonra, kendi timeout ve ust sinirlariyla', function () {
+    const steps = deploySteps();
+    const v = steps[idx(steps, 'Verify contracts on BaseScan (experimental)')];
+    expect(idx(steps, 'Verify contracts on BaseScan (experimental)')).to.be.greaterThan(idx(steps, 'Check backend health'));
+    expect(v['timeout-minutes']).to.be.a('number').and.to.be.at.most(15);
+    expect(Number(v.env.VERIFY_RETRIES)).to.be.at.most(3);
+    expect(Number(v.env.VERIFY_RETRY_DELAY_MS)).to.be.at.most(15000);
+  });
+
+  it('K4-04: Persist yalniz rotasyon/ilk-kurulum registry adimi basarili olunca; always() yok; ozet OLD_ESCROW_ADDRESS yazar', function () {
+    const steps = deploySteps();
+    const p = steps[idx(steps, 'Persist deployment variables')];
+    expect(p.if).to.not.include('always()');
+    expect(p.if).to.include("steps.rotate_state.outcome == 'success'").and.to.include("steps.registry_first.outcome == 'success'");
+    expect(steps.find((s) => s.id === 'rotate_state').name).to.equal('Rotate escrow state (archive + registry switch)');
+    expect(steps.find((s) => s.id === 'registry_first').name).to.equal('Write active escrow registry (first install)');
+    const sum = steps[idx(steps, 'Print deployment summary')];
+    expect(sum.env.OLD_ESCROW_ADDRESS).to.equal('${{ vars.ARAF_ESCROW_ADDRESS }}');
+    expect(sum.run).to.include('OLD_ESCROW_ADDRESS');
+  });
+
+  it('K4-08: ci.yml permissions contents read + concurrency + timeout; release CI basarisini ister', function () {
+    const ci = load('ci.yml');
+    expect(ci.permissions).to.deep.equal({ contents: 'read' });
+    expect(ci.concurrency['cancel-in-progress']).to.equal(true);
+    for (const j of Object.values(ci.jobs)) expect(j['timeout-minutes']).to.be.a('number');
+    const rel = load('release.yml');
+    const steps = rel.jobs.release.steps;
+    const gate = steps.findIndex((s) => s.name === 'Require successful CI for this commit');
+    expect(gate).to.be.greaterThan(-1);
+    expect(gate).to.be.lessThan(steps.findIndex((s) => s.name === 'Publish release'));
+    expect(steps[gate].run).to.include('workflows/ci.yml/runs').and.to.include('head_sha=$GITHUB_SHA').and.to.include('status=success');
+    expect(rel.permissions.actions).to.equal('read');
+  });
+
+  it('K4-09: GH_VARIABLES_TOKEN hardhat adiminda yok; ayri adimda', function () {
+    const steps = deploySteps();
+    const h = steps[idx(steps, 'Deploy test USDT (optional)')];
+    expect(JSON.stringify(h)).to.not.include('GH_VARIABLES_TOKEN');
+    expect(h.run).to.not.include('gh variable');
+    const p = steps[idx(steps, 'Persist test USDT variable (optional)')];
+    expect(p.env.GH_TOKEN).to.equal('${{ secrets.GH_VARIABLES_TOKEN }}');
+    expect(p.run).to.not.include('hardhat');
+    for (const s of steps) if (s.run && s.run.includes('hardhat')) expect(JSON.stringify(s.env || {}), s.name).to.not.include('GH_VARIABLES_TOKEN');
+  });
+
+  it('K4-20d: rotate-escrow.yml contracts npm ci adimi yok', function () {
+    for (const s of load('rotate-escrow.yml').jobs.rotate.steps) expect(s['working-directory'], s.name).to.not.equal('contracts');
+  });
+});
+
 describe('fly-machines-lib.sh: capture_started gecis durumlari (K4-13)', function () {
   const LIB = path.join(ROOT, '.github/scripts/fly-machines-lib.sh');
   function capture(states, extra = {}) {
