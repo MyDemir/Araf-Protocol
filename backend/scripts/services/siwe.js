@@ -218,8 +218,8 @@ async function verifySiweSignature(messageStr, signature) {
     throw new AuthError(`SIWE domain uyuşmazlığı: beklenen ${expectedDomain}, gelen ${message.domain}`);
   }
 
-  let parsedIncoming = null;
-  let parsedExpected = null;
+  let parsedIncoming;
+  let parsedExpected;
 
   try {
     parsedIncoming = new URL(message.uri);

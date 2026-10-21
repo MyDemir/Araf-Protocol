@@ -58,7 +58,7 @@ describe("eventListener reads runtime settings every round", () => {
     worker._lastSafeCheckpointBlock = 0;
     worker.provider = { on: jest.fn(), getBlockNumber: jest.fn().mockResolvedValue(20) };
     worker._pollLiveRange = jest.fn().mockResolvedValue(undefined);
-    worker._computeFinalizedUpTo = jest.fn().mockReturnValue(0);
+    worker._computeFinalizedUpTo = jest.fn((h) => h - 5); // B1-02: canlı tur head - derinlik (5) kadar okur
     worker._shouldTriggerLiveReplay = jest.fn().mockReturnValue(false);
   });
 
@@ -71,14 +71,14 @@ describe("eventListener reads runtime settings every round", () => {
   it("uses env until an admin value is saved; the new batch size applies on the next tick, no restart", async () => {
     await worker._refreshRuntimeSettings();
     await worker._liveTick();
-    expect(worker._pollLiveRange.mock.calls).toEqual([[1, 10], [11, 20]]);
+    expect(worker._pollLiveRange.mock.calls).toEqual([[1, 10], [11, 15]]);
 
     await svc.setSetting("WORKER_BLOCK_BATCH_SIZE", 4, { wallet: ADMIN });
     worker._pollLiveRange.mockClear();
     worker._lastLivePolledBlock = 0;
     await worker._refreshRuntimeSettings();
     await worker._liveTick();
-    expect(worker._pollLiveRange.mock.calls).toEqual([[1, 4], [5, 8], [9, 12], [13, 16], [17, 20]]);
+    expect(worker._pollLiveRange.mock.calls).toEqual([[1, 4], [5, 8], [9, 12], [13, 15]]);
 
     // env'e dön: override silinir, env (10) geri gelir
     await svc.setSetting("WORKER_BLOCK_BATCH_SIZE", null, { wallet: ADMIN });
@@ -86,7 +86,7 @@ describe("eventListener reads runtime settings every round", () => {
     worker._lastLivePolledBlock = 0;
     await worker._refreshRuntimeSettings();
     await worker._liveTick();
-    expect(worker._pollLiveRange.mock.calls).toEqual([[1, 10], [11, 20]]);
+    expect(worker._pollLiveRange.mock.calls).toEqual([[1, 10], [11, 15]]);
   });
 
   it("timer path: interval change applies from the next scheduled tick", async () => {

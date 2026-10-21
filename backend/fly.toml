@@ -6,6 +6,18 @@
 app = "araf-protocol-backend"
 primary_region = "ams" # Amsterdam. İhtiyaca göre değiştirilebilir.
 
+# Düzgün kapanış: app.js SIGTERM/SIGINT dinler (scripts/app.js shutdown) ve 8 sn sonra process.exit zorlar
+# (FATAL_EXIT_TIMEOUT_MS). Fly varsayılanı ~5 sn olduğundan kill_timeout bunun ÜSTÜNDE tutulur.
+kill_signal = "SIGTERM"
+kill_timeout = "15s"
+
+# TEK MAKİNE VARSAYIMI: event listener worker tek makinede çalışır (çok makinede lider kilidi doğrulanmadı).
+# "rolling": eski makine durdurulup yenisi başlatılır -> kısa kesinti olur ama iki worker AYNI ANDA çalışmaz.
+# "bluegreen" yeni makineyi eskisi dururken başlatır -> iki listener aynı olayları çifte işleyebilir; makine sayısı
+# 1'den fazlaysa bu seçim, worker lider kilidi doğrulanana kadar DEĞİŞTİRİLMEMELİ.
+[deploy]
+  strategy = "rolling"
+
 [build]
   dockerfile = "Dockerfile"
 

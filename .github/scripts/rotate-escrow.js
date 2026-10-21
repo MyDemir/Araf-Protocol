@@ -66,7 +66,8 @@ const REDIS_DLQ_KEYS = {
   'worker:dlq:quarantine:keys': 'quarantine:keys',
 };
 const LAST_KNOWN_KEY = 'cache:protocol_config:v3:last_known';
-const CHECKPOINT_KEYS = ['worker:last_block', 'worker:last_safe_block'];
+const CONFIG_CACHE_KEY = 'cache:protocol_config:v3';
+const CHECKPOINT_KEYS =['worker:last_block', 'worker:last_safe_block'];
 
 const OPEN_TRADE_STATES = new Set([1, 2, 3]); // LOCKED, PAID, CHALLENGED
 const OPEN_ORDER_STATES = new Set([0, 1]); // OPEN, PARTIALLY_FILLED
@@ -86,9 +87,13 @@ function archiveName(chainId, escrow, collection) {
 const redisArchiveKey = (chainId, escrow, suffix) => `worker:dlq:archived:${chainId}:${String(escrow).toLowerCase()}:${suffix}`;
 const lastKnownArchiveKey = (chainId, escrow) => `${LAST_KNOWN_KEY}:archived:${chainId}:${String(escrow).toLowerCase()}`;
 
+const configCacheArchiveKey = (chainId, escrow) => `${CONFIG_CACHE_KEY}:archived:${chainId}:${String(escrow).toLowerCase()}`;
+
 function redisMoves(chainId, escrow) {
   const moves = Object.entries(REDIS_DLQ_KEYS).map(([live, suffix]) => ({ live, archive: redisArchiveKey(chainId, escrow, suffix) }));
   moves.push({ live: LAST_KNOWN_KEY, archive: lastKnownArchiveKey(chainId, escrow) });
+  // [TR] B4-01: TTL'li canlı protokol config önbelleği de taşınır; yeni escrow eski kontratın değerlerini sunmasın.
+  moves.push({ live: CONFIG_CACHE_KEY, archive: configCacheArchiveKey(chainId, escrow) });
   return moves;
 }
 
