@@ -15,7 +15,8 @@ const tick = () => new Promise((r) => setImmediate(r));
 // Gerçek Redis gibi: her komut ağ turu yapar (araya başka istek girebilir); EVAL ise tek komuttur (atomik).
 const mockRedis = {
   get: jest.fn(async (k) => { await tick(); return kv.has(k) ? kv.get(k) : null; }),
-  set: jest.fn(async (k, v) => { await tick(); kv.set(k, v); return "OK"; }),
+  // Küçük değeri (50) yazan istek ağda yavaş kalır: atomik olmayan yolda büyük değerin ÜSTÜNE geç yazar.
+  set: jest.fn(async (k, v) => { for (let i = 0; i < (v === "50" ? 5 : 1); i += 1) await tick(); kv.set(k, v); return "OK"; }),
   eval: jest.fn(async (script, { keys, arguments: args }) => {
     await tick();
     const [safeKey, lastKey] = keys;
