@@ -192,7 +192,7 @@ The contract is the single authoritative V3 state machine surface. The following
 - `decayReputation(wallet)` — permissionless clean-slate (see §8.3).
 
 ### 3.4 Governance / mutable admin surface
-- `setTreasury` (zero address rejected)
+- `setTreasury` (zero address rejected; the new treasury must be a vault wired to this escrow: its `escrow()` getter must return `address(this)`, otherwise EOAs, code-less addresses, contracts without the getter or wired to another escrow revert with `TreasuryEscrowMismatch`. The initial treasury set in the constructor is not subject to this check.)
 - `setFeeConfig` (≤ 2000 bps per side)
 - `setCooldownConfig` (≤ 30 days per tier)
 - `setTokenConfig` (decimals 1–18 and equal to the token's `decimals()`; all four tier caps > 0)
@@ -203,7 +203,7 @@ Owner powers per contract (none has a timelock; detailed runbook: [GOVERNANCE_RE
 
 | Contract | Owner functions | Code bound |
 |---|---|---|
-| `ArafEscrow` | `setTreasury`, `setFeeConfig`, `setCooldownConfig`, `setTokenConfig`, `setReputationPolicy`, `setReputationTierThresholds`, `pause`/`unpause` | Fee ≤ 2000 bps; cooldown ≤ 30 days; decimals must match the token; policy bounds §8.4; pause only stops create/fill |
+| `ArafEscrow` | `setTreasury`, `setFeeConfig`, `setCooldownConfig`, `setTokenConfig`, `setReputationPolicy`, `setReputationTierThresholds`, `pause`/`unpause` | Treasury must be a vault wired to this escrow (`TreasuryEscrowMismatch`); fee ≤ 2000 bps; cooldown ≤ 30 days; decimals must match the token; policy bounds §8.4; pause only stops create/fill |
 | `ArafRevenueVault` | `setRewardBps`, `setFinalTreasury`, `setRewards` (one-shot), `setSupportedToken`, `setProductPool`, `withdrawTreasuryShare`, `withdrawTreasuryShareToFinal`, `pause`/`unpause` | `rewardBps` 4000–7000; withdrawals only from the treasury reserve; pause only stops sponsor funding |
 | `ArafRewards` | `allocateEpochRewards`, `pause`/`unpause` | Source is the vault only; recording, finalize, claim and sweep are not pausable and no recipient can be chosen |
 
@@ -490,7 +490,7 @@ flowchart TD
 - **Ban:** after a negative signal, if `riskPoints ≥ banRiskPointsThreshold` (**100**): when the user is not currently banned, `consecutiveBans`+1 and the ban lasts `baseBanDuration × 2^(consecutiveBans−1)` (**30 days**, 60, 120 …, at most **365 days**). Under the same condition the tier ceiling drops one step every time (the first penalty seeds it at 4 and lowers it to 3).
 - **Ban effect:** taker entry (`TakerBanActive`) and maker roles (`MakerBanActive`: opening a sell order, having one's sell order filled, filling a buy order) are closed. Exit paths of open trades stay available.
 - **Bond pricing:** with `riskPoints == 0` and at least one success the bond rate drops by 100 bps; with `riskPoints > 0` it rises by 300 bps (Tier 0 bond is always 0).
-- **Clean-slate:** `decayReputation(wallet)` is permissionless; conditions: ban history exists (`NoPriorBanHistory`), `now > bannedUntil + cleanPeriod` (`CleanPeriodNotElapsed`), `consecutiveBans > 0` (`NoBansToReset`). Current `cleanPeriod`: **90 days**. It resets `consecutiveBans`, `riskPoints`, and the tier ceiling (back to 4). Not full amnesty: `failedDisputes`, outcome counters and `bannedUntil` are not erased.
+- **Clean-slate:** `decayReputation(wallet)` is permissionless; conditions: ban history exists (`NoPriorBanHistory`), `now > bannedUntil + cleanPeriod` and `now > lastNegativeEventAt + cleanPeriod` (both `CleanPeriodNotElapsed`), `consecutiveBans > 0` (`NoBansToReset`). Forgiveness therefore needs a full clean period after both the ban end and the last negative event; risk accumulated during the post-ban clean period is not forgiven (K3-01, 2026-10-21). The backend decay job only sends txs for candidates that meet this rule; the contract decides. Current `cleanPeriod`: **90 days**. It resets `consecutiveBans`, `riskPoints`, and the tier ceiling (back to 4). Not full amnesty: `failedDisputes`, outcome counters and `bannedUntil` are not erased.
 - The backend `reputationDecay` job can trigger this call for candidate wallets after reading the contract's `getReputation()` / `cleanPeriod()` (optional `RELAYER_PRIVATE_KEY`); the decision stays in the contract.
 
 ### 8.4 Policy bounds (`setReputationPolicy` / `setReputationTierThresholds`)
@@ -1010,6 +1010,7 @@ Frontend does not replace contract enforcement; it is a guardrail/orchestration 
 | Maker pings and goes silent to hold a PAID trade hostage | The ping lapses at `ping+48h` (`MAKER_CHALLENGE_WINDOW`); the taker uses `pingMaker` → `autoRelease` |
 | Bond-free (Tier 0) taker holding a LOCKED trade hostage | `PAYMENT_WINDOW` (48h) + `expirePaymentWindow`; `reportPayment` reverts with `PaymentWindowClosed` afterwards |
 | Settlement split changed right before acceptance | `acceptSettlement(tradeId, expectedProposalId)`; mismatch reverts with `SettlementProposalMismatch` |
+| Paid exits halted by a misconfigured treasury (`RevenueHookFailed`) | `setTreasury` only accepts a vault whose `escrow()` getter points at this escrow (`TreasuryEscrowMismatch`). Not full protection against a malicious owner: it can still wire a contract to this escrow whose hook reverts; there is no timelock. |
 | Owner repoints rewards to drain the reward reserve | `ArafRevenueVault.setRewards` is one-shot (`RewardsAlreadySet`) |
 | Wrong token decimals corrupting tier caps / reward notional | `setTokenConfig` verifies the token's `decimals()` on-chain (`InvalidDecimals`) |
 | Decayed value locked forever in the escrow on burn | `burnExpired` sends the trade's full balance to treasury |
@@ -1025,6 +1026,7 @@ Frontend does not replace contract enforcement; it is a guardrail/orchestration 
 | Risk | Description |
 |---|---|
 | Governance key risk | mutable fee/cooldown/token config/reputation policy/treasury surfaces remain owner-controlled without a timelock and require multisig/ops discipline. |
+| Blacklisted party (K1-01) | Payouts are pushed directly; if a party is put on the token's blacklist, a LOCKED Tier≥1 trade has no exit until the blacklist is lifted. By user decision (2026-10-21) no withdrawable (pull) balance was added. |
 | `renounceOwnership` | The inherited `Ownable` function is not disabled; calling it locks owner surfaces (pause included) permanently. |
 | Fake receipt / off-chain payment ambiguity | encrypted receipt + hash trace raises fraud cost but cannot cryptographically prove fiat transfer truth. |
 | Chargeback reality | banking reversals/disputes can make off-chain finality differ from on-chain expectations. |
