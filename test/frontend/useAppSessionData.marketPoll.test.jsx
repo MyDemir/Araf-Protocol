@@ -130,4 +130,26 @@ describe('F-pazar yoklamasi: yuklu sayfalar yeniden cekilir', () => {
     await waitFor(() => expect(publicCalls().length - before).toBeGreaterThan(0));
     expect(publicCalls().length - before).toBe(1);
   });
+  it('ucusta daha-fazla-yukle varken yoklama sayfayi daraltmaz; liste bosluksuz kalir', async () => {
+    serverOrders = Array.from({ length: 450 }, (_, i) => makeOrder(i + 1));
+    const baseFetch = (() => { installFetch(); return global.fetch; })();
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    global.fetch = vi.fn(async (url, ...rest) => {
+      const u = new URL(String(url), 'http://localhost');
+      if (u.pathname.endsWith('/api/orders') && u.searchParams.get('page') === '9') await gate;
+      return baseFetch(url, ...rest);
+    });
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByTestId('count').textContent).toBe('50'));
+    await loadMore(7);
+    expect(screen.getByTestId('count').textContent).toBe('400');
+    let pending;
+    await act(async () => { pending = api.loadMoreMarketOrders(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(30000); });
+    await act(async () => { release(); await pending; });
+    await waitFor(() => expect(screen.getByTestId('count').textContent).toBe('450'));
+    const expected = Array.from({ length: 450 }, (_, i) => `order-${i + 1}`).join(',');
+    expect(screen.getByTestId('ids').textContent).toBe(expected);
+  });
 });

@@ -1088,7 +1088,8 @@ export function useAppSessionData({
           }));
           if (isStale()) return;
           // [TR] Yoklama sürerken "daha fazla yükle" bir sayfa eklediyse bu tur atlanır; sonraki tur kurar.
-          if (marketPageRef.current !== pagesAtStart) return;
+          //      Uçuşta "daha fazla yükle" varsa da atlanır: sayfa sayısını daraltıp 6-7. sayfaları boşlukta bırakmasın.
+          if (marketPageRef.current !== pagesAtStart || marketMoreBusyRef.current) return;
           extra.forEach((pageData) => {
             const mapped = mapOrders(pageData.orders);
             mapped.forEach((o) => { if (o?.id !== undefined && o?.id !== null) laterIds.add(o.id); });
@@ -1144,6 +1145,8 @@ export function useAppSessionData({
       const data = await res.json();
       if (seq !== marketMoreSeqRef.current) return;
       if (!Array.isArray(data.orders)) throw new Error('Malformed orders payload');
+      // [TR] Yoklama yüklü sayfa sayısını değiştirdiyse (daralttıysa) bu sonuç atılır; aksi halde sayfalar arasında boşluk kalır.
+      if (marketPageRef.current !== nextPage - 1) return;
       const incoming = mapMarketOrdersRef.current(data.orders);
       incoming.forEach((o) => { if (o?.id !== undefined && o?.id !== null) marketMoreIdsRef.current.add(o.id); });
       setOrders((prev) => mergeOrdersById(prev, incoming));
