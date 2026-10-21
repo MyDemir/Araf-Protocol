@@ -3,7 +3,7 @@ import { deriveTradeTimeline } from './contexts/trade-room/tradeTimeline';
 import { shortAddress } from './copy';
 import { getChainNowMs, setClockOffset } from './clock';
 import { toUnixSeconds } from './contexts/settlement/settlementActionModel';
-import { buildMarketOrdersQuery, MARKET_FILTER_DEFAULTS, matchesMarketFilters } from './contexts/marketplace/marketFilters';
+import { buildMarketOrdersQuery, hasMoreMarketOrders, MARKET_FILTER_DEFAULTS, matchesMarketFilters, mergeOrdersById } from './contexts/marketplace/marketFilters';
 import { mapApiOrderToUi, formatTokenAmount as formatTokenAmountFromRaw, tokenToNumber as rawTokenToDisplayNumber } from './orderUiModel';
 import { buildApiUrl } from './apiConfig';
 import { fetchWithTimeout, isTimeoutError, DEFAULT_FETCH_TIMEOUT_MS, WRITE_FETCH_TIMEOUT_MS } from './fetchWithTimeout';
@@ -367,6 +367,11 @@ export function useAppSessionData({
   const [orders, setOrders] = useState([]);
   // [TR] Sunucudaki eşleşen emir sayısı (ilk sayfa 50 ile sınırlı olduğundan ayrı tutulur). [EN] Server-side match count.
   const [marketOrdersTotal, setMarketOrdersTotal] = useState(null);
+  // [TR] "Daha fazla yükle" durumu (F3-02): sonraki sayfa var mı, yükleniyor mu, hata var mı.
+  // [EN] "Load more" state (F3-02): is there a next page, loading, error.
+  const [marketHasMore, setMarketHasMore] = useState(false);
+  const [marketLoadingMore, setMarketLoadingMore] = useState(false);
+  const [marketLoadMoreError, setMarketLoadMoreError] = useState(false);
   // [TR] Pazar akışı alınamazsa sayaçlar "0" yerine "—" göstermeli; boş pazar ile ulaşılamayan sunucu ayırt edilir.
   // [EN] Distinguish an unreachable feed from an empty market.
   const [ordersFeedError, setOrdersFeedError] = useState(false);
@@ -981,6 +986,16 @@ export function useAppSessionData({
   const ordersLoadedRef = React.useRef(false);
   const ordersSeqRef = React.useRef(0);
   const myOrdersSeqRef = React.useRef(0);
+  // [TR] Sayfalama: yüklü sayfa no, 2+. sayfalardan gelen id'ler (yoklama 1. sayfayı yenilerken korunur), son sayfa adedi.
+  // [EN] Paging: loaded page no, ids that came from page 2+ (kept while polling refreshes page 1), last page size.
+  const marketPageRef = React.useRef(1);
+  const marketMoreIdsRef = React.useRef(new Set());
+  const marketLastCountRef = React.useRef(0);
+  const marketTotalRef = React.useRef(null);
+  const marketMoreSeqRef = React.useRef(0);
+  const marketMoreBusyRef = React.useRef(false);
+  const marketQueryRef = React.useRef('');
+  const mapMarketOrdersRef = React.useRef(null);
   const marketOrdersQuery = buildMarketOrdersQuery({
     filters: { ...marketFilters, amount: debouncedSearchAmount },
     tokenAddresses: SUPPORTED_TOKEN_ADDRESSES,
@@ -1003,6 +1018,17 @@ export function useAppSessionData({
     let initialLoad = true;
     let cancelled = false;
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    mapMarketOrdersRef.current = mapOrders;
+    // [TR] Efekt yeniden çalışınca (sorgu, dil, config) sayfalama baştan başlar; eski eşlemeli sayfalar tutulmaz.
+    // [EN] A re-run (query, language, config) restarts paging; pages mapped with old inputs are dropped.
+    marketQueryRef.current = marketOrdersQuery;
+    marketPageRef.current = 1;
+    marketMoreIdsRef.current = new Set();
+    marketLastCountRef.current = 0;
+    marketMoreSeqRef.current += 1;
+    marketMoreBusyRef.current = false;
+    setMarketLoadingMore(false);
+    setMarketLoadMoreError(false);
     // [TR] Sorgu/dil değişince ya da bileşen kapanınca uçuştaki istek iptal edilir; sıra numarası üst üste binen
     //      yoklamalarda eski yanıtın yenisini ezmesini önler (F10).
     const fetchOrders = async () => {
@@ -1015,8 +1041,17 @@ export function useAppSessionData({
         const data = await res.json();
         if (isStale()) return;
         if (!Array.isArray(data.orders)) throw new Error('Malformed orders payload');
-        setOrders(mapOrders(data.orders));
-        setMarketOrdersTotal(Number.isFinite(data.total) ? data.total : null);
+        // [TR] Yoklama yalnız 1. sayfayı yeniler; daha önce yüklenen 2+. sayfa emirleri id ile tekilleştirilip sona eklenir.
+        const firstPage = mapOrders(data.orders);
+        const moreIds = marketMoreIdsRef.current;
+        setOrders((prev) => (moreIds.size
+          ? mergeOrdersById(firstPage, prev.filter((o) => moreIds.has(o?.id)))
+          : firstPage));
+        const total = Number.isFinite(data.total) ? data.total : null;
+        setMarketOrdersTotal(total);
+        marketTotalRef.current = total;
+        if (marketPageRef.current === 1) marketLastCountRef.current = data.orders.length;
+        setMarketHasMore(hasMoreMarketOrders({ total, page: marketPageRef.current, lastPageCount: marketLastCountRef.current }));
         setOrdersFeedError(false);
         ordersLoadedRef.current = true;
       } catch (err) {
@@ -1040,6 +1075,42 @@ export function useAppSessionData({
     const interval = setInterval(whenVisible(fetchOrders), 30000);
     return () => { cancelled = true; controller?.abort(); clearInterval(interval); };
   }, [lang, onchainBondMap, onchainTokenMap, paymentRiskConfig, marketOrdersQuery, marketViewOpen, formatAddress, infraEpoch]);
+
+  // [TR] "Daha fazla yükle": aynı sorgunun sonraki sayfası. Kapsam değişirse (efekt yeniden çalışırsa) sonuç atılır.
+  // [EN] "Load more": next page of the same query. A result is discarded if the scope changed meanwhile.
+  const loadMoreMarketOrders = React.useCallback(async () => {
+    if (marketMoreBusyRef.current || typeof mapMarketOrdersRef.current !== 'function') return;
+    const query = marketQueryRef.current;
+    const nextPage = marketPageRef.current + 1;
+    const seq = marketMoreSeqRef.current;
+    marketMoreBusyRef.current = true;
+    setMarketLoadingMore(true);
+    setMarketLoadMoreError(false);
+    try {
+      const res = await fetchWithTimeout(() => buildApiUrl(`${query}&page=${nextPage}`), { credentials: 'include', infra: 'backend' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (seq !== marketMoreSeqRef.current) return;
+      if (!Array.isArray(data.orders)) throw new Error('Malformed orders payload');
+      const incoming = mapMarketOrdersRef.current(data.orders);
+      incoming.forEach((o) => { if (o?.id !== undefined && o?.id !== null) marketMoreIdsRef.current.add(o.id); });
+      setOrders((prev) => mergeOrdersById(prev, incoming));
+      marketPageRef.current = nextPage;
+      marketLastCountRef.current = data.orders.length;
+      const total = Number.isFinite(data.total) ? data.total : marketTotalRef.current;
+      if (Number.isFinite(data.total)) { marketTotalRef.current = total; setMarketOrdersTotal(total); }
+      setMarketHasMore(hasMoreMarketOrders({ total, page: nextPage, lastPageCount: data.orders.length }));
+    } catch (err) {
+      if (seq !== marketMoreSeqRef.current) return;
+      console.error('Load more orders error:', err);
+      setMarketLoadMoreError(true);
+    } finally {
+      if (seq === marketMoreSeqRef.current) {
+        marketMoreBusyRef.current = false;
+        setMarketLoadingMore(false);
+      }
+    }
+  }, []);
 
   useEffect(() => {
     if (!isAuthenticated || !isConnected) {
@@ -1674,6 +1745,10 @@ export function useAppSessionData({
     formatAddress,
     filteredOrders,
     marketOrdersTotal,
+    marketHasMore,
+    marketLoadingMore,
+    marketLoadMoreError,
+    loadMoreMarketOrders,
     activeEscrowCounts,
     chainOffsetMs,
     canMakerStartChallengeFlow,
