@@ -28,6 +28,7 @@ const { ethers, artifacts, network } = hre;
 const fs = require("fs");
 const path = require("path");
 const { retryRead, settleDeployment, blockOverrides } = require("./lib/waitForCode");
+const { formatError } = require("./lib/redact");
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const PUBLIC_CHAIN_IDS = new Set([8453, 84532]);
@@ -544,7 +545,7 @@ if (require.main === module) {
   main()
     .then(() => process.exit(0))
     .catch((err) => {
-      console.error(err);
+      console.error(formatError(err));
       process.exit(1);
     });
 }

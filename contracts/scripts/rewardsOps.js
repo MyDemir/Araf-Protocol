@@ -8,6 +8,7 @@ const hre = require('hardhat');
 const { ethers, network } = hre;
 const fs = require('fs');
 const path = require('path');
+const { formatError } = require('./lib/redact');
 
 const ZERO = '0x0000000000000000000000000000000000000000';
 const addr = (v, n) => {
@@ -109,7 +110,7 @@ if (require.main === module) {
     console.error(`Unknown rewards op "${op}". Use REWARDS_OP=${Object.keys(OPS).join('|')}`);
     process.exit(1);
   }
-  run().catch((e) => { console.error(e); process.exit(1); });
+  run().catch((e) => { console.error(formatError(e)); process.exit(1); });
 }
 
 module.exports = { loadManifest, resolveAddresses, configure, verify, switchTreasury };

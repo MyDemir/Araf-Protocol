@@ -8,6 +8,7 @@
 const fs = require("fs");
 const { ethers, network } = require("hardhat");
 const { deployEscrowWithLibraries } = require("./deploy");
+const { formatError } = require("./lib/redact");
 
 const D = 6;
 const u = (v) => ethers.parseUnits(String(v), D);
@@ -173,4 +174,4 @@ async function main() {
   if (process.env.GAS_BASELINE_OUT) fs.writeFileSync(process.env.GAS_BASELINE_OUT, JSON.stringify(table, null, 2));
 }
 
-main().catch((err) => { console.error(err); process.exit(1); });
+main().catch((err) => { console.error(formatError(err)); process.exit(1); });

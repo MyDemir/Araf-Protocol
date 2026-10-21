@@ -1,5 +1,6 @@
 const hre = require('hardhat');
 const { ethers, network } = hre;
+const { formatError } = require('./lib/redact');
 
 async function main() {
   const net = await ethers.provider.getNetwork();
@@ -44,4 +45,4 @@ async function main() {
   console.log('✅ smokeRewards checks passed');
 }
 
-if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });
+if (require.main === module) main().catch((e) => { console.error(formatError(e)); process.exit(1); });
