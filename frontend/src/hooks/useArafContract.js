@@ -22,7 +22,7 @@ import { parseAbi, getAddress, decodeEventLog } from 'viem';
 import { resolveClientErrorLogUrl } from '../app/apiConfig';
 import { setMakerChallengeWindowMs } from '../app/contexts/trade-room/tradeTimeline';
 import { getSupportedChainsMap, isConfiguredTestToken, isFaucetChainId, isMintTokenEnabled } from '../app/chainPolicy';
-import { ARAF_CONTRACT_ERROR_ABI, decorateContractError, describeContractErrorName, extractContractErrorName } from '../app/contractErrors';
+import { ARAF_CONTRACT_ERROR_ABI, decorateContractError, RECEIPT_UNCERTAIN_NAMES, describeContractErrorName, extractContractErrorName } from '../app/contractErrors';
 import { diagnoseWriteError, applyDiagnosis, stripAddresses, isUserRejection } from '../app/walletRpcDiagnosis';
 import { addKnownTradeIds } from '../app/knownTrades';
 import { safeStorage } from '../app/safeStorage';
@@ -448,7 +448,7 @@ export function useArafContract({ expectedChainId = null } = {}) {
       //      başarısız işlemi de başarı gibi gösterirdi. Yalnız bu çağrının kaydı silinir; sonucu belirsiz
       //      (zaman aşımı) işlemler kurtarma için saklanır.
       // [EN] Definitively failed txs drop their pending record; timeouts keep it (outcome unknown).
-      if (submittedHash && !/Timeout|NotFound/i.test(String(error?.name || ''))) {
+      if (submittedHash && !RECEIPT_UNCERTAIN_NAMES.test(String(error?.name || ''))) {
         try {
           const stored = JSON.parse(safeStorage.get("araf_pending_tx") || 'null');
           if (stored?.hash === submittedHash) safeStorage.remove("araf_pending_tx");
