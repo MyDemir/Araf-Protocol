@@ -82,7 +82,10 @@ const T = {
 const tokenText = (raw, decimals, crypto, lang) => {
   if (raw === null || raw === undefined) return null;
   try {
-    return `${fmtNumber(formatUnits(BigInt(raw), decimals), lang, { maxFractionDigits: Math.min(decimals, 6) })} ${crypto}`;
+    // [TR] F4-11: bigint'ten birebir (Number'a çevirme/yuvarlama yok); yalnız ayırıcılar dile göre seçilir.
+    // [EN] F4-11: exact from the bigint (no Number conversion/rounding); only separators depend on language.
+    const [whole, frac = ''] = formatUnits(BigInt(raw), decimals).split('.');
+    return `${fmtNumber(BigInt(whole), lang)}${frac ? `${lang === 'TR' ? ',' : '.'}${frac}` : ''} ${crypto}`;
   } catch {
     return null;
   }
