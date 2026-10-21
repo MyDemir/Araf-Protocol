@@ -57,7 +57,18 @@ describe('cleanupUserBankRiskMetadata atomik güncelleme', () => {
     mockCursor([makeUser([old, recent])]);
     jest.spyOn(User, 'updateOne').mockResolvedValue({ matchedCount: 0, modifiedCount: 0 });
     const res = await runUserBankRiskMetadataCleanup(NOW);
-    expect(res).toMatchObject({ success: true, scanned: 1, updated: 0 });
+    expect(res).toMatchObject({ success: true, scanned: 1, updated: 0, skipped: 1 });
+  });
+
+  it('legacy: okunan dizi boşsa alanın hiç olmaması da eşleşir', async () => {
+    const u = makeUser([]);
+    u.bankChangeCount30d = 2; // sayaç tutarsız -> değişiklik var
+    mockCursor([u]);
+    const spy = jest.spyOn(User, 'updateOne').mockResolvedValue({ matchedCount: 1 });
+    await runUserBankRiskMetadataCleanup(NOW);
+    const [filter] = spy.mock.calls[0];
+    expect(filter.$or).toEqual([{ bank_change_history: [] }, { bank_change_history: { $exists: false } }]);
+    expect(filter).not.toHaveProperty('bank_change_history');
   });
 
   it('değişmeyen belgede updateOne çağırmaz', async () => {
@@ -65,6 +76,6 @@ describe('cleanupUserBankRiskMetadata atomik güncelleme', () => {
     const spy = jest.spyOn(User, 'updateOne').mockResolvedValue({ matchedCount: 1 });
     const res = await runUserBankRiskMetadataCleanup(NOW);
     expect(spy).not.toHaveBeenCalled();
-    expect(res.updated).toBe(0);
+    expect(res).toMatchObject({ updated: 0, skipped: 0 });
   });
 });

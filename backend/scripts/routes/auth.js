@@ -21,13 +21,15 @@ const express = require("express");
 const Joi = require("joi");
 const { asyncHandler } = require("../utils/asyncHandler");
 const router = express.Router();
-
 const crypto = require("crypto");
 const { SiweMessage } = require("siwe");
 const { authLimiter, nonceLimiter } = require("../middleware/rateLimiter");
 const { ACCEPTED_TERMS_VERSIONS, CURRENT_TERMS_VERSION, parseTermsAcceptance } = require("../config/terms");
 const TermsAcceptance = require("../models/TermsAcceptance");
-const { requireAuth, requireSessionWalletMatch } = require("../middleware/auth");
+const { requireAuth: _requireAuth, requireSessionWalletMatch: _requireSessionWalletMatch } = require("../middleware/auth");
+// [TR] B2-17: async auth middleware'leri de reddi next(err)'e iletecek şekilde sarılır.
+const requireAuth = asyncHandler(_requireAuth);
+const requireSessionWalletMatch = asyncHandler(_requireSessionWalletMatch);
 const { isAdminWallet } = require("../utils/adminWallets");
 const { isRailEnabled, isRailEnabledStrict } = require("../services/paymentRails");
 const {

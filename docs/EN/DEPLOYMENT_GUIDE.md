@@ -932,7 +932,7 @@ PII re-encryption after the HKDF change has no tool in the repository; see `PII_
 - Concurrency `connections`, soft 80 / hard 100; VM `shared` 1 CPU, 512 MB.
 - Health check: `GET /health` every 30 s, 15 s grace period, 5 s timeout, HTTP inside the container (`force_https = true` outside).
 - `/health` is the **liveness** signal tied to the worker: it returns `503 "stale"` when no block was seen for `WORKER_LIVENESS_STALE_MS`; independently the worker watchdog reconnects after `WORKER_BLOCK_STALE_MS` and exits the process if blocks still do not arrive (the platform then restarts it). `/ready` (readiness) is not wired into `fly.toml`; use it for deploy gates and monitoring (full detail with `x-internal-token: $READY_INTERNAL_TOKEN`).
-- The image (`backend/Dockerfile`) is `node:22-alpine`, installs with `npm ci --omit=dev`, runs as the non-root `nodeapp` user and starts `node scripts/app.js`.
+- The image (`backend/Dockerfile`) is `node:22-alpine` pinned by index digest (to update, put the new index digest of the Docker Hub `library/node` `22-alpine` tag into the `FROM` line), installs with `npm ci --omit=dev`, runs as the non-root `nodeapp` user and starts `node scripts/app.js`.
 
 ---
 

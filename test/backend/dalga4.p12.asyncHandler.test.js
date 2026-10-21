@@ -1,9 +1,6 @@
 // B2-17: async route handler reddi süreci düşürmemeli; next(err)'e gitmeli.
-const fs = require('fs');
-const path = require('path');
 const express = require('express');
 const request = require('supertest');
-const acorn = require('../../backend/node_modules/acorn');
 const { asyncHandler } = require('../../backend/scripts/utils/asyncHandler');
 
 describe('asyncHandler', () => {
@@ -37,25 +34,21 @@ describe('asyncHandler', () => {
   });
 });
 
-describe('route dosyalarında sarmalanmamış async handler yok', () => {
-  const dir = path.join(__dirname, '../../backend/scripts/routes');
-  const VERBS = new Set(['get', 'post', 'put', 'patch', 'delete', 'all', 'use']);
+jest.mock("../../backend/scripts/middleware/rateLimiter", () => new Proxy({}, { get: () => (_req, _res, next) => next() }));
 
-  for (const file of fs.readdirSync(dir).filter((f) => f.endsWith('.js'))) {
+describe("route modüllerinde sarmalanmamış async handler yok", () => {
+  const { ROUTE_MOUNTS } = require("../../backend/scripts/routes/mounts");
+  const AsyncFunction = (async () => {}).constructor;
+
+  for (const { file } of ROUTE_MOUNTS) {
     it(file, () => {
-      const ast = acorn.parse(fs.readFileSync(path.join(dir, file), 'utf8'), { ecmaVersion: 2022 });
+      process.env.JWT_SECRET = process.env.JWT_SECRET || "Kq7vR2mZ9xT4pL6wN8bC3dF5hJ1gS0aE7yU2tH6rV9nM4cX8kB5fD3jG1sA0eQ7zW";
+      const router = require(`../../backend/scripts/routes/${file}`);
       const bare = [];
-      (function walk(n) {
-        if (!n || typeof n !== 'object') return;
-        if (Array.isArray(n)) return n.forEach(walk);
-        if (n.type === 'CallExpression' && n.callee.type === 'MemberExpression' &&
-            n.callee.object.name === 'router' && VERBS.has(n.callee.property.name)) {
-          for (const a of n.arguments) {
-            if ((a.type === 'ArrowFunctionExpression' || a.type === 'FunctionExpression') && a.async) bare.push(a.start);
-          }
-        }
-        for (const k in n) if (k !== 'type') walk(n[k]);
-      })(ast);
+      for (const layer of router.stack) {
+        const handles = layer.route ? layer.route.stack.map((l) => l.handle) : [layer.handle];
+        for (const h of handles) if (h instanceof AsyncFunction) bare.push(layer.route ? layer.route.path : "use");
+      }
       expect(bare).toEqual([]);
     });
   }

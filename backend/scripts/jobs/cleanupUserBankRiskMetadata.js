@@ -50,6 +50,7 @@ function buildCandidateQuery() {
 async function runUserBankRiskMetadataCleanup(now = new Date()) {
   let scanned = 0;
   let updated = 0;
+  let skipped = 0;
 
   try {
     const cursor = User.find(buildCandidateQuery())
@@ -102,7 +103,10 @@ async function runUserBankRiskMetadataCleanup(now = new Date()) {
         const res = await User.updateOne(
           {
             _id: user._id,
-            bank_change_history: beforeHistory,
+            // [TR] Legacy: alan DB'de hiç yoksa (okunan dizi boş) {alan: []} eşleşmez; yokluk da kabul edilir.
+            ...(beforeHistory.length === 0
+              ? { $or: [{ bank_change_history: beforeHistory }, { bank_change_history: { $exists: false } }] }
+              : { bank_change_history: beforeHistory }),
             bankChangeCount7d: counterCond(beforeCount7d),
             bankChangeCount30d: counterCond(beforeCount30d),
             lastBankChangeAt: beforeLastRaw,
@@ -117,6 +121,7 @@ async function runUserBankRiskMetadataCleanup(now = new Date()) {
           }
         );
         if ((res?.matchedCount ?? res?.n ?? 0) > 0) updated += 1;
+        else skipped += 1; // eşzamanlı değişiklik: sonraki turda yeniden denenir
       } catch (perUserErr) {
         logger.warn(
           `[Job:UserBankRiskCleanup] Kullanıcı atlandı: wallet=${user.wallet_address || "unknown"} err=${perUserErr.message}`
@@ -124,16 +129,16 @@ async function runUserBankRiskMetadataCleanup(now = new Date()) {
       }
     }
 
-    if (updated > 0) {
+    if (updated > 0 || skipped > 0) {
       logger.info(
-        `[Job:UserBankRiskCleanup] ${updated} kullanıcı belgesinde bank risk metadata prune edildi (scanned=${scanned}).`
+        `[Job:UserBankRiskCleanup] scanned=${scanned} updated=${updated} skipped=${skipped}`
       );
     }
 
-    return { success: true, scanned, updated };
+    return { success: true, scanned, updated, skipped };
   } catch (err) {
     logger.error(`[Job:UserBankRiskCleanup] Temizlik başarısız: ${err.message}`);
-    return { success: false, scanned, updated, error: err.message };
+    return { success: false, scanned, updated, skipped, error: err.message };
   }
 }
 

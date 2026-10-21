@@ -6,7 +6,10 @@ const express = require("express");
 const Joi = require("joi");
 const { asyncHandler } = require("../utils/asyncHandler");
 const router = express.Router();
-const { requireAuth, requireSessionWalletMatch } = require("../middleware/auth");
+const { requireAuth: _requireAuth, requireSessionWalletMatch: _requireSessionWalletMatch } = require("../middleware/auth");
+// [TR] B2-17: async auth middleware'leri de reddi next(err)'e iletecek şekilde sarılır.
+const requireAuth = asyncHandler(_requireAuth);
+const requireSessionWalletMatch = asyncHandler(_requireSessionWalletMatch);
 const { feedbackLimiter } = require("../middleware/rateLimiter");
 const Feedback = require("../models/Feedback");
 const logger = require("../utils/logger");

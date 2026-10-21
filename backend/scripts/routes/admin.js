@@ -3,7 +3,7 @@
 const express = require("express");
 const Joi = require("joi");
 
-const { requireAuth, requireSessionWalletMatch } = require("../middleware/auth");
+const { requireAuth: _requireAuth, requireSessionWalletMatch: _requireSessionWalletMatch } = require("../middleware/auth");
 const { adminReadLimiter, adminWriteLimiter } = require("../middleware/rateLimiter");
 const { getRedisClient } = require("../config/redis");
 const { getReadiness } = require("../services/health");
@@ -27,6 +27,9 @@ const { hmacDigest } = require("../services/encryption");
 
 const { asyncHandler } = require("../utils/asyncHandler");
 const router = express.Router();
+// [TR] B2-17: async auth middleware'leri de reddi next(err)'e iletecek şekilde sarılır.
+const requireAuth = asyncHandler(_requireAuth);
+const requireSessionWalletMatch = asyncHandler(_requireSessionWalletMatch);
 
 const TERMINAL_TRADE_STATUSES = ["RESOLVED", "CANCELED", "BURNED"];
 const DLQ_KEY = "worker:dlq";
