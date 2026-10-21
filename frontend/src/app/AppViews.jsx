@@ -131,6 +131,10 @@ export const buildAppViews = (ctx) => {
     setMarketFilter,
     resetMarketFilters,
     marketOrdersTotal = null,
+    marketHasMore = false,
+    marketLoadingMore = false,
+    marketLoadMoreError = null,
+    loadMoreMarketOrders,
     filteredOrders,
     orders,
     ordersFeedError,
@@ -765,6 +769,10 @@ export const buildAppViews = (ctx) => {
           result={{ loading, error: ordersFeedError, shown: shownCount, total: totalCount, loaded: loadedCount }}
           closedRailCount={visibleOrders.filter(isOwnerRailDisabled).length}
           trailing={faucetRow || null}
+          hasMore={marketHasMore}
+          loadingMore={marketLoadingMore}
+          loadMoreError={marketLoadMoreError}
+          onLoadMore={loadMoreMarketOrders}
         >
           {orderList}
         </MarketFilters>
