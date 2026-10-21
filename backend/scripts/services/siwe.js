@@ -18,7 +18,21 @@ const logger = require("../utils/logger");
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRES = process.env.JWT_EXPIRES_IN || "15m";
-const PII_EXPIRES = process.env.PII_TOKEN_EXPIRES_IN || "15m";
+// B2-18: PII token süresi env ile sınırsız uzatılamaz (üst sınır 15 dk).
+const PII_EXPIRES_MAX_MS = 15 * 60 * 1000;
+function _resolvePiiExpires(raw) {
+  const fallback = "15m";
+  if (!raw) return fallback;
+  const m = /^(\d+)\s*(ms|s|m|h|d)?$/i.exec(String(raw).trim());
+  if (!m) return fallback;
+  const unitMs = { ms: 1, s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 }[(m[2] || "ms").toLowerCase()];
+  const totalMs = Number(m[1]) * unitMs;
+  // jsonwebtoken: birimsiz rakam-string milisaniyedir; 0 / üst sınır üstü varsayılana iner.
+  return totalMs > 0 && totalMs <= PII_EXPIRES_MAX_MS ? String(raw).trim() : fallback;
+}
+const PII_EXPIRES = _resolvePiiExpires(process.env.PII_TOKEN_EXPIRES_IN);
+// B2-10: algoritma sabitlenir (iss/aud eklenmez: mevcut oturumlar geçersiz kalmasın).
+const JWT_ALGORITHMS = ["HS256"];
 const NONCE_TTL_SECS = 5 * 60; // 5 dakika
 
 function _positiveIntEnv(name, fallback) {
@@ -132,6 +146,15 @@ function getExpectedSiweChainId() {
     rpcUrl: process.env.BASE_RPC_URL,
     surface: "siwe",
   });
+}
+
+/**
+ * [TR] B2-12: SIWE_DOMAIN/SIWE_URI/EXPECTED_CHAIN_ID yapılandırma hatası ilk istekte değil açılışta ortaya çıksın.
+ * [EN] Fail fast at boot instead of on the first /nonce request.
+ */
+function assertSiweBootConfigOrThrow() {
+  getSiweConfig();
+  getExpectedSiweChainId();
 }
 
 // KEYS yerine SCAN kullanılır; Redis'i bloklamaz. (Yalnız legacy revoke fallback'i için.)
@@ -273,7 +296,7 @@ function issueJWT(walletAddress) {
   return jwt.sign(
     { sub: walletAddress.toLowerCase(), type: "auth", jti },
     JWT_SECRET,
-    { expiresIn: JWT_EXPIRES }
+    { expiresIn: JWT_EXPIRES, algorithm: "HS256" }
   );
 }
 
@@ -281,7 +304,7 @@ function issuePIIToken(walletAddress, tradeId) {
   return jwt.sign(
     { sub: walletAddress.toLowerCase(), type: "pii", tradeId },
     JWT_SECRET,
-    { expiresIn: PII_EXPIRES }
+    { expiresIn: PII_EXPIRES, algorithm: "HS256" }
   );
 }
 
@@ -292,8 +315,8 @@ function issuePIIToken(walletAddress, tradeId) {
  */
 function verifyJWT(token, options = {}) {
   return options.ignoreExpiration
-    ? jwt.verify(token, JWT_SECRET, { ignoreExpiration: true })
-    : jwt.verify(token, JWT_SECRET);
+    ? jwt.verify(token, JWT_SECRET, { ignoreExpiration: true, algorithms: JWT_ALGORITHMS })
+    : jwt.verify(token, JWT_SECRET, { algorithms: JWT_ALGORITHMS });
 }
 
 /**
@@ -325,11 +348,15 @@ async function isJWTBlacklisted(jti) {
   }
 }
 
+/**
+ * @returns {Promise<boolean>} B2-11: yazım başarısızsa false (çağıran logout'ta bildirir);
+ *          kara listeye alınacak jti/exp yoksa true (yapılacak iş yok).
+ */
 async function blacklistJWT(token) {
   try {
     const payload = jwt.decode(token);
-    if (!payload?.jti) return;
-    if (!payload?.exp) return;
+    if (!payload?.jti) return true;
+    if (!payload?.exp) return true;
 
     const redis = getRedisClient();
     const nowSecs = Math.floor(Date.now() / 1000);
@@ -341,8 +368,10 @@ async function blacklistJWT(token) {
       "Redis blacklist yazması"
     );
     logger.debug(`[Auth] JWT blacklist'e alındı: jti=${payload.jti}`);
+    return true;
   } catch (err) {
     logger.warn(`[Auth] JWT blacklist eklenemedi: ${err.message}`);
+    return false;
   }
 }
 
@@ -500,6 +529,11 @@ async function _handleConsumedRefreshToken(redis, usedRaw, expectedWallet) {
  * _handleConsumedRefreshToken ile tespit edilir.
  */
 async function rotateRefreshToken(refreshToken, expectedWallet = null) {
+  // B2-10: anahtar ayırıcı/joker içeren biçimsiz değer Redis'e gitmeden reddedilir
+  //        (üretilen token 64 hex; sıkı kontrol peekRefreshTokenOwner'da).
+  if (typeof refreshToken !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(refreshToken)) {
+    throw new AuthError(INVALID_REFRESH_MESSAGE, "REFRESH_INVALID");
+  }
   const redis = getRedisClient();
   const tokenKey = `${REFRESH_TOKEN_PREFIX}${refreshToken}`;
   const usedKey = `${REFRESH_USED_PREFIX}${refreshToken}`;
@@ -632,6 +666,7 @@ module.exports = {
   AuthError,
   getSiweConfig,
   getExpectedSiweChainId,
+  assertSiweBootConfigOrThrow,
   generateNonce,
   consumeNonce,
   verifySiweSignature,

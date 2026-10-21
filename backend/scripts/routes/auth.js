@@ -64,6 +64,11 @@ const COOKIE_OPTIONS_BASE = {
 };
 
 const ACTIVE_TRADE_STATUSES_FOR_BANK_PROFILE_LOCK = ["LOCKED", "PAID", "CHALLENGED"];
+// [TR] B2-23: set ve clearCookie aynı secure niteliğini kullanır.
+function _cookieSecure() {
+  return process.env.NODE_ENV === "production";
+}
+
 function _getJwtCookieOptions() {
   return {
     ...COOKIE_OPTIONS_BASE,
@@ -295,7 +300,8 @@ router.get("/nonce", authLimiter, nonceLimiter, asyncHandler(async (req, res, ne
   try {
     const { wallet } = req.query;
 
-    if (!wallet || !/^0x[a-fA-F0-9]{40}$/.test(wallet)) {
+    // B2-08: qs ile wallet[]=... dizi/nesne olabilir; yalnız string kabul edilir.
+    if (typeof wallet !== "string" || !/^0x[a-fA-F0-9]{40}$/.test(wallet)) {
       return res.status(400).json({ error: "Geçerli bir Ethereum adresi gir." });
     }
 
@@ -305,7 +311,9 @@ router.get("/nonce", authLimiter, nonceLimiter, asyncHandler(async (req, res, ne
     return res.json({ nonce, siweDomain, siweUri, termsVersion: CURRENT_TERMS_VERSION });
   } catch (err) {
     if (/SIWE_/.test(err.message)) {
-      return res.status(503).json({ error: err.message });
+      // B2-12: yapılandırma ayrıntısı anonim istemciye dönmez; ayrıntı yalnız log'da.
+      logger.error(`[Auth] SIWE yapılandırma hatası: ${err.message}`);
+      return res.status(503).json({ error: "Kimlik doğrulama servisi geçici olarak kullanılamıyor." });
     }
     next(err);
   }
@@ -452,6 +460,11 @@ router.post("/refresh", authLimiter, asyncHandler(async (req, res) => {
     // [EN] Body wallet is compatibility-only; authority comes from verified refresh token.
     if (expectedWallet == null || expectedWallet === "") expectedWallet = null;
 
+    // B2-08: dizi/nesne wallet 500'e düşmesin.
+    if (expectedWallet !== null && typeof expectedWallet !== "string") {
+      return res.status(400).json({ error: "Wallet formatı geçersiz." });
+    }
+
     if (expectedWallet && !/^0x[a-fA-F0-9]{40}$/.test(expectedWallet)) {
       return res.status(400).json({ error: "Wallet formatı geçersiz." });
     }
@@ -477,8 +490,8 @@ router.post("/refresh", authLimiter, asyncHandler(async (req, res) => {
     // [EN] Only AuthError ends the session (401 + clear cookies). Infra errors → 503, cookies kept.
     if (_isExpectedAuthError(err)) {
       logger.warn(`[Auth] Refresh reddedildi: ${err.code || "AUTH_FAILED"}`);
-      res.clearCookie("araf_jwt", { ...COOKIE_OPTIONS_BASE, path: "/" });
-      res.clearCookie("araf_refresh", { ...COOKIE_OPTIONS_BASE, path: "/api/auth" });
+      res.clearCookie("araf_jwt", { ...COOKIE_OPTIONS_BASE, secure: _cookieSecure(), path: "/" });
+      res.clearCookie("araf_refresh", { ...COOKIE_OPTIONS_BASE, secure: _cookieSecure(), path: "/api/auth" });
       return res.status(401).json({ error: err.message, ...(err.code === "TERMS_NOT_ACCEPTED" ? { code: err.code } : {}) });
     }
     // [TR] Ham err.message loglanmaz (bağlantı dizesi/kimlik bilgisi içerebilir); yalnız ad ve kod.
@@ -522,15 +535,26 @@ router.post("/logout", authLimiter, asyncHandler(async (req, res, next) => {
       if (owner) wallet = owner.wallet;
     }
 
+    // B2-11: blacklist yazımı başarısızsa (false) çalıntı JWT TTL sonuna dek geçerli kalabilir;
+    //        çerezler yine silinir, istemciye 503 ile "tamamlanmadı" bildirilir.
+    let blacklistOk = true;
     if (jwtIsAuthoritative) {
-      await blacklistJWT(currentJWT);
+      blacklistOk = (await blacklistJWT(currentJWT)) !== false;
     }
     if (wallet) {
       await revokeRefreshToken(wallet);
     }
 
-    res.clearCookie("araf_jwt", { ...COOKIE_OPTIONS_BASE, path: "/" });
-    res.clearCookie("araf_refresh", { ...COOKIE_OPTIONS_BASE, path: "/api/auth" });
+    res.clearCookie("araf_jwt", { ...COOKIE_OPTIONS_BASE, secure: _cookieSecure(), path: "/" });
+    res.clearCookie("araf_refresh", { ...COOKIE_OPTIONS_BASE, secure: _cookieSecure(), path: "/api/auth" });
+
+    if (!blacklistOk) {
+      logger.warn(`[Auth] Çıkış tamamlanamadı (JWT blacklist yazılamadı): ${wallet}`);
+      return res.status(503).json({
+        error: "Çıkış tamamen tamamlanamadı. Lütfen tekrar deneyin.",
+        code: "LOGOUT_REVOKE_INCOMPLETE",
+      });
+    }
 
     logger.info(`[Auth] Çıkış yapıldı: ${wallet || "kimlik çözülemedi (yalnız çerezler temizlendi)"}`);
     return res.json({ success: true, message: "Oturum kapatıldı." });
@@ -555,8 +579,8 @@ router.get("/me", requireAuth, asyncHandler(async (req, res) => {
         `[Auth] /me wallet mismatch: cookie=${req.wallet} header=${headerWallet} — session geçersiz`
       );
 
-      res.clearCookie("araf_jwt", { ...COOKIE_OPTIONS_BASE, path: "/" });
-      res.clearCookie("araf_refresh", { ...COOKIE_OPTIONS_BASE, path: "/api/auth" });
+      res.clearCookie("araf_jwt", { ...COOKIE_OPTIONS_BASE, secure: _cookieSecure(), path: "/" });
+      res.clearCookie("araf_refresh", { ...COOKIE_OPTIONS_BASE, secure: _cookieSecure(), path: "/api/auth" });
 
       try {
         await revokeRefreshToken(req.wallet);
@@ -635,9 +659,15 @@ router.put("/profile", requireAuth, requireSessionWalletMatch, authLimiter, asyn
         "bankChangeCount7d bankChangeCount30d bank_change_history payout_profile"
       );
 
+    const isNewUser = !user;
     if (!user) {
       user = new User({ wallet_address: req.wallet });
     }
+
+    // [TR] Atomik yazım koşulu: okunan sürüm ve şifreli detay. Araya başka bir profil yazımı girerse
+    //      koşul eşleşmez ve istek 409 ile reddedilir (kayıp güncelleme olmaz).
+    const readProfileVersion = Number.isInteger(user.profileVersion) ? user.profileVersion : 0;
+    const readDetailsEnc = user.payout_profile?.payout_details_enc ?? null;
 
     // [TR] Şifreli profil varsa çözüp gerçek değişim olup olmadığını kıyaslıyoruz.
     let existingProfile = { rail: "", country: "", contact: { channel: null, value: null }, details: {} };
@@ -746,7 +776,43 @@ router.put("/profile", requireAuth, requireSessionWalletMatch, authLimiter, asyn
 
     user.payout_profile = genericProfile;
 
-    await user.save();
+    // [TR] Oku-değiştir-kaydet yarışı: save() koşulsuz yazar ve eşzamanlı bir değişikliği ezerdi.
+    //      Mevcut kullanıcıda okunan duruma koşullu tek updateOne (cleanupUserBankRiskMetadata deseni);
+    //      yeni kullanıcıda insert, eşzamanlı oluşturma duplicate-key ile yakalanır.
+    const conflictResponse = () => res.status(409).json({
+      error: "Profil başka bir istekle eşzamanlı güncellendi. Lütfen tekrar deneyin.",
+      code: "PROFILE_UPDATE_CONFLICT",
+    });
+    if (isNewUser) {
+      try {
+        await user.save();
+      } catch (saveErr) {
+        if (saveErr?.code === 11000) return conflictResponse();
+        throw saveErr;
+      }
+    } else {
+      const counterCond = (v) => (v === 0 ? { $in: [0, null] } : v);
+      const writeResult = await User.updateOne(
+        {
+          wallet_address: req.wallet,
+          profileVersion: counterCond(readProfileVersion),
+          "payout_profile.payout_details_enc": readDetailsEnc === null ? { $in: [null] } : readDetailsEnc,
+        },
+        {
+          $set: {
+            payout_profile: genericProfile,
+            profileVersion: user.profileVersion,
+            bank_change_history: user.bank_change_history,
+            bankChangeCount7d: user.bankChangeCount7d,
+            bankChangeCount30d: user.bankChangeCount30d,
+            lastBankChangeAt: user.lastBankChangeAt || null,
+          },
+        },
+        // save() ile eşdeğerlik: şema enum/min doğrulamaları updateOne yolunda da çalışır.
+        { runValidators: true }
+      );
+      if (!writeResult || writeResult.matchedCount === 0) return conflictResponse();
+    }
 
     logger.info(
       `[Auth] Profil güncellendi: ${req.wallet} bank_profile_changed=${bankProfileChanged}`

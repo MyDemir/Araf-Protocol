@@ -45,7 +45,9 @@ if (!fs.existsSync(logDir)) {
 //      Console transport's own colorize+simple format only ever sees redacted data.
 const PASSTHROUGH_KEYS = new Set(["level", "timestamp", "message", "stack"]);
 const redactInfo = format((info) => {
-  if (typeof info.message === "string") info.message = redactLogString(info.message);
+  // B2-16: mesajdaki CR/LF boşluğa çevrilir (istemci kontrollü içerikle sahte log satırı enjeksiyonu).
+  //        Stack izi ayrı alandır ve bilinçli çok satırlıdır.
+  if (typeof info.message === "string") info.message = redactLogString(info.message).replace(/[\r\n]+/g, " ");
   else if (info.message != null && typeof info.message === "object") info.message = redactLogMeta(info.message);
   if (typeof info.stack === "string") info.stack = redactLogString(info.stack);
   for (const key of Object.keys(info)) {

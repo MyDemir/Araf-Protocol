@@ -4,12 +4,14 @@
 // [EN] Shared validators for on-chain identifiers (routes, worker and jobs use one rule).
 
 const POSITIVE_NUMERIC_ID_RE = /^[1-9]\d*$/;
+const MAX_ONCHAIN_ID_DIGITS = 78;
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 // [TR] Pozitif on-chain id'yi string olarak döndürür; geçersizse null. [EN] Positive on-chain id as string, else null.
 function parsePositiveOnchainId(rawId) {
   const normalized = String(rawId ?? "").trim();
-  return POSITIVE_NUMERIC_ID_RE.test(normalized) ? normalized : null;
+  // B2-20: uint256 en fazla 78 hane; daha uzun girdi anahtar/sorguya hiç girmez.
+  return normalized.length <= MAX_ONCHAIN_ID_DIGITS && POSITIVE_NUMERIC_ID_RE.test(normalized) ? normalized : null;
 }
 
 // [TR] Env'den gelen adres tanımlı ve sıfır adres değil mi? [EN] Is an env address set and non-zero?
