@@ -4,6 +4,7 @@ const express = require("express");
 const { parsePositiveOnchainId: _parsePositiveOnchainId } = require("../utils/onchain");
 const Joi = require("joi");
 const { ethers } = require("ethers");
+const { asyncHandler } = require("../utils/asyncHandler");
 const router = express.Router();
 
 const { requireAuth, requireSessionWalletMatch } = require("../middleware/auth");
@@ -289,7 +290,7 @@ async function _attachBankProfileRisk(trades) {
 }
 
 // ─── GET /api/trades/my ───────────────────────────────────────────────────────
-router.get("/my", requireAuth, requireSessionWalletMatch, roomReadLimiter, async (req, res, next) => {
+router.get("/my", requireAuth, requireSessionWalletMatch, roomReadLimiter, asyncHandler(async (req, res, next) => {
   try {
     const schema = Joi.object({
       page: Joi.number().integer().min(1).default(1),
@@ -319,10 +320,10 @@ router.get("/my", requireAuth, requireSessionWalletMatch, roomReadLimiter, async
   } catch (err) {
     next(err);
   }
-});
+}));
 
 // ─── GET /api/trades/history ──────────────────────────────────────────────────
-router.get("/history", requireAuth, requireSessionWalletMatch, roomReadLimiter, async (req, res, next) => {
+router.get("/history", requireAuth, requireSessionWalletMatch, roomReadLimiter, asyncHandler(async (req, res, next) => {
   try {
     const schema = Joi.object({
       page: Joi.number().integer().min(1).default(1),
@@ -360,12 +361,12 @@ router.get("/history", requireAuth, requireSessionWalletMatch, roomReadLimiter, 
   } catch (err) {
     next(err);
   }
-});
+}));
 
 // ─── GET /api/trades/by-escrow/:onchainId ────────────────────────────────────
 // [TR] GET /:id'den önce tanımlanmalı — yoksa Express yanlış route'a girebilir.
 // [TR] Buradaki kimlik parent order id değil, child trade / escrow id'dir.
-router.get("/by-escrow/:onchainId", requireAuth, requireSessionWalletMatch, roomReadLimiter, async (req, res, next) => {
+router.get("/by-escrow/:onchainId", requireAuth, requireSessionWalletMatch, roomReadLimiter, asyncHandler(async (req, res, next) => {
   try {
     const onchainId = _parsePositiveOnchainId(req.params.onchainId);
     if (!onchainId) {
@@ -389,13 +390,13 @@ router.get("/by-escrow/:onchainId", requireAuth, requireSessionWalletMatch, room
   } catch (err) {
     next(err);
   }
-});
+}));
 
 // ─── GET /api/trades/:id/settlement-proposal ─────────────────────────────────
 // [TR] Settlement proposal read-model endpoint'i yalnız bilgilendirme amaçlıdır.
 //      Backend proposal outcome üretmez; authority kontrattadır.
 // [EN] Settlement proposal read-model endpoint is informational-only.
-router.get("/:id/settlement-proposal", requireAuth, requireSessionWalletMatch, roomReadLimiter, async (req, res, next) => {
+router.get("/:id/settlement-proposal", requireAuth, requireSessionWalletMatch, roomReadLimiter, asyncHandler(async (req, res, next) => {
   try {
     if (!/^[a-fA-F0-9]{24}$/.test(req.params.id)) {
       return res.status(400).json({ error: "Geçersiz trade ID formatı." });
@@ -416,12 +417,12 @@ router.get("/:id/settlement-proposal", requireAuth, requireSessionWalletMatch, r
   } catch (err) {
     next(err);
   }
-});
+}));
 
 // ─── POST /api/trades/:id/settlement-proposal/preview ───────────────────────
 // [TR] Preview hesaplama informational-only'dir ve on-chain authority üretmez.
 // [EN] Preview computation is informational-only and never authoritative.
-router.post("/:id/settlement-proposal/preview", requireAuth, requireSessionWalletMatch, roomReadLimiter, async (req, res, next) => {
+router.post("/:id/settlement-proposal/preview", requireAuth, requireSessionWalletMatch, roomReadLimiter, asyncHandler(async (req, res, next) => {
   try {
     if (!/^[a-fA-F0-9]{24}$/.test(req.params.id)) {
       return res.status(400).json({ error: "Geçersiz trade ID formatı." });
@@ -501,10 +502,10 @@ router.post("/:id/settlement-proposal/preview", requireAuth, requireSessionWalle
     }
     next(err);
   }
-});
+}));
 
 // ─── GET /api/trades/:id ──────────────────────────────────────────────────────
-router.get("/:id", requireAuth, requireSessionWalletMatch, roomReadLimiter, async (req, res, next) => {
+router.get("/:id", requireAuth, requireSessionWalletMatch, roomReadLimiter, asyncHandler(async (req, res, next) => {
   try {
     if (!/^[a-fA-F0-9]{24}$/.test(req.params.id)) {
       return res.status(400).json({ error: "Geçersiz trade ID formatı." });
@@ -527,7 +528,7 @@ router.get("/:id", requireAuth, requireSessionWalletMatch, roomReadLimiter, asyn
   } catch (err) {
     next(err);
   }
-});
+}));
 
 // ─── POST /api/trades/:id/chargeback-ack ─────────────────────────────────────
 // [TR] Bu endpoint yalnızca audit/log içindir. On-chain release akışına veto uygulamaz.
@@ -544,7 +545,7 @@ function _getRealIP(req) {
   return resolveClientIp(req) || req.socket?.remoteAddress || "unknown";
 }
 
-router.post("/:id/chargeback-ack", requireAuth, requireSessionWalletMatch, coordinationWriteLimiter, async (req, res, next) => {
+router.post("/:id/chargeback-ack", requireAuth, requireSessionWalletMatch, coordinationWriteLimiter, asyncHandler(async (req, res, next) => {
   try {
     if (!/^[a-fA-F0-9]{24}$/.test(req.params.id)) {
       return res.status(400).json({ error: "Geçersiz trade ID formatı." });
@@ -599,7 +600,7 @@ router.post("/:id/chargeback-ack", requireAuth, requireSessionWalletMatch, coord
   } catch (err) {
     next(err);
   }
-});
+}));
 
 // [TR] __resetCancelVerifier / __getCancelVerifierCacheKey kaldırıldı: iptal koordinasyonu tamamen
 //      on-chain olduğundan cancelVerify* değişkenleri yoktu (tanımsız değişkenlere atama).

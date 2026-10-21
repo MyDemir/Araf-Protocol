@@ -25,6 +25,7 @@ const runtimeSettings = require("../services/runtimeSettings");
 const socialLinks = require("../services/socialLinks");
 const { hmacDigest } = require("../services/encryption");
 
+const { asyncHandler } = require("../utils/asyncHandler");
 const router = express.Router();
 
 const TERMINAL_TRADE_STATUSES = ["RESOLVED", "CANCELED", "BURNED"];
@@ -208,14 +209,14 @@ function _toProposalAgeSeconds(proposedAt, now = new Date()) {
 router.use(requireAuth, requireSessionWalletMatch, requireAdminWallet);
 router.use(adminReadLimiter);
 
-router.get("/revenue", async (_req, res, next) => {
+router.get("/revenue", asyncHandler(async (_req, res, next) => {
   try {
     const rows = await RevenueEvent.find().sort({ block_number: -1, log_index: -1 }).limit(500).lean();
     return res.json({ rows });
   } catch (err) { return next(err); }
-});
+}));
 
-router.get("/rewards/health", async (_req, res, next) => {
+router.get("/rewards/health", asyncHandler(async (_req, res, next) => {
   try {
     const [epochs, funding, claims] = await Promise.all([
       RewardEpoch.countDocuments(),
@@ -224,9 +225,9 @@ router.get("/rewards/health", async (_req, res, next) => {
     ]);
     return res.json({ mirror_only: true, counts: { epochs, funding, claims } });
   } catch (err) { return next(err); }
-});
+}));
 
-router.get("/summary", async (req, res, next) => {
+router.get("/summary", asyncHandler(async (req, res, next) => {
   try {
     const degraded = {
       isDegraded: false,
@@ -473,9 +474,9 @@ router.get("/summary", async (req, res, next) => {
   } catch (err) {
     return next(err);
   }
-});
+}));
 
-router.get("/feedback", async (req, res, next) => {
+router.get("/feedback", asyncHandler(async (req, res, next) => {
   try {
     const schema = Joi.object({
       category: Joi.string().valid("bug", "suggestion", "ui/ux", "other").optional(),
@@ -511,9 +512,9 @@ router.get("/feedback", async (req, res, next) => {
   } catch (err) {
     return next(err);
   }
-});
+}));
 
-router.get("/trades", async (req, res, next) => {
+router.get("/trades", asyncHandler(async (req, res, next) => {
   try {
     const schema = Joi.object({
       status: Joi.string().valid(...ADMIN_TRADES_STATUS_VALUES).default("CHALLENGED"),
@@ -593,9 +594,9 @@ router.get("/trades", async (req, res, next) => {
   } catch (err) {
     return next(err);
   }
-});
+}));
 
-router.get("/settlement-proposals", async (req, res, next) => {
+router.get("/settlement-proposals", asyncHandler(async (req, res, next) => {
   try {
     // [TR] Bu endpoint settlement authority üretmez; yalnız mirror/read-model gözlem verisi döner.
     // [EN] This endpoint never determines settlement outcomes; it returns mirror/read-model observability only.
@@ -693,7 +694,7 @@ router.get("/settlement-proposals", async (req, res, next) => {
   } catch (err) {
     return next(err);
   }
-});
+}));
 
 // ─── Ödeme yöntemleri (rail) yönetimi ────────────────────────────────────────
 // [TR] Admin yazma yolu. Zincir (router.use): requireAuth (cookie JWT, SameSite=Lax) →
@@ -710,15 +711,15 @@ const AUDIT_QUERY_SCHEMA = Joi.object({
   limit: Joi.number().integer().min(1).max(100).default(20),
 });
 
-router.get("/payment-rails", async (_req, res, next) => {
+router.get("/payment-rails", asyncHandler(async (_req, res, next) => {
   try {
     return res.json({ rails: await paymentRails.listRails() });
   } catch (err) {
     return next(err);
   }
-});
+}));
 
-router.get("/payment-rails/audit", async (req, res, next) => {
+router.get("/payment-rails/audit", asyncHandler(async (req, res, next) => {
   try {
     const { error, value } = AUDIT_QUERY_SCHEMA.validate(req.query || {});
     if (error) return res.status(400).json({ error: error.message });
@@ -726,9 +727,9 @@ router.get("/payment-rails/audit", async (req, res, next) => {
   } catch (err) {
     return next(err);
   }
-});
+}));
 
-router.put("/payment-rails/:rail", adminWriteLimiter, async (req, res, next) => {
+router.put("/payment-rails/:rail", adminWriteLimiter, asyncHandler(async (req, res, next) => {
   try {
     const rail = String(req.params.rail || "").toUpperCase();
     if (!paymentRails.isKnownRail(rail)) {
@@ -759,7 +760,7 @@ router.put("/payment-rails/:rail", adminWriteLimiter, async (req, res, next) => 
     }
     return next(err);
   }
-});
+}));
 
 // ─── Çalışma ayarları (runtime settings) ─────────────────────────────────────
 // [TR] Aynı yetki zinciri (router.use) + adminWriteLimiter. Yalnız performans/operasyon ayarları; RPC URL'leri,
@@ -772,16 +773,16 @@ const SETTING_PUT_SCHEMA = Joi.object({
   expectedVersion: Joi.number().integer().min(0).strict().optional(),
 }).xor("value", "reset").required();
 
-router.get("/runtime-settings", async (_req, res, next) => {
+router.get("/runtime-settings", asyncHandler(async (_req, res, next) => {
   try {
     const { settings, version, degraded } = await runtimeSettings.getEffectiveSettings();
     return res.json({ settings: runtimeSettings.SETTING_KEYS.map((k) => settings[k]), version, degraded });
   } catch (err) {
     return next(err);
   }
-});
+}));
 
-router.get("/runtime-settings/audit", async (req, res, next) => {
+router.get("/runtime-settings/audit", asyncHandler(async (req, res, next) => {
   try {
     const { error, value } = AUDIT_QUERY_SCHEMA.validate(req.query || {});
     if (error) return res.status(400).json({ error: error.message });
@@ -789,9 +790,9 @@ router.get("/runtime-settings/audit", async (req, res, next) => {
   } catch (err) {
     return next(err);
   }
-});
+}));
 
-router.put("/runtime-settings/:key", adminWriteLimiter, async (req, res, next) => {
+router.put("/runtime-settings/:key", adminWriteLimiter, asyncHandler(async (req, res, next) => {
   try {
     const key = String(req.params.key || "");
     if (!runtimeSettings.isKnownSetting(key)) {
@@ -831,7 +832,7 @@ router.put("/runtime-settings/:key", adminWriteLimiter, async (req, res, next) =
     }
     return next(err);
   }
-});
+}));
 
 // ─── Footer sosyal linkleri ──────────────────────────────────────────────────
 // [TR] Aynı yetki zinciri (router.use) + adminWriteLimiter. Doğrulama sunucuda tek kaynak (utils/socialLinks.js):
@@ -843,16 +844,16 @@ const SOCIAL_LINKS_PUT_SCHEMA = Joi.object({
   reason: Joi.string().trim().max(300).allow("").optional(),
 }).required();
 
-router.get("/social-links", async (_req, res, next) => {
+router.get("/social-links", asyncHandler(async (_req, res, next) => {
   try {
     return res.json(await socialLinks.getAdminState());
   } catch (err) {
     if (err.code === "DB_UNAVAILABLE") return res.status(503).json({ error: err.message, code: "DB_UNAVAILABLE" });
     return next(err);
   }
-});
+}));
 
-router.get("/social-links/audit", async (req, res, next) => {
+router.get("/social-links/audit", asyncHandler(async (req, res, next) => {
   try {
     const { error, value } = AUDIT_QUERY_SCHEMA.validate(req.query || {});
     if (error) return res.status(400).json({ error: error.message });
@@ -860,9 +861,9 @@ router.get("/social-links/audit", async (req, res, next) => {
   } catch (err) {
     return next(err);
   }
-});
+}));
 
-router.put("/social-links", adminWriteLimiter, async (req, res, next) => {
+router.put("/social-links", adminWriteLimiter, asyncHandler(async (req, res, next) => {
   try {
     const { error, value } = SOCIAL_LINKS_PUT_SCHEMA.validate(req.body);
     if (error) return res.status(400).json({ error: error.message, code: "SOCIAL_LINKS_INVALID" });
@@ -881,6 +882,6 @@ router.put("/social-links", adminWriteLimiter, async (req, res, next) => {
     if (err.code === "SOCIAL_LINKS_AUDIT_FAILED") return res.status(500).json({ error: err.message, code: "SOCIAL_LINKS_AUDIT_FAILED" });
     return next(err);
   }
-});
+}));
 
 module.exports = router;

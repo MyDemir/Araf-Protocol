@@ -73,6 +73,7 @@ const { verifyIdentityNormalization } = require("./services/identityNormalizatio
 const escrowGuard = require("./services/escrowRegistryGuard");
 const { parsePositiveTimerMs } = require("./utils/timeEnv");
 const { getAdminWallets } = require("./utils/adminWallets");
+const { asyncHandler } = require("./utils/asyncHandler");
 const { runArchiveRetention } = require("./jobs/archiveRetention");
 const { didScheduledJobSucceed } = require("./utils/schedulerSuccess");
 const { runExclusive: runExclusiveJob } = require("./services/jobLock");
@@ -681,9 +682,9 @@ async function bootstrap() {
     //      görünüm redakte; ayrıntı yalnız READY_INTERNAL_TOKEN ile (B27).
     // [EN] /health: liveness tied to the worker last-block threshold (B6). /ready: cached, redacted for
     //      unauthenticated callers; full detail only with READY_INTERNAL_TOKEN (B27).
-    app.get("/health", createHealthHandler({ worker }));
+    app.get("/health", asyncHandler(createHealthHandler({ worker })));
 
-    app.get("/ready", createReadyHandler({ worker, getProvider: () => worker.provider }));
+    app.get("/ready", asyncHandler(createReadyHandler({ worker, getProvider: () => worker.provider })));
 
     app.use((_req, res) => res.status(404).json({ error: "İstenen endpoint bulunamadı" }));
     app.use(globalErrorHandler);

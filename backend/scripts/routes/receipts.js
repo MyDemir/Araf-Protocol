@@ -14,6 +14,7 @@ const crypto = require("crypto");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
+const { asyncHandler } = require("../utils/asyncHandler");
 const router = express.Router();
 
 const { requireAuth, requireSessionWalletMatch } = require("../middleware/auth");
@@ -90,7 +91,7 @@ async function encryptFileFromDisk(filePath, wallet) {
 
 // [TR] Receipt upload write-adjacent coordination yüzeyidir; generic trade-room bucket'tan ayrıdır.
 // [EN] Receipt upload is write-adjacent coordination, isolated from generic room-read bucket.
-router.post("/upload", requireAuth, requireSessionWalletMatch, receiptUploadLimiter, upload.single("receipt"), async (req, res, next) => {
+router.post("/upload", requireAuth, requireSessionWalletMatch, receiptUploadLimiter, upload.single("receipt"), asyncHandler(async (req, res, next) => {
   const tempFilePath = req.file?.path;
   try {
     if (!req.file) return res.status(400).json({ error: "Dekont dosyası eksik veya boş." });
@@ -146,6 +147,6 @@ router.post("/upload", requireAuth, requireSessionWalletMatch, receiptUploadLimi
       try { await fsp.unlink(tempFilePath); } catch (cleanupErr) { if (cleanupErr.code !== "ENOENT") logger.warn(`[Receipts] Geçici dosya silinemedi: ${tempFilePath}`); }
     }
   }
-});
+}));
 
 module.exports = router;
