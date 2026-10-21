@@ -988,15 +988,22 @@ class EventWorker {
       this._staleReconnects = 0;
       await this._updateSeenBlockIfHigher(head);
 
+      // [TR] B1-02: canlı tur finalize edilmemiş head'e değil head - WORKER_FINALITY_DEPTH'e kadar okur; sığ reorg'da
+      //      taşınan/düşen blok event'i imleç ve checkpoint üzerinden atlanmaz (ek gecikme ≈ derinlik × blok süresi).
+      //      head < derinlik ise sınır ≤ 0 olur ve tur boş geçer.
+      // [EN] B1-02: the live tick reads up to head - WORKER_FINALITY_DEPTH, not the unfinalized head, so a shallow
+      //      reorg cannot make the cursor/checkpoint skip a moved or dropped block's events. When head < depth
+      //      the bound is <= 0 and the tick is empty.
+      const pollUpTo = this._computeFinalizedUpTo(head);
       let from = this._lastLivePolledBlock + 1;
-      while (from <= head) {
+      while (from <= pollUpTo) {
         if (this._stopRequested || stale()) return;
-        const to = Math.min(from + this._cfg("WORKER_BLOCK_BATCH_SIZE") - 1, head);
+        const to = Math.min(from + this._cfg("WORKER_BLOCK_BATCH_SIZE") - 1, pollUpTo);
         await this._pollLiveRange(from, to);
         if (stale()) return; // yeniden bağlanma sırasında: imleç ilerletilmez
         this._lastLivePolledBlock = to;
         from = to + 1;
-        if (from <= head && this._cfg("WORKER_REPLAY_BATCH_DELAY_MS") > 0) await _sleep(this._cfg("WORKER_REPLAY_BATCH_DELAY_MS"));
+        if (from <= pollUpTo && this._cfg("WORKER_REPLAY_BATCH_DELAY_MS") > 0) await _sleep(this._cfg("WORKER_REPLAY_BATCH_DELAY_MS"));
       }
 
       if (stale()) return;
