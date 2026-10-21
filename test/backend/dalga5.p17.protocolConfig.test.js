@@ -84,4 +84,23 @@ describe("protocolConfig önbellek yazımı (B4-10)", () => {
     await service.updateCachedFeeConfig(99, 88);
     expect(redis.setEx).toHaveBeenCalledTimes(1);
   });
+
+  it("kısmi yükleme sonrası event yaması Redis'e yazılmaz; sonraki tam yükleme bayrağı temizler", async () => {
+    const { service, redis, state } = setup();
+    state.failToken = true;
+    await service.loadProtocolConfig(); // kısmi: configIsStale=false ama kısmi
+    redis.setEx.mockClear();
+    redis.set.mockClear();
+
+    await service.updateCachedFeeConfig(99, 88);
+    expect(service.getConfig().feeConfig.takerFeeBps).toBe(99);
+    expect(redis.setEx).not.toHaveBeenCalled();
+    expect(redis.set).not.toHaveBeenCalled();
+
+    state.failToken = false;
+    await service.refreshProtocolConfig(); // tam başarılı yükleme
+    redis.setEx.mockClear();
+    await service.updateCachedFeeConfig(77, 66);
+    expect(redis.setEx).toHaveBeenCalledTimes(1);
+  });
 });
