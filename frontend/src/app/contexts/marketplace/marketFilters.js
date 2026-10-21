@@ -55,6 +55,9 @@ const SIDE_TO_ORDER_SIDE = { BUY: 'SELL_CRYPTO', SELL: 'BUY_CRYPTO' };
 // [TR] Sunucu sorgusu. ELIGIBLE yalnız kullanıcı tier'ı biliniyorsa max_tier gönderir.
 // [EN] Server query. ELIGIBLE sends max_tier only when the viewer's tier is known.
 export const MARKET_PAGE_LIMIT = 50;
+// [TR] Yoklamada yeniden çekilen en çok sayfa; fazlası için kullanıcı "daha fazla yükle" ile tekrar yükler.
+// [EN] Max pages re-fetched per poll; beyond it the user reloads with "load more".
+export const MARKET_POLL_MAX_PAGES = 5;
 
 export const buildMarketOrdersQuery = ({ filters = MARKET_FILTER_DEFAULTS, tokenAddresses = {}, userTier = null, page = 1 } = {}) => {
   const f = { ...MARKET_FILTER_DEFAULTS, ...filters };
