@@ -229,12 +229,14 @@ cmd_health() {
 cmd_guard_mode() {
   local base="${HEALTH_BASE_URL:-https://$(val FLY_APP_NAME).fly.dev}"
   local retries="${HEALTH_RETRIES:-12}" delay="${HEALTH_RETRY_DELAY:-10}"
-  local tmp mode i=0 code
+  local tmp mode="" i=0 code=""
   tmp="$(mktemp)"
+  # Rolling deploy'da eski makine warn/off dönebilir: yalnız enforce görülünce çık, aksi halde HEALTH_RETRIES bitene kadar dene.
   while :; do
     code="$(curl --connect-timeout 5 --max-time 15 --silent --output "$tmp" --write-out '%{http_code}' "$base/ready" || true)"
-    mode="$(grep -Eo '"escrowRegistry"[[:space:]]*:[[:space:]]*\{[^}]*\}' "$tmp" | grep -Eo '"mode"[[:space:]]*:[[:space:]]*"[a-z]*"' | head -n1 | sed -E 's/.*:[[:space:]]*"([a-z]*)"/\1/' || true)"
-    [ -n "$mode" ] && break
+    # Yalnız üst düzey escrowRegistry.mode; JSON değilse ya da alan yoksa boş.
+    mode="$(node -e 'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>{try{const m=JSON.parse(b).escrowRegistry?.mode;if(typeof m==="string")process.stdout.write(m.slice(0,16).replace(/[^a-z]/gi,""))}catch{}})' < "$tmp" || true)"
+    [ "$mode" = "enforce" ] && break
     [ "$i" -lt "$retries" ] || break
     i=$((i + 1)); sleep "$delay"
   done

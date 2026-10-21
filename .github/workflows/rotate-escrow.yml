@@ -139,12 +139,6 @@ jobs:
           CONFIRM_ARCHIVE_ACTIVE_TRADES: ${{ inputs.confirm_archive_active_trades }}
         run: node .github/scripts/rotate-escrow.js --precheck
 
-      # K4-01: Makineleri durdurmadan ÖNCE canlı bekçi modu enforce olmalı (yalnız uygulanan rotate/restore).
-      - name: Verify registry guard is enforce (before apply)
-        if: ${{ inputs.mode != 'precheck' && !inputs.dry_run }}
-        shell: bash
-        run: bash .github/scripts/stage-runtime-env.sh guard-mode
-
       - name: Rotate (complete interrupted rotation)
         if: ${{ inputs.mode == 'rotate' }}
         shell: bash

@@ -85,6 +85,36 @@ describe('K4-01: registry guard enforce (Base Sepolia)', function () {
       });
     }
 
+    it('ignores a nested detail.mode=enforce (top-level escrowRegistry only)', async function () {
+      reply = { code: 200, body: JSON.stringify({ ok: true, detail: { mode: 'enforce' }, escrowRegistry: { mode: 'warn' } }) };
+      expect((await runAsync('guard-mode', env())).status).to.equal(1);
+      reply = { code: 200, body: JSON.stringify({ ok: true, detail: { escrowRegistry: { mode: 'enforce' } } }) };
+      expect((await runAsync('guard-mode', env())).status).to.equal(1);
+    });
+
+    it('accepts pretty-printed JSON with mode enforce', async function () {
+      reply = { code: 200, body: JSON.stringify({ ok: true, escrowRegistry: { mode: 'enforce', ok: true } }, null, 2) };
+      const r = await runAsync('guard-mode', env());
+      expect(r.status, r.stderr).to.equal(0);
+    });
+
+    it('retries: warn first (old machine), then enforce -> passes', async function () {
+      let n = 0;
+      const orig = reply;
+      reply = { get code() { return 200; }, get body() { n += 1; return JSON.stringify({ ok: true, escrowRegistry: { mode: n === 1 ? 'warn' : 'enforce' } }); } };
+      const r = await runAsync('guard-mode', env());
+      reply = orig;
+      expect(r.status, r.stderr).to.equal(0);
+      expect(n).to.be.greaterThan(1);
+    });
+
+    it('exhausted retries with warn: error names the last seen mode', async function () {
+      reply = ready('warn');
+      const r = await runAsync('guard-mode', env());
+      expect(r.status).to.equal(1);
+      expect(r.stderr).to.include("'warn'");
+    });
+
     it('fails when /ready has no escrowRegistry field', async function () {
       reply = { code: 200, body: '{"ok":true}' };
       const r = await runAsync('guard-mode', env());
@@ -131,18 +161,13 @@ describe('K4-01: registry guard enforce (Base Sepolia)', function () {
       expect(s[gm].if).to.include('inputs.deploy_backend');
     });
 
-    it('rotate-escrow: guard-mode runs before rotate/restore apply and after health', function () {
+    it('rotate-escrow: NO pre-apply guard-mode (recovery paths must not be blocked); guard-mode after health on all applied paths', function () {
       const s = steps('rotate-escrow.yml');
-      const rot = idx(s, (x) => x.name.startsWith('Rotate (complete'));
-      const res = idx(s, (x) => x.name === 'Restore archive');
       const health = idx(s, (x) => x.name === 'Check backend health');
-      const pre = idx(s, (x) => x.run.includes(GM) && x.name.toLowerCase().includes('before'));
-      const post = idx(s, (x, i) => i > health && x.run.includes(GM));
-      expect(pre).to.be.greaterThan(-1);
-      expect(pre).to.be.lessThan(rot);
-      expect(pre).to.be.lessThan(res);
-      expect(s[pre].if).to.include('!inputs.dry_run');
-      expect(post).to.be.greaterThan(health);
+      const gm = s.map((x, i) => (x.run.includes(GM) ? i : -1)).filter((i) => i >= 0);
+      expect(gm).to.have.length(1);
+      expect(gm[0]).to.be.greaterThan(health);
+      expect(s[gm[0]].if).to.include('!inputs.dry_run');
     });
   });
 });
