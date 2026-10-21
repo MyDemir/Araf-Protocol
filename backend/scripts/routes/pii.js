@@ -67,8 +67,22 @@ function hasTakerNameSnapshot(trade) {
 
 // [TR] Mirror aktif dese bile zincir trade'i kapatmışsa PII açılmaz (event gecikmesi penceresi).
 // [EN] Even if the mirror says active, PII stays closed once the chain has closed the trade.
-async function closedOnChain(trade) {
-  return (await isTradeActiveOnChain(trade?.onchain_escrow_id)) === false;
+//      B4-13/B3-18: production'da zincir durumu okunamazsa (RPC hatası/zaman aşımı → null) PII AÇILMAZ (fail-closed):
+//      karar mercii kontrattır, zincir okunamıyorsa mirror tek başına yetmez. Geliştirme/testte mirror karar verir.
+// [EN] In production an unreadable chain state (null) denies PII (fail-closed); elsewhere the mirror decides.
+// @returns {Promise<"closed"|"unknown"|"open">}
+async function onChainClosure(trade) {
+  const active = await isTradeActiveOnChain(trade?.onchain_escrow_id);
+  if (active === false) return "closed";
+  if (active === null && process.env.NODE_ENV === "production") return "unknown";
+  return "open";
+}
+
+function sendOnChainUnavailable(res) {
+  return res.status(503).json({
+    error: "Zincir durumu şu an doğrulanamadı; PII geçici olarak kapalı. Biraz sonra tekrar deneyin.",
+    code: "ONCHAIN_STATE_UNAVAILABLE",
+  });
 }
 
 function hasCompletePayoutSnapshot(trade) {
@@ -165,9 +179,11 @@ router.get("/taker-name/:onchainId", requireAuth, requireSessionWalletMatch, pii
       });
     }
 
-    if (await closedOnChain(trade)) {
+    const closure = await onChainClosure(trade);
+    if (closure === "closed") {
       return res.status(400).json({ error: "İşlem zincirde kapanmış. Erişim yalnız aktif child trade'lerde geçerlidir." });
     }
+    if (closure === "unknown") return sendOnChainUnavailable(res);
 
     if (!trade.taker_address) {
       return res.json({ bankOwner: null });
@@ -285,9 +301,11 @@ router.get(
         });
       }
 
-      if (await closedOnChain(trade)) {
+      const closure = await onChainClosure(trade);
+      if (closure === "closed") {
         return res.status(403).json({ error: "İşlem zincirde kapanmış. PII erişimi kaldırıldı." });
       }
+      if (closure === "unknown") return sendOnChainUnavailable(res);
 
       // [TR] V3 güvenlik sınırında current profile fallback kapalıdır.
       //      Gerekli maker snapshot alanları yoksa kontrollü hata döneriz.

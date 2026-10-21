@@ -1,6 +1,7 @@
 import { CalendarClock, CheckCircle2, Gift, Hourglass, LoaderCircle, RefreshCw, TimerOff } from 'lucide-react';
 import React from 'react';
 import { buildApiUrl } from '../../apiConfig';
+import { fetchJsonWithTimeout } from '../../fetchWithTimeout';
 import { formatTokenAmount } from '../../orderUiModel';
 import { useRewardsContract } from '../../../hooks/useRewardsContract';
 import { deriveEpochReward, REWARD_STATUS, summarizeRewards } from './rewardsModel';
@@ -112,9 +113,10 @@ export const RewardsPanel = ({ lang = 'EN', address, showToast, tokenDecimalsMap
     let cancelled = false;
     if (!address) return undefined;
     const load = fetchClaimHistory || (async (wallet) => {
-      const res = await fetch(buildApiUrl(`rewards/${wallet}/history`), { credentials: 'include' });
+      // [TR] F4-12/F4-13: zaman aşımlı (gövde dahil) istek; cüzdan yol parçası olarak kodlanır.
+      const { res, data } = await fetchJsonWithTimeout(() => buildApiUrl(`rewards/${encodeURIComponent(wallet)}/history`), { credentials: 'include' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return (await res.json())?.claims || [];
+      return data?.claims || [];
     });
     load(address)
       .then((claims) => { if (!cancelled) setHistory(claims.map((c) => ({ ...c, symbol: symbolOfAddress(c.token) })).filter((c) => c.symbol)); })
@@ -141,6 +143,16 @@ export const RewardsPanel = ({ lang = 'EN', address, showToast, tokenDecimalsMap
   };
 
   const summary = summarizeRewards({ rows: state.rows, claimHistory: history, currentEpoch: state.currentEpoch });
+  // [TR] F4-12: Ayna (backend) gerçeklik kaynağı değildir; yeni claim henüz indekslenmediyse "toplam alınan" zincirdeki
+  //      CLAIMED satırlarının toplamının altına düşmez: token başına max(zincir CLAIMED, ayna). Kontrat otoritedir.
+  // [EN] F4-12: the mirror is not authoritative; total received never drops below the on-chain CLAIMED rows.
+  if (history.length) {
+    const chain = summarizeRewards({ rows: state.rows, claimHistory: [], currentEpoch: state.currentEpoch });
+    for (const [sym, b] of Object.entries(chain.byToken)) {
+      const target = (summary.byToken[sym] ||= { claimable: 0n, claimed: 0n, currentEstimate: 0n });
+      if (b.claimed > target.claimed) target.claimed = b.claimed;
+    }
+  }
   const currentRows = state.rows.filter((r) => state.currentEpoch != null && r.epoch === state.currentEpoch);
   const pastRows = state.rows.filter((r) => state.currentEpoch == null || r.epoch !== state.currentEpoch);
   const pastEpochs = [...new Set(pastRows.map((r) => r.epoch.toString()))];

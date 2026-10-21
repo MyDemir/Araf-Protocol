@@ -26,7 +26,7 @@ const REWARDS_EPOCH_SECONDS = 30 * 24 * 3600;
 router.get("/epochs/current", asyncHandler(async (_req, res, next) => {
   try {
     const nowEpoch = Math.floor(Date.now() / 1000 / REWARDS_EPOCH_SECONDS);
-    const rows = await RewardEpoch.find({ epoch: String(nowEpoch) }).lean();
+    const rows = await RewardEpoch.find({ epoch: String(nowEpoch) }).limit(200).lean();
     return res.json({ epoch: String(nowEpoch), rows, source: "WALL_CLOCK_ESTIMATE_NOT_AUTHORITY" });
   } catch (err) { return next(err); }
 }));
@@ -35,7 +35,7 @@ router.get("/epochs/:epoch", asyncHandler(async (req, res, next) => {
   try {
     const epoch = String(req.params.epoch || "");
     if (!EPOCH_RE.test(epoch)) return res.status(400).json({ error: "Geçersiz epoch." });
-    const rows = await RewardEpoch.find({ epoch }).lean();
+    const rows = await RewardEpoch.find({ epoch }).limit(200).lean();
     return res.json({ epoch, rows });
   } catch (err) { return next(err); }
 }));

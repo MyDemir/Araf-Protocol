@@ -5,6 +5,7 @@ import { formatTokenAmount } from '../../orderUiModel';
 import { shortAddress as short, tx as t } from '../../copy';
 import { fmtDateTime, fmtInt } from '../../format';
 
+const ROW_LIMIT = 100;
 const fmtUnits = (raw, lang, decimals = 6) => formatTokenAmount(raw, decimals, 2, lang);
 
 // [TR] Gelir & Ödül sekmesi: backend'in zaten sunduğu /admin/revenue (kontrat RevenueEvent aynası) ve
@@ -79,7 +80,7 @@ export default function AdminRevenuePanel({ lang = 'EN', authenticatedFetch, tok
 
       {totals.length > 0 && (
         <div className="bg-surface border border-borderSubtle rounded-xl p-4">
-          <p className="text-xs font-bold uppercase tracking-wide text-textMuted mb-2">{t(lang, 'Token bazında toplam (son 500 olay)', 'Totals by token (last 500 events)')}</p>
+          <p className="text-xs font-bold uppercase tracking-wide text-textMuted mb-2">{t(lang, `Token bazında toplam (yüklenen son ${state.rows.length} olay)`, `Totals by token (last ${state.rows.length} loaded events)`)}</p>
           <div className="divide-y divide-borderSubtle text-sm">
             {totals.map(([token, acc]) => (
               <div key={token} className="grid grid-cols-2 md:grid-cols-4 gap-2 py-2">
@@ -108,7 +109,7 @@ export default function AdminRevenuePanel({ lang = 'EN', authenticatedFetch, tok
           <tbody className="divide-y divide-borderSubtle">
             {state.rows.length === 0 && !state.loading ? (
               <tr><td colSpan={6} className="px-3 py-4 text-textMuted">{t(lang, 'Henüz gelir olayı yok.', 'No revenue events yet.')}</td></tr>
-            ) : state.rows.slice(0, 100).map((row) => (
+            ) : state.rows.slice(0, ROW_LIMIT).map((row) => (
               <tr key={`${row.tx_hash}-${row.log_index}`} className="text-textSecondary">
                 <td className="px-3 py-2 whitespace-nowrap">{row.created_at_onchain ? fmtDateTime(row.created_at_onchain, lang, { seconds: true }) : `#${row.block_number}`}</td>
                 <td className="px-3 py-2">{REVENUE_KIND_LABELS[Number(row.kind)]?.[lang === 'TR' ? 'TR' : 'EN'] || `#${row.kind}`}</td>
@@ -121,6 +122,9 @@ export default function AdminRevenuePanel({ lang = 'EN', authenticatedFetch, tok
           </tbody>
         </table>
       </div>
+      {state.rows.length > ROW_LIMIT && (
+        <p className="text-xs text-textMuted" data-testid="admin-revenue-truncated">{t(lang, `Tabloda ${ROW_LIMIT} / ${state.rows.length} satır gösteriliyor; toplamlar tüm yüklenen satırları kapsar.`, `Table shows ${ROW_LIMIT} of ${state.rows.length} rows; totals cover all loaded rows.`)}</p>
+      )}
       <p className="text-xs text-textMuted">{t(lang, 'Kaynak: kontrat olaylarının backend aynası (salt okunur). Tutarlar 6 ondalıkla gösterilir.', 'Source: backend mirror of contract events (read-only). Amounts shown with 6 decimals.')}</p>
     </section>
   );

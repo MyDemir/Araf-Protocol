@@ -90,7 +90,7 @@ const SETTING_DEFS = {
     },
   },
   WORKER_MAX_LAG_BLOCKS: {
-    group: "watchdog", unit: "blocks", min: 1, max: 1_000, default: 25,
+    group: "watchdog", unit: "blocks", min: 1, max: 100, default: 25,
     description: {
       TR: "/ready: worker bu kadar blok geriye düşerse hazır değil (503) sayılır.",
       EN: "/ready: the worker is reported not ready (503) when it lags this many blocks.",
@@ -163,7 +163,7 @@ const SETTING_DEFS = {
     },
   },
   REPUTATION_DECAY_TX_LIMIT: {
-    group: "jobs", unit: "tx", min: 1, max: 100, default: 50,
+    group: "jobs", unit: "tx", min: 1, max: 50, default: 50,
     warning: {
       TR: "Maliyet uyarısı: her turda bu sayıya kadar relayer işlemi gönderilir; relayer gas'ı harcanır.",
       EN: "Cost warning: up to this many relayer transactions are sent per run; relayer gas is spent.",

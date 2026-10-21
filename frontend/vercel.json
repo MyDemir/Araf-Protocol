@@ -5,7 +5,7 @@
       "destination": "https://araf-protocol-backend.fly.dev/api/$1"
     },
     {
-      "source": "/(.*)",
+      "source": "/((?!\\.well-known/farcaster\\.json).*)",
       "destination": "/index.html"
     }
   ],

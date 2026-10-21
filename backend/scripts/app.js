@@ -209,7 +209,8 @@ app.use(cookieParser());
 
 app.use(mongoSanitize({
   replaceWith: "_",
-  onSanitize: ({ key }) => logger.warn(`[GÜVENLİK] Mongo injection denemesi engellendi: ${key}`),
+  // B2-16: anahtar istemci kontrollüdür; JSON.stringify CR/LF'yi kaçırır, uzunluk sınırlanır (log enjeksiyonu).
+  onSanitize: ({ key }) => logger.warn(`[GÜVENLİK] Mongo injection denemesi engellendi: ${JSON.stringify(String(key).slice(0, 100))}`),
 }));
 
 // ── Bootstrap ────────────────────────────────────────────────────────────────
@@ -417,6 +418,14 @@ async function bootstrap() {
       const siweDomain = process.env.SIWE_DOMAIN;
       if (!siweDomain || siweDomain === "localhost") {
         logger.error("[GÜVENLİK] SIWE_DOMAIN production'da 'localhost' olamaz! Gerçek domain ayarlayın.");
+        process.exit(1);
+      }
+
+      // [TR] B2-12: SIWE_URI/SIWE_DOMAIN/EXPECTED_CHAIN_ID hatası ilk girişte değil açılışta yakalanır (fail-fast).
+      try {
+        require("./services/siwe").assertSiweBootConfigOrThrow();
+      } catch (siweCfgErr) {
+        logger.error(`[GÜVENLİK] SIWE yapılandırması geçersiz: ${siweCfgErr.message}`);
         process.exit(1);
       }
     }

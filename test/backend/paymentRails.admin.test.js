@@ -101,6 +101,8 @@ function build({ profile = null, activeTrade = false, ready = true } = {}) {
   User.findOne = jest.fn(() => ({
     select: () => Object.assign(Promise.resolve(userDoc), { lean: async () => (userDoc ? { payout_profile: { rail: profile.rail } } : null) }),
   }));
+  // Atomik profil yazımı (updateOne) eski save() davranışını taklit eder: aynı belgeye yazar.
+  User.updateOne = jest.fn(async () => { if (userDoc) await userDoc.save(); return { matchedCount: 1 }; });
   User.exists = jest.fn(async () => (userDoc ? { _id: "x" } : null));
   User.find = jest.fn(() => ({ select: () => ({ lean: async () => [] }) }));
   jest.doMock("../../backend/scripts/models/User", () => User);

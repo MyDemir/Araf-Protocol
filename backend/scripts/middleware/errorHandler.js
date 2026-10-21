@@ -22,14 +22,17 @@ const SENSITIVE_VALUE_PATTERNS = [
   /\b\d{9}\b/g, // routing
   /\b\d{4,17}\b/g, // account-like
   /0x[a-fA-F0-9]{40}/g, // wallet
-  /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, // email
+  /\b[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,255}\.[A-Za-z]{2,}\b/g, // email (B2-06: sinirli => dogrusal)
   /(bearer\s+)[a-zA-Z0-9\-._~+/]+=*/gi, // bearer
   /\b(eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9._-]+\.[A-Za-z0-9._-]+)\b/g, // jwt
 ];
 
+// B2-06: log amacli scrub oncesi dize uzunlugu sinirlanir (50KB govde ile CPU yuku olusmasin).
+const SCRUB_MAX_CHARS = 4096;
+
 function scrubSensitiveText(value) {
   if (typeof value !== "string") return value;
-  let clean = value;
+  let clean = value.length > SCRUB_MAX_CHARS ? `${value.slice(0, SCRUB_MAX_CHARS)}...[TRUNCATED]` : value;
   for (const pattern of SENSITIVE_VALUE_PATTERNS) {
     clean = clean.replace(pattern, "[REDACTED]");
   }
