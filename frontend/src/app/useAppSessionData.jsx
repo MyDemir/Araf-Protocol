@@ -66,6 +66,12 @@ const fetchAllMyPages = async ({ authenticatedFetch, endpoint, collectionKey, en
   while (requestedPage <= MAX_MY_ITEMS_PAGE_FETCHES) {
     const res = await authenticatedFetch(buildApiUrl(`${endpoint}?page=${requestedPage}&limit=${MY_ITEMS_PAGE_LIMIT}`), signal ? { signal } : undefined);
     if (signal?.aborted) return allItems;
+    // [TR] F1-12: HTTP hatası şema uyumsuzluğu gibi görünmesin; durum kodu hataya eklenir.
+    if (res.ok === false) {
+      const httpErr = new Error(`${endpointLabel} HTTP ${res.status}`);
+      httpErr.httpStatus = res.status;
+      throw httpErr;
+    }
     const data = await res.json();
     const { items, total, page, limit } = assertPaginatedPayload(data, collectionKey, endpointLabel);
 
@@ -243,6 +249,9 @@ export function useAppSessionData({
   SUPPORTED_TOKEN_ADDRESSES,
   marketFilters = MARKET_FILTER_DEFAULTS,
   devScenarioActive = false,
+  // [TR] F1-01: wagmi sayfa yenilemede 'reconnecting' iken isConnected=false döner; bu 'bağlantı yok' değildir.
+  // [EN] F1-01: wagmi reports isConnected=false while reconnecting; that is not a real disconnect.
+  isWalletResolving = false,
 }) {
   const [tradeState, setTradeState] = useState('LOCKED');
   const [userRole, setUserRole] = useState('taker');
@@ -459,7 +468,11 @@ export function useAppSessionData({
         method: 'POST',
         credentials: 'include',
       });
-    } catch (_) {}
+      return true;
+    } catch (_) {
+      // [TR] F1-14: çağıran (gerçek çıkış) sunucu çıkışının yapılamadığını bilsin; diğer çağıranlar dönüşü yok sayar.
+      return false;
+    }
   }, []);
 
   const authenticatedFetch = React.useCallback(async (url, options = {}) => {
@@ -468,6 +481,8 @@ export function useAppSessionData({
       suppressAuthToast = false,
       ...requestOptions
     } = options || {};
+    // [TR] F1-05: istek başındaki oturum dönemi; hesap değişimi/çıkış sonrası gelen eski 401/409 yeni oturumu silmez.
+    const requestEpoch = sessionEpochRef.current;
     const walletHeader = connectedWallet ? { 'x-wallet-address': connectedWallet } : {};
     // [TR] FormData (dekont yükleme) için Content-Type tarayıcıya bırakılır; aksi halde multipart
     //      boundary kaybolur. JSON istekleri için varsayılan application/json korunur.
@@ -506,6 +521,7 @@ export function useAppSessionData({
     });
 
     if (res.status === 409 && await isSessionWalletMismatch(res)) {
+      if (requestEpoch !== sessionEpochRef.current) return res;
       try {
         await fetch(buildApiUrl('auth/logout'), {
           method: 'POST',
@@ -528,6 +544,8 @@ export function useAppSessionData({
 
     if (res.status !== 401) return res;
     if (skipRefresh) return res;
+    // [TR] F1-05: eski dönemin 401'i için yenileme/temizlik yapılmaz; yeni oturum etkilenmez.
+    if (requestEpoch !== sessionEpochRef.current) return res;
 
     try {
       const refreshRes = await fetchWithTimeout(() => buildApiUrl('auth/refresh'), {
@@ -554,6 +572,7 @@ export function useAppSessionData({
       }
 
       if (!refreshRes.ok) {
+        if (requestEpoch !== sessionEpochRef.current) return res;
         clearLocalSessionState({ navigateHome: false, closeModals: true });
         if (!suppressAuthToast && !sessionToastShownRef.current) {
           sessionToastShownRef.current = true;
@@ -759,7 +778,8 @@ export function useAppSessionData({
     } catch (err) {
       console.error('Trades fetch error:', err);
       // [TR] P4: eski/başka oturuma ait istek bayrağı açmaz (oturum düşüşü backend arızası değildir).
-      if (!isStale()) setTradesBackendUnavailable(true);
+      //      F1-12: 429 (hız sınırı) backend arızası değildir; zincir yedek görünümü açılmaz.
+      if (!isStale() && err?.httpStatus !== 429) setTradesBackendUnavailable(true);
     }
   }, [devScenarioActive, isAuthenticated, isConnected, address, lang, authenticatedFetch, tokenDecimalsMap, showToast, setActiveEscrows, setActiveTrade, formatAddress]);
 
@@ -887,6 +907,8 @@ export function useAppSessionData({
 
   useEffect(() => {
     if (!isConnected || !connectedWallet) {
+      // [TR] F1-01: reconnect sürerken oturum silinmez, authChecked false kalır (derin bağlantı korunur).
+      if (isWalletResolving) return;
       authValidationKeyRef.current = null;
       clearLocalSessionState({ navigateHome: false, closeModals: true });
       setAuthChecked(true);
@@ -928,6 +950,10 @@ export function useAppSessionData({
           setTradesBackendUnavailable(true);
           return;
         }
+        // [TR] F1-02: /auth/me "oturum geçersiz" için 401/403 (requireAuth) ve 409 (genel çakışma; mevcut davranış korunur)
+        //      döndürür. 429 ve diğer 4xx geçicidir: yerel oturum silinmez, durum "bilinmiyor" kalır (5xx dalı gibi).
+        //      Backend /me 404 döndürmez [kanıt: backend/scripts/routes/auth.js:547-620 status kodları 409/503/401].
+        if (!res.ok && res.status !== 401 && res.status !== 403 && res.status !== 409) return;
         if (!res.ok) {
           clearLocalSessionState({ navigateHome: false, closeModals: true });
           setAuthChecked(true);
@@ -978,7 +1004,7 @@ export function useAppSessionData({
     return () => {
       cancelled = true;
     };
-  }, [isConnected, connectedWallet, clearLocalSessionState, bestEffortBackendLogout, infraEpoch]);
+  }, [isConnected, connectedWallet, isWalletResolving, clearLocalSessionState, bestEffortBackendLogout, infraEpoch]);
 
   // [TR] Giriş (imza) /auth/me doğrulamasından bağımsız yapılır; isAdmin bu durumda henüz bilinmez. Oturum açılınca
   //      yönetici bayrağı bir kez /auth/me'den okunur (doğrulama zaten okuduysa tekrar istenmez).
@@ -1011,6 +1037,7 @@ export function useAppSessionData({
   const viewerTier = Number.isInteger(userReputation?.effectiveTier) ? userReputation.effectiveTier : null;
   const marketViewOpen = currentView === 'market';
   const ordersLoadedRef = React.useRef(false);
+  const ordersMapDepsRef = React.useRef(null);
   const ordersSeqRef = React.useRef(0);
   const myOrdersSeqRef = React.useRef(0);
   // [TR] Sayfalama: yüklü sayfa no, 2+. sayfalardan gelen id'ler (yoklama 1. sayfayı yenilerken korunur), son sayfa adedi.
@@ -1118,6 +1145,12 @@ export function useAppSessionData({
         }
       }
     };
+    // [TR] F1-07: eşlemeyi belirleyen girdiler (dil, bond/token/risk config, sorgu) Pazar dışındayken değişirse
+    //      önceki eşleme bayattır: bir kez yeniden çekilir. Yalnız Pazar görünümü değişimi yeniden çekmez.
+    const mapDeps = [lang, onchainBondMap, onchainTokenMap, paymentRiskConfig, marketOrdersQuery];
+    const prevMapDeps = ordersMapDepsRef.current;
+    if (prevMapDeps && mapDeps.some((d, i) => d !== prevMapDeps[i])) ordersLoadedRef.current = false;
+    ordersMapDepsRef.current = mapDeps;
     // [TR] Pazardan çıkarken tekrar çekilmez; yalnız ilk yüklemede ya da Pazar açıkken. [EN] No refetch on leaving Market.
     if (marketViewOpen || !ordersLoadedRef.current) fetchOrders();
     // [TR] Liste yalnız Pazar ekranı açıkken yenilenir; diğer ekranlarda ilk yükleme yeterlidir.
@@ -1282,12 +1315,21 @@ export function useAppSessionData({
   // [TR] İtibar/ban/tier yalnız cüzdan değişiminde değil; trade bitince, decayReputation sonrası ve ban süresi
   //      dolunca da yeniden okunur (F9).
   const reputationReqRef = React.useRef(0);
+  const reputationAddressRef = React.useRef(null);
   const refreshReputation = React.useCallback(async () => {
     if (!isConnected || !address || !getReputation) {
+      // [TR] F1-04: uçuştaki eski istek bağlantı kesildikten sonra veri yazmasın.
+      reputationReqRef.current += 1;
+      reputationAddressRef.current = null;
       setUserReputation(null);
       return null;
     }
     const req = ++reputationReqRef.current;
+    // [TR] F1-04: hesap değiştiyse önceki hesabın itibarı hemen silinir (bilinmiyor); aynı hesapta yenileme değeri korur.
+    if (reputationAddressRef.current !== address) {
+      reputationAddressRef.current = address;
+      setUserReputation(null);
+    }
     try {
       const repData = await getReputation(address);
       if (req !== reputationReqRef.current) return null;
@@ -1328,11 +1370,24 @@ export function useAppSessionData({
     terminalSeenRef.current = terminal;
   }, [resolvedTradeState, refreshReputation]);
 
+  // [TR] F1-03: hesap değişince/bağlantı kesilince önceki hesabın sybil ipucu silinir (bilinmiyor) ve uçuştaki
+  //      eski yanıt yazılmaz. Aynı hesapta bağımlılık değişimi değeri sıfırlamaz (titreme yok).
+  const sybilKeyRef = React.useRef(null);
   useEffect(() => {
-    if (!isConnected || !address || !antiSybilCheck) return;
+    if (!isConnected || !address || !antiSybilCheck) {
+      sybilKeyRef.current = null;
+      setSybilStatus(null);
+      return undefined;
+    }
+    if (sybilKeyRef.current !== address) {
+      sybilKeyRef.current = address;
+      setSybilStatus(null);
+    }
+    let cancelled = false;
     const fetchSybil = async () => {
       let res;
       try { res = await antiSybilCheck(address); } catch { res = null; }
+      if (cancelled) return;
       if (res) {
         const cooldownOk = typeof res.cooldownOk !== 'undefined' ? res.cooldownOk : res[2];
         let remaining = 0n;
@@ -1341,6 +1396,7 @@ export function useAppSessionData({
           // [TR] Okunamazsa 0 (süre doldu) sanılmaz: bilinmiyor olarak işaretlenir (F20).
           try { remaining = await getCooldownRemaining(address); } catch { cooldownUnknown = true; }
         }
+        if (cancelled) return;
         setSybilStatus({
           cooldownUnknown,
           aged: typeof res.aged !== 'undefined' ? res.aged : res[0],
@@ -1352,7 +1408,7 @@ export function useAppSessionData({
     };
     fetchSybil();
     const interval = setInterval(whenVisible(fetchSybil), 60000);
-    return () => clearInterval(interval);
+    return () => { cancelled = true; clearInterval(interval); };
   }, [isConnected, address, antiSybilCheck, getCooldownRemaining]);
 
   useEffect(() => {
@@ -1417,6 +1473,8 @@ export function useAppSessionData({
     }
   }, [activeTrade?.onchainId, activeEscrows, address]);
 
+  const fetchMyTradesRef = React.useRef(fetchMyTrades);
+  fetchMyTradesRef.current = fetchMyTrades;
   useEffect(() => { fetchMyTrades(); }, [fetchMyTrades]);
 
   useEffect(() => {
@@ -1526,15 +1584,17 @@ export function useAppSessionData({
   }, [wantsTradeHistory, isAuthenticated, tradeHistoryPage, authenticatedFetch]);
 
   useEffect(() => {
-    if (!isConnected) clearLocalSessionState({ navigateHome: true, closeModals: true });
-  }, [isConnected, clearLocalSessionState]);
+    if (!isConnected && !isWalletResolving) clearLocalSessionState({ navigateHome: true, closeModals: true });
+  }, [isConnected, isWalletResolving, clearLocalSessionState]);
 
   useEffect(() => {
     if (!publicClient || !isConnected) return;
     if (pendingTxCheckedRef.current) return;
-    pendingTxCheckedRef.current = true;
     const raw = safeStorage.get('araf_pending_tx');
-    if (!raw) return;
+    if (!raw) { pendingTxCheckedRef.current = true; return; }
+    // [TR] F1-08: bayrak zincir kontrolünden SONRA kalıcılaşır; yanlış zincirdeyken dönülürse doğru zincire
+    //      geçince kurtarma yeniden denenir. Geçersiz kayıtlar silindiği için bayrak onlarda hemen set edilir.
+    pendingTxCheckedRef.current = true;
 
     let parsed;
     try {
@@ -1557,7 +1617,10 @@ export function useAppSessionData({
       safeStorage.remove('araf_pending_tx');
       return;
     }
-    if (parsed.chainId && Number(parsed.chainId) !== Number(chainId)) return;
+    if (parsed.chainId && Number(parsed.chainId) !== Number(chainId)) {
+      pendingTxCheckedRef.current = false;
+      return;
+    }
 
     publicClient.getTransactionReceipt({ hash: parsed.hash })
       .then((receipt) => {
@@ -1572,7 +1635,8 @@ export function useAppSessionData({
           );
           return;
         }
-        fetchMyTrades();
+        // [TR] F1-08: en güncel closure ref'ten çağrılır (bayat closure erken dönüp hiçbir şey çekmezdi).
+        fetchMyTradesRef.current();
         showToast(
           lang === 'TR'
             ? 'Bekleyen işlem bulundu ve onaylandı. Veriler yenilendi.'
@@ -1656,7 +1720,11 @@ export function useAppSessionData({
     };
   }, [connector, connectedWallet, isAuthenticated, authenticatedWallet, lang, bestEffortBackendLogout, clearLocalSessionState, showToast]);
 
-  const filteredOrders = orders.filter((order) => matchesMarketFilters(order, marketFilters, { viewerAddress: connectedWallet, userTier: viewerTier }));
+  // [TR] F1-11: girdiler değişmedikçe aynı referans (gereksiz alt ağaç render'ı olmaz).
+  const filteredOrders = React.useMemo(
+    () => orders.filter((order) => matchesMarketFilters(order, marketFilters, { viewerAddress: connectedWallet, userTier: viewerTier })),
+    [orders, marketFilters, connectedWallet, viewerTier],
+  );
 
   const activeEscrowCounts = {
     LOCKED: activeEscrows.filter((e) => e.state === 'LOCKED').length,

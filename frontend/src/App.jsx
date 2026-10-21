@@ -134,7 +134,11 @@ function App() {
     activeToastKeyRef.current = key;
     setToast({ id, message, type, key, action });
     if (action) return;
-    setTimeout(() => setToast((current) => (current?.id === id ? null : current)), type === 'error' ? 6000 : 4000);
+    setTimeout(() => {
+      // [TR] F1-10: otomatik kapanan anahtarlı toast, anahtarını da bırakır (ref hâlâ onunsa); sonraki aynı anahtar bastırılmaz.
+      if (key && activeToastKeyRef.current === key) activeToastKeyRef.current = null;
+      setToast((current) => (current?.id === id ? null : current));
+    }, type === 'error' ? 6000 : 4000);
   }, []);
   const dismissToast = React.useCallback(() => {
     activeToastKeyRef.current = null;
@@ -159,7 +163,7 @@ function App() {
   // 2. WEB3 BAĞLANTI VE KONTRAT HOOK'LARI
   //    Wallet connection + all contract methods
   // ═══════════════════════════════════════════
-  const { address, isConnected, connector, chainId: walletChainId } = useAccount();
+  const { address, isConnected, isReconnecting, connector, chainId: walletChainId } = useAccount();
   const { connect, connectors } = useConnect();
   const { disconnect } = useDisconnect();
   const { signMessageAsync } = useSignMessage();
@@ -324,6 +328,8 @@ function App() {
   } = useAppSessionData({
     address,
     isConnected,
+    // [TR] F1-01: sayfa yenilemede wagmi reconnect sürerken oturum silinmez / derin bağlantı korunur.
+    isWalletResolving: Boolean(isReconnecting),
     connector,
     chainId,
     publicClient,
