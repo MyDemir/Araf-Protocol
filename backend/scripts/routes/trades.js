@@ -3,7 +3,6 @@
 const express = require("express");
 const { parsePositiveOnchainId: _parsePositiveOnchainId } = require("../utils/onchain");
 const Joi = require("joi");
-const crypto = require("crypto");
 const { ethers } = require("ethers");
 const router = express.Router();
 
@@ -16,6 +15,7 @@ const { hmacDigest } = require("../services/encryption");
 const { buildBankProfileRisk, buildTradeHealthSignals } = require("./tradeRisk");
 const { assertProviderExpectedChainOrThrow } = require("../services/expectedChain");
 const { getSharedProvider } = require("../services/rpcProvider");
+const { resolveClientIp } = require("../utils/clientIp");
 
 // [TR] Yalnız settlement preview için okunan on-chain yüzey. İptal koordinasyonu artık tamamen on-chain:
 //      her taraf proposeOrApproveCancel(tradeId) çağırır, worker CancelProposed event'ini mirror'lar.
@@ -211,14 +211,6 @@ function _parseBpsOrNull(raw) {
   return n;
 }
 
-function _toBigIntStringSafe(raw) {
-  try {
-    return BigInt(raw ?? 0).toString();
-  } catch {
-    return "0";
-  }
-}
-
 function _extractSafeSettlementProposalPayload(trade) {
   const sp = trade?.settlement_proposal || {};
   return {
@@ -285,7 +277,8 @@ async function _attachBankProfileRisk(trades) {
 
     // [TR] Internal snapshot alanlarını response'ta doğrudan açmıyoruz;
     //      onun yerine türetilmiş risk nesnesi veriyoruz.
-    const { payout_snapshot, ...safeTrade } = trade;
+    const safeTrade = { ...trade };
+    delete safeTrade.payout_snapshot;
 
     return {
       ...safeTrade,
@@ -542,15 +535,13 @@ router.get("/:id", requireAuth, requireSessionWalletMatch, roomReadLimiter, asyn
 
 /**
  * Gerçek IP belirleme fonksiyonu.
- * app.js'de trust proxy aktif olduğunda req.ip zaten doğru IP'yi döndürür.
- * Bu fonksiyon ek güvence katmanı sağlar.
+ * [TR] Varsayılan olarak req.ip (app.js'de trust proxy açık). x-real-ip yalnızca
+ *      ORIGIN_SHARED_SECRET tanımlı ve x-araf-origin-secret başlığı eşleşirse güvenilir
+ *      (bkz. utils/clientIp.js). Ham x-forwarded-for'a güvenilmez.
+ * [EN] Defaults to req.ip; x-real-ip is trusted only when the shared origin secret matches.
  */
 function _getRealIP(req) {
-  // [TR] x-forwarded-for header'ını doğrudan güvenmeyiz.
-  //      app.js'de trust proxy açık; Express req.ip'i güvenli şekilde normalize eder.
-  // [EN] Do not trust raw x-forwarded-for header directly.
-  //      trust proxy is enabled in app.js, so req.ip is the normalized source.
-  return req.ip || req.socket?.remoteAddress || "unknown";
+  return resolveClientIp(req) || req.socket?.remoteAddress || "unknown";
 }
 
 router.post("/:id/chargeback-ack", requireAuth, requireSessionWalletMatch, coordinationWriteLimiter, async (req, res, next) => {
