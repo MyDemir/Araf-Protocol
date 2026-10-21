@@ -19,14 +19,17 @@
 
 const express = require("express");
 const Joi = require("joi");
+const { asyncHandler } = require("../utils/asyncHandler");
 const router = express.Router();
-
 const crypto = require("crypto");
 const { SiweMessage } = require("siwe");
 const { authLimiter, nonceLimiter } = require("../middleware/rateLimiter");
 const { ACCEPTED_TERMS_VERSIONS, CURRENT_TERMS_VERSION, parseTermsAcceptance } = require("../config/terms");
 const TermsAcceptance = require("../models/TermsAcceptance");
-const { requireAuth, requireSessionWalletMatch } = require("../middleware/auth");
+const { requireAuth: _requireAuth, requireSessionWalletMatch: _requireSessionWalletMatch } = require("../middleware/auth");
+// [TR] B2-17: async auth middleware'leri de reddi next(err)'e iletecek şekilde sarılır.
+const requireAuth = asyncHandler(_requireAuth);
+const requireSessionWalletMatch = asyncHandler(_requireSessionWalletMatch);
 const { isAdminWallet } = require("../utils/adminWallets");
 const { isRailEnabled, isRailEnabledStrict } = require("../services/paymentRails");
 const {
@@ -288,7 +291,7 @@ function _isExpectedAuthError(err) {
  * GET /api/auth/nonce?wallet=0x...
  * Nonce üretir ve SIWE config bilgisini döndürür.
  */
-router.get("/nonce", authLimiter, nonceLimiter, async (req, res, next) => {
+router.get("/nonce", authLimiter, nonceLimiter, asyncHandler(async (req, res, next) => {
   try {
     const { wallet } = req.query;
 
@@ -306,13 +309,13 @@ router.get("/nonce", authLimiter, nonceLimiter, async (req, res, next) => {
     }
     next(err);
   }
-});
+}));
 
 /**
  * POST /api/auth/verify
  * SIWE imzasını doğrular, JWT ve refresh token'ı httpOnly cookie olarak set eder.
  */
-router.post("/verify", authLimiter, async (req, res) => {
+router.post("/verify", authLimiter, asyncHandler(async (req, res) => {
   try {
     const schema = Joi.object({
       message: Joi.string().max(2000).required(),
@@ -429,13 +432,13 @@ router.post("/verify", authLimiter, async (req, res) => {
     logger.error(`[Auth] /verify beklenmeyen hata: ${err?.stack || err?.message || err}`);
     return res.status(500).json({ error: "Kimlik doğrulama sırasında sunucu hatası oluştu. Lütfen tekrar deneyin." });
   }
-});
+}));
 
 /**
  * POST /api/auth/refresh
  * Refresh token ile yeni JWT ve yeni refresh token üretir.
  */
-router.post("/refresh", authLimiter, async (req, res) => {
+router.post("/refresh", authLimiter, asyncHandler(async (req, res) => {
   try {
     const refreshToken = req.cookies?.araf_refresh;
     if (!refreshToken) {
@@ -482,7 +485,7 @@ router.post("/refresh", authLimiter, async (req, res) => {
     logger.error(`[Auth] /refresh altyapı hatası: ${err?.name || "Error"} ${err?.code || ""}`.trim());
     return res.status(503).json({ error: "AUTH_REFRESH_UNAVAILABLE" });
   }
-});
+}));
 
 /**
  * POST /api/auth/logout
@@ -494,7 +497,7 @@ router.post("/refresh", authLimiter, async (req, res) => {
  *      sunucuda kayıtlı refresh token). Kimlik çözülemezse çerezler temizlenir, işlem başarılı döner.
  * [EN] Logout works with an expired-but-validly-signed JWT or with the refresh cookie alone.
  */
-router.post("/logout", authLimiter, async (req, res, next) => {
+router.post("/logout", authLimiter, asyncHandler(async (req, res, next) => {
   try {
     const currentJWT = req.cookies?.araf_jwt;
     const refreshCookie = req.cookies?.araf_refresh;
@@ -534,14 +537,14 @@ router.post("/logout", authLimiter, async (req, res, next) => {
   } catch (err) {
     next(err);
   }
-});
+}));
 
 /**
  * GET /api/auth/me
  * Cookie'deki JWT geçerliyse wallet adresini döndürür.
  * Bağlı cüzdan header ile gelmişse, cookie wallet ile birebir eşleşmesi gerekir.
  */
-router.get("/me", requireAuth, async (req, res) => {
+router.get("/me", requireAuth, asyncHandler(async (req, res) => {
   const headerWalletRaw = req.headers["x-wallet-address"];
 
   if (headerWalletRaw) {
@@ -606,7 +609,7 @@ router.get("/me", requireAuth, async (req, res) => {
     payoutRail,
     payoutRailEnabled,
   });
-});
+}));
 
 /**
  * PUT /api/auth/profile
@@ -617,7 +620,7 @@ router.get("/me", requireAuth, async (req, res) => {
  *   - payout profile gerçekten değiştiyse User.js risk sayaçları güncellenir
  *   - aktif LOCKED / PAID / CHALLENGED trade varken payout profile değişimi engellenir
  */
-router.put("/profile", requireAuth, requireSessionWalletMatch, authLimiter, async (req, res, next) => {
+router.put("/profile", requireAuth, requireSessionWalletMatch, authLimiter, asyncHandler(async (req, res, next) => {
   try {
     const normalizedBody = _normalizePayoutProfileBody(req.body);
     const { error, value } = PROFILE_SCHEMA.validate(normalizedBody);
@@ -769,7 +772,7 @@ router.put("/profile", requireAuth, requireSessionWalletMatch, authLimiter, asyn
   } catch (err) {
     next(err);
   }
-});
+}));
 
 module.exports = router;
 // [TR] Test yüzeyi: deploy/cookie policy regression doğrulaması.

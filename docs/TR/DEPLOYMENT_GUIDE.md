@@ -658,6 +658,9 @@ Koddaki her `process.env` / `import.meta.env` kullanımından çıkarılmıştı
 | `REDIS_TLS` | hayır | `false` | `true` ya da `rediss://` URL'si TLS açar; production'da zorunlu. |
 | `REDIS_TLS_SKIP_VERIFY` | hayır | `false` | Yalnız self-signed geliştirme Redis'i için; production'da `true` açılışı durdurur. |
 | `REDIS_READY_WAIT_MS` | hayır | `5000` | Redis'in hazır olmasını bekleme süresi. |
+| `REDIS_CONNECT_TIMEOUT_MS` | hayır | `10000` | Redis bağlantı (connect) zaman aşımı, ms. |
+| `JOB_LOCK_TTL_MS` | hayır | `120000` | Dağıtık iş kilidi ömrü (ms); ttl/3 aralıkla yenilenir. |
+| `JOB_LOCK_COMMAND_TIMEOUT_MS` | hayır | `5000` | Tek bir kilit komutunun (Redis) zaman aşımı, ms. |
 
 ### 6.2 Backend — auth, oturum, CORS
 
@@ -933,7 +936,7 @@ HKDF değişikliği sonrası PII'ın yeniden şifrelenmesi için repoda bir ara�
 - Concurrency `connections`, soft 80 / hard 100; VM `shared` 1 CPU, 512 MB.
 - Health check: `GET /health`, 30 sn'de bir, 15 sn grace period, 5 sn timeout; konteyner içinde HTTP (dışarıda `force_https = true`).
 - `/health`, worker'a bağlı **liveness** sinyalidir: `WORKER_LIVENESS_STALE_MS` boyunca blok görülmediyse `503 "stale"` döner; bağımsız olarak worker watchdog'u `WORKER_BLOCK_STALE_MS` sonra reconnect dener, bloklar hâlâ gelmiyorsa süreçten çıkar (platform yeniden başlatır). `/ready` (readiness) `fly.toml`'a bağlı değildir; deploy kapıları ve izleme için kullanın (tam ayrıntı `x-internal-token: $READY_INTERNAL_TOKEN` ile).
-- İmaj (`backend/Dockerfile`) `node:22-alpine`'dir, `npm ci --omit=dev` ile kurar, root olmayan `nodeapp` kullanıcısıyla çalışır ve `node scripts/app.js` başlatır.
+- İmaj (`backend/Dockerfile`) `node:22-alpine`'dir (index digest ile sabitlenmiştir; güncellemek için Docker Hub `library/node` `22-alpine` etiketinin yeni index digest'ini `FROM` satırına yazın), `npm ci --omit=dev` ile kurar, root olmayan `nodeapp` kullanıcısıyla çalışır ve `node scripts/app.js` başlatır.
 
 ---
 

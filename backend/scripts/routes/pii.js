@@ -15,9 +15,14 @@
  */
 
 const express = require("express");
+const { asyncHandler } = require("../utils/asyncHandler");
 const router = express.Router();
 
-const { requireAuth, requirePIIToken, requireSessionWalletMatch } = require("../middleware/auth");
+const { requireAuth: _requireAuth, requirePIIToken: _requirePIIToken, requireSessionWalletMatch: _requireSessionWalletMatch } = require("../middleware/auth");
+// [TR] B2-17: async auth middleware'leri de reddi next(err)'e iletecek şekilde sarılır.
+const requireAuth = asyncHandler(_requireAuth);
+const requirePIIToken = asyncHandler(_requirePIIToken);
+const requireSessionWalletMatch = asyncHandler(_requireSessionWalletMatch);
 const {
   piiProfileLimiter,
   piiTakerNameLimiter,
@@ -96,7 +101,7 @@ async function ensureIdentityNormalizedForPIIRoutes() {
 // ─── GET /api/pii/my ─────────────────────────────────────────────────────────
 // [TR] Kullanıcının kendi kayıtlı PII profilini döndürür.
 //      V3'te economic authority üretmez; yalnız şifreli profil bilgisini çözer.
-router.get("/my", requireAuth, requireSessionWalletMatch, piiProfileLimiter, async (req, res, next) => {
+router.get("/my", requireAuth, requireSessionWalletMatch, piiProfileLimiter, asyncHandler(async (req, res, next) => {
   try {
     const user = await User.findOne({ wallet_address: req.wallet })
       .select("payout_profile")
@@ -119,12 +124,12 @@ router.get("/my", requireAuth, requireSessionWalletMatch, piiProfileLimiter, asy
   } catch (err) {
     next(err);
   }
-});
+}));
 
 // ─── GET /api/pii/taker-name/:onchainId ──────────────────────────────────────
 // [TR] Maker, aktif child trade'inde karşı tarafın banka sahibi adını görebilir.
 //      Parent order değil, gerçek escrow/trade kimliği kullanılır.
-router.get("/taker-name/:onchainId", requireAuth, requireSessionWalletMatch, piiTakerNameLimiter, async (req, res, next) => {
+router.get("/taker-name/:onchainId", requireAuth, requireSessionWalletMatch, piiTakerNameLimiter, asyncHandler(async (req, res, next) => {
   try {
     try {
       await ensureIdentityNormalizedForPIIRoutes();
@@ -204,12 +209,12 @@ router.get("/taker-name/:onchainId", requireAuth, requireSessionWalletMatch, pii
   } catch (err) {
     next(err);
   }
-});
+}));
 
 // ─── POST /api/pii/request-token/:tradeId ────────────────────────────────────
 // [TR] Taker, aktif child trade için kısa ömürlü trade-scoped PII token talep eder.
 //      Bu token parent order'a değil, tek bir trade belgesine bağlıdır.
-router.post("/request-token/:tradeId", requireAuth, requireSessionWalletMatch, piiTokenRequestLimiter, async (req, res, next) => {
+router.post("/request-token/:tradeId", requireAuth, requireSessionWalletMatch, piiTokenRequestLimiter, asyncHandler(async (req, res, next) => {
   try {
     const { tradeId } = req.params;
     const callerWallet = req.wallet;
@@ -240,7 +245,7 @@ router.post("/request-token/:tradeId", requireAuth, requireSessionWalletMatch, p
   } catch (err) {
     next(err);
   }
-});
+}));
 
 // ─── GET /api/pii/:tradeId ────────────────────────────────────────────────────
 // [TR] Trade-scoped token ile maker'ın ödeme bilgilerini çözer.
@@ -251,7 +256,7 @@ router.get(
   requireSessionWalletMatch,
   requirePIIToken,
   piiFetchLimiter,
-  async (req, res, next) => {
+  asyncHandler(async (req, res, next) => {
     try {
       const { tradeId } = req.params;
       const callerWallet = req.wallet;
@@ -341,7 +346,7 @@ router.get(
 
       next(err);
     }
-  }
+  })
 );
 
 module.exports = router;

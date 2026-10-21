@@ -1,5 +1,5 @@
-# Alpine Linux tabanlı, hafif ve güvenli bir Node.js imajı.
-FROM node:22-alpine
+# Alpine Linux tabanlı, hafif ve güvenli bir Node.js imajı (index digest ile sabit; güncelleme: Docker Hub library/node 22-alpine).
+FROM node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402
 
 # Uygulama için çalışma dizini oluştur
 WORKDIR /usr/src/app
