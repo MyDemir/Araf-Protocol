@@ -155,7 +155,17 @@ describe('lib/redact.js (K4-10)', function () {
 describe('escrow-registry.js write filtresi (K4-20a)', function () {
   const Module = require('module');
   it('ROTATING belgeyi ezmez: filtre state $ne ROTATING; 11000 guvenli hataya cevrilir', async function () {
-    const resolved = require.resolve('mongodb', { paths: [path.join(ROOT, 'backend')] });
+    // CI'da (contracts job'u) backend/node_modules yoktur: mongodb gerçek modül olarak aranmaz, çözümleme geçici sarılır.
+    const resolved = path.join(os.tmpdir(), 'p9a-fake-mongodb', 'index.js');
+    const origResolve = Module._resolveFilename;
+    const origFind = Module._findPath;
+    Module._resolveFilename = function (request, ...rest) {
+      return request === 'mongodb' || request === resolved ? resolved : origResolve.call(this, request, ...rest);
+    };
+    // require.resolve(name, { paths }) _resolveFilename'i atlayıp _findPath'i çağırır.
+    Module._findPath = function (request, ...rest) {
+      return request === 'mongodb' ? resolved : origFind.call(this, request, ...rest);
+    };
     const saved = require.cache[resolved];
     const calls = [];
     let failWith = null;
@@ -180,6 +190,8 @@ describe('escrow-registry.js write filtresi (K4-20a)', function () {
       expect(err.safe).to.equal(true);
       expect(err.message).to.match(/ROTATING/).and.to.not.match(/secret/);
     } finally {
+      Module._resolveFilename = origResolve;
+      Module._findPath = origFind;
       if (saved) require.cache[resolved] = saved; else delete require.cache[resolved];
     }
   });
