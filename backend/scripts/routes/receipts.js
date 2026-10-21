@@ -36,7 +36,11 @@ const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const allowed = ["image/jpeg", "image/png", "image/webp", "image/gif", "application/pdf"];
-    if (!allowed.includes(file.mimetype)) return cb(new Error(`UNSUPPORTED_MIME:${file.mimetype}`));
+    if (!allowed.includes(file.mimetype)) {
+      const err = new Error("UNSUPPORTED_MIME");
+      err.code = "UNSUPPORTED_MIME";
+      return cb(err);
+    }
     cb(null, true);
   },
 });
@@ -135,11 +139,7 @@ router.post("/upload", requireAuth, requireSessionWalletMatch, receiptUploadLimi
     logger.info(`[Receipts] Dekont kaydedildi: trade=#${onchainId} mime=${req.file.mimetype} hash=${sha256Hash.slice(0, 8)}...`);
     return res.status(201).json({ hash: sha256Hash });
   } catch (err) {
-    if (err.code === "LIMIT_FILE_SIZE") return res.status(413).json({ error: "Dosya boyutu 5 MB sınırını aşıyor." });
-    if (err.message?.startsWith("UNSUPPORTED_MIME:")) {
-      const mime = err.message.split(":")[1];
-      return res.status(415).json({ error: `Desteklenmeyen dosya tipi: ${mime}. İzin verilenler: JPEG, PNG, WebP, GIF, PDF` });
-    }
+    // [TR] B3-01: multer hataları handler'a girmez; globalErrorHandler 413/415/400 + sabit kod döner.
     next(err);
   } finally {
     if (tempFilePath) {
