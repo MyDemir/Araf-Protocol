@@ -1,3 +1,4 @@
+import { safeStorage } from './safeStorage';
 import React, { useEffect, useMemo, useState } from 'react';
 import { deriveTradeTimeline } from './contexts/trade-room/tradeTimeline';
 import { shortAddress } from './copy';
@@ -448,7 +449,7 @@ export function useAppSessionData({
     draftTouchedRef.current = false;
     setPaymentIpfsHashState((prev) => (prev.onchainId === null && prev.hash === '' ? prev : { onchainId: null, hash: '' }));
     if (clearPendingTx && typeof window !== 'undefined') {
-      localStorage.removeItem('araf_pending_tx');
+      safeStorage.remove('araf_pending_tx');
     }
   }, [setCurrentView, setShowMakerModal, setActiveTrade, setActiveEscrows]);
 
@@ -488,7 +489,7 @@ export function useAppSessionData({
       } catch (err) {
         if (isWrite && isTimeoutError(err)) {
           err.writeMayHaveCompleted = true;
-          showToast(
+          showToastRef.current(
             langRef.current === 'TR'
               ? 'İstek zaman aşımına uğradı; işlem sunucuda tamamlanmış olabilir. Sayfayı yenileyip kontrol edin.'
               : 'The request timed out; the action may have completed on the server. Refresh and check before retrying.',
@@ -515,8 +516,8 @@ export function useAppSessionData({
       clearLocalSessionState({ navigateHome: false, closeModals: true });
       if (!suppressAuthToast && !sessionToastShownRef.current) {
         sessionToastShownRef.current = true;
-        showToast(
-          lang === 'TR'
+        showToastRef.current(
+          langRef.current === 'TR'
             ? 'Oturum cüzdan uyuşmazlığı nedeniyle sonlandırıldı. Lütfen yeniden giriş yapın.'
             : 'Session ended due to wallet mismatch. Please sign in again.',
           'error'
@@ -542,8 +543,8 @@ export function useAppSessionData({
       if (!refreshRes.ok && refreshRes.status !== 401) {
         if (!suppressAuthToast && !refreshTransientToastShownRef.current) {
           refreshTransientToastShownRef.current = true;
-          showToast(
-            lang === 'TR'
+          showToastRef.current(
+            langRef.current === 'TR'
               ? 'Geçici bağlantı sorunu, tekrar deneyin.'
               : 'Temporary connection problem, please try again.',
             'error'
@@ -556,8 +557,8 @@ export function useAppSessionData({
         clearLocalSessionState({ navigateHome: false, closeModals: true });
         if (!suppressAuthToast && !sessionToastShownRef.current) {
           sessionToastShownRef.current = true;
-          showToast(
-            lang === 'TR'
+          showToastRef.current(
+            langRef.current === 'TR'
               ? 'Oturumunuz sona erdi. Lütfen tekrar imzalayın.'
               : 'Session expired. Please sign in again.',
             'error'
@@ -579,7 +580,7 @@ export function useAppSessionData({
     } catch (_) {
       return res;
     }
-  }, [connectedWallet, address, clearLocalSessionState, lang, showToast]);
+  }, [connectedWallet, address, clearLocalSessionState]);
 
   useEffect(() => {
     // [TR] Dedupe bayrağını yalnız doğrulanmış auth geri geldiğinde sıfırlarız.
@@ -1504,35 +1505,35 @@ export function useAppSessionData({
     if (!publicClient || !isConnected) return;
     if (pendingTxCheckedRef.current) return;
     pendingTxCheckedRef.current = true;
-    const raw = localStorage.getItem('araf_pending_tx');
+    const raw = safeStorage.get('araf_pending_tx');
     if (!raw) return;
 
     let parsed;
     try {
       parsed = JSON.parse(raw);
     } catch {
-      localStorage.removeItem('araf_pending_tx');
+      safeStorage.remove('araf_pending_tx');
       return;
     }
 
     if (!parsed?.hash) {
-      localStorage.removeItem('araf_pending_tx');
+      safeStorage.remove('araf_pending_tx');
       return;
     }
     const isValidHash = /^0x[a-fA-F0-9]{64}$/.test(parsed.hash);
     if (!isValidHash) {
-      localStorage.removeItem('araf_pending_tx');
+      safeStorage.remove('araf_pending_tx');
       return;
     }
     if (parsed.createdAt && (Date.now() - Number(parsed.createdAt) > 24 * 3600 * 1000)) {
-      localStorage.removeItem('araf_pending_tx');
+      safeStorage.remove('araf_pending_tx');
       return;
     }
     if (parsed.chainId && Number(parsed.chainId) !== Number(chainId)) return;
 
     publicClient.getTransactionReceipt({ hash: parsed.hash })
       .then((receipt) => {
-        localStorage.removeItem('araf_pending_tx');
+        safeStorage.remove('araf_pending_tx');
         // [TR] Receipt'in status'u kontrol edilir: reverted işlem "onaylandı" diye gösterilmez (F7).
         if (receipt && receipt.status && receipt.status !== 'success') {
           showToast(

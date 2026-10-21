@@ -37,6 +37,15 @@ export default function AdminSocialLinksPanel({ lang = 'EN', authenticatedFetch,
   const [pending, setPending] = React.useState(null); // { links, summary }
   const [reason, setReason] = React.useState('');
   const [saving, setSaving] = React.useState(false);
+  // [TR] lang ve taslak durumu ref'te: dil değişimi yeniden yüklemeyi tetiklemez, kirli taslak ezilmez (F4-03).
+  // [EN] lang and dirty state live in refs: a language switch never reloads, and a dirty draft is never overwritten.
+  const langRef = React.useRef(lang);
+  langRef.current = lang;
+  const rowsRef = React.useRef(rows);
+  rowsRef.current = rows;
+  const baselineRef = React.useRef('[]');
+  const firstLoadRef = React.useRef(true);
+  const serializeRows = (rs) => JSON.stringify(rs.map((r) => [r.id ?? null, r.label, r.url, r.enabled]));
   const [conflict, setConflict] = React.useState(false);
 
   const loadAudit = React.useCallback(async (page = 1) => {
@@ -53,7 +62,7 @@ export default function AdminSocialLinksPanel({ lang = 'EN', authenticatedFetch,
     } catch { /* audit ikincil; sessiz */ }
   }, [authenticatedFetch]);
 
-  const load = React.useCallback(async () => {
+  const load = React.useCallback(async ({ force = false } = {}) => {
     setState((s) => ({ ...s, loading: true, error: '' }));
     try {
       const res = await authenticatedFetch(buildApiUrl('admin/social-links'), { suppressAuthToast: true });
@@ -61,17 +70,23 @@ export default function AdminSocialLinksPanel({ lang = 'EN', authenticatedFetch,
       if (!res.ok) throw new Error('bad_status');
       const data = await res.json();
       const links = Array.isArray(data?.links) ? data.links : [];
+      if (!force && serializeRows(rowsRef.current) !== baselineRef.current) {
+        setState((s) => ({ ...s, loading: false }));
+        return;
+      }
       setState({ loading: false, error: '', unauthorized: false, links, version: Number(data?.version) || 0 });
-      setRows(links.map(toRow));
+      const nextRows = links.map(toRow);
+      baselineRef.current = serializeRows(nextRows);
+      setRows(nextRows);
       setErrors([]);
       setConflict(false);
       loadAudit(1);
     } catch {
-      setState((s) => ({ ...s, loading: false, error: t(lang, 'Sosyal linkler alınamadı.', 'Failed to load social links.') }));
+      setState((s) => ({ ...s, loading: false, error: t(langRef.current, 'Sosyal linkler alınamadı.', 'Failed to load social links.') }));
     }
-  }, [authenticatedFetch, lang, loadAudit]);
+  }, [authenticatedFetch, loadAudit]);
 
-  React.useEffect(() => { load(); }, [load]);
+  React.useEffect(() => { const force = firstLoadRef.current; firstLoadRef.current = false; load({ force }); }, [load]);
 
   const update = (key, patch) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
   const move = (index, delta) => setRows((rs) => {
@@ -113,7 +128,7 @@ export default function AdminSocialLinksPanel({ lang = 'EN', authenticatedFetch,
         showToast(t(lang, 'Sosyal linkler güncellendi.', 'Social links updated.'), 'success');
         setPending(null);
         setReason('');
-        await load();
+        await load({ force: true });
       } else if (res.status === 409) {
         setPending(null);
         setReason('');
@@ -164,7 +179,7 @@ export default function AdminSocialLinksPanel({ lang = 'EN', authenticatedFetch,
               'Sosyal linkler başka biri tarafından değiştirildi. Değişikliğiniz kaydedilmedi; güncel listeyi yenileyin.',
               'Social links were changed by someone else. Your change was not saved; refresh to see the current list.')}
           </p>
-          <button type="button" onClick={load} className="min-h-[44px] px-4 rounded-lg border border-borderStrong text-sm font-semibold text-textPrimary">
+          <button type="button" onClick={() => load({ force: true })} className="min-h-[44px] px-4 rounded-lg border border-borderStrong text-sm font-semibold text-textPrimary">
             {t(lang, 'Yenile', 'Refresh')}
           </button>
         </div>
@@ -235,7 +250,7 @@ export default function AdminSocialLinksPanel({ lang = 'EN', authenticatedFetch,
         >
           {t(lang, 'Kaydet', 'Save')}
         </button>
-        {summary.any && <button type="button" className={btn} onClick={load}>{t(lang, 'Değişiklikleri at', 'Discard changes')}</button>}
+        {summary.any && <button type="button" className={btn} onClick={() => load({ force: true })}>{t(lang, 'Değişiklikleri at', 'Discard changes')}</button>}
       </div>
 
       <div className="bg-surface border border-borderSubtle rounded-xl p-4">
