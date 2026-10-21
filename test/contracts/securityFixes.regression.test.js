@@ -455,9 +455,11 @@ describe("Security fixes regression (K1–K14, G1/G2)", function () {
   describe("K4 vault.setRewards is set-once", function () {
     it("K4: second setRewards reverts; owner cannot repoint rewards to drain reserves", async function () {
       const c = await loadFixture(base);
-      await c.vault.setRewards(c.helper.address);
+      // [TR] K3-04: rewards bu vault'a bağlı bir kontrat olmalı. [EN] K3-04: rewards must be a contract bound to the vault.
+      const first = await (await ethers.getContractFactory("MockRewardsBinding")).deploy(await c.vault.getAddress());
+      await c.vault.setRewards(await first.getAddress());
       await expect(c.vault.setRewards(c.eoa.address)).to.be.revertedWithCustomError(c.vault, "RewardsAlreadySet");
-      expect(await c.vault.rewards()).to.equal(c.helper.address);
+      expect(await c.vault.rewards()).to.equal(await first.getAddress());
       await expect(c.vault.connect(c.eoa).transferEpochAllocation(1, await c.token.getAddress(), 1n))
         .to.be.revertedWithCustomError(c.vault, "UnauthorizedRewards");
     });
