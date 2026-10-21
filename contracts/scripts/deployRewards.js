@@ -21,6 +21,7 @@ const { ethers, artifacts, network } = hre;
 const fs = require('fs');
 const path = require('path');
 const { retryRead, settleDeployment, blockOverrides } = require('./lib/waitForCode');
+const { formatError, redactText } = require('./lib/redact');
 
 const LOCAL = new Set(['hardhat', 'localhost']);
 const ZERO = '0x0000000000000000000000000000000000000000';
@@ -75,12 +76,21 @@ async function readRewardsOf(provider, address) {
   if (!address) return null;
   const code = await provider.getCode(address);
   if (!code || code === '0x') return null;
+  let data;
   try {
-    const data = await provider.call({ to: address, data: REWARDS_SELECTOR_IFACE.encodeFunctionData('rewards') });
+    data = await provider.call({ to: address, data: REWARDS_SELECTOR_IFACE.encodeFunctionData('rewards') });
+  } catch (err) {
+    // [TR] Yalnız revert (rewards() yok) null sayılır; 429/timeout gibi geçici hatalar fail-closed: throw (K4-12).
+    // [EN] Only a revert (no rewards()) counts as "not wired"; transient RPC errors propagate (fail-closed).
+    if (err && err.code === 'CALL_EXCEPTION') return null;
+    throw err;
+  }
+  if (!data || data === '0x') return null; // rewards() olmayan, boş dönen kod / empty return
+  try {
     const [value] = REWARDS_SELECTOR_IFACE.decodeFunctionResult('rewards', data);
     return ethers.getAddress(value);
   } catch {
-    return null;
+    return null; // dönen veri adres değil -> rewards() değil / undecodable payload is not a wired vault
   }
 }
 
@@ -131,7 +141,7 @@ async function transferIfNeeded(contract, label, finalOwner) {
   try {
     transferReceipt = await (await contract.transferOwnership(finalOwner)).wait();
   } catch (err) {
-    throw new Error(`${label} ownership transfer failed; deployer still owner of ${address} (${err && err.message ? err.message.split('\n')[0] : err})`);
+    throw new Error(`${label} ownership transfer failed; deployer still owner of ${address} (${redactText(err && err.message ? err.message.split('\n')[0] : err)})`);
   }
   const after = ethers.getAddress(await retryRead(() => contract.owner(...blockOverrides(transferReceipt && transferReceipt.blockNumber))));
   if (after !== finalOwner) throw new Error(`${label} ownership transfer failed; deployer still owner of ${address} (owner()=${after}, expected ${finalOwner})`);
@@ -187,6 +197,11 @@ async function main(env = process.env, opts = {}) {
   // [TR] Kilit: hiçbir tx'ten önce. [EN] Lock: before any tx.
   const reasons = await assertRewardsRedeploySafety({ provider: ethers.provider, existingManifest: existing, escrowAddress, env });
   if (reasons.length) console.warn(`WARNING: CONFIRM_REDEPLOY_REWARDS=YES; replacing existing rewards setup: ${reasons.join('; ')}`);
+
+  // [TR] Manifest ezme güvenliği deploy'dan ÖNCE (K4-12): vault/rewards yeni deploy ile mutlaka değişir,
+  //      bu yüzden sentinel; reddederse hiçbir kontrat yetim kalmaz. escrow yerelde henüz bilinmiyorsa atlanır.
+  // [EN] Overwrite guard runs BEFORE deploying so a refusal never orphans fresh contracts.
+  assertManifestOverwriteSafety(existing, { escrow: escrowAddress, vault: 'new-deploy', rewards: 'new-deploy', finalTreasury }, env);
 
   let usdt = null; let usdc = null;
   if (local) {
@@ -245,11 +260,6 @@ async function main(env = process.env, opts = {}) {
   // [TR] Kısmi (pending) manifest: wiring yarıda kalırsa adresler kaybolmaz ve kilit sonraki çalıştırmada görür.
   // [EN] Partial manifest so addresses survive a failed wiring and the lock sees them next time.
   ensureDir(depDir);
-  if (existing) {
-    // [TR] Kritik deployment adreslerinin sessizce ezilmesini engeller.
-    // [EN] Prevent silent overwrite of critical deployment addresses.
-    assertManifestOverwriteSafety(existing, manifest, env);
-  }
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 
   try {
@@ -287,7 +297,7 @@ async function main(env = process.env, opts = {}) {
 }
 
 if (require.main === module) {
-  main().catch((e) => { console.error(e); process.exit(1); });
+  main().catch((e) => { console.error(formatError(e)); process.exit(1); });
 }
 
 module.exports = {

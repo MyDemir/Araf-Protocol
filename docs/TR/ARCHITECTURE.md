@@ -189,7 +189,7 @@ Kontrat, V3’ün tek authoritative state machine yüzeyidir. Aşağıdaki fonks
 - `decayReputation(wallet)` — permissionless clean-slate (bkz. §8.3).
 
 ### 3.4 Governance / mutable admin surface
-- `setTreasury` (sıfır adres yasak)
+- `setTreasury` (sıfır adres yasak; yeni hazine bu escrow'a bağlı vault olmalı: `escrow()` getter'ı `address(this)` döndürmeli, aksi hâlde EOA, kodsuz adres, getter'ı olmayan ya da başka escrow'a bağlı kontrat `TreasuryEscrowMismatch` ile reddedilir. Constructor'daki ilk hazine bu kontrole tabi değildir.)
 - `setFeeConfig` (taraf başına ≤ 2000 bps)
 - `setCooldownConfig` (her tier için ≤ 30 gün)
 - `setTokenConfig` (decimals 1–18 ve token'ın `decimals()` değerine eşit; dört tier tavanı > 0)
@@ -200,7 +200,7 @@ Kontrata göre owner yetkileri (hiçbirinde zaman kilidi yoktur; ayrıntılı ru
 
 | Kontrat | Owner fonksiyonları | Kod sınırı |
 |---|---|---|
-| `ArafEscrow` | `setTreasury`, `setFeeConfig`, `setCooldownConfig`, `setTokenConfig`, `setReputationPolicy`, `setReputationTierThresholds`, `pause`/`unpause` | Fee ≤ 2000 bps; cooldown ≤ 30 gün; decimals token'la eşleşmeli; politika sınırları §8.4; pause yalnız create/fill |
+| `ArafEscrow` | `setTreasury`, `setFeeConfig`, `setCooldownConfig`, `setTokenConfig`, `setReputationPolicy`, `setReputationTierThresholds`, `pause`/`unpause` | Hazine yalnız bu escrow'a bağlı vault (`TreasuryEscrowMismatch`); fee ≤ 2000 bps; cooldown ≤ 30 gün; decimals token'la eşleşmeli; politika sınırları §8.4; pause yalnız create/fill |
 | `ArafRevenueVault` | `setRewardBps`, `setFinalTreasury`, `setRewards` (tek seferlik), `setSupportedToken`, `setProductPool`, `withdrawTreasuryShare`, `withdrawTreasuryShareToFinal`, `pause`/`unpause` | `rewardBps` 4000–7000; çekim yalnız treasury rezervinden; pause yalnız sponsor fonlamasını durdurur |
 | `ArafRewards` | `allocateEpochRewards`, `pause`/`unpause` | Kaynak yalnız vault; kayıt, finalize, claim ve sweep pause edilemez ve alıcı seçilemez |
 
@@ -487,7 +487,7 @@ flowchart TD
 - **Ban:** negatif sinyal sonrası `riskPoints ≥ banRiskPointsThreshold` (**100**) ise: kullanıcı o an banlı değilse `consecutiveBans`+1 ve ban süresi `baseBanDuration × 2^(consecutiveBans−1)` (**30 gün**, 60, 120 …, en çok **365 gün**). Aynı koşulda her seferinde tier tavanı bir kademe düşer (ilk ceza 4'ten başlatıp 3'e indirir).
 - **Ban etkisi:** taker girişi (`TakerBanActive`) ve maker rolleri (`MakerBanActive`: sell order açma, sell order'ın doldurulması, buy order'ı doldurma) kapanır. Açık trade'lerin kapanış yolları açık kalır.
 - **Bond fiyatlaması:** `riskPoints == 0` ve en az bir başarı varsa bond oranı 100 bps düşer; `riskPoints > 0` ise 300 bps artar (Tier 0 bond'u her durumda 0).
-- **Clean-slate:** `decayReputation(wallet)` permissionless'tır; koşullar: ban geçmişi var (`NoPriorBanHistory`), `now > bannedUntil + cleanPeriod` (`CleanPeriodNotElapsed`), `consecutiveBans > 0` (`NoBansToReset`). Güncel `cleanPeriod`: **90 gün**. Sıfırlananlar: `consecutiveBans`, `riskPoints`, tier tavanı (4'e döner). Bu tam af değildir; `failedDisputes`, sonuç sayaçları ve `bannedUntil` silinmez.
+- **Clean-slate:** `decayReputation(wallet)` permissionless'tır; koşullar: ban geçmişi var (`NoPriorBanHistory`), `now > bannedUntil + cleanPeriod` ve `now > lastNegativeEventAt + cleanPeriod` (ikisi de `CleanPeriodNotElapsed`), `consecutiveBans > 0` (`NoBansToReset`). Yani af ancak hem ban bitiminden hem son olumsuz olaydan sonra tam bir temiz dönem geçince verilir; ban sonrası biriken risk, son olumsuz olaydan sonra tam temiz dönem geçene kadar affedilmez (K3-01, 2026-10-21). Bilinen sınır: hiç banlanmamış cüzdan `decayReputation` çağıramaz (`NoPriorBanHistory`); onun `riskPoints`'i yalnız pozitif sinyallerle düşer. Banlanan cüzdanın daha hızlı tam af alması yönündeki ters teşvik daraldı ama kapanmadı. Backend decay görevi yalnız bu koşulu karşılayan adaylara tx gönderir; karar kontrattadır. Güncel `cleanPeriod`: **90 gün**. Sıfırlananlar: `consecutiveBans`, `riskPoints`, tier tavanı (4'e döner). Bu tam af değildir; `failedDisputes`, sonuç sayaçları ve `bannedUntil` silinmez.
 - Backend'in `reputationDecay` job'ı aday cüzdanlar için kontratın `getReputation()` / `cleanPeriod()` okumasıyla bu çağrıyı tetikleyebilir (opsiyonel `RELAYER_PRIVATE_KEY`); karar yine kontrattadır.
 
 ### 8.4 Politika sınırları (`setReputationPolicy` / `setReputationTierThresholds`)
@@ -1007,6 +1007,7 @@ Frontend kontratın yerine geçmez; enforcement kontrattadır. Frontend guardrai
 | Maker'ın ping atıp susarak PAID trade'i rehin tutması | Ping `ping+48sa`'te düşer (`MAKER_CHALLENGE_WINDOW`), taker `pingMaker` → `autoRelease` yolunu kullanır |
 | Bond'suz (Tier 0) taker'ın LOCKED trade'i rehin tutması | `PAYMENT_WINDOW` (48 saat) + `expirePaymentWindow`; `reportPayment` pencere sonrası `PaymentWindowClosed` |
 | Settlement oranının kabul öncesi değiştirilmesi | `acceptSettlement(tradeId, expectedProposalId)`; uyuşmazlıkta `SettlementProposalMismatch` |
+| Yanlış yapılandırılmış hazine yüzünden ücretli çıkışların durması (`RevenueHookFailed`) | `setTreasury` yalnız `escrow()` getter'ı bu escrow'u gösteren vault'u kabul eder (`TreasuryEscrowMismatch`). Kötü niyetli owner'a karşı tam koruma değildir: owner yine bu escrow'a bağlı ama hook'u revert eden bir kontrat kurabilir; zaman kilidi yoktur. |
 | Owner'ın rewards adresini değiştirip ödül rezervini çekmesi | `ArafRevenueVault.setRewards` tek seferlik (`RewardsAlreadySet`) |
 | Yanlış token decimals ile tier tavanı / ödül notional'ı bozulması | `setTokenConfig` token'ın `decimals()` değerini zincirde doğrular (`InvalidDecimals`) |
 | Burn'de erimiş kısmın escrow'da kalıcı kilitlenmesi | `burnExpired` trade'in tüm bakiyesini hazineye gönderir |
@@ -1022,6 +1023,8 @@ Frontend kontratın yerine geçmez; enforcement kontrattadır. Frontend guardrai
 | Risk | Açıklama |
 |---|---|
 | Governance key risk | mutable fee/cooldown/token config/reputation politikası/treasury yüzeyi owner kontrolündedir; zaman kilidi yoktur, multisig ve operasyon disiplini gerektirir. |
+| Kara listeye giren taraf (K1-01) | Ödeme doğrudan gönderilir; taraf token kara listesine girerse LOCKED Tier≥1 işlemde çıkış, kara liste kalkana kadar mümkün olmaz. Kullanıcı kararıyla (2026-10-21) çekilebilir bakiye eklenmedi. |
+| Decay ters teşviki (K3-01 sonrası kalan) | Hiç banlanmamış cüzdan `decayReputation` çağıramaz (`NoPriorBanHistory`), `riskPoints`'i yalnız pozitif sinyallerle düşer; banlanan cüzdan temiz dönem sonunda `riskPoints` sıfırlaması alır. Son olumsuz olay koşuluyla fark daraldı ama kapanmadı (§8.3). |
 | `renounceOwnership` | `Ownable` mirası kapatılmamıştır; çağrılırsa owner yüzeyleri (pause dahil) kalıcı kilitlenir. |
 | Fake receipt / off-chain payment ambiguity | dekont hash’i ve encrypted payload fraud’u pahalılaştırır ama fiat transferin maddi gerçekliğini matematiksel kanıtlamaz. |
 | Chargeback reality | bankacılık katmanındaki geri alma/itiraz süreçleri zincir üstü finaliteyi dış dünyada tartışmalı hale getirebilir. |

@@ -20,6 +20,10 @@ function extractQuotedSignatures(source) {
   return out;
 }
 
+function eventSignature(ev) {
+  return `event ${ev.name}(${ev.inputs.map((i) => `${i.type}${i.indexed ? " indexed" : ""} ${i.name}`).join(", ")})`;
+}
+
 function assertIncludes(signatureList, sig, where) {
   if (!signatureList.includes(normalizeSig(sig))) {
     throw new Error(`[ABI-DRIFT] Missing signature in ${where}: ${sig}`);
@@ -42,7 +46,7 @@ function runAbiDriftCheck() {
   for (const name of criticalEvents) {
     const ev = artifact.abi.find((x) => x.type === "event" && x.name === name);
     if (!ev) throw new Error(`[ABI-DRIFT] Event missing in artifact: ${name}`);
-    const evSig = `event ${name}(${ev.inputs.map((i) => `${i.type}${i.indexed ? " indexed" : ""} ${i.name}`).join(", ")})`;
+    const evSig = eventSignature(ev);
     assertIncludes(backendSigs, evSig, "backend event ABI");
     if (name === "OrderFilled") assertIncludes(frontendSigs, evSig, "frontend event ABI");
   }
@@ -62,6 +66,24 @@ function runAbiDriftCheck() {
     if (["getReputation", "getTrade", "getOrder"].includes(name)) {
       assertIncludes(backendSigs, fnSig, "backend function ABI");
     }
+  }
+
+  // [TR] Kapsam genişletme (K4-19a): backend dinleyicisinin alıntıladığı HER event, ArafEscrow/ArafRevenueVault/ArafRewards
+  //      artifact'larından birinde adıyla bulunuyorsa imzası birebir eşleşmeli (sabit listeden bağımsız).
+  // [EN] Coverage: every event the backend listener quotes must match the artifact signature when its name exists in
+  //      ArafEscrow/ArafRevenueVault/ArafRewards (independent of the fixed critical list).
+  const abis = [artifact.abi];
+  for (const n of ["ArafRevenueVault", "ArafRewards"]) {
+    const p = path.join(root, `artifacts/src/${n}.sol/${n}.json`);
+    if (fs.existsSync(p)) abis.push(JSON.parse(fs.readFileSync(p, "utf8")).abi);
+  }
+  const eventsByName = new Map();
+  for (const abi of abis) for (const x of abi) if (x.type === "event") eventsByName.set(x.name, x);
+  for (const sig of backendSigs.filter((s) => s.startsWith("event "))) {
+    const name = sig.slice(6, sig.indexOf("("));
+    const ev = eventsByName.get(name);
+    if (!ev) continue;
+    assertIncludes(backendSigs, eventSignature(ev), "backend event ABI");
   }
 
   const rep = artifact.abi.find((x) => x.type === "function" && x.name === "getReputation");

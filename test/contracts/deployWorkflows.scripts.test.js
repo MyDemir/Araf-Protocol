@@ -595,6 +595,38 @@ describe('deploy workflows (YAML structure)', function () {
     for (const s of steps) if (s.run && s.shell === 'bash' && s.run.includes('\n')) expect(s.run, s.name).to.match(/set -euo pipefail/);
   });
 
+  it('deploy-base-sepolia: registry none + dolu ARAF_ESCROW_ADDRESS variable ilk kurulum sayilmaz (K4-02)', function () {
+    const step = load('deploy-base-sepolia.yml').jobs.deploy.steps.find((s) => s.name === 'Read escrow registry state');
+    expect(step.env.VAR_ESCROW_ADDRESS).to.equal('${{ vars.ARAF_ESCROW_ADDRESS }}');
+    const run = (state, varEscrow) => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'k402-'));
+      fs.mkdirSync(path.join(dir, '.github/scripts'), { recursive: true });
+      fs.writeFileSync(path.join(dir, '.github/scripts/escrow-registry.js'), `console.log('registry_state=${state}');\n`);
+      const envFile = path.join(dir, 'gh_env');
+      fs.writeFileSync(envFile, '');
+      const r = spawnSync('bash', ['-c', step.run], {
+        cwd: dir,
+        env: { PATH: process.env.PATH, GITHUB_ENV: envFile, VAR_ESCROW_ADDRESS: varEscrow },
+        encoding: 'utf8',
+      });
+      const out = { status: r.status, text: `${r.stdout}${r.stderr}`, env: fs.readFileSync(envFile, 'utf8') };
+      fs.rmSync(dir, { recursive: true, force: true });
+      return out;
+    };
+    const blocked = run('none', ESCROW);
+    expect(blocked.status).to.equal(1);
+    expect(blocked.text).to.include('::error::');
+    expect(blocked.text).to.include('escrow-registry-adopt.yml');
+    expect(blocked.text).to.include('GH_VARIABLES_TOKEN');
+    expect(blocked.env).to.equal('');
+    const first = run('none', '');
+    expect(first.status).to.equal(0);
+    expect(first.env).to.include('REGISTRY_STATE=none');
+    const active = run('ACTIVE', ESCROW);
+    expect(active.status).to.equal(0);
+    expect(active.env).to.include('REGISTRY_STATE=ACTIVE');
+  });
+
   it('both deploy workflows share the same Fly/Vercel/health script and secret list; ETHERSCAN never reaches Fly', function () {
     for (const [f, job] of [['deploy-base-sepolia.yml', 'deploy'], ['deploy-runtime-base-sepolia.yml', 'runtime-deploy']]) {
       const steps = load(f).jobs[job].steps;

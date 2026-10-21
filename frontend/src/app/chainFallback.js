@@ -206,12 +206,24 @@ export const mergeChainTradeIntoRoom = (current, fresh, chainState = null) => {
     const { role, cancelStatus, ...fields } = fresh;
     let changed = false;
     const next = { ...current };
+    // [TR] İptal teklifi/geri çekme tek başına değişebilir (durum/zaman damgası aynı kalır); karşılaştırmaya dahil.
+    // [EN] A cancel proposal/revoke can change alone; include it in the comparison.
+    if ((current.cancelStatus ?? null) !== (cancelStatus ?? null)) {
+      next.cancelStatus = cancelStatus ?? null;
+      changed = true;
+    }
     for (const [key, value] of Object.entries(fields)) {
       if (TIMESTAMP_KEYS.has(key) && (value === null || value === undefined) && current[key]) continue;
       if (next[key] !== value) {
         next[key] = value;
         changed = true;
       }
+    }
+    // [TR] F2-04: taze (stale olmayan) okuma odadaki `stale` işaretini kaldırır; yoksa oda kalıcı kilitli kalır.
+    // [EN] F2-04: a fresh (non-stale) read clears the room's `stale` flag, otherwise the room stays locked.
+    if (fresh.stale !== true && 'stale' in next) {
+      delete next.stale;
+      changed = true;
     }
     return changed ? next : current;
   }

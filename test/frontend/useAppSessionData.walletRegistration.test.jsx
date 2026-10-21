@@ -145,6 +145,71 @@ describe('registered lock', () => {
   });
 });
 
+describe('registration tx races (B1/B3/B2)', () => {
+  const other = '0xdef0000000000000000000000000000000000000';
+
+  it('B1: a late registration result for a switched account does not mark the new account registered; state is re-read', async () => {
+    const read = vi.fn().mockResolvedValue(0n);
+    const { result, rerender } = renderHook((p) => useAppSessionData({ ...baseProps, ...p, getWalletRegisteredAt: read }), { initialProps: {} });
+    await flush(0);
+    await act(async () => { result.current.setIsRegisteringWallet(true); });
+    rerender({ address: other, connectedWallet: other });
+    await flush(0);
+    const before = read.mock.calls.length;
+    await act(async () => { result.current.setIsWalletRegistered(true); });
+    await flush(0);
+    expect(result.current.isWalletRegistered).toBe(false);
+    expect(read.mock.calls.length).toBeGreaterThan(before);
+    expect(read).toHaveBeenLastCalledWith(other);
+  });
+
+  it('B1: same account still gets true as before', async () => {
+    const read = vi.fn().mockResolvedValue(0n);
+    const { result } = mount(read);
+    await flush(0);
+    await act(async () => { result.current.setIsRegisteringWallet(true); });
+    await act(async () => { result.current.setIsWalletRegistered(true); });
+    expect(result.current.isWalletRegistered).toBe(true);
+  });
+
+  it('B1: address comparison is case-insensitive', async () => {
+    const read = vi.fn().mockResolvedValue(0n);
+    const { result, rerender } = renderHook((p) => useAppSessionData({ ...baseProps, ...p, getWalletRegisteredAt: read }), { initialProps: {} });
+    await flush(0);
+    await act(async () => { result.current.setIsRegisteringWallet(true); });
+    rerender({ address: baseProps.address.replace('0xabc', '0xABC') });
+    await flush(0);
+    await act(async () => { result.current.setIsWalletRegistered(true); });
+    expect(result.current.isWalletRegistered).toBe(true);
+  });
+
+  it('B3: finishing a registration attempt (e.g. receipt timeout) re-reads the registration state', async () => {
+    const read = vi.fn().mockResolvedValue(0n);
+    const { result } = mount(read);
+    await flush(0);
+    await act(async () => { result.current.setIsRegisteringWallet(true); });
+    const before = read.mock.calls.length;
+    await act(async () => { result.current.setIsRegisteringWallet(false); });
+    await flush(0);
+    expect(read.mock.calls.length).toBe(before + 1);
+  });
+
+  it('B2: remaining days use the chain clock when the device clock is ahead', async () => {
+    const chainSec = nowSec();
+    const publicClient = { getBlock: vi.fn().mockResolvedValue({ timestamp: BigInt(chainSec - 3 * 86400) }) };
+    // chain time = device - 3 days; registered so that 2 days of age remain on the chain clock
+    const regAt = BigInt(chainSec - 3 * 86400 - WALLET_AGE_MIN_SEC + 2 * 86400);
+    const read = vi.fn().mockResolvedValue(regAt);
+    const { result } = renderHook(() => useAppSessionData({
+      ...baseProps, publicClient, currentView: 'tradeRoom', getWalletRegisteredAt: read,
+    }));
+    await flush(0);
+    await act(async () => { result.current.setActiveTrade({ id: 't1', onchainId: '1' }); });
+    await flush(0);
+    expect(result.current.walletAgeRemainingDays).toBe(2);
+  });
+});
+
 describe('AccountPanel retry button', () => {
   const sybil = { aged: false, funded: true, cooldownOk: true, cooldownRemaining: 0 };
   it('shows Retry only when unknown, fires callback, and never a register button', () => {

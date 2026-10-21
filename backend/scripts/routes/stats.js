@@ -10,6 +10,7 @@
  */
 
 const express = require("express");
+const { asyncHandler } = require("../utils/asyncHandler");
 const router = express.Router();
 const { statsReadLimiter } = require("../middleware/rateLimiter");
 const { getRedisClient } = require("../config/redis");
@@ -26,7 +27,7 @@ function calculateChange(current, previous) {
 
 // [TR] Stats endpoint'i public read yüzeyidir; dedicated lightweight bucket ile ayrıştırılır.
 // [EN] Stats endpoint is public read surface with dedicated lightweight bucket.
-router.get("/", statsReadLimiter, async (_req, res, next) => {
+router.get("/", statsReadLimiter, asyncHandler(async (_req, res, next) => {
   try {
     const redis = getRedisClient();
     const cachedStats = await redis.get(STATS_CACHE_KEY);
@@ -35,7 +36,8 @@ router.get("/", statsReadLimiter, async (_req, res, next) => {
     const currentStatsDoc = await HistoricalStat.findOne().sort({ date: -1 }).lean();
     if (!currentStatsDoc) return res.json({ stats: {} });
 
-    const { _id, date, __v, created_at, ...currentStats } = currentStatsDoc;
+    const currentStats = { ...currentStatsDoc };
+    for (const k of ["_id", "date", "__v", "created_at"]) delete currentStats[k];
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     const dateString30d = thirtyDaysAgo.toISOString().split("T")[0];
@@ -76,6 +78,6 @@ router.get("/", statsReadLimiter, async (_req, res, next) => {
     await redis.setEx(STATS_CACHE_KEY, STATS_CACHE_TTL, JSON.stringify(finalStats));
     return res.json({ stats: finalStats });
   } catch (err) { next(err); }
-});
+}));
 
 module.exports = router;
