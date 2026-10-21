@@ -10,6 +10,7 @@ const { getReadiness } = require("../services/health");
 const { getDlqMetrics } = require("../services/dlqProcessor");
 const worker = require("../services/eventListener");
 const { resolveClientIp } = require("../utils/clientIp");
+const logger = require("../utils/logger");
 const Trade = require("../models/Trade");
 const User = require("../models/User");
 const Feedback = require("../models/Feedback");
@@ -247,9 +248,10 @@ router.get("/summary", asyncHandler(async (req, res, next) => {
       readiness = await getReadiness({ worker, provider: worker.provider });
     } catch (err) {
       degraded.isDegraded = true;
+      logger.warn(`[Admin] summary kaynağı başarısız: readiness: ${err.message}`);
       degraded.errors.push({
         source: "readiness",
-        message: err.message,
+        message: "readiness_unavailable",
       });
       readiness = {
         ok: false,
@@ -264,9 +266,10 @@ router.get("/summary", asyncHandler(async (req, res, next) => {
     } catch (err) {
       degraded.isDegraded = true;
       degraded.sources.latestStatFallbackUsed = true;
+      logger.warn(`[Admin] summary kaynağı başarısız: latest_stat: ${err.message}`);
       degraded.errors.push({
         source: "latest_stat",
-        message: err.message,
+        message: "latest_stat_unavailable",
       });
       latestStat = null;
     }
@@ -288,9 +291,10 @@ router.get("/summary", asyncHandler(async (req, res, next) => {
     } catch (err) {
       degraded.isDegraded = true;
       degraded.sources.tradeCountsFallbackUsed = true;
+      logger.warn(`[Admin] summary kaynağı başarısız: trade_counts: ${err.message}`);
       degraded.errors.push({
         source: "trade_counts",
-        message: err.message,
+        message: "trade_counts_unavailable",
       });
     }
 
@@ -300,9 +304,10 @@ router.get("/summary", asyncHandler(async (req, res, next) => {
     } catch (err) {
       degraded.isDegraded = true;
       degraded.sources.dlqDepthFallbackUsed = true;
+      logger.warn(`[Admin] summary kaynağı başarısız: dlq_depth: ${err.message}`);
       degraded.errors.push({
         source: "dlq_depth",
-        message: err.message,
+        message: "dlq_depth_unavailable",
       });
     }
 
@@ -319,14 +324,21 @@ router.get("/summary", asyncHandler(async (req, res, next) => {
       const finalized24hStart = new Date(now.getTime() - 24 * 3600 * 1000);
       const proposalStateFilter = { "settlement_proposal.state": { $in: ADMIN_SETTLEMENT_STATE_VALUES.filter((v) => v !== "ALL") } };
       const settlementSplitRowsPromise = Promise.resolve().then(() =>
-        Trade.find({
-          "settlement_proposal.state": "FINALIZED",
-          "settlement_proposal.maker_share_bps": { $gte: 0, $lte: 10_000 },
-        })
-          .select("settlement_proposal.maker_share_bps")
-          .limit(5000)
-          .lean()
-      );
+        // [TR] B3-08: ortalama sunucuda, tüm FINALIZED kayıtlar üzerinden hesaplanır (eski: sırasız ilk 5000).
+        Trade.aggregate([
+          { $match: {
+            "settlement_proposal.state": "FINALIZED",
+            "settlement_proposal.maker_share_bps": { $gte: 0, $lte: 10_000 },
+          } },
+          { $group: { _id: null, avg: { $avg: "$settlement_proposal.maker_share_bps" }, n: { $sum: 1 } } },
+        ])
+      ).catch((splitErr) => {
+        // [TR] Ortalama başarısız olsa bile diğer yerleşim sayaçları korunur; yalnız bu kaynak degraded işaretlenir.
+        logger.warn(`[Admin] summary kaynağı başarısız: settlement_split_avg: ${splitErr.message}`);
+        degraded.isDegraded = true;
+        degraded.errors.push({ source: "settlement_split_avg", message: "settlement_split_avg_unavailable" });
+        return null;
+      });
 
       const settlementResults = await Promise.allSettled([
         Trade.countDocuments({
@@ -350,16 +362,11 @@ router.get("/summary", asyncHandler(async (req, res, next) => {
       const expiredSettlementProposals = Number(settlementResults[1].value) || 0;
       const finalizedSettlementProposals24h = Number(settlementResults[2].value) || 0;
       const finalizedSettlementProposalsTotal = Number(settlementResults[3].value) || 0;
-      const settlementSplitRows = Array.isArray(settlementResults[4].value) ? settlementResults[4].value : [];
+      const splitAgg = Array.isArray(settlementResults[4].value) ? settlementResults[4].value[0] : null;
       const settlementProposalTotal = Number(settlementResults[5].value) || 0;
 
-      const safeMakerSplitValues = settlementSplitRows
-        .map((row) => Number(row?.settlement_proposal?.maker_share_bps))
-        .filter((n) => Number.isInteger(n) && n >= 0 && n <= 10_000);
-      const avgSettlementSplitMakerBps = safeMakerSplitValues.length > 0
-        ? Number(
-            (safeMakerSplitValues.reduce((acc, n) => acc + n, 0) / safeMakerSplitValues.length).toFixed(2)
-          )
+      const avgSettlementSplitMakerBps = splitAgg && Number(splitAgg.n) > 0 && Number.isFinite(Number(splitAgg.avg))
+        ? Number(Number(splitAgg.avg).toFixed(2))
         : null;
       const settlementFinalizationRate = settlementProposalTotal > 0
         ? Number((finalizedSettlementProposalsTotal / settlementProposalTotal).toFixed(4))
@@ -374,9 +381,10 @@ router.get("/summary", asyncHandler(async (req, res, next) => {
       };
     } catch (err) {
       degraded.isDegraded = true;
+      logger.warn(`[Admin] summary kaynağı başarısız: settlement_analytics: ${err.message}`);
       degraded.errors.push({
         source: "settlement_analytics",
-        message: err.message,
+        message: "settlement_analytics_unavailable",
       });
     }
 
@@ -423,9 +431,10 @@ router.get("/summary", asyncHandler(async (req, res, next) => {
       };
     } catch (err) {
       degraded.isDegraded = true;
+      logger.warn(`[Admin] summary kaynağı başarısız: resolution_analytics: ${err.message}`);
       degraded.errors.push({
         source: "resolution_analytics",
-        message: err.message,
+        message: "resolution_analytics_unavailable",
       });
     }
 
