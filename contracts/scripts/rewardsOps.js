@@ -98,6 +98,10 @@ async function switchTreasury(env = process.env) {
 
   console.warn('WARNING: switching escrow treasury to revenue vault.');
   await (await escrow.setTreasury(vaultAddr)).wait();
+  // [TR] Geri-okuma (K4-20e): tx başarılı görünse de treasury gerçekten vault olmalı.
+  // [EN] Read-back: after setTreasury, escrow.treasury() must equal the vault.
+  const after = ethers.getAddress(await escrow.treasury());
+  if (after !== ethers.getAddress(vaultAddr)) throw new Error(`treasury read-back mismatch. expected=${vaultAddr} got=${after}`);
 }
 
 const OPS = { configure, verify, 'switch-treasury': switchTreasury };

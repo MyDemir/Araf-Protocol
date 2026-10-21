@@ -2,6 +2,23 @@ const hre = require('hardhat');
 const { ethers, network } = hre;
 const { formatError } = require('./lib/redact');
 
+// [TR] Çağrının BEKLENEN custom error ile revert ettiğini doğrular. Ağ/yetki/başka revert hatası 'reddedildi' sayılmaz (K4-19c).
+// [EN] Asserts the call reverts with the EXPECTED custom error; network/permission/other errors are not a pass.
+async function expectCustomRevert(fn, iface, expectedName) {
+  let got = 'no revert (did not revert)';
+  try {
+    await fn();
+  } catch (e) {
+    let name = e && e.revert && e.revert.name;
+    if (!name && e && typeof e.data === 'string' && e.data.startsWith('0x')) {
+      try { name = iface.parseError(e.data)?.name; } catch { /* decode edilemedi */ }
+    }
+    if (name === expectedName) return;
+    got = `error ${name || (e && e.code) || 'unknown'}`;
+  }
+  throw new Error(`expected revert ${expectedName}, got ${got}`);
+}
+
 async function main() {
   const net = await ethers.provider.getNetwork();
   const isLocal = ['hardhat', 'localhost'].includes(network.name) || net.chainId === 31337n;
@@ -28,21 +45,26 @@ async function main() {
   await (await vault.setRewards(await rewards.getAddress())).wait();
   await (await vault.setSupportedToken(await token.getAddress(), true)).wait();
 
-  let rejectedLow = false; let rejectedHigh = false;
-  try { await vault.setRewardBps(3999); } catch { rejectedLow = true; }
-  try { await vault.setRewardBps(7001); } catch { rejectedHigh = true; }
-  if (!rejectedLow || !rejectedHigh) throw new Error('rewardBps bound checks failed');
+  await expectCustomRevert(() => vault.setRewardBps(3999), vault.interface, 'RewardBpsOutOfRange');
+  await expectCustomRevert(() => vault.setRewardBps(7001), vault.interface, 'RewardBpsOutOfRange');
 
   await (await token.mint(owner.address, 1_000_000_000)).wait();
   await (await token.approve(await vault.getAddress(), 1_000_000_000)).wait();
-  await (await vault.fundGlobalRewards(await token.getAddress(), 100_000_000, 1, ethers.id('smoke'))).wait();
+  await (await vault.fundGlobalRewards(await token.getAddress(), 100_000_000, await rewards.currentEpoch(), ethers.id('smoke'))).wait();
 
   const reserve = await vault.rewardReserve(await token.getAddress());
-  let withdrewReserve = false;
-  try { await vault.withdrawTreasuryShare(await token.getAddress(), reserve, user.address); } catch { withdrewReserve = true; }
-  if (!withdrewReserve) throw new Error('owner was able to withdraw reward reserve through treasury path');
+  // [TR] rewardReserve yalnız escrow geliri ile dolar (bu smoke'ta 0 olabilir); 0 ZeroAmount'a takılıp sahte geçmesin diye min 1.
+  // [EN] rewardReserve is only credited by escrow revenue (may be 0 here); use at least 1 so ZeroAmount cannot mask the check.
+  const probeAmount = reserve > 0n ? reserve : 1n;
+  const tokenAddress = await token.getAddress();
+  await expectCustomRevert(
+    () => vault.withdrawTreasuryShare(tokenAddress, probeAmount, user.address),
+    vault.interface, 'InsufficientTreasuryReserve'
+  );
 
   console.log('✅ smokeRewards checks passed');
 }
 
 if (require.main === module) main().catch((e) => { console.error(formatError(e)); process.exit(1); });
+
+module.exports = { main, expectCustomRevert };

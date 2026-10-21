@@ -352,7 +352,8 @@ async function main() {
   const isPublic = deployMode === "public";
   const isLocal = deployMode === "local";
 
-  if (isPublic && process.env.CONFIRM_PUBLIC_DEPLOY !== "yes") {
+  // [TR] "custom" (bilinmeyen zincir) de public kadar korunur: yalnız yerel ağ onaysız çalışır (K4-19d).
+  if (!isLocal && process.env.CONFIRM_PUBLIC_DEPLOY !== "yes") {
     throw new Error(
       "❌ Public chain deploy guard aktif. Devam etmek için CONFIRM_PUBLIC_DEPLOY=yes ver."
     );
