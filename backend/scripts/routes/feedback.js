@@ -4,12 +4,16 @@
  */
 const express = require("express");
 const Joi = require("joi");
+const { asyncHandler } = require("../utils/asyncHandler");
 const router = express.Router();
-const { requireAuth, requireSessionWalletMatch } = require("../middleware/auth");
+const { requireAuth: _requireAuth, requireSessionWalletMatch: _requireSessionWalletMatch } = require("../middleware/auth");
+// [TR] B2-17: async auth middleware'leri de reddi next(err)'e iletecek şekilde sarılır.
+const requireAuth = asyncHandler(_requireAuth);
+const requireSessionWalletMatch = asyncHandler(_requireSessionWalletMatch);
 const { feedbackLimiter } = require("../middleware/rateLimiter");
 const Feedback = require("../models/Feedback");
 const logger = require("../utils/logger");
-router.post("/", requireAuth, requireSessionWalletMatch, feedbackLimiter, async (req, res, next) => {
+router.post("/", requireAuth, requireSessionWalletMatch, feedbackLimiter, asyncHandler(async (req, res, next) => {
   try {
     const schema = Joi.object({ rating: Joi.number().integer().min(1).max(5).required(), comment: Joi.string().max(1000).allow("").optional(), category: Joi.string().valid("bug", "suggestion", "ui/ux", "other").required() });
     const { error, value } = schema.validate(req.body);
@@ -18,5 +22,5 @@ router.post("/", requireAuth, requireSessionWalletMatch, feedbackLimiter, async 
     logger.info(`[Feedback] ${req.wallet} → ${value.rating}/5 [${value.category}]`);
     return res.status(201).json({ success: true, message: "Geri bildirim alındı, teşekkürler!" });
   } catch (err) { next(err); }
-});
+}));
 module.exports = router;

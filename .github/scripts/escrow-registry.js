@@ -76,7 +76,19 @@ function createMongoStore(uri) {
   };
   return {
     async read() { return (await open()).findOne({ _id: 'active' }); },
-    async write(doc) { await (await open()).replaceOne({ _id: 'active' }, doc, { upsert: true }); },
+    // K4-20(a): okuma ile yazma arasında ROTATING'e geçilmişse ezilmez; upsert aynı _id'yi eklemeye çalışıp 11000 verir (fail-closed).
+    async write(doc) {
+      try {
+        await (await open()).replaceOne({ _id: 'active', state: { $ne: 'ROTATING' } }, doc, { upsert: true });
+      } catch (e) {
+        if (e && e.code === 11000) {
+          const err = new Error('Registry is ROTATING (changed after it was read); refusing to overwrite. Complete the rotation with rotate-escrow.yml.');
+          err.safe = true;
+          throw err;
+        }
+        throw e;
+      }
+    },
     async close() { await client.close().catch(() => {}); },
   };
 }

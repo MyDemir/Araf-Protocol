@@ -12,8 +12,9 @@
  *
  * Bu görev:
  *   1. Geniş bir aday havuzu çıkarır (mirror/cache yardımcıdır)
- *   2. Her aday için kontrattan güncel bannedUntil + consecutiveBans okur
- *   3. 90 günlük clean-slate eşiği dolmuşsa decayReputation() çağırır
+ *   2. Her aday için kontrattan güncel bannedUntil + consecutiveBans + lastNegativeEventAt okur
+ *   3. Temiz dönem (cleanPeriod) hem ban bitiminden hem son olumsuz olaydan sonra dolmuşsa
+ *      decayReputation() çağırır (K3-01; kontrat aynı koşulu zorlar, backend yalnız boşuna tx göndermez)
  *   4. ReputationUpdated event'i eventListener tarafından mirror'a yansıtılır
  */
 
@@ -82,7 +83,8 @@ function getDecayContract() {
   return { contract: decayContract };
 }
 
-async function runReputationDecay() {
+async function runReputationDecay(lockCtx = {}) {
+  const lockLost = () => typeof lockCtx?.isLockLost === "function" && lockCtx.isLockLost();
   logger.info("[DecayJob] V3 itibar temizleme görevi başlatıldı...");
 
   const resolved = getDecayContract();
@@ -105,17 +107,32 @@ async function runReputationDecay() {
   // [EN] Mirror fields may be stale. This query only builds a candidate pool.
   const candidateLimit = await runtimeValue("REPUTATION_DECAY_CANDIDATE_LIMIT");
   const txLimit = await runtimeValue("REPUTATION_DECAY_TX_LIMIT");
+  const cutoffDate = new Date(cutoffMs);
   const candidates = await User.find({
     consecutive_bans: { $gt: 0 },
-    // [TR] banned_until ban bitince null'lanır; bu yüzden kalıcı last_ban_ends_at esas alınır
-    //      (banned_until yalnız eski kayıtlar için yedek).
-    // [EN] banned_until is nulled on expiry, so the persistent last_ban_ends_at is the primary key.
-    $or: [
-      { last_ban_ends_at: { $ne: null, $lte: new Date(cutoffMs) } },
-      { banned_until: { $ne: null, $lte: new Date(cutoffMs) } },
+    $and: [
+      // [TR] banned_until ban bitince null'lanır; bu yüzden kalıcı last_ban_ends_at esas alınır
+      //      (banned_until yalnız eski kayıtlar için yedek).
+      // [EN] banned_until is nulled on expiry, so the persistent last_ban_ends_at is the primary key.
+      {
+        $or: [
+          { last_ban_ends_at: { $ne: null, $lte: cutoffDate } },
+          { banned_until: { $ne: null, $lte: cutoffDate } },
+        ],
+      },
+      // [TR] K3-01: son olumsuz olaydan sonra temiz dönem dolmamış cüzdan havuzu doldurmasın (eski banlılar
+      //      sıralamada önde olduğu için uygun adayları aç bırakırdı). Ayna zincirin gerisinde kalır, önüne
+      //      geçmez; bu yüzden filtre uygun adayı dışlamaz. Alan yoksa (null) aday kalır, karar zincirde.
+      // [EN] K3-01: wallets whose last negative event is inside the clean period must not fill the pool.
+      {
+        $or: [
+          { "reputation_breakdown.last_negative_event_at": null },
+          { "reputation_breakdown.last_negative_event_at": { $lte: cutoffDate } },
+        ],
+      },
     ],
   })
-    .select("wallet_address consecutive_bans banned_until last_ban_ends_at")
+    .select("wallet_address consecutive_bans banned_until last_ban_ends_at reputation_breakdown.last_negative_event_at")
     .sort({ last_ban_ends_at: 1, banned_until: 1, wallet_address: 1 })
     .limit(candidateLimit)
     .lean();
@@ -131,10 +148,15 @@ async function runReputationDecay() {
       const rep = await contract.getReputation(user.wallet_address);
       const bannedUntil = Number(rep.bannedUntil || 0);
       const consecutiveBans = Number(rep.consecutiveBans || 0);
+      const lastNegativeEventAt = Number(rep.lastNegativeEventAt || 0);
 
       if (!bannedUntil || consecutiveBans <= 0) continue;
       const bannedUntilMs = bannedUntil * 1000;
-      if (bannedUntilMs <= cutoffMs) {
+      // [TR] K3-01: kontrat temiz dönemi son olumsuz olaydan da sayar ve eşitlikte revert eder
+      //      (block.timestamp <= lastNeg + cleanPeriod); aday yalnız lastNeg + cleanPeriod < şimdi ise seçilir.
+      // [EN] K3-01: the contract reverts on equality, so a candidate needs lastNeg + cleanPeriod < now.
+      const lastNegativeMs = lastNegativeEventAt * 1000;
+      if (bannedUntilMs < cutoffMs && lastNegativeMs < cutoffMs) {
         usersToClean.push(user.wallet_address);
       }
       if (usersToClean.length >= txLimit) break;
@@ -152,13 +174,20 @@ async function runReputationDecay() {
   logger.info(`[DecayJob] ${usersToClean.length} kullanıcı için decayReputation() denenecek.`);
 
   for (const wallet of usersToClean) {
+    // [TR] D1: Redis iş kilidi kaybolduysa yeni tx gönderilmez (başka makine aynı relayer ile çalışıyor olabilir).
+    // [EN] D1: if the Redis job lock was lost, no new tx is sent (another machine may use the same relayer).
+    if (lockLost()) {
+      logger.error("[DecayJob] İş kilidi kaybedildi; kalan kullanıcılar için tx gönderilmeden duruldu.");
+      return { success: false, candidates: candidates.length, processed: 0, error: "lock_lost" };
+    }
     try {
       const tx = await contract.decayReputation(wallet);
-      const receipt = await tx.wait();
+      const receipt = await _waitForReceipt(tx);
       logger.info(
         `[DecayJob] decayReputation onaylandı: wallet=${wallet} tx=${tx.hash} block=${receipt?.blockNumber || "n/a"}`
       );
     } catch (err) {
+      if (err?.code === "TX_WAIT_TIMEOUT") logger.warn(`[DecayJob] ${wallet} ${err.message}`);
       logger.error(`[DecayJob] ${wallet} için itibar temizleme başarısız: ${err.reason || err.message}`);
       hadErrors = true;
     }
@@ -169,6 +198,27 @@ async function runReputationDecay() {
     candidates: candidates.length,
     processed: usersToClean.length,
   };
+}
+
+
+// [TR] tx.wait() için üst süre: takılan tx iş kilidini (app.js jobLocks) kalıcı tutmasın.
+// [EN] Upper bound for tx.wait() so a stuck tx cannot hold the scheduler lock forever.
+const TX_WAIT_TIMEOUT_MS = 120_000;
+
+async function _waitForReceipt(tx, timeoutMs = TX_WAIT_TIMEOUT_MS) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const e = new Error(`tx.wait zaman aşımı (${timeoutMs} ms) tx=${tx?.hash || "n/a"}`);
+      e.code = "TX_WAIT_TIMEOUT";
+      reject(e);
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([tx.wait(1, timeoutMs), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 module.exports = { runReputationDecay };

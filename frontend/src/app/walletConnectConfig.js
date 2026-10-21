@@ -17,6 +17,8 @@ export const buildWalletConnectMetadata = ({ publicUrl, origin } = {}) => {
     description: 'Araf Protocol',
     url: base,
     icons: base ? [`${base}/icon-192.png`] : [],
+    // [TR] redirect.universal = url ile aynı taban; native için güvenilir değer yok, eklenmez. Taban yoksa alan yok.
+    ...(base ? { redirect: { universal: base } } : {}),
   };
 };
 

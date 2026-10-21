@@ -658,6 +658,9 @@ Koddaki her `process.env` / `import.meta.env` kullanımından çıkarılmıştı
 | `REDIS_TLS` | hayır | `false` | `true` ya da `rediss://` URL'si TLS açar; production'da zorunlu. |
 | `REDIS_TLS_SKIP_VERIFY` | hayır | `false` | Yalnız self-signed geliştirme Redis'i için; production'da `true` açılışı durdurur. |
 | `REDIS_READY_WAIT_MS` | hayır | `5000` | Redis'in hazır olmasını bekleme süresi. |
+| `REDIS_CONNECT_TIMEOUT_MS` | hayır | `10000` | Redis bağlantı (connect) zaman aşımı, ms. |
+| `JOB_LOCK_TTL_MS` | hayır | `120000` | Dağıtık iş kilidi ömrü (ms); ttl/3 aralıkla yenilenir. |
+| `JOB_LOCK_COMMAND_TIMEOUT_MS` | hayır | `5000` | Tek bir kilit komutunun (Redis) zaman aşımı, ms. |
 
 ### 6.2 Backend — auth, oturum, CORS
 
@@ -753,6 +756,11 @@ Production açılışta KMS self-test çalıştırır (`runProductionKmsStartupS
 1. Bekçi kodunu mod hâlâ `warn` (varsayılan) iken `deploy-runtime` ile yayınlayın. Hiçbir şey kapanmaz.
 2. **Escrow Registry Adopt** workflow'unu (`escrow-registry-adopt.yml`) önce `dry_run=true` ile çalıştırıp çıktıyı okuyun, sonra `dry_run=false` ile tekrar çalıştırın. Canlı escrow'u (`ARAF_ESCROW_ADDRESS` / `ARAF_DEPLOYMENT_BLOCK` repo variable'ları, zincir 84532) `active` olarak yazar.
 3. Backend logunda `[EscrowRegistryGuard] UYUMSUZ` satırı yoksa ve `/ready` `escrowRegistry.ok: true` diyorsa zorlamayı açın: `flyctl secrets set ESCROW_REGISTRY_GUARD_MODE=enforce -a <app>`.
+
+**Durum: Base Sepolia'da enforce açık.** Kod varsayılanı `warn` kalır (yerel geliştirme etkilenmez); Base Sepolia workflow'ları modu kendileri ayarlar ve doğrular:
+- `stage-runtime-env.sh fly-secrets` (hem `deploy-base-sepolia.yml` hem `deploy-runtime-base-sepolia.yml` kullanır) her çalışmada `ESCROW_REGISTRY_GUARD_MODE=enforce` yazar; elle `flyctl secrets set` gerekmez.
+- `stage-runtime-env.sh guard-mode` canlı `/ready` içindeki `escrowRegistry.mode` değerini okur; `enforce` değilse (ya da okunamazsa) `::error::` ile job düşer. Çalıştığı yerler: Fly deploy sonrası health adımının ardından (iki deploy workflow'u), tam deploy'da rotasyondan (makineleri durdurma ve arşivleme) önce (registry ACTIVE yolu), `rotate-escrow.yml`'de uygulanan rotate/restore sonrası (kurtarma yolları önceden bloke edilmez). Mod, enforce görülene kadar yeniden denenir (rolling deploy'da eski makine geçici `warn` dönebilir).
+- Beklenen yan etki: enforce'ta registry ile uyumsuz her backend (`registry_missing`, `escrow_mismatch`, `chain_mismatch`, `rotating`, `registry_unreadable`) worker'sız ve escrow route'ları 503 ile açılır; süreç çıkmaz, `/health` 200 kalır, bekçi 60 sn'de bir yeniden bakar. İlk kurulumda registry Fly deploy'undan sonra yazılır (checkpoint sıfırlama ve `--adopt --apply`), bu yüzden backend bu arada engelli açılır ve registry yazıldıktan sonra en geç ~60 sn içinde kendiliğinden açılır. Registry'si hiç yazılmamış mevcut bir kurulumda `deploy-runtime` çalıştırmadan önce Escrow Registry Adopt çalıştırın; aksi halde backend engelli kalır.
 
 Tam kontrat deploy'u (`deploy-base-sepolia.yml`) registry'yi iki yoldan yazar: registry **hiç yoksa** (ilk kurulum) eski davranış sürer ("first install" adımları: checkpoint sıfırlama + `--adopt --apply`, ezilecek kayıt olmadığından `--force-switch` yok); registry **ACTIVE** ise escrow rotasyonu çalışır (bkz. 6.6b). Registry **ROTATING** ise deploy kontrat yayınlamadan durur; `--force-switch` ROTATING kaydını hiçbir koşulda ezmez. Runtime deploy escrow'u değiştirmez ve registry'ye yazmaz; `araf_escrow_address` override'ı registry'den farklıysa bekçi `escrow_mismatch` bildirir.
 
@@ -928,7 +936,7 @@ HKDF değişikliği sonrası PII'ın yeniden şifrelenmesi için repoda bir ara�
 - Concurrency `connections`, soft 80 / hard 100; VM `shared` 1 CPU, 512 MB.
 - Health check: `GET /health`, 30 sn'de bir, 15 sn grace period, 5 sn timeout; konteyner içinde HTTP (dışarıda `force_https = true`).
 - `/health`, worker'a bağlı **liveness** sinyalidir: `WORKER_LIVENESS_STALE_MS` boyunca blok görülmediyse `503 "stale"` döner; bağımsız olarak worker watchdog'u `WORKER_BLOCK_STALE_MS` sonra reconnect dener, bloklar hâlâ gelmiyorsa süreçten çıkar (platform yeniden başlatır). `/ready` (readiness) `fly.toml`'a bağlı değildir; deploy kapıları ve izleme için kullanın (tam ayrıntı `x-internal-token: $READY_INTERNAL_TOKEN` ile).
-- İmaj (`backend/Dockerfile`) `node:22-alpine`'dir, `npm ci --omit=dev` ile kurar, root olmayan `nodeapp` kullanıcısıyla çalışır ve `node scripts/app.js` başlatır.
+- İmaj (`backend/Dockerfile`) `node:22-alpine`'dir (index digest ile sabitlenmiştir; güncellemek için Docker Hub `library/node` `22-alpine` etiketinin yeni index digest'ini `FROM` satırına yazın), `npm ci --omit=dev` ile kurar, root olmayan `nodeapp` kullanıcısıyla çalışır ve `node scripts/app.js` başlatır.
 
 ---
 
