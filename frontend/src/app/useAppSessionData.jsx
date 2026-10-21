@@ -1425,9 +1425,10 @@ export function useAppSessionData({
         if (!res.ok) return;
         const data = await res.json();
         // [TR] /pii/my kayıtlı profilin yetkili kaynağıdır: pii varsa true, yoksa false.
-        setHasPayoutProfile(Boolean(data.pii));
+        // [TR] İlk eşzamanlama yalnız taslağı doldurur; hasPayoutProfile'ı /auth/me yönetir.
+        if (wantsPayoutProfile) setHasPayoutProfile(Boolean(data.pii));
         draftSyncedWalletRef.current = authenticatedWallet;
-        if (data.pii && (true)) {
+        if (data.pii && (wantsPayoutProfile || !draftTouchedRef.current)) {
           setPayoutProfileDraft({
             rail: data.pii.rail || 'TR_IBAN',
             country: data.pii.country || 'TR',
