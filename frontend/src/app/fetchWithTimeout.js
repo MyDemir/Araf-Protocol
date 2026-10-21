@@ -42,7 +42,10 @@ const probeEscrowMismatch = async () => {
 
 export const isTimeoutError = (err) => err?.name === 'TimeoutError';
 
-export const fetchWithTimeout = async (urlOrThunk, options = {}) => {
+// [TR] F4-13: readJson=true ise zamanlayıcı JSON gövde okuması bitene kadar sürer (başlıklar gelip gövde takılırsa
+//      istek iptal edilir, TimeoutError fırlar). Dönüş { res, data }. Varsayılan yol (fetchWithTimeout) değişmez.
+// [EN] F4-13: with readJson=true the timer also covers the JSON body read; returns { res, data }.
+const requestWithTimeout = async (urlOrThunk, options = {}, readJson = false) => {
   const { timeoutMs = DEFAULT_FETCH_TIMEOUT_MS, infra = null, signal: callerSignal, ...init } = options;
   const url = typeof urlOrThunk === 'function' ? urlOrThunk() : urlOrThunk;
   const controller = new AbortController();
@@ -63,6 +66,7 @@ export const fetchWithTimeout = async (urlOrThunk, options = {}) => {
       else if (infra === 'backend' && await isDegradedResponse(res)) markInfraFailure('degraded');
       else if (res.status >= 500) markInfraFailure(infra);
     }
+    if (readJson) return { res, data: await res.json() };
     return res;
   } catch (err) {
     if (timedOut && !callerSignal?.aborted) {
@@ -78,5 +82,10 @@ export const fetchWithTimeout = async (urlOrThunk, options = {}) => {
     callerSignal?.removeEventListener?.('abort', onCallerAbort);
   }
 };
+
+export const fetchWithTimeout = (urlOrThunk, options = {}) => requestWithTimeout(urlOrThunk, options, false);
+
+// [TR] Başlık + JSON gövde tek zaman bütçesinde. res.ok denetimi çağırana aittir; gövde JSON değilse reddeder.
+export const fetchJsonWithTimeout = (urlOrThunk, options = {}) => requestWithTimeout(urlOrThunk, options, true);
 
 export default fetchWithTimeout;
