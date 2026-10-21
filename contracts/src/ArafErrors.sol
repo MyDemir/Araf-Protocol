@@ -82,4 +82,7 @@ interface IArafEscrowErrors {
     error NoCancelConsent();
     // K2(B): maker challenge penceresini kaçırdı, ping düştü / maker missed the challenge window, the ping lapsed.
     error ChallengeWindowExpired();
+    // [TR] K1-02: setTreasury yalnız bu escrow'a bağlı vault'u kabul eder (vault.escrow() == address(this)).
+    // [EN] K1-02: setTreasury only accepts a vault wired to this escrow (vault.escrow() == address(this)).
+    error TreasuryEscrowMismatch(address treasury);
 }

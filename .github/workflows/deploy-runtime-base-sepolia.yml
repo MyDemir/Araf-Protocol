@@ -73,10 +73,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .nvmrc
 
@@ -147,8 +147,8 @@ jobs:
           need FRONTEND_DOMAIN
           for n in FLY_API_TOKEN MONGODB_URI REDIS_URL JWT_SECRET MASTER_ENCRYPTION_KEY BASE_SEPOLIA_RPC_URL BASE_SEPOLIA_WS_RPC_URL; do need "$n"; done
 
-          [[ "$FRONTEND_DOMAIN" != http* && "$FRONTEND_DOMAIN" != */* ]] || { echo "::error::FRONTEND_DOMAIN must be a bare host (no https://, no path)."; exit 1; }
-          [[ "$FRONTEND_DOMAIN" != "localhost" ]] || { echo "::error::FRONTEND_DOMAIN cannot be localhost."; exit 1; }
+          [[ "$FRONTEND_DOMAIN" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?$ ]] || { echo "::error::FRONTEND_DOMAIN must be a lowercase bare host[:port] (no https://, no path, no spaces)."; exit 1; }
+          [[ "${FRONTEND_DOMAIN%%:*}" != "localhost" ]] || { echo "::error::FRONTEND_DOMAIN cannot be localhost."; exit 1; }
           [[ "$BASE_SEPOLIA_RPC_URL" == http* ]] || { echo "::error::BASE_SEPOLIA_RPC_URL must be http(s)."; exit 1; }
           [[ "$BASE_SEPOLIA_WS_RPC_URL" == wss://* ]] || { echo "::error::BASE_SEPOLIA_WS_RPC_URL must start with wss:// (backend eventListener only uses wss://; ws:// silently falls back to HTTP)."; exit 1; }
           [[ "$REDIS_URL" == rediss://* ]] || { echo "::error::REDIS_URL must be rediss:// (backend requires Redis TLS in production)."; exit 1; }
@@ -166,7 +166,9 @@ jobs:
 
       - name: Setup Fly CLI
         if: ${{ inputs.deploy_backend }}
-        uses: superfly/flyctl-actions/setup-flyctl@1.5
+        uses: superfly/flyctl-actions/setup-flyctl@fc53c09e1bc3be6f54706524e3b82c4f462f77be # 1.5
+        with:
+          version: 0.4.120
 
       # App yoksa oluşturur (FLY_API_TOKEN org/kişisel token olmalı); var olan app'e dokunmaz.
       - name: Ensure Fly app exists
