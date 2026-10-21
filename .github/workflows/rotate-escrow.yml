@@ -200,3 +200,10 @@ jobs:
         env:
           FLY_APP_NAME: ${{ env.FLY_APP_NAME }}
         run: bash .github/scripts/stage-runtime-env.sh health
+
+      - name: Verify registry guard mode (enforce)
+        if: ${{ inputs.mode != 'precheck' && !inputs.dry_run }}
+        shell: bash
+        env:
+          FLY_APP_NAME: ${{ env.FLY_APP_NAME }}
+        run: bash .github/scripts/stage-runtime-env.sh guard-mode
