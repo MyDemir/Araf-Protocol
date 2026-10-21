@@ -73,6 +73,16 @@ function _buildPreviewUnavailableError(message, rootCause = null) {
   return err;
 }
 
+// [TR] B3-16: RPC yavaşlarsa istek sarkmasın; süre dolunca PREVIEW_UNAVAILABLE (503) döner.
+const PREVIEW_RPC_TIMEOUT_MS = 4_000;
+function _withPreviewTimeout(promise, ms = PREVIEW_RPC_TIMEOUT_MS) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("preview rpc timeout")), ms); }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 async function _getOnchainCurrentAmountsForPreview(onchainEscrowId) {
   const verifier = await _getPreviewReadContract();
   if (!verifier) {
@@ -81,7 +91,7 @@ async function _getOnchainCurrentAmountsForPreview(onchainEscrowId) {
 
   try {
     const { contract } = verifier;
-    const result = await contract.getCurrentAmounts(BigInt(onchainEscrowId));
+    const result = await _withPreviewTimeout(Promise.resolve(contract.getCurrentAmounts(BigInt(onchainEscrowId))));
     const currentCrypto = BigInt(result.currentCrypto ?? result[0] ?? 0);
     const currentMakerBond = BigInt(result.currentMakerBond ?? result[1] ?? 0);
     const currentTakerBond = BigInt(result.currentTakerBond ?? result[2] ?? 0);
@@ -594,7 +604,7 @@ router.post("/:id/chargeback-ack", requireAuth, requireSessionWalletMatch, coord
       return res.status(400).json({ error: `Chargeback onayı bu durumda yapılamaz (mevcut: ${existing.status}).` });
     }
 
-    logger.info(`[ChargebackAck] Kaydedildi: maker=${req.wallet} trade=${req.params.id}`);
+    logger.info(`[ChargebackAck] Kaydedildi: maker=${String(req.wallet).slice(0, 10)}... trade=${req.params.id}`);
     return res.status(201).json({
       success: true,
       acknowledged_at: updatedTrade.chargeback_ack.acknowledged_at,

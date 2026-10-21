@@ -22,6 +22,35 @@ function _buildMirrorContext(lockContext, fallbackUser) {
     partial_settlement_count: lockContext?.partial_settlement_count,
     risk_points: lockContext?.risk_points,
   };
+  const authorityCounters = {
+    manual_release_count:
+      authorityLock.manual_release_count ?? fallbackUser?.reputation_breakdown?.manual_release_count ?? null,
+    burn_count: authorityLock.burn_count ?? fallbackUser?.reputation_breakdown?.burn_count ?? null,
+    auto_release_count:
+      authorityLock.auto_release_count ?? fallbackUser?.reputation_breakdown?.auto_release_count ?? null,
+    mutual_cancel_count:
+      authorityLock.mutual_cancel_count ?? fallbackUser?.reputation_breakdown?.mutual_cancel_count ?? null,
+    disputed_resolved_count:
+      authorityLock.disputed_resolved_count ??
+      fallbackUser?.reputation_breakdown?.disputed_resolved_count ??
+      null,
+    dispute_win_count:
+      authorityLock.dispute_win_count ?? fallbackUser?.reputation_breakdown?.dispute_win_count ?? null,
+    dispute_loss_count:
+      authorityLock.dispute_loss_count ?? fallbackUser?.reputation_breakdown?.dispute_loss_count ?? null,
+    partial_settlement_count:
+      authorityLock.partial_settlement_count ??
+      fallbackUser?.reputation_breakdown?.partial_settlement_count ??
+      null,
+    risk_points:
+      authorityLock.risk_points ?? fallbackUser?.reputation_breakdown?.risk_points ?? null,
+    // [TR] Geriye-uyum: eski isim route seviyesinde maplenir, DB truth çoğaltılmaz.
+    // [EN] Backward-compat: legacy alias mapped at route layer only, no duplicated DB truth.
+    disputed_but_resolved_count:
+      authorityLock.disputed_resolved_count ??
+      fallbackUser?.reputation_breakdown?.disputed_resolved_count ??
+      null,
+  };
   return {
     successRate: lockContext?.success_rate ?? fallbackUser?.reputation_cache?.success_rate ?? null,
     failedDisputes: lockContext?.failed_disputes ?? fallbackUser?.reputation_cache?.failed_disputes ?? null,
@@ -31,64 +60,10 @@ function _buildMirrorContext(lockContext, fallbackUser) {
     consecutiveBansMirror: lockContext?.consecutive_bans ?? fallbackUser?.consecutive_bans ?? null,
     // [TR] Aşağıdaki sayaçlar kontrat authority'sinin backend aynasıdır; payload paketlemesi bilgilendirme amaçlıdır.
     // [EN] Counters below mirror contract authority; payload packaging is informational-only.
-    reputation_authority_counters: {
-      manual_release_count:
-        authorityLock.manual_release_count ?? fallbackUser?.reputation_breakdown?.manual_release_count ?? null,
-      burn_count: authorityLock.burn_count ?? fallbackUser?.reputation_breakdown?.burn_count ?? null,
-      auto_release_count:
-        authorityLock.auto_release_count ?? fallbackUser?.reputation_breakdown?.auto_release_count ?? null,
-      mutual_cancel_count:
-        authorityLock.mutual_cancel_count ?? fallbackUser?.reputation_breakdown?.mutual_cancel_count ?? null,
-      disputed_resolved_count:
-        authorityLock.disputed_resolved_count ??
-        fallbackUser?.reputation_breakdown?.disputed_resolved_count ??
-        null,
-      dispute_win_count:
-        authorityLock.dispute_win_count ?? fallbackUser?.reputation_breakdown?.dispute_win_count ?? null,
-      dispute_loss_count:
-        authorityLock.dispute_loss_count ?? fallbackUser?.reputation_breakdown?.dispute_loss_count ?? null,
-      partial_settlement_count:
-        authorityLock.partial_settlement_count ??
-        fallbackUser?.reputation_breakdown?.partial_settlement_count ??
-        null,
-      risk_points:
-        authorityLock.risk_points ?? fallbackUser?.reputation_breakdown?.risk_points ?? null,
-      // [TR] Geriye-uyum: eski isim route seviyesinde maplenir, DB truth çoğaltılmaz.
-      // [EN] Backward-compat: legacy alias mapped at route layer only, no duplicated DB truth.
-      disputed_but_resolved_count:
-        authorityLock.disputed_resolved_count ??
-        fallbackUser?.reputation_breakdown?.disputed_resolved_count ??
-        null,
-    },
+    reputation_authority_counters: authorityCounters,
     // [TR] Geriye-uyum için eski anahtar korunur (alias).
     // [EN] Preserve legacy key as alias for backward compatibility.
-    reputation_semantics: {
-      manual_release_count:
-        authorityLock.manual_release_count ?? fallbackUser?.reputation_breakdown?.manual_release_count ?? null,
-      burn_count: authorityLock.burn_count ?? fallbackUser?.reputation_breakdown?.burn_count ?? null,
-      auto_release_count:
-        authorityLock.auto_release_count ?? fallbackUser?.reputation_breakdown?.auto_release_count ?? null,
-      mutual_cancel_count:
-        authorityLock.mutual_cancel_count ?? fallbackUser?.reputation_breakdown?.mutual_cancel_count ?? null,
-      disputed_resolved_count:
-        authorityLock.disputed_resolved_count ??
-        fallbackUser?.reputation_breakdown?.disputed_resolved_count ??
-        null,
-      dispute_win_count:
-        authorityLock.dispute_win_count ?? fallbackUser?.reputation_breakdown?.dispute_win_count ?? null,
-      dispute_loss_count:
-        authorityLock.dispute_loss_count ?? fallbackUser?.reputation_breakdown?.dispute_loss_count ?? null,
-      partial_settlement_count:
-        authorityLock.partial_settlement_count ??
-        fallbackUser?.reputation_breakdown?.partial_settlement_count ??
-        null,
-      risk_points:
-        authorityLock.risk_points ?? fallbackUser?.reputation_breakdown?.risk_points ?? null,
-      disputed_but_resolved_count:
-        authorityLock.disputed_resolved_count ??
-        fallbackUser?.reputation_breakdown?.disputed_resolved_count ??
-        null,
-    },
+    reputation_semantics: { ...authorityCounters },
   };
 }
 
@@ -159,11 +134,10 @@ function buildTradeHealthSignals(trade, makerUser) {
   if (snapshotMissing) {
     reasons.push("partial_or_incomplete_snapshot");
   }
-  if (_buildMirrorContext(makerReputationContextAtLock, makerUser).isBannedMirror) {
+  const makerMirrorContext = _buildMirrorContext(makerReputationContextAtLock, makerUser);
+  if (makerMirrorContext.isBannedMirror) {
     reasons.push("maker_ban_mirror_active");
   }
-
-  const makerMirrorContext = _buildMirrorContext(makerReputationContextAtLock, makerUser);
 
   // [TR] Bu nesne yalnız explainability için üretilir; authority değildir.
   // [EN] This object is explainability-only and non-authoritative.

@@ -28,7 +28,26 @@ const logger = require("../utils/logger");
 const { promises: fsp } = fs;
 
 const tmpDir = path.join(os.tmpdir(), "araf-receipts");
-if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+// [TR] B3-03: düz (şifresiz) dekont geçici dizini yalnız süreç sahibine açık (0700); eski dizin de daraltılır.
+if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true, mode: 0o700 });
+try { fs.chmodSync(tmpDir, 0o700); } catch { /* paylaşımlı/salt-okunur FS: en iyi çaba */ }
+
+// [TR] B3-03: SIGKILL/OOM sonrası kalan düz dekontlar açılışta (varsayılan >1 saat) silinir.
+const STALE_RECEIPT_TMP_MS = 60 * 60 * 1000;
+function sweepStaleReceiptTmp(dir = tmpDir, maxAgeMs = STALE_RECEIPT_TMP_MS, now = Date.now()) {
+  let removed = 0;
+  let names;
+  try { names = fs.readdirSync(dir); } catch { return 0; }
+  for (const name of names) {
+    const full = path.join(dir, name);
+    try {
+      const st = fs.statSync(full);
+      if (st.isFile() && now - st.mtimeMs > maxAgeMs) { fs.unlinkSync(full); removed += 1; }
+    } catch { /* yarışta silinmiş olabilir */ }
+  }
+  return removed;
+}
+sweepStaleReceiptTmp();
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, tmpDir),
@@ -109,23 +128,32 @@ router.post("/upload", requireAuth, requireSessionWalletMatch, receiptUploadLimi
 
     const { encryptedHex, sha256Hash } = await encryptFileFromDisk(tempFilePath, req.wallet);
 
-    const updatedTrade = await Trade.findOneAndUpdate(
-      {
-        ..._buildIdentityLookup(onchainId),
-        taker_address: req.wallet,
-        status: "LOCKED",
-        "evidence.receipt_encrypted": null,
-      },
-      {
-        $set: {
-          "evidence.receipt_encrypted": encryptedHex,
-          "evidence.ipfs_receipt_hash": sha256Hash,
-          "evidence.receipt_timestamp": new Date(),
-          "evidence.receipt_delete_at": new Date(Date.now() + 30 * 24 * 3600 * 1000),
+    let updatedTrade;
+    try {
+      updatedTrade = await Trade.findOneAndUpdate(
+        {
+          ..._buildIdentityLookup(onchainId),
+          taker_address: req.wallet,
+          status: "LOCKED",
+          "evidence.receipt_encrypted": null,
         },
-      },
-      { new: false }
-    );
+        {
+          $set: {
+            "evidence.receipt_encrypted": encryptedHex,
+            "evidence.ipfs_receipt_hash": sha256Hash,
+            "evidence.receipt_timestamp": new Date(),
+            "evidence.receipt_delete_at": new Date(Date.now() + 30 * 24 * 3600 * 1000),
+          },
+        },
+        { new: false }
+      );
+    } catch (writeErr) {
+      // [TR] B3-04: BSON 16MB sınırı aşımı 500 yerine 413 (RECEIPT_TOO_LARGE) olarak bildirilir.
+      if (writeErr?.code === 10334 || writeErr?.name === "BSONObjectTooLargeError" || /BSONObj size/i.test(String(writeErr?.message))) {
+        return res.status(413).json({ error: "Dekont kaydedilemeyecek kadar büyük.", code: "RECEIPT_TOO_LARGE" });
+      }
+      throw writeErr;
+    }
 
     if (!updatedTrade) {
       const existing = await Trade.findOne(_buildIdentityLookup(onchainId))
@@ -153,3 +181,4 @@ router.post("/upload", requireAuth, requireSessionWalletMatch, receiptUploadLimi
 }));
 
 module.exports = router;
+module.exports.sweepStaleReceiptTmp = sweepStaleReceiptTmp;
