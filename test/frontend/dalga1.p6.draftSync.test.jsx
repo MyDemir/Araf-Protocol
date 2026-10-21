@@ -51,4 +51,39 @@ describe('F2-02: taslak oturum başında kayıtlı profilden bir kez dolar', () 
     await act(async () => { resolvePii(); await vi.advanceTimersByTimeAsync(0); });
     expect(result.current.payoutProfileDraft.rail).toBe('SEPA_IBAN');
   });
+
+  const WALLET_B = '0xdef0000000000000000000000000000000000000';
+
+  it('cüzdan değişimi yarışı: A yanıtı geç gelirse B taslağı A verisini almaz', async () => {
+    let meWallet = WALLET;
+    let resolveA;
+    global.fetch = vi.fn(async (url) => {
+      const u = String(url);
+      if (u.includes('auth/me')) return res({ wallet: meWallet, hasPayoutProfile: true });
+      if (u.includes('pii/my')) {
+        if (meWallet === WALLET) return new Promise((r) => { resolveA = () => r(res({ pii: { rail: 'US_ACH', country: 'US', fields: { iban: 'A-SECRET' } } })); });
+        return res({ pii: { rail: 'SEPA_IBAN', country: 'DE', fields: {} } });
+      }
+      return res({});
+    });
+    const { result, rerender } = renderHook((p) => useAppSessionData(p), { initialProps: baseProps });
+    await flush();
+    meWallet = WALLET_B;
+    rerender({ ...baseProps, address: WALLET_B, connectedWallet: WALLET_B });
+    await flush(); await flush();
+    expect(result.current.payoutProfileDraft.rail).toBe('SEPA_IBAN');
+    await act(async () => { resolveA(); await vi.advanceTimersByTimeAsync(0); });
+    expect(result.current.payoutProfileDraft.rail).toBe('SEPA_IBAN');
+    expect(result.current.payoutProfileDraft.fields.iban).toBeNull();
+  });
+
+  it('çıkışta ödeme taslağı boş varsayılana sıfırlanır', async () => {
+    const { result, rerender } = renderHook((p) => useAppSessionData(p), { initialProps: baseProps });
+    await flush(); await flush();
+    expect(result.current.payoutProfileDraft.rail).toBe('US_ACH');
+    rerender({ ...baseProps, isConnected: false });
+    await flush();
+    expect(result.current.payoutProfileDraft.rail).toBe('TR_IBAN');
+    expect(result.current.payoutProfileDraft.fields.iban).toBeNull();
+  });
 });

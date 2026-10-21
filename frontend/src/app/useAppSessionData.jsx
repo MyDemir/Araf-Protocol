@@ -202,6 +202,21 @@ export function mapResolutionTypeLabel(resolutionType, lang = "EN") {
   return labels[key][lang === "TR" ? "TR" : "EN"];
 }
 
+const makeEmptyPayoutDraft = () => ({
+  rail: 'TR_IBAN',
+  country: 'TR',
+  contact: { channel: null, value: null },
+  fields: {
+    account_holder_name: '',
+    iban: null,
+    routing_number: null,
+    account_number: null,
+    account_type: null,
+    bic: null,
+    bank_name: null,
+  },
+});
+
 export function useAppSessionData({
   address,
   isConnected,
@@ -286,20 +301,9 @@ export function useAppSessionData({
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   const [userReputation, setUserReputation] = useState(null);
-  const [payoutProfileDraft, setPayoutProfileDraft] = useState({
-    rail: 'TR_IBAN',
-    country: 'TR',
-    contact: { channel: null, value: null },
-    fields: {
-      account_holder_name: '',
-      iban: null,
-      routing_number: null,
-      account_number: null,
-      account_type: null,
-      bic: null,
-      bank_name: null,
-    },
-  });
+  const [payoutProfileDraft, setPayoutProfileDraft] = useState(makeEmptyPayoutDraft);
+  const draftSyncedWalletRef = React.useRef(null);
+  const draftTouchedRef = React.useRef(false);
 
   const [tradeHistory, setTradeHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(true);
@@ -438,6 +442,10 @@ export function useAppSessionData({
     setTradesBackendUnavailable(false);
     pendingTxCheckedRef.current = false;
     autoTradeResumeRef.current = false;
+    // [TR] Çıkış/oturum temizliğinde ödeme taslağı boş varsayılana döner (önceki cüzdanın verisi kalmaz).
+    setPayoutProfileDraft(makeEmptyPayoutDraft());
+    draftSyncedWalletRef.current = null;
+    draftTouchedRef.current = false;
     setPaymentIpfsHashState((prev) => (prev.onchainId === null && prev.hash === '' ? prev : { onchainId: null, hash: '' }));
     if (clearPendingTx && typeof window !== 'undefined') {
       localStorage.removeItem('araf_pending_tx');
@@ -1408,8 +1416,6 @@ export function useAppSessionData({
   //      elle değiştirdiyse ezilmez. Dışarı verilen setPayoutProfileDraft "dokunuldu" işaretini koyar.
   // [EN] The draft is filled once per session from the saved profile even if the profile page never opens;
   //      a hand-edited draft is never overwritten.
-  const draftSyncedWalletRef = React.useRef(null);
-  const draftTouchedRef = React.useRef(false);
   const setPayoutProfileDraftByUser = React.useCallback((value) => {
     draftTouchedRef.current = true;
     setPayoutProfileDraft(value);
@@ -1419,11 +1425,16 @@ export function useAppSessionData({
   useEffect(() => {
     const needsInitialSync = draftSyncedWalletRef.current !== authenticatedWallet;
     if ((!wantsPayoutProfile && !needsInitialSync) || !isAuthenticated) return;
+    let cancelled = false;
+    const requestedWallet = authenticatedWallet;
+    // [TR] Uçuştaki yanıt, cüzdan değişmişse/oturum kapanmışsa atılır (A'nın profili B'nin taslağına yazılmaz).
+    const isStale = () => cancelled || authenticatedWalletRef.current !== requestedWallet;
     const fetchMyPII = async () => {
       try {
         const res = await authenticatedFetch(buildApiUrl('pii/my'));
-        if (!res.ok) return;
+        if (!res.ok || isStale()) return;
         const data = await res.json();
+        if (isStale()) return;
         // [TR] /pii/my kayıtlı profilin yetkili kaynağıdır: pii varsa true, yoksa false.
         // [TR] İlk eşzamanlama yalnız taslağı doldurur; hasPayoutProfile'ı /auth/me yönetir.
         if (wantsPayoutProfile) setHasPayoutProfile(Boolean(data.pii));
@@ -1452,6 +1463,7 @@ export function useAppSessionData({
       }
     };
     fetchMyPII();
+    return () => { cancelled = true; };
   }, [wantsPayoutProfile, isAuthenticated, authenticatedFetch, authenticatedWallet]);
 
   useEffect(() => {
