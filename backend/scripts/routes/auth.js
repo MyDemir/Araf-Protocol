@@ -659,9 +659,15 @@ router.put("/profile", requireAuth, requireSessionWalletMatch, authLimiter, asyn
         "bankChangeCount7d bankChangeCount30d bank_change_history payout_profile"
       );
 
+    const isNewUser = !user;
     if (!user) {
       user = new User({ wallet_address: req.wallet });
     }
+
+    // [TR] Atomik yazım koşulu: okunan sürüm ve şifreli detay. Araya başka bir profil yazımı girerse
+    //      koşul eşleşmez ve istek 409 ile reddedilir (kayıp güncelleme olmaz).
+    const readProfileVersion = Number.isInteger(user.profileVersion) ? user.profileVersion : 0;
+    const readDetailsEnc = user.payout_profile?.payout_details_enc ?? null;
 
     // [TR] Şifreli profil varsa çözüp gerçek değişim olup olmadığını kıyaslıyoruz.
     let existingProfile = { rail: "", country: "", contact: { channel: null, value: null }, details: {} };
@@ -770,7 +776,41 @@ router.put("/profile", requireAuth, requireSessionWalletMatch, authLimiter, asyn
 
     user.payout_profile = genericProfile;
 
-    await user.save();
+    // [TR] Oku-değiştir-kaydet yarışı: save() koşulsuz yazar ve eşzamanlı bir değişikliği ezerdi.
+    //      Mevcut kullanıcıda okunan duruma koşullu tek updateOne (cleanupUserBankRiskMetadata deseni);
+    //      yeni kullanıcıda insert, eşzamanlı oluşturma duplicate-key ile yakalanır.
+    const conflictResponse = () => res.status(409).json({
+      error: "Profil başka bir istekle eşzamanlı güncellendi. Lütfen tekrar deneyin.",
+      code: "PROFILE_UPDATE_CONFLICT",
+    });
+    if (isNewUser) {
+      try {
+        await user.save();
+      } catch (saveErr) {
+        if (saveErr?.code === 11000) return conflictResponse();
+        throw saveErr;
+      }
+    } else {
+      const counterCond = (v) => (v === 0 ? { $in: [0, null] } : v);
+      const writeResult = await User.updateOne(
+        {
+          wallet_address: req.wallet,
+          profileVersion: counterCond(readProfileVersion),
+          "payout_profile.payout_details_enc": readDetailsEnc === null ? { $in: [null] } : readDetailsEnc,
+        },
+        {
+          $set: {
+            payout_profile: genericProfile,
+            profileVersion: user.profileVersion,
+            bank_change_history: user.bank_change_history,
+            bankChangeCount7d: user.bankChangeCount7d,
+            bankChangeCount30d: user.bankChangeCount30d,
+            lastBankChangeAt: user.lastBankChangeAt || null,
+          },
+        }
+      );
+      if (!writeResult || writeResult.matchedCount === 0) return conflictResponse();
+    }
 
     logger.info(
       `[Auth] Profil güncellendi: ${req.wallet} bank_profile_changed=${bankProfileChanged}`
