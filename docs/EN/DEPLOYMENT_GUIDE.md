@@ -613,6 +613,7 @@ npm run migrate:identity:dry
 node scripts/migrations/backfillTerminalTradeStats.js            # dry-run
 node scripts/migrations/dedupeRevenueEvents.js                   # dry-run
 # back up before --apply: dedupeRevenueEvents.js --apply --backup=<file>
+# (the backup file contains wallet addresses and transaction data; store it securely, keep it out of the repo)
 
 # Fly.io backend logs
 fly logs --app araf-protocol-backend
@@ -750,11 +751,11 @@ The `escrow_registry` Mongo collection holds one document, `_id: "active"`: `esc
 | `ESCROW_REGISTRY_GUARD_INTERVAL_MS` | no | `60000` | Re-check interval. |
 
 **First-time setup order**
-1. Deploy the guard code with `deploy-runtime` while the mode is still `warn` (the default). Nothing is closed.
+1. Deploy the guard code. In production the default is `enforce`; the registry document must be adopted first (`escrow-registry-adopt.yml`, step 2), otherwise the backend starts blocked with `registry_missing`. To deploy without blocking temporarily, set the mode explicitly to `warn`.
 2. Run the **Escrow Registry Adopt** workflow (`escrow-registry-adopt.yml`) with `dry_run=true` and read the output, then run it again with `dry_run=false`. It writes the live escrow (`ARAF_ESCROW_ADDRESS` / `ARAF_DEPLOYMENT_BLOCK` repository variables, chain 84532) as `active`.
 3. If the backend log shows no `[EscrowRegistryGuard] UYUMSUZ` line and `/ready` reports `escrowRegistry.ok: true`, switch on enforcement: `flyctl secrets set ESCROW_REGISTRY_GUARD_MODE=enforce -a <app>`.
 
-**Status: enforce is on for Base Sepolia.** The code default stays `warn` (local development is unaffected); the Base Sepolia workflows set and verify the mode themselves:
+**Status: enforce is on for Base Sepolia.** The code default is `enforce` in production and `warn` elsewhere (local development is unaffected); the Base Sepolia workflows set and verify the mode themselves:
 - `stage-runtime-env.sh fly-secrets` (used by both `deploy-base-sepolia.yml` and `deploy-runtime-base-sepolia.yml`) writes `ESCROW_REGISTRY_GUARD_MODE=enforce` on every run; no manual `flyctl secrets set` is needed.
 - `stage-runtime-env.sh guard-mode` reads `escrowRegistry.mode` from the live `/ready`; if it is not `enforce` (or cannot be read) the job fails with `::error::`. It runs after the health step following the Fly deploy (both deploy workflows), before the rotation (stopping machines and archiving) in the full deploy (registry ACTIVE path), and after an applied rotate/restore in `rotate-escrow.yml` (recovery paths are not blocked beforehand). The mode is retried until `enforce` is seen (during a rolling deploy an old machine may briefly report `warn`).
 - Expected side effect: under enforce, a backend that does not match the registry (`registry_missing`, `escrow_mismatch`, `chain_mismatch`, `rotating`, `registry_unreadable`) starts without the worker and with escrow routes returning 503; the process does not exit, `/health` stays 200, and the guard re-checks every 60 s. On a first install the registry is written after the Fly deploy (checkpoint reset and `--adopt --apply`), so the backend starts blocked and unblocks itself within about 60 s after the registry is written. For an existing install whose registry was never written, run Escrow Registry Adopt before `deploy-runtime`; otherwise the backend stays blocked.
