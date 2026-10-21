@@ -941,6 +941,7 @@ function App() {
 
   const {
     handleFileUpload,
+    handleLocalReceiptSelect,
     handleReportPayment,
     handleProposeCancel,
     handleRevokeCancel,
@@ -1137,6 +1138,7 @@ function App() {
     setChargebackAccepted,
     paymentIpfsHash: room.paymentIpfsHash,
     handleFileUpload,
+    handleLocalReceiptSelect,
     handleReportPayment,
     handleProposeCancel,
     handleRevokeCancel,
@@ -1151,6 +1153,7 @@ function App() {
     // [TR] Gerçek sayaçlar saat sınırında (AppViews/NowBoundary) türetilir; burada yalnız lab geçersiz kılmaları taşınır.
     tradeTimers: labTradeRoom ? labTradeRoom.timers : undefined,
     chainOffsetMs,
+    getWalletRegisteredAt,
     canMakerStartChallengeFlow,
     canMakerChallenge,
     // [TR] Lab'da kontrat okuması yok; eriyen tutar kontrat formülünün aynasıyla tahmin edilir.
