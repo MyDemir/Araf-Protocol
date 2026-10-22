@@ -6,7 +6,7 @@ if (typeof mongoose.Schema !== "function") {
   };
 } else {
   const schema = new mongoose.Schema({
-    tx_hash: { type: String, required: true, index: true },
+    tx_hash: { type: String, required: true },
     log_index: { type: Number, required: true, index: true },
     epoch: { type: String, required: true },
     token: { type: String, required: true, lowercase: true },

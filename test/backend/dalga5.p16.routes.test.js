@@ -119,7 +119,12 @@ describe("P16 B3-03 / B3-04 receipts", () => {
   it("BSON boyut hatası 500 değil 413", async () => {
     const Trade = {
       findOneAndUpdate: jest.fn().mockRejectedValue(Object.assign(new Error("BSONObj size: 17000000 is invalid"), { code: 10334 })),
-      findOne: jest.fn(),
+      // [TR] B3-02: ön kontrol (taker + LOCKED + dekont yok) geçer; BSON hatası atomik yazmada oluşur.
+      findOne: jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          lean: jest.fn().mockResolvedValue({ taker_address: WALLET, status: "LOCKED", evidence: {} }),
+        }),
+      }),
     };
     const router = load(receiptMocks(Trade), "receipts");
     const res = await request(mkApp("/api/receipts", router)).post("/api/receipts/upload")

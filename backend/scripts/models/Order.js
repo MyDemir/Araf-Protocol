@@ -135,6 +135,8 @@ const orderSchema = new mongoose.Schema(
 
 // ── Indexes ───────────────────────────────────────────────────────────────────
 orderSchema.index({ owner_address: 1, status: 1, side: 1 });
+// [TR] B3-15: /orders/my updated_at sıralaması. [EN] /orders/my updated_at sort.
+orderSchema.index({ owner_address: 1, updated_at: -1 });
 orderSchema.index({ side: 1, status: 1, tier: 1 });
 // [TR] Pazar yeri "en iyi kur" sıralaması. [EN] Marketplace best-rate sort.
 orderSchema.index({ status: 1, side: 1, "market.exchange_rate": 1 });

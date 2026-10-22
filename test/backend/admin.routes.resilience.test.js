@@ -90,6 +90,7 @@ describe("admin routes resilience + pagination semantics", () => {
     const adminReadLimiter = jest.fn((_req, _res, next) => next());
     let router;
     let countDocumentsMock;
+    let aggregateMock;
 
     jest.isolateModules(() => {
       jest.doMock("../../backend/scripts/middleware/auth", () => ({
@@ -114,23 +115,18 @@ describe("admin routes resilience + pagination semantics", () => {
         })),
       }));
 
-      const exactResolutionCounts = {
-        MANUAL_RELEASE: 4,
-        AUTO_RELEASE: 3,
-        PARTIAL_SETTLEMENT: 2,
-        MUTUAL_CANCEL: 5,
-        BURNED: 1,
-        DISPUTED_RESOLUTION: 6,
-        PAYMENT_WINDOW_EXPIRED: 7,
-      };
-      countDocumentsMock = jest.fn((filter = {}) => {
-        const resolutionType = filter?.resolution_type;
-        if (resolutionType && exactResolutionCounts[resolutionType] !== undefined) {
-          return Promise.resolve(exactResolutionCounts[resolutionType]);
-        }
-        if (Array.isArray(filter?.$or)) return Promise.resolve(10);
-        return Promise.resolve(0);
-      });
+      // [TR] B3-09: çözünürlük sayıları tek aggregate ($group) ile gelir; null/eksik resolution_type "UNKNOWN"a katlanır.
+      aggregateMock = jest.fn().mockResolvedValue([
+        { _id: "MANUAL_RELEASE", n: 4 },
+        { _id: "AUTO_RELEASE", n: 3 },
+        { _id: "PARTIAL_SETTLEMENT", n: 2 },
+        { _id: "MUTUAL_CANCEL", n: 5 },
+        { _id: "BURNED", n: 1 },
+        { _id: "DISPUTED_RESOLUTION", n: 6 },
+        { _id: "PAYMENT_WINDOW_EXPIRED", n: 7 },
+        { _id: "UNKNOWN", n: 10 },
+      ]);
+      countDocumentsMock = jest.fn(() => Promise.resolve(0));
       jest.doMock("../../backend/scripts/models/Trade", () => ({
         find: jest.fn(() => ({
           select: jest.fn().mockReturnThis(),
@@ -138,6 +134,7 @@ describe("admin routes resilience + pagination semantics", () => {
           lean: jest.fn().mockResolvedValue([]),
         })),
         countDocuments: countDocumentsMock,
+        aggregate: aggregateMock,
       }));
       jest.doMock("../../backend/scripts/models/User", () => ({ find: jest.fn() }));
       jest.doMock("../../backend/scripts/models/Feedback", () => ({ find: jest.fn(), countDocuments: jest.fn() }));
@@ -157,17 +154,15 @@ describe("admin routes resilience + pagination semantics", () => {
       paymentWindowExpiredCount: 7,
       unknownResolvedCount: 10,
     });
-    const unknownQuery = countDocumentsMock.mock.calls
-      .map(([filter]) => filter)
-      .find((filter) => Array.isArray(filter?.$or));
-    expect(unknownQuery).toEqual({
-      status: { $in: ["RESOLVED", "CANCELED", "BURNED"] },
-      $or: [
-        { resolution_type: "UNKNOWN" },
-        { resolution_type: null },
-        { resolution_type: { $exists: false } },
-      ],
-    });
+    // Tek aggregate: terminal statüler + null/eksik resolution_type -> "UNKNOWN" (eski $or sorgusunun eşdeğeri).
+    const pipelines = aggregateMock.mock.calls.map(([p]) => p);
+    const resolutionPipeline = pipelines.find((p) => p.some((stage) => stage.$group?._id?.$ifNull));
+    expect(resolutionPipeline).toEqual([
+      { $match: { status: { $in: ["RESOLVED", "CANCELED", "BURNED"] } } },
+      { $group: { _id: { $ifNull: ["$resolution_type", "UNKNOWN"] }, n: { $sum: 1 } } },
+    ]);
+    const resolutionCountCalls = countDocumentsMock.mock.calls.filter(([filter]) => filter?.resolution_type !== undefined || Array.isArray(filter?.$or));
+    expect(resolutionCountCalls).toEqual([]);
   });
 
   it("uses stable global totals for normal mode and explicit windowed scope for riskOnly", async () => {
