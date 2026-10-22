@@ -6,13 +6,15 @@
 [![Version](https://img.shields.io/badge/version-V3_Order--First-00c9a7?style=flat-square)](.)
 [![Network](https://img.shields.io/badge/network-Base_L2_(8453)-0052FF?style=flat-square&logo=coinbase)](.)
 [![Status](https://img.shields.io/badge/status-Canonical-f5a623?style=flat-square)](.)
-[![Updated](https://img.shields.io/badge/updated-October_2026-purple?style=flat-square)](.)
+[![Updated](https://img.shields.io/badge/updated-2026--10--22-purple?style=flat-square)](.)
 [![Solidity](https://img.shields.io/badge/Solidity-0.8.24-363636?style=flat-square&logo=solidity)](.)
 [![Docs](https://img.shields.io/badge/docs-Source_of_Truth-green?style=flat-square)](.)
 
 ---
 
 *An order-first, child-trade escrow protocol for oracle-free, non-custodial P2P fiat ↔ crypto exchange.*
+
+*Last verified: 2026-10-22 (code is the reference: `contracts/src`, `backend/scripts`, `frontend/src`; where this document and the code disagree, the code wins).*
 
 > **"Contract decides. Off-chain only mirrors, coordinates, and accelerates."**
 
@@ -159,7 +161,7 @@ The contract is the single authoritative V3 state machine surface. The following
 
 ### 3.1 Parent-order write surface
 - `createSellOrder(token, totalAmount, minFillAmount, tier, orderRef, paymentRiskLevel)` — the seller locks inventory + the full maker bond reserve upfront. Only an active ban is checked for the owner (`MakerBanActive`).
-- `createBuyOrder(...)` — the buyer locks only its own full taker bond reserve; since the owner becomes taker in child trades, it passes the taker entry gate.
+- `createBuyOrder(...)` — the buyer locks only its own full taker bond reserve; since the owner becomes taker in child trades, create-time checks are an active ban (`TakerBanActive`), registration (`WalletTooYoung` if `registerWallet` was never called), dust (`InsufficientNativeBalance`) and tier cooldown (`TierCooldownActive`), in this order. **The 2-day wallet-age check is not applied at create**; it is enforced at `fillBuyOrder` time through `_enforceTakerEntry` (§6).
 - `fillSellOrder(orderId, fillAmount, childListingRef)` / `fillBuyOrder(...)` — exact fill; the child trade is born `LOCKED` in the same tx. The final fill sweeps the whole remaining reserve (no rounding drift).
 - `cancelSellOrder` / `cancelBuyOrder` — order owner only, only `OPEN`/`PARTIALLY_FILLED`; unfilled inventory (sell) and unused bond reserve are refunded.
 - Order validation: `totalAmount > 0`, `0 < minFillAmount ≤ totalAmount`, `tier ≤ 4`, `orderRef ≠ 0`, tier ≤ the owner's effective tier (`TierNotAllowed`), amount ≤ the token's tier cap (`AmountExceedsTierLimit`; Tier 4 is unlimited). A disabled token direction reverts with `TokenDirectionNotAllowed`. Fee-on-transfer inflows revert with `InvalidTransferAmount`.
@@ -192,10 +194,10 @@ The contract is the single authoritative V3 state machine surface. The following
 - `decayReputation(wallet)` — permissionless clean-slate (see §8.3).
 
 ### 3.4 Governance / mutable admin surface
-- `setTreasury` (zero address rejected; the new treasury must be a vault wired to this escrow: its `escrow()` getter must return `address(this)`, otherwise EOAs, code-less addresses, contracts without the getter or wired to another escrow revert with `TreasuryEscrowMismatch`. The initial treasury set in the constructor is not subject to this check.)
+- `setTreasury` (zero address rejected with `ZeroAddress`; the new treasury must be a vault wired to this escrow: its `escrow()` getter must return `address(this)`, otherwise EOAs, code-less addresses, contracts without the getter or wired to another escrow revert with `TreasuryEscrowMismatch`. The initial treasury set in the constructor is not subject to this check.)
 - `setFeeConfig` (≤ 2000 bps per side)
 - `setCooldownConfig` (≤ 30 days per tier)
-- `setTokenConfig` (decimals 1–18 and equal to the token's `decimals()`; all four tier caps > 0)
+- `setTokenConfig` (zero token rejected with `ZeroAddress`; decimals 1–18 and equal to the token's `decimals()`, otherwise `InvalidDecimals`; all four tier caps > 0, otherwise `ZeroAmount`). Emits `TokenConfigUpdated(token, supported, allowSellOrders, allowBuyOrders)` together with `TokenLimitsUpdated(token, decimals, tierMaxAmountsBaseUnit[4])`. The constructor also rejects a zero treasury with `ZeroAddress`.
 - `setReputationPolicy`, `setReputationTierThresholds` (bounds in §8.4)
 - `pause` / `unpause`
 
@@ -297,9 +299,9 @@ flowchart LR
 5. Maker resolves with `releaseFunds` or dispute/cancel paths
 
 ### 5.2 Buy-order flow
-1. Owner calls `createBuyOrder` (owner is eventual taker; gate enforced at create-time)
+1. Owner calls `createBuyOrder` (owner is eventual taker; ban/registration/dust/cooldown are enforced at create-time; wallet age is not)
 2. Filler calls `fillBuyOrder`
-3. Owner (taker) is re-checked at fill-time
+3. Owner (taker) passes the full taker entry gate at fill-time (ban, registration + 2-day age, dust, cooldown); if the owner has not aged, `fillBuyOrder` reverts with `WalletTooYoung`
 4. Child trade enters `LOCKED`
 5. `reportPayment` then resolution/dispute/cancel paths
 
@@ -312,7 +314,7 @@ No universal “maker=seller, taker=buyer” rule:
 |---|---|---|---|---|
 | `SELL_CRYPTO` | Owner = maker (crypto seller) | at create: inventory + full maker bond reserve | active ban at create and fill; tier ≤ effective tier at create, re-checked at fill | `releaseFunds`, `pingTakerForChallenge`, `challengeTrade`, cancel, settlement |
 | `SELL_CRYPTO` | Filler = taker (crypto buyer) | at fill: taker bond | taker entry gate + tier | `reportPayment`, `pingMaker`, `autoRelease`, cancel, settlement |
-| `BUY_CRYPTO` | Owner = taker (crypto buyer) | at create: full taker bond reserve | taker entry gate + tier at create and fill | `reportPayment`, `pingMaker`, `autoRelease`, cancel, settlement |
+| `BUY_CRYPTO` | Owner = taker (crypto buyer) | at create: full taker bond reserve | at create: ban/registration/dust/cooldown (no age) + tier; at fill: full taker entry gate (age included) + tier | `reportPayment`, `pingMaker`, `autoRelease`, cancel, settlement |
 | `BUY_CRYPTO` | Filler = maker (crypto seller) | at fill: crypto + maker bond | active ban + tier | `releaseFunds`, `pingTakerForChallenge`, `challengeTrade`, cancel, settlement |
 
 Either party may call `expirePaymentWindow`; `burnExpired` and `expireSettlement` are open to anyone.
@@ -321,7 +323,7 @@ Either party may call `expirePaymentWindow`; `burnExpired` and `expireSettlement
 
 ## 6. Anti-sybil enforcement semantics (V3)
 
-Canonical gate helper: `_enforceTakerEntry(wallet, tier)`
+Canonical gate helper: `_enforceTakerEntry(wallet, tier)` (ban + age + `_enforceTakerDustAndCooldown`: dust, cooldown)
 
 ```mermaid
 flowchart TD
@@ -343,9 +345,9 @@ Gate components:
 - tier cooldown: `tier0TradeCooldown` for a Tier 0 order, `tier1TradeCooldown` for Tier 1 (both default to **4 hours**, max 30 days); no cooldown for Tier 2+ (`TierCooldownActive`). `lastTradeAt` is only written for the taker on Tier 0/1 fills.
 
 V3 enforcement points:
-- `fillSellOrder` (filler/taker)
-- `createBuyOrder` (owner/eventual taker)
-- `fillBuyOrder` (owner/taker re-check)
+- `fillSellOrder` (filler/taker): full gate (`_enforceTakerEntry`)
+- `fillBuyOrder` (owner/taker re-check): full gate (`_enforceTakerEntry`); wallet age is enforced on this path
+- `createBuyOrder` (owner/eventual taker): does NOT use `_enforceTakerEntry`; it calls ban, registration (`walletRegisteredAt == 0` reverts `WalletTooYoung`), dust and cooldown separately and has no 2-day age check (moved to fill)
 
 The maker role is only checked for an active ban (`MakerBanActive`): `createSellOrder` (owner), `fillSellOrder` (owner), `fillBuyOrder` (filler). Age/dust/cooldown gates are taker-entry specific; the maker already locks inventory + bond. A tier gate applies as well: the order tier may not exceed the owner's effective tier at create time, nor the effective tier of either the owner or the filler at fill time.
 
@@ -553,7 +555,7 @@ This section separates immutable parameters from runtime surfaces that the owner
 | `MAX_TRADE_COOLDOWN` | 30 days | Cooldown setter upper bound |
 | `MAX_FEE_CONFIG_BPS` | 2000 bps | Fee setter upper bound (per side) |
 
-The constants `MAX_CANCEL_DEADLINE` (7 days) and `MIN_SETTLEMENT_EXPIRY` are declared in the escrow but unused by escrow code; the settlement deadline bounds (10 minutes – 7 days) are enforced by `ArafSettlementLib`'s own constants.
+The unused `MAX_CANCEL_DEADLINE` and `MIN_SETTLEMENT_EXPIRY` constants were removed from the escrow (K1-07); the settlement deadline bounds (10 minutes – 7 days) are enforced only by `ArafSettlementLib`'s own constants.
 
 ### 9.2 Mutable runtime config class
 - `takerFeeBps`, `makerFeeBps` — default **15 / 15 bps** (0.15%), ≤ 2000 bps per side
