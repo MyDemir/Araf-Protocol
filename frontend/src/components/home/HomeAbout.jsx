@@ -26,7 +26,7 @@ const HomeAbout = ({ about, video }) => (
         {about.facts.map((f) => (
           <div key={f.k} className="min-w-0 rounded-xl border border-borderSubtle bg-surface px-3 py-2.5">
             <dt className="text-[10px] font-bold tracking-widest uppercase text-textMuted truncate">{f.k}</dt>
-            <dd className="text-sm font-semibold text-textPrimary truncate">{f.v}</dd>
+            <dd className="text-sm font-semibold text-textPrimary break-words">{f.v}</dd>
           </div>
         ))}
       </dl>

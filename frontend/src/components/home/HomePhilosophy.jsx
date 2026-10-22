@@ -2,7 +2,7 @@ import { Ban, FileCode2, Flame, Hourglass } from 'lucide-react';
 
 const POINT_ICONS = [Ban, FileCode2, Flame];
 const BLEED_MAX_HOURS = 240; // ArafEscrow.sol:273 MAX_BLEEDING
-const BLEED_TONES = ['bg-elevated', 'bg-warning/40', 'bg-danger/60'];
+const BLEED_TONES = ['bg-textMuted/25', 'bg-warning/50', 'bg-danger/70'];
 
 // [TR] Felsefe: "Zamana Güven, Hakeme Değil". Üç ilke ve itirazdaki eriyen kasanın zaman çizgisi (orantılı çubuk).
 // [EN] Philosophy: three principles and a proportional timeline of the bleeding escrow.
@@ -19,10 +19,12 @@ const HomePhilosophy = ({ content }) => (
           const Icon = POINT_ICONS[i] || Ban;
           return (
             <div key={pt.title} className="min-w-0 rounded-2xl border border-borderSubtle bg-elevated p-5">
-              <span className="mb-3 flex h-9 w-9 items-center justify-center rounded-xl bg-brand/15 text-brand">
-                <Icon className="h-[18px] w-[18px]" strokeWidth={1.8} aria-hidden="true" />
-              </span>
-              <p className="text-base font-bold text-textPrimary mb-1">{pt.title}</p>
+              <div className="mb-2 flex items-center gap-3 md:mb-3 md:flex-col md:items-start">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand/15 text-brand">
+                  <Icon className="h-[18px] w-[18px]" strokeWidth={1.8} aria-hidden="true" />
+                </span>
+                <p className="min-w-0 text-base font-bold text-textPrimary">{pt.title}</p>
+              </div>
               <p className="text-sm text-textSecondary leading-relaxed">{pt.text}</p>
             </div>
           );

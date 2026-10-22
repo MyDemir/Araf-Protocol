@@ -23,10 +23,12 @@ const HomeFeatures = ({ content }) => (
         const Icon = ICONS[item.key] || ShieldCheck;
         return (
           <li key={item.key} className="min-w-0 rounded-2xl border border-borderSubtle bg-surface p-5 transition hover:border-borderStrong">
-            <span className={`mb-3 flex h-9 w-9 items-center justify-center rounded-xl ${item.key === 'bleed' ? 'bg-danger/10 text-danger' : 'bg-elevated text-textSecondary'} border border-borderSubtle`}>
-              <Icon className="h-[18px] w-[18px]" strokeWidth={1.8} aria-hidden="true" />
-            </span>
-            <p className="text-sm font-bold text-textPrimary mb-1">{item.title}</p>
+            <div className="mb-2 flex items-center gap-3 sm:mb-3 sm:flex-col sm:items-start">
+              <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${item.key === 'bleed' ? 'bg-danger/10 text-danger' : 'bg-elevated text-textSecondary'} border border-borderSubtle`}>
+                <Icon className="h-[18px] w-[18px]" strokeWidth={1.8} aria-hidden="true" />
+              </span>
+              <p className="min-w-0 text-sm font-bold text-textPrimary">{item.title}</p>
+            </div>
             <p className="text-sm text-textSecondary leading-relaxed">{item.text}</p>
           </li>
         );

@@ -14,7 +14,9 @@ const HomeHero = ({ content, onOpenMarket, onCreateOrder, newTxBlocked }) => (
       <h1 id="home-hero-title" className="text-3xl sm:text-4xl md:text-5xl font-extrabold tracking-tight leading-[1.1] mb-4 text-balance">
         <span className="text-textPrimary">{content.titleLine1}</span>
         <br />
-        <span className="text-brand">{content.titleLine2}</span>
+        {/* [TR] Marka yeşili açık zeminde büyük metin için 3:1'in altında kalır (#10b981 / #f8fafc); açık temada
+            ikinci satır textSecondary, koyu temada brand. [EN] Brand green fails 3:1 on the light background. */}
+        <span className="text-textSecondary [:root[data-theme=night]_&]:text-brand">{content.titleLine2}</span>
       </h1>
       <p className="text-textSecondary text-base md:text-lg max-w-xl leading-relaxed">{content.lead}</p>
       <div className="mt-6 flex flex-col sm:flex-row gap-3">
