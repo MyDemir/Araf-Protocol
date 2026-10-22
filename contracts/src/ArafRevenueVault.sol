@@ -11,6 +11,11 @@ interface IArafRewardsEpochClock {
     function currentEpoch() external view returns (uint256);
 }
 
+// [TR] K3-04: setRewards bağ kontrolü için ArafRewards'ın immutable getter'ı. [EN] K3-04 binding getter.
+interface IArafRewardsBinding {
+    function revenueVault() external view returns (address);
+}
+
 /**
  * @title ArafRevenueVault
  * @notice Escrow'dan gelen protokol gelirini reward/treasury rezervlerine böler.
@@ -34,6 +39,7 @@ contract ArafRevenueVault is Ownable, ReentrancyGuard, Pausable {
     error RevenueAmountMismatch();
     error StaleTargetEpoch();
     error RewardsAlreadySet();
+    error InvalidRewardsBinding(address rewards);
 
     uint256 public constant BPS = 10_000;
     uint256 public constant MIN_REWARD_BPS = 4_000;
@@ -50,6 +56,11 @@ contract ArafRevenueVault is Ownable, ReentrancyGuard, Pausable {
     mapping(address => uint256) public totalEscrowRevenue;
     mapping(address => uint256) public totalExternalFunding;
     mapping(uint256 => mapping(address => uint256)) public externalFundingByEpoch;
+    // [TR] K3-06: henüz ödenmemiş sponsor fonu toplamı (fon alınınca artar, transferEpochAllocation ödedikçe azalır).
+    //      onArafRevenue değişmez kontrolü bunu yükümlülüğe katar; totalExternalFunding ise yalnız kümülatif istatistiktir.
+    // [EN] K3-06: unpaid sponsor funding (grows on funding, shrinks as transferEpochAllocation pays it out). The
+    //      onArafRevenue invariant counts it as liability; totalExternalFunding stays a cumulative statistic.
+    mapping(address => uint256) public outstandingExternalFunding;
 
     struct ProductPool {
         bool enabled;
@@ -131,6 +142,15 @@ contract ArafRevenueVault is Ownable, ReentrancyGuard, Pausable {
     function setRewards(address _rewards) external onlyOwner {
         if (_rewards == address(0)) revert InvalidRecipient();
         if (rewards != address(0)) revert RewardsAlreadySet();
+        // [TR] K3-04: yalnız bu vault'a bağlı bir Rewards kontratı kabul edilir (kod var ve revenueVault() == bu vault).
+        //      EOA ya da başka vault'a bağlı kontrat reddedilir. Getter'ı taklit eden sahte kontratı tek başına
+        //      engellemez; deploy sırası (Rewards(escrow, vault) → setRewards) ve doğrulama betikleri bunu tamamlar.
+        // [EN] K3-04: only a Rewards contract bound to this vault is accepted (has code and revenueVault() == this).
+        //      An EOA or a contract bound to another vault is rejected. A fake contract mimicking the getter is not
+        //      stopped by this alone; deploy order and verification scripts complete the guarantee.
+        if (_rewards.code.length == 0 || IArafRewardsBinding(_rewards).revenueVault() != address(this)) {
+            revert InvalidRewardsBinding(_rewards);
+        }
         rewards = _rewards;
         emit RewardsUpdated(_rewards);
     }
@@ -187,7 +207,9 @@ contract ArafRevenueVault is Ownable, ReentrancyGuard, Pausable {
         uint256 balanceAfterTransfer = IERC20(token).balanceOf(address(this));
         if (balanceAfterTransfer - balanceBefore != amount) revert ExactInMismatch();
 
-        uint256 currentLiability = rewardReserve[token] + treasuryReserve[token];
+        // [TR] K3-06: ödenmemiş sponsor fonları da yükümlülüktür; bakiye açığını maskeleyemez.
+        // [EN] K3-06: unpaid sponsor funding is a liability too and can no longer mask a balance shortfall.
+        uint256 currentLiability = rewardReserve[token] + treasuryReserve[token] + outstandingExternalFunding[token];
         if (balanceAfterTransfer < currentLiability + amount) revert RevenueLiabilityMismatch();
 
         uint256 rewardShare = (amount * rewardBps) / BPS;
@@ -278,6 +300,7 @@ contract ArafRevenueVault is Ownable, ReentrancyGuard, Pausable {
         if (fromExternal > amount) fromExternal = amount;
         if (fromExternal > 0) {
             externalFundingByEpoch[epoch][token] -= fromExternal;
+            outstandingExternalFunding[token] -= fromExternal;
         }
 
         uint256 remaining = amount - fromExternal;
@@ -309,6 +332,7 @@ contract ArafRevenueVault is Ownable, ReentrancyGuard, Pausable {
 
         externalFundingByEpoch[targetEpoch][token] += amount;
         totalExternalFunding[token] += amount;
+        outstandingExternalFunding[token] += amount;
     }
 
     function _revenueIntentKey(

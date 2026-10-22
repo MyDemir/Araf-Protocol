@@ -373,10 +373,10 @@ stateDiagram-v2
 ### 7.1 `LOCKED` ve `PAID` sonrası çözüm yolları
 - **Normal kapanış:** maker `releaseFunds`
 - **Dispute hattı:** maker `pingTakerForChallenge` (en erken `paidAt + 24 saat`; öncesinde `PingCooldownNotElapsed`) → 24 saat cevap penceresi → `challengeTrade` (yalnız maker). Ping bir iddiadır: maker challenge'ı `[ping+24sa, ping+48sa)` aralığında (`MAKER_CHALLENGE_WINDOW` = 24 saat, sabit) açmazsa ping **düşer**; `ping+48sa` saniyesinden itibaren `challengeTrade` `ChallengeWindowExpired` ile reddedilir. Maker trade başına tek ping atabilir (`AlreadyPinged`).
-- **Liveness hattı:** taker `pingMaker` (`paidAt + GRACE_PERIOD` = `paidAt + 48 saat` sonrası) → 24 saat → `autoRelease` (iki bond'dan `AUTO_RELEASE_PENALTY_BPS` = %2). Maker'ın pingi geçerliyken (`ping+48sa` öncesi) `pingMaker` `ConflictingPingPath` ile reddedilir; ping düştüğü saniyeden itibaren açılır. Böylece ping atıp susan maker PAID trade'i süresiz kilitleyemez. Ters yönde, taker `pingMaker` attıysa maker'ın `pingTakerForChallenge`'ı `ConflictingPingPath` ile reddedilir.
+- **Liveness hattı:** taker `pingMaker` (`paidAt + GRACE_PERIOD` = `paidAt + 48 saat` sonrası) → 24 saat → `autoRelease` (taraf başına kesinti = max(bond'un `AUTO_RELEASE_PENALTY_BPS` = %2'si, o tarafın `releaseFunds` ücreti); Tier 0 dahil, K2-01). Maker'ın pingi geçerliyken (`ping+48sa` öncesi) `pingMaker` `ConflictingPingPath` ile reddedilir; ping düştüğü saniyeden itibaren açılır. Böylece ping atıp susan maker PAID trade'i süresiz kilitleyemez. Ters yönde, taker `pingMaker` attıysa maker'ın `pingTakerForChallenge`'ı `ConflictingPingPath` ile reddedilir.
 - **Maker her zaman release edebilir:** `PAID`'den `releaseFunds` ping'den bağımsız her an açıktır (clean release); `CHALLENGED`'dan release `DISPUTED_RELEASE` + maker dispute kaybıdır.
 - **Mutual cancel:** her iki taraf kendi `proposeOrApproveCancel(tradeId)` işlemini gönderir (ayrı imza yok); ikinci onay gelmeden önce taraf kendi onayını `revokeCancel(tradeId)` ile geri çekebilir (`CancelRevoked`; onay yoksa `NoCancelConsent`)
-- **Ödeme penceresi aşımı:** `reportPayment` yalnız `lockedAt + PAYMENT_WINDOW` (48 saat) öncesinde kabul edilir (sınır saniyesinden itibaren `PaymentWindowClosed`). LOCKED'da 48 saat içinde ödeme bildirilmezse taraflardan biri `expirePaymentWindow` çağırır (öncesinde `PaymentWindowActive`); maker tam iade alır, taker bond'undan %2 liveness cezası + negatif itibar sinyali
+- **Ödeme penceresi aşımı:** `reportPayment` yalnız `lockedAt + PAYMENT_WINDOW` (48 saat) öncesinde kabul edilir (sınır saniyesinden itibaren `PaymentWindowClosed`). LOCKED'da 48 saat içinde ödeme bildirilmezse taraflardan biri `expirePaymentWindow` çağırır (öncesinde `PaymentWindowActive`); maker tam iade alır, taker bond'undan %2 liveness cezası kesilip maker'a tazminat olarak ödenir (K1-03; hazineye gitmez, Tier 0'da bond olmadığı için 0) + taker'a negatif itibar sinyali
 - **Terminal burn:** challenge sonrası `MAX_BLEEDING` (240 saat) dolunca `burnExpired`
 
 ### 7.2 Bleeding bileşenleri
@@ -419,7 +419,7 @@ yalnız son 96 saatte erir; bu yüzden yakılma anına kadar yaklaşık %34,7'si
 ### 7.5 Cancel semantiği
 - `proposeOrApproveCancel` onayı msg.sender ile kanıtlanır; onaylar yalnız verildikleri state için geçerlidir (`reportPayment` / `challengeTrade` sıfırlar).
 - Her iki taraf onayı tamamlanmadan cancel finalize edilmez; tamamlanmadan önce verilen onay `revokeCancel` ile geri alınabilir.
-- **Tasarım notu (EIP-712 iptal imzası):** Önceki sürümde `proposeOrApproveCancel(tradeId, deadline, sig)` bir EIP-712 imzası (`CANCEL_TYPEHASH`, `sigNonces`, `deadline`) istiyordu; 2026-09-29'da `f4a3298` commit'iyle (PR #112) kaldırıldı. Kontrat `recovered == msg.sender` şartı aradığı için imzayı işlemi gönderen cüzdanın kendisi atıyordu: relay mümkün değildi ve imza `msg.sender` yetkisine ek koruma sağlamıyordu. `deadline` yalnız gönderim anında kontrol ediliyor, verilen onaya süre koymuyordu; nonce pratikte işlevsizdi. Yerine gelen korumalar: `reportPayment` ve `challengeTrade`'de onayların sıfırlanması (ödeme öncesi verilen onay ödeme sonrası kullanılamaz) ve `revokeCancel`. Kullanılmayan `MAX_CANCEL_DEADLINE` sabiti bu akıştan kalmadır.
+- **Tasarım notu (EIP-712 iptal imzası):** Önceki sürümde `proposeOrApproveCancel(tradeId, deadline, sig)` bir EIP-712 imzası (`CANCEL_TYPEHASH`, `sigNonces`, `deadline`) istiyordu; 2026-09-29'da `f4a3298` commit'iyle (PR #112) kaldırıldı. Kontrat `recovered == msg.sender` şartı aradığı için imzayı işlemi gönderen cüzdanın kendisi atıyordu: relay mümkün değildi ve imza `msg.sender` yetkisine ek koruma sağlamıyordu. `deadline` yalnız gönderim anında kontrol ediliyor, verilen onaya süre koymuyordu; nonce pratikte işlevsizdi. Yerine gelen korumalar: `reportPayment` ve `challengeTrade`'de onayların sıfırlanması (ödeme öncesi verilen onay ödeme sonrası kullanılamaz) ve `revokeCancel`. Bu akıştan kalan kullanılmayan `MAX_CANCEL_DEADLINE` sabiti K1-07'de kaldırıldı.
 - `LOCKED` iptalinde fee yoktur, iki taraf tam iade alır. `PAID`/`CHALLENGED` iptalinde her tarafın fee'si (snapshot oranı × güncel kripto) kendi güncel bond'uyla sınırlanarak kesilir; `CHALLENGED`'da erimiş kısım da hazineye gider.
 
 ### 7.6 Settlement semantiği
@@ -434,14 +434,35 @@ yalnız son 96 saatte erir; bu yüzden yakılma anına kadar yaklaşık %34,7'si
 |---|---|---|---|
 | `releaseFunds` (PAID) | `makerBond − makerFee` (fee bond ile sınırlı) | `crypto − takerFee + takerBond` | `takerFee + makerFee` |
 | `releaseFunds` (CHALLENGED) | aynı formül, güncel (erime sonrası) tutarlarla | aynı | fee'ler + erimiş kısım |
-| `autoRelease` | `makerBond − %2` | `crypto + takerBond − %2` | iki bond'un %2'si |
-| `expirePaymentWindow` | `crypto + makerBond` | `takerBond − %2` | taker bond'unun %2'si |
+| `autoRelease` | `makerBond − makerCut` | `crypto + takerBond − takerCut` | `takerCut + makerCut`; `cut = max(bond × %2, releaseFunds ücreti)` (K2-01) |
+| `expirePaymentWindow` | `crypto + makerBond + takerBond × %2` | `takerBond − %2` | — (K1-03: ceza maker'a) |
 | Mutual cancel (LOCKED) | `crypto + makerBond` | `takerBond` | — |
 | Mutual cancel (PAID/CHALLENGED) | `crypto + makerBond − makerFee` | `takerBond − takerFee` | fee'ler (+ erimiş kısım) |
 | `acceptSettlement` | maker gross payı − maker fee | taker gross payı − taker fee | fee'ler + erimiş kısım |
 | `burnExpired` | — | — | `crypto + makerBond + takerBond` |
 
-Fee'ler: `takerFee = crypto × takerFeeBpsSnapshot`, `makerFee = crypto × makerFeeBpsSnapshot` (varsayılan 15 bps = %0,15; Tier 0 order'da maker fee 0). Treasury bir kontratsa (`ArafRevenueVault`) aktarım `noteEscrowRevenueIntent` → transfer → `onArafRevenue` sırasıyla yapılır; hook revert ederse tüm işlem `RevenueHookFailed` ile geri alınır.
+Fee'ler: `takerFee = crypto × takerFeeBpsSnapshot`, `makerFee = crypto × makerFeeBpsSnapshot` (varsayılan 15 bps = %0,15; Tier 0 order'da maker fee 0). Treasury bir kontratsa (`ArafRevenueVault`) aktarım `noteEscrowRevenueIntent` → transfer → `onArafRevenue` sırasıyla yapılır; hook revert ederse tüm işlem `RevenueHookFailed` ile geri alınır. Intent çağrısı nedenli revert ettiyse hata `RevenueIntentFailed(bytes reason)` ile kök nedeni taşır (K3-09; işlem yine revert eder).
+
+### 7.8 Dalga 5 kontrat notları (2026-10-21)
+
+Davranış değişiklikleri (kullanıcı onaylı; yeni deploy gerektirir):
+
+- **K1-06 CEI sırası:** Terminal yollarda `_recordTerminalOutcome` ve itibar kaydı, hazine hook'u ve token transferlerinden **önce** yazılır. Hook sırasında okunan view'lar (terminal snapshot, `getReputation`, `getRewardableTrade`) artık güncel değeri döndürür. Log sırası değişti: `ReputationUpdated` → (`BleedingDecayed`) → `ProtocolRevenueSent` / `Transfer` → terminal event (`EscrowReleased` vb.). Backend dinleyicisi sıraya bağlı değildir (event'ler blok + log index ile işlenir; itibar ve trade handler'ları birbirini okumaz).
+- **K2-01 autoRelease:** taraf başına kesinti `max(bond × %2, releaseFunds ücreti)`; maker ücreti `releaseFunds`'taki gibi maker bond ile sınırlıdır. Böylece maker'ın susması protokol gelirini `releaseFunds`'ın altına düşürmez (Tier 0'da taker ücreti alınır, maker bond 0 olduğundan maker kesintisi 0).
+- **K1-03 expirePaymentWindow:** bonded tier'larda taker cezası hazine yerine envanteri kilitlenen maker'a gider; `ProtocolRevenueSent` yayılmaz. `PaymentWindowExpired.makerRefund` maker'ın aldığı toplamdır (envanter + bond + ceza).
+- **K3-02 ödül ağırlığı:** snapshot'ta ödenen ücreti 0 olan taraf ödül ağırlığı almaz (`TradeOutcomeRecorded` maker/taker ağırlığı ayrı olabilir).
+- **K3-04 setRewards:** yalnız kodu olan ve `revenueVault()` getter'ı bu vault'u gösteren kontrat kabul edilir (`InvalidRewardsBinding`). Getter'ı taklit eden sahte kontratı tek başına engellemez.
+- **K3-06 liability:** `outstandingExternalFunding[token]` (sponsor fonuyla artar, `transferEpochAllocation` ödedikçe azalır) `onArafRevenue` değişmez kontrolünde yükümlülüğe katılır; sponsor bakiyesi bir açığı maskeleyemez.
+- **K3-07:** süresi dolmuş ama hâlâ PROPOSED görünen teklif yeni teklifle üzerine yazılırken önce eski id için `SettlementExpired` yayılır.
+- **K2-07 / K2-08 / K1-07:** sıfır treasury/token için `ZeroAddress()`; `setTokenConfig` ek olarak `TokenLimitsUpdated(token, decimals, tierMaxAmountsBaseUnit[4])` yayar (`TokenConfigUpdated` imzası aynı); kullanılmayan `MAX_CANCEL_DEADLINE` ve `MIN_SETTLEMENT_EXPIRY` escrow'dan silindi (tek kaynak `ArafSettlementLib`). `TradeState.OPEN` hiçbir trade'e atanmaz, ABI uyumu için durur.
+
+Yalnız belgelenen davranışlar (kontrat değişmedi):
+
+- **K2-04 `burnExpired` front-run:** `challengedAt + MAX_BLEEDING` sonrasında durum CHALLENGED kaldıkça `releaseFunds`, cancel ve `acceptSettlement` hâlâ geçerlidir; bu anda kriptonun ≈%34,7'si, maker bond'un ≈%50'si, taker bond'un ≈%19'u kurtarılabilir. Herkese açık `burnExpired` mempool'daki geç uzlaşmayı front-run edip kalan her şeyi hazineye gönderebilir. Saldırgan kazanç elde etmez (griefing; hazine lehine). Karar: dokunulmadı; burn zaman temelli son çıkıştır. Taraflar uzlaşmayı `MAX_BLEEDING` dolmadan tamamlamalıdır.
+- **K1-05 / K2-05 iptal ücreti etiketi:** `PAID` iptal ücreti `ProtocolRevenueSent.kind = MANUAL_RELEASE_FEE`, `CHALLENGED` iptal ücreti `DISPUTED_RELEASE_FEE` ile yayılır; `RevenueKind` içinde iptal türü yoktur. İptal gelirini release gelirinden ayırmak için `tradeId` terminal snapshot'ı (`getRewardableTrade(...).outcome == MUTUAL_CANCEL`) ile birleştirilmelidir.
+- **K2-06 ücret tabanı:** `acceptSettlement` ücreti settlement havuzunun (kripto + iki bond) gross payları üzerinden ve tavansız alır; `releaseFunds` ve cancel ücreti yalnız kripto üzerinden alır ve maker ücretini maker bond ile sınırlar. Bu yüzden Tier 0'da maker release'de ücret ödemez, settlement'ta öder. Korunum bozulmaz.
+- **K2-11 snapshot ücret alanları:** `AUTO_RELEASE` için terminal snapshot'taki `takerFeePaid`/`makerFeePaid` kesinti tutarlarıdır (K2-01 sonrası en az release ücreti). `PAYMENT_WINDOW_EXPIRED` için `takerFeePaid` maker'a ödenen cezadır (protokol geliri değil). Ödül motoru bu iki sonuca 0 çarpan verdiği için ağırlığı etkilemez.
+- **K3-05 permissionless finalize:** `finalizeEpochToken` `recordingDeadline` (epoch sonu + 24 saat) anından itibaren herkese açıktır; sonra gelen `allocateEpochRewards` `EpochTokenFinalized` ile revert eder (fon kaybı yok, rezerv yerinde kalır). Operasyon kuralı: tahsis epoch bitmeden yapılır.
 
 ---
 
@@ -666,7 +687,7 @@ Worker kontrat event’lerini consume eder, Mongo’yu authoritative olmadan gü
 Child trade authority worker tarafında heuristik yerine explicit event+getter kombinasyonuyla mirror edilir. Kontrat `EscrowCreated` / `EscrowLocked` yayınlamaz; mirror `OrderFilled` anında `LOCKED` olarak kurulur ve tek seferlik payout snapshot aynı adımda alınır (§12.4.1).
 
 ### 11.6.1 Mirror edilen event'ler ve terminal sayaç
-- Escrow event'leri: order (`OrderCreated/Filled/Canceled`), trade lifecycle (`PaymentReported`, `EscrowReleased`, `DisputeOpened`, `MakerPinged`, `CancelProposed`, `CancelRevoked`, `EscrowCanceled`, `PaymentWindowExpired`, `BleedingDecayed`, `EscrowBurned`), settlement (`SettlementProposed/Rejected/Withdrawn/Expired/Finalized`), reputation/config (`ReputationUpdated`, `FeeConfigUpdated`, `CooldownConfigUpdated`, `TokenConfigUpdated`, `ReputationPolicyUpdated`, `ReputationTierThresholdsUpdated`), `WalletRegistered`, `ProtocolRevenueSent`. Vault event'leri (`EscrowRevenueReceived`, `ExternalRewardFunded`, `ProductRewardFunded`) vault adresinden ayrıca okunur.
+- Escrow event'leri: order (`OrderCreated/Filled/Canceled`), trade lifecycle (`PaymentReported`, `EscrowReleased`, `DisputeOpened`, `MakerPinged`, `CancelProposed`, `CancelRevoked`, `EscrowCanceled`, `PaymentWindowExpired`, `BleedingDecayed`, `EscrowBurned`), settlement (`SettlementProposed/Rejected/Withdrawn/Expired/Finalized`), reputation/config (`ReputationUpdated`, `FeeConfigUpdated`, `CooldownConfigUpdated`, `TokenConfigUpdated`, `TokenLimitsUpdated`, `ReputationPolicyUpdated`, `ReputationTierThresholdsUpdated`), `WalletRegistered`, `ProtocolRevenueSent`. Vault event'leri (`EscrowRevenueReceived`, `ExternalRewardFunded`, `ProductRewardFunded`) vault adresinden ayrıca okunur.
 - `CancelRevoked` ilgili tarafın `cancel_proposal` onay bayrağını geri alır; mirror yoksa event retry/DLQ'ya gider.
 - Manuel/otomatik release ayrımı heuristikle değil kontratın terminal snapshot'ından (`getRewardableTrade`) okunur; okuma hatası kalıcı "UNKNOWN" yazmaz, event retry/DLQ'ya gider.
 - Terminal geçiş (`resolved_at` işareti) trade başına bir kez uygulanır ve aynı işlemde **kalıcı terminal sayaç** satırı (`TerminalTradeStat`, `trade_key` tekil) yazılır; Trade belgesi 1 yıllık TTL ile silinse de istatistik geriye gitmez.
@@ -1008,7 +1029,10 @@ Frontend kontratın yerine geçmez; enforcement kontrattadır. Frontend guardrai
 | Bond'suz (Tier 0) taker'ın LOCKED trade'i rehin tutması | `PAYMENT_WINDOW` (48 saat) + `expirePaymentWindow`; `reportPayment` pencere sonrası `PaymentWindowClosed` |
 | Settlement oranının kabul öncesi değiştirilmesi | `acceptSettlement(tradeId, expectedProposalId)`; uyuşmazlıkta `SettlementProposalMismatch` |
 | Yanlış yapılandırılmış hazine yüzünden ücretli çıkışların durması (`RevenueHookFailed`) | `setTreasury` yalnız `escrow()` getter'ı bu escrow'u gösteren vault'u kabul eder (`TreasuryEscrowMismatch`). Kötü niyetli owner'a karşı tam koruma değildir: owner yine bu escrow'a bağlı ama hook'u revert eden bir kontrat kurabilir; zaman kilidi yoktur. |
-| Owner'ın rewards adresini değiştirip ödül rezervini çekmesi | `ArafRevenueVault.setRewards` tek seferlik (`RewardsAlreadySet`) |
+| Owner'ın rewards adresini değiştirip ödül rezervini çekmesi | `ArafRevenueVault.setRewards` tek seferlik (`RewardsAlreadySet`) ve yalnız `revenueVault()` bu vault'u gösteren kontratı kabul eder (`InvalidRewardsBinding`, K3-04; ilk atamada EOA reddedilir, getter'ı taklit eden sahte kontrata karşı tam güvence değildir) |
+| Sponsor fonunun vault bakiye açığını maskelemesi | `outstandingExternalFunding` `onArafRevenue` yükümlülüğüne katılır (K3-06) |
+| Sıfır ücretli wash-trade ile ödül havuzunun emilmesi | Ödenen ücreti 0 olan tarafın ödül ağırlığı 0 (K3-02). Çok düşük (sıfır olmayan) ücretle arbitraj belgelenmiş kalan risktir |
+| Maker sessiz kalınca `autoRelease`'in `releaseFunds`'tan az ücret bırakması | Kesinti taraf başına en az release ücreti (K2-01) |
 | Yanlış token decimals ile tier tavanı / ödül notional'ı bozulması | `setTokenConfig` token'ın `decimals()` değerini zincirde doğrular (`InvalidDecimals`) |
 | Burn'de erimiş kısmın escrow'da kalıcı kilitlenmesi | `burnExpired` trade'in tüm bakiyesini hazineye gönderir |
 | Create sonrası cezalanan order sahibinin order'ının doldurulması | Fill anında sahibin ban'ı ve efektif tier'ı yeniden kontrol edilir |

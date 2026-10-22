@@ -146,7 +146,7 @@ const ESCROW_EVENT_NAMES = [
   "BleedingDecayed", "EscrowBurned",
   "SettlementProposed", "SettlementRejected", "SettlementWithdrawn", "SettlementExpired", "SettlementFinalized",
   "OrderCreated", "OrderFilled", "OrderCanceled",
-  "FeeConfigUpdated", "CooldownConfigUpdated", "TokenConfigUpdated",
+  "FeeConfigUpdated", "CooldownConfigUpdated", "TokenConfigUpdated", "TokenLimitsUpdated",
   "ReputationPolicyUpdated", "ReputationTierThresholdsUpdated",
   "ProtocolRevenueSent",
 ];
@@ -209,6 +209,9 @@ const ARAF_ABI = [
   "event FeeConfigUpdated(uint256 takerFeeBps, uint256 makerFeeBps)",
   "event CooldownConfigUpdated(uint256 tier0TradeCooldown, uint256 tier1TradeCooldown)",
   "event TokenConfigUpdated(address indexed token, bool supported, bool allowSellOrders, bool allowBuyOrders)",
+  // [TR] K2-08: setTokenConfig'in decimals + tier limitleri ayrı event'te (TokenConfigUpdated imzası değişmedi).
+  // [EN] K2-08: decimals + tier limits of setTokenConfig in a separate event (TokenConfigUpdated is unchanged).
+  "event TokenLimitsUpdated(address indexed token, uint8 decimals, uint256[4] tierMaxAmountsBaseUnit)",
   "event ReputationPolicyUpdated(uint256 cleanPeriod, uint256 manualReleaseRewardPts, uint256 autoReleasePenaltyPts, uint256 disputeWinRewardPts, uint256 disputeLossPenaltyPts, uint256 burnPenaltyPts, uint256 mutualCancelPenaltyPts, uint256 baseBanDuration, uint256 banRiskPointsThreshold)",
   "event ReputationTierThresholdsUpdated(uint32[5] minSuccessfulTrades, uint32[5] maxRiskPoints)",
   "event ProtocolRevenueSent(address indexed token, uint256 amount, uint8 indexed kind, uint256 indexed tradeId, address treasury)",
@@ -297,6 +300,7 @@ const EVENT_ARG_KEYS = {
   FeeConfigUpdated: ["takerFeeBps", "makerFeeBps"],
   CooldownConfigUpdated: ["tier0TradeCooldown", "tier1TradeCooldown"],
   TokenConfigUpdated: ["token", "supported", "allowSellOrders", "allowBuyOrders"],
+  TokenLimitsUpdated: ["token", "decimals", "tierMaxAmountsBaseUnit"],
   ReputationPolicyUpdated: ["cleanPeriod", "manualReleaseRewardPts", "autoReleasePenaltyPts", "disputeWinRewardPts", "disputeLossPenaltyPts", "burnPenaltyPts", "mutualCancelPenaltyPts", "baseBanDuration", "banRiskPointsThreshold"],
   ReputationTierThresholdsUpdated: ["minSuccessfulTrades", "maxRiskPoints"],
   ProtocolRevenueSent: ["token", "amount", "kind", "tradeId", "treasury"],
@@ -2071,6 +2075,7 @@ class EventWorker {
       ReputationPolicyUpdated: this._onReputationPolicyUpdated.bind(this),
       ReputationTierThresholdsUpdated: this._onReputationTierThresholdsUpdated.bind(this),
       TokenConfigUpdated: this._onTokenConfigUpdated.bind(this),
+      TokenLimitsUpdated: this._onTokenLimitsUpdated.bind(this),
       ProtocolRevenueSent: this._onProtocolRevenueSent.bind(this),
       EscrowRevenueReceived: this._onEscrowRevenueReceived.bind(this),
       ExternalRewardFunded: this._onExternalRewardFunded.bind(this),
@@ -3450,6 +3455,25 @@ class EventWorker {
       logger.warn(`[Worker] refreshProtocolConfig başarısız, event payload ile partial patch uygulanıyor: ${err.message}`);
       await updateCachedTokenConfig(token, { supported, allowSellOrders, allowBuyOrders });
     }
+  }
+
+  // [TR] K2-08: TokenLimitsUpdated decimals + tier limitlerini taşır; cache RPC'siz yamalanır. Eksik/bozuk alan
+  //      throw eder (retry/DLQ). Token başına sıralama koruması: daha eski bir event yeni limitleri ezmez.
+  // [EN] K2-08: TokenLimitsUpdated carries decimals + tier limits; the cache is patched without an RPC. A missing or
+  //      malformed field throws (retry/DLQ). Per-token ordering guard: an older event cannot overwrite newer limits.
+  async _onTokenLimitsUpdated(event) {
+    const { token } = event.args;
+    if (typeof token !== "string" || !token) throw new Error("TokenLimitsUpdated: token eksik.");
+    const decimals = _requireFiniteNumber(event.args?.decimals, "decimals", "TokenLimitsUpdated");
+    const rawLimits = event.args?.tierMaxAmountsBaseUnit;
+    const limits = rawLimits == null ? [] : Array.from(rawLimits, (v) => String(v));
+    if (limits.length !== 4 || limits.some((v) => !/^\d+$/.test(v))) {
+      throw new Error("TokenLimitsUpdated: tierMaxAmountsBaseUnit 4 elemanlı tam sayı dizisi olmalı.");
+    }
+    const scope = `TokenLimitsUpdated:${token.toLowerCase()}`;
+    if (await this._isStaleOrderedEvent(scope, event)) return;
+    await updateCachedTokenConfig(token, { decimals, tierMaxAmountsBaseUnit: limits });
+    await this._markOrderedEventApplied(scope, event);
   }
 }
 

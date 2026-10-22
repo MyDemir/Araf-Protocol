@@ -131,8 +131,15 @@ describe("ArafEscrow V3 reputation authority", () => {
     await time.increase(REF_1D + 1);
 
     const tradeBeforeRelease = await escrow.getTrade(fillArgs.tradeId);
-    const makerPenalty = (tradeBeforeRelease.makerBond * 200n) / 10_000n;
-    const takerPenalty = (tradeBeforeRelease.takerBond * 200n) / 10_000n;
+    // [TR] K2-01: kesinti taraf başına max(%2 bond cezası, releaseFunds ücreti). [EN] K2-01: max(2% bond penalty, release fee).
+    const tb = tradeBeforeRelease;
+    const makerFeeQ = (tb.cryptoAmount * tb.makerFeeBpsSnapshot) / 10_000n;
+    const makerFee = makerFeeQ > tb.makerBond ? tb.makerBond : makerFeeQ;
+    const takerFee = (tb.cryptoAmount * tb.takerFeeBpsSnapshot) / 10_000n;
+    const makerBondPenalty = (tb.makerBond * 200n) / 10_000n;
+    const takerBondPenalty = (tb.takerBond * 200n) / 10_000n;
+    const makerPenalty = makerBondPenalty > makerFee ? makerBondPenalty : makerFee;
+    const takerPenalty = takerBondPenalty > takerFee ? takerBondPenalty : takerFee;
 
     await expect(escrow.connect(taker).autoRelease(fillArgs.tradeId))
       .to.emit(escrow, "EscrowReleased")

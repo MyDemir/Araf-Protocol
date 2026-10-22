@@ -106,7 +106,7 @@ Sınır saniyesi tektir: `T+48sa` anında challenge reddedilir ve aynı saniyede
 |---|---|---|
 | Dürüst maker, ödeme gerçekten gelmedi | Ping atar, `T+24sa`–`T+48sa` arasında `challengeTrade` açar | Bleeding başlar; uzlaşma, iptal ya da `burnExpired` ile biter. İddiasını zamanında desteklediği için ping kuralından ek kaybı yok |
 | Dürüst maker, ödeme sonradan geldi | Ping attıktan sonra da `releaseFunds` çağırır (her an açık) | Clean release; ping maliyetsizdir |
-| Kötü niyetli maker: ping atıp susar (fonu rehin tutmak) | `T+48sa` anında ping düşer; taker `pingMaker` → 24 saat → `autoRelease` | Taker kriptoyu alır; iki bond'dan `AUTO_RELEASE_PENALTY` kesilir, auto-release itibar sinyali. Süresiz kilit yok |
+| Kötü niyetli maker: ping atıp susar (fonu rehin tutmak) | `T+48sa` anında ping düşer; taker `pingMaker` → 24 saat → `autoRelease` | Taker kriptoyu alır; taraf başına max(`AUTO_RELEASE_PENALTY`, release ücreti) kesilir (K2-01), auto-release itibar sinyali. Süresiz kilit yok |
 | Kötü niyetli maker: ödeme geldiği halde challenge açar | Bleeding başlar, iki tarafın bond'u ve kripto erir | Maker de kaybeder; `CHALLENGED`'dan geç release `DISPUTED_RELEASE` + maker dispute kaybı |
 | Kötü niyetli taker: ödemeden `reportPayment` | Maker ping atar ve pencerede challenge açar | Bleeding taker bond'unu eritir; taker challenge açamaz, ping'i düşüremez, pencere boyunca `pingMaker` ile maker'ı aşamaz |
 | Taker önce `pingMaker` atar | Maker artık ping atamaz (`ConflictingPingPath`) | Maker 24 saat içinde `releaseFunds` (ya da iptal/uzlaşma) yapmazsa `autoRelease` |

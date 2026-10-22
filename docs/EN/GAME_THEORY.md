@@ -106,7 +106,7 @@ There is a single boundary second: at `T+48h` the challenge is rejected and `pin
 |---|---|---|
 | Honest maker, payment really missing | Pings, opens `challengeTrade` between `T+24h` and `T+48h` | Bleeding starts; ends in settlement, cancel or `burnExpired`. Backed the claim in time, so no extra loss from the ping rule |
 | Honest maker, payment arrives late | Calls `releaseFunds` after pinging (always open) | Clean release; the ping costs nothing |
-| Malicious maker: pings and goes silent (hostage) | Ping lapses at `T+48h`; taker `pingMaker` → 24h → `autoRelease` | Taker receives the crypto; both bonds pay `AUTO_RELEASE_PENALTY`, auto-release reputation signal. No indefinite lock |
+| Malicious maker: pings and goes silent (hostage) | Ping lapses at `T+48h`; taker `pingMaker` → 24h → `autoRelease` | Taker receives the crypto; each side pays max(`AUTO_RELEASE_PENALTY`, its release fee) (K2-01), auto-release reputation signal. No indefinite lock |
 | Malicious maker: challenges although paid | Bleeding starts, both bonds and the crypto decay | The maker loses too; a late release from `CHALLENGED` is `DISPUTED_RELEASE` + maker dispute loss |
 | Malicious taker: `reportPayment` without paying | Maker pings and challenges within the window | Bleeding eats the taker bond; the taker cannot challenge, cannot void the ping, and cannot bypass it with `pingMaker` during the window |
 | Taker calls `pingMaker` first | Maker can no longer ping (`ConflictingPingPath`) | Unless the maker releases (or cancel/settlement) within 24h, `autoRelease` |

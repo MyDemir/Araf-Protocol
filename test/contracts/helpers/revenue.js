@@ -17,4 +17,19 @@ async function pushRevenue(vault, token, amount, kind = 0, tradeId = 1, transfer
   return pusher.pushRevenue(await vault.getAddress(), await token.getAddress(), amount, transferAmount, kind, tradeId);
 }
 
-module.exports = { deployRevenueEscrow, pushRevenue };
+// [TR] K3-04: setRewards yalnız bu vault'a bağlı kontrat kabul eder. Vault birim testleri rewards'ı doğrudan
+//      çağıran bir imza sahibi ister; bağ kontratı (MockRewardsBinding) kurulur ve adresi impersonate edilir.
+//      currentEpoch 0 kalır, yani eski EOA rewards gibi StaleTargetEpoch kontrolü tetiklenmez.
+// [EN] K3-04: setRewards only accepts a contract bound to the vault. Vault unit tests need a signer acting as
+//      rewards: deploy MockRewardsBinding, wire it and impersonate its address (currentEpoch stays 0).
+async function bindRewardsSigner(vault, owner) {
+  const { network } = require("hardhat");
+  const binding = await (await ethers.getContractFactory("MockRewardsBinding")).deploy(await vault.getAddress());
+  await binding.waitForDeployment();
+  const addr = await binding.getAddress();
+  await (owner ? vault.connect(owner) : vault).setRewards(addr);
+  await network.provider.send("hardhat_setBalance", [addr, "0x56BC75E2D63100000"]);
+  return ethers.getImpersonatedSigner(addr);
+}
+
+module.exports = { deployRevenueEscrow, pushRevenue, bindRewardsSigner };

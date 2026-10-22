@@ -174,8 +174,10 @@ library ArafReputationLib {
             _applyNegativeSignal(s, _taker, t, pts);
         } else {
             // PARTIAL_SETTLEMENT
-            // [TR] Ceza semantiği yok; sıfır puanlı pozitif sinyal yalnız firstSuccessfulTradeAt/lastPositiveEventAt'i tutarlı başlatır.
-            // [EN] Non-penal; the zero-point positive signal only keeps firstSuccessfulTradeAt/lastPositiveEventAt consistent.
+            // [TR] Ceza semantiği yok; K3-08: işlem nitelikliyse +1 başarı (successfulTrades), 0 puan. Sinyal ayrıca
+            //      firstSuccessfulTradeAt/lastPositiveEventAt'i tutarlı tutar.
+            // [EN] Non-penal; K3-08: +1 success (successfulTrades) when the trade qualifies, 0 points. The signal also
+            //      keeps firstSuccessfulTradeAt/lastPositiveEventAt consistent.
             m.partialSettlementCount++;
             t.partialSettlementCount++;
             _applyPositiveSignal(s, _maker, m, 0, _qualifies);
