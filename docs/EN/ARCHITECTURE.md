@@ -586,21 +586,24 @@ Backend behavior is defined not only by chosen technologies, but also by bootstr
 flowchart LR
     A[Env / security checks + KMS self-test] --> B[Mongo connect]
     B --> C[Redis connect]
-    C --> D[Identity guard + protocol config load]
+    C --> D[Identity guard + escrow registry guard + protocol config load]
     D --> E[Scheduler + route mount + health/ready]
     E --> F[app.listen]
     F --> G[Worker start + replay in background]
 ```
 
 ### 10.1 Backend bootstrap ordering (`backend/scripts/app.js`)
-1. env/security prechecks (e.g. `SIWE_DOMAIN` cannot be localhost in production) + production KMS self-test
+0. at module load: CORS (`ALLOWED_ORIGINS` is mandatory in production; wildcard/localhost/origins with a path stop the process) and the one-time `runtimeSettings` env audit
+1. env/security prechecks (`SIWE_DOMAIN` cannot be localhost in production; an invalid SIWE configuration exits) + production KMS self-test (§12.5)
 2. Mongo connect
 3. Redis connect
-4. identity-normalization guard (enforced by default in production) and loading of the mutable protocol config mirror (a load failure does not crash the process; affected routes may return `CONFIG_UNAVAILABLE`)
-5. scheduler jobs
-6. route mount + `/health`, `/ready`
-7. `app.listen`
-8. the worker starts via `startInBackground`: connect + replay continue in the background after HTTP starts listening, while `/ready` reports "replaying"
+4. identity-normalization guard (enforced by default in production)
+5. first escrow registry guard check (`escrowGuard.check()`, §10.8)
+6. loading of the mutable protocol config mirror (a load failure does not crash the process; affected routes may return `CONFIG_UNAVAILABLE`)
+7. scheduler jobs (§10.6)
+8. `requireFullService` gate + route mount (`routes/mounts.js` is the single source) + `/health`, `/ready`
+9. `app.listen`
+10. the worker starts via `startInBackground`: connect + replay continue in the background after HTTP starts listening, while `/ready` reports "replaying". The worker is not started while the escrow guard blocks or the service is degraded (§10.8, "Degraded (restricted) mode")
 
 ### 10.2 Readiness-first operations
 - Liveness (`/health`) answers “is process alive?”.
@@ -612,8 +615,9 @@ flowchart LR
 - Security boundaries prefer fail-closed semantics (auth/session/PII).
 
 ### 10.4 Timeout/connectivity policy
-- Mongo uses `maxPoolSize: 100`, `socketTimeoutMS: 20000`, and `serverSelectionTimeoutMS: 5000` for combined worker+API load.
-- An unexpected Mongo disconnect triggers a fail-fast restart via `process.exit(1)` to reduce stale/partial-connection drift.
+- Mongo defaults are `maxPoolSize: 100` (`MONGO_MAX_POOL_SIZE`), `socketTimeoutMS: 20000` (`MONGO_SOCKET_TIMEOUT_MS`), and `serverSelectionTimeoutMS: 5000` for combined worker+API load.
+- If an unexpected Mongo disconnect does not recover within `MONGO_DISCONNECT_GRACE_MS` (default 10 s), the process fail-fast restarts via `process.exit(1)` to reduce stale/partial-connection drift; if the connection returns in time the fail-fast is cancelled. The exit is suppressed during graceful shutdown.
+- RPC: one shared provider (`services/rpcProvider.js`). `BASE_RPC_URL` is primary and `BASE_RPC_URL_FALLBACKS` (comma-separated) gives ordered failover; on 429/network errors a URL cools down (rate limit 60 s, monthly capacity 10 min, network error 30 s). Every URL is verified against the expected chain (`EXPECTED_CHAIN_ID`) before use, and an unverifiable URL is never used. Per-URL requests per second are capped by `RPC_MAX_REQUESTS_PER_SEC` (default 4; excess requests queue). Request timeout is 10 s, 60 s for `eth_getLogs`. URLs (which embed API keys) are redacted from logs and error messages.
 - Redis `isReady` is explicitly treated as distinct from mere connectivity.
 - Redis TLS (`rediss://`) and managed-service assumptions are part of runtime configuration behavior.
 
@@ -629,19 +633,36 @@ Default intervals can be changed with the `JOB_*_MS` env variables.
 
 | Job | Default interval | Note |
 |---|---|---|
-| DLQ processing | 60 s | See §11.4 |
-| Reputation decay trigger | 24h (first run after 30 s) | Does not run without `RELAYER_PRIVATE_KEY` + `BASE_RPC_URL` |
-| Reward outcome recorder | 1h | `ArafRewards.recordTradeOutcomes`; same relayer requirement |
-| Stats snapshot | 24h | |
+| DLQ processing | 60 s | See §11.4; chain-bound + distributed lock |
+| Reputation decay trigger | 24h (first run after 30 s) | Errors without `BASE_RPC_URL`; stays passive without `RELAYER_PRIVATE_KEY`. Chain-bound + distributed lock |
+| Reward outcome recorder | 1h | `ArafRewards.recordTradeOutcomes`; same relayer requirement. Chain-bound + distributed lock |
+| Stats snapshot | 24h (first run after 60 s) | |
 | Receipt & PII snapshot retention cleanup | 30 min | |
+| Archive retention (`archive_<chainId>_<escrow>_trades`) | 30 min (first run after 180 s) | Mongo-only; keeps running while degraded / escrow-blocked (§10.8) |
 | User bank-risk metadata cleanup | 6h | |
-| Reference rate ticker | periodic | Informational only; does not affect settlement |
-| Reconciliation report | 10 min | On by default in production (`JOB_RECONCILIATION_ENABLED`) |
+| Reference rate ticker | 120 s (`REFERENCE_TICKER_REFRESH_INTERVAL_MS`) | Informational only; does not affect settlement |
+| Reconciliation report | 10 min | On by default in production (`JOB_RECONCILIATION_ENABLED`); chain-bound |
+
+- Intervals change through `JOB_*_INTERVAL_MS` / `JOB_*_DELAY_MS` env variables; tunable job limits (decay/recorder candidate and tx limits, etc.) come from the admin runtime settings (§14.7).
+- Chain-bound jobs (`dlq`, `reputationDecay`, `rewardRecorder`, `reconciliation`) are skipped while degraded and while the escrow guard blocks. A job never overlaps itself (in-process lock).
+- `dlq`, `reputationDecay` and `rewardRecorder` take a Redis distributed lock (`services/jobLock.js`) so that several machines do not run them at once: `SET NX PX` with a per-process random token, renew/release only if the token still matches (Lua), key `lock:job:<chainId>:<escrow>:<job>`. **Fail-closed:** if Redis errors, or `ARAF_ESCROW_ADDRESS`/`EXPECTED_CHAIN_ID` is missing, the job does not run that tick. If the lock is lost the job stops before starting new items/txs.
 
 ### 10.7 Operational meaning of health vs ready
 - `/health`: is the process alive and is the worker still seeing new blocks? (`503 stale` once the worker passes its last-block threshold)
-- `/ready`: Mongo/Redis + config + chain id + worker lag (default max 25 blocks, `WORKER_MAX_LAG_BLOCKS`) + replay safety gate. The result is cached for a few seconds; unauthenticated callers get a redacted view, full detail only with `READY_INTERNAL_TOKEN`.
+- `/ready`: Mongo/Redis + config + chain id + worker lag (default max 25 blocks, `WORKER_MAX_LAG_BLOCKS`) + replay state + escrow registry guard safety gate. The result is cached for a few seconds (`READY_CACHE_TTL_MS`, default 7 s); unauthenticated callers get a redacted view, full detail only with `READY_INTERNAL_TOKEN`. It returns 503 while degraded and while an enforced escrow mismatch exists (`degradedReasons`).
 - During replay/high lag, liveness may be true while readiness is intentionally false.
+
+### 10.8 Escrow registry guard (escrow registry enforce)
+- `services/escrowRegistryGuard.js` only reads the `_id:"active"` document of the Mongo `escrow_registry` collection and compares it with `ARAF_ESCROW_ADDRESS` / `EXPECTED_CHAIN_ID`; it deletes/changes no data and sends no tx. It checks once at boot and then every `ESCROW_REGISTRY_GUARD_INTERVAL_MS` (default 60 s).
+- Mode `ESCROW_REGISTRY_GUARD_MODE`: `off` | `warn` | `enforce`. Default is `enforce` in production and `warn` elsewhere; an invalid value falls back to the default.
+- Mismatch reasons: `registry_missing` (no record / unknown state), `rotating`, `escrow_mismatch`, `chain_mismatch`, `registry_unreadable`.
+- `warn`: log + `/ready` info field only. `enforce` + mismatch (also when the record cannot be read, fail-closed): the worker does not start/stops, chain-bound jobs are skipped, escrow-bound `/api` endpoints answer `503 ESCROW_MISMATCH` (only auth, client log, social links, reference rates and feedback are allowlisted), and `/ready` is 503. This flag is separate from degraded mode.
+- Only the deploy flow writes the record (`.github/scripts/escrow-registry.js`; `escrow-registry-adopt.yml`, `rotate-escrow.yml`); the backend model (`EscrowRegistry`) is read-only and no route/admin panel writes it.
+- User exits are unaffected: transactions go from the frontend straight to the contract; the frontend closes only NEW-position txs on `escrow_mismatch` (see "Frontend behaviour during infrastructure outages").
+
+### 10.9 Client IP and origin secret
+- The request path is browser → Vercel rewrite → Fly → Express, so `req.ip` is an infrastructure address. `utils/clientIp.js::resolveClientIp(req)`: when `ORIGIN_SHARED_SECRET` is set and the request carries the same secret in the `x-araf-origin-secret` header (constant-time compare), a valid `x-real-ip` is used; otherwise `req.ip`. The secret, header value and IP are never logged; the request is not rejected.
+- Rate-limit keys, the admin audit IP digest (HMAC) and the chargeback-ack IP digest use this resolver.
 
 ---
 
@@ -659,7 +680,7 @@ flowchart TD
 ```
 
 ### 11.1 Worker state model
-Worker consumes contract events and updates Mongo without becoming authority.
+Worker consumes contract events and updates Mongo without becoming authority. Live following is **periodic log polling, not subscriptions**: each tick (`LIVE_POLL_INTERVAL_MS`, default 15 s) does one `eth_blockNumber` + `eth_getLogs` and reads up to `head − WORKER_FINALITY_DEPTH` (so a shallow reorg cannot make events be skipped). If the last safe checkpoint falls `WORKER_CHECKPOINT_INTERVAL_BLOCKS` (50) blocks behind head, a short catch-up replay is triggered for missed events. If no new block is seen the watchdog reconnects, and if there is still none the process exits (`WORKER_BLOCK_STALE_MS`, `WORKER_WATCHDOG_INTERVAL_MS`). These timing knobs are admin runtime settings (§14.7).
 
 ### 11.2 Checkpoint approach
 - last processed block (`worker:last_block`) and last safe checkpoint (`worker:last_safe_block`)
@@ -668,7 +689,7 @@ Worker consumes contract events and updates Mongo without becoming authority.
 - replay-safe startup logic
 
 ### 11.3 Replay and batch processing
-- block-batch processing (default 1,000 blocks, `WORKER_BLOCK_BATCH_SIZE`; checkpoint at least every 50 blocks, `WORKER_CHECKPOINT_INTERVAL_BLOCKS`)
+- block-batch processing (default 1,000 blocks, `WORKER_BLOCK_BATCH_SIZE`; `WORKER_REPLAY_BATCH_DELAY_MS` = 250 ms between batches; a failed replay backs off exponentially, 5 s → 5 min, `WORKER_REPLAY_BACKOFF_*`)
 - if a range cannot be read or a batch fails, the checkpoint does not move; replay stops at the first failed batch
 - idempotent mirror intent; the last applied `(blockNumber, logIndex)` is kept per scope so an older event cannot write back
 - state-regression guards prevent backward drift; terminal states are never reopened
@@ -680,8 +701,8 @@ Worker consumes contract events and updates Mongo without becoming authority.
 
 ### 11.4 DLQ and poison-event visibility
 - an event is first retried in place (5 attempts); unprocessable events go to the DLQ. Entries are unique per `txHash:logIndex` (live DLQ, archive and quarantine index sets)
-- the DLQ processor re-drives entries; a successful re-drive acks the event and clears the block's unsafe flag
-- past `MAX_REDRIVE_ATTEMPTS` (10) an entry moves to **permanent quarantine** (no TTL, manual review): the event counts as "acked-poison" and no longer blocks the checkpoint; the alarm is `logger.error` + a quarantine counter. The archive is kept for 7 days
+- the DLQ processor re-drives entries (every 60 s; under the distributed lock so only one machine runs it, §10.6); a successful re-drive acks the event and clears the block's unsafe flag. An unparseable raw entry is not dropped silently, it goes to quarantine (raw text is not logged)
+- past `MAX_REDRIVE_ATTEMPTS` (10) an entry moves to **permanent quarantine** (no TTL, manual review): the event counts as "acked-poison" and no longer blocks the checkpoint; the alarm is `logger.error` + a quarantine counter. The quarantine list keeps the newest 1,000 entries (the index set is untouched; a trimmed entry's event still counts as acked). The archive is kept for 7 days. The error text written to a DLQ entry has RPC URLs masked and is capped at 500 characters
 - operational logs preserve observability of failure modes
 
 ### 11.5 Identity normalization
@@ -692,7 +713,7 @@ Worker consumes contract events and updates Mongo without becoming authority.
 Child-trade authority is mirrored through explicit event + getter linkage rather than heuristics. The contract never emits `EscrowCreated` / `EscrowLocked`; the mirror is created as `LOCKED` on `OrderFilled`, and the one-shot payout snapshot is taken in the same step (§12.4.1).
 
 ### 11.6.1 Mirrored events and terminal counter
-- Escrow events: orders (`OrderCreated/Filled/Canceled`), trade lifecycle (`PaymentReported`, `EscrowReleased`, `DisputeOpened`, `MakerPinged`, `CancelProposed`, `CancelRevoked`, `EscrowCanceled`, `PaymentWindowExpired`, `BleedingDecayed`, `EscrowBurned`), settlement (`SettlementProposed/Rejected/Withdrawn/Expired/Finalized`), reputation/config (`ReputationUpdated`, `FeeConfigUpdated`, `CooldownConfigUpdated`, `TokenConfigUpdated`, `TokenLimitsUpdated`, `ReputationPolicyUpdated`, `ReputationTierThresholdsUpdated`), `WalletRegistered`, `ProtocolRevenueSent`. Vault events (`EscrowRevenueReceived`, `ExternalRewardFunded`, `ProductRewardFunded`) are read separately from the vault address.
+- Escrow events: orders (`OrderCreated/Filled/Canceled`), trade lifecycle (`PaymentReported`, `EscrowReleased`, `DisputeOpened`, `MakerPinged`, `CancelProposed`, `CancelRevoked`, `EscrowCanceled`, `PaymentWindowExpired`, `BleedingDecayed`, `EscrowBurned`), settlement (`SettlementProposed/Rejected/Withdrawn/Expired/Finalized`), reputation/config (`ReputationUpdated`, `FeeConfigUpdated`, `CooldownConfigUpdated`, `TokenConfigUpdated`, `TokenLimitsUpdated`, `ReputationPolicyUpdated`, `ReputationTierThresholdsUpdated`), `WalletRegistered`, `ProtocolRevenueSent`. Vault events (`EscrowRevenueReceived`, `ExternalRewardFunded`, `ProductRewardFunded`) and `ArafRewards` events (`EpochRewardAllocated`, `TradeOutcomeRecorded`, `RewardClaimed`, `EpochTokenFinalizedEvent`, `EpochDustRolledOver`) are read separately from `ARAF_REVENUE_VAULT_ADDRESS` / `ARAF_REWARDS_ADDRESS` (if those are missing the reward mirror is not followed and the worker warns).
 - `CancelRevoked` clears the revoking party's consent flag in `cancel_proposal`; a missing mirror sends the event to retry/DLQ.
 - Manual vs auto release is read from the contract's terminal snapshot (`getRewardableTrade`), never inferred; a read error writes no permanent "UNKNOWN" and the event goes to retry/DLQ.
 - The terminal transition (`resolved_at` marker) is applied once per trade and writes a **permanent terminal counter** row (`TerminalTradeStat`, unique `trade_key`) in the same operation, so stats survive the Trade document's 1-year TTL.
@@ -776,15 +797,17 @@ flowchart TD
 - The snapshot is ONE-SHOT: `_captureLockedTradeSnapshot` writes only when `payout_snapshot.captured_at` is empty, through an atomic conditional update. Worker replay, DLQ re-drive, or re-processing of the same `OrderFilled` never rewrites an existing snapshot; an incomplete (`is_complete=false`) snapshot is never "completed" later either.
 - The gate ("no saved payout profile -> cannot create/fill an order") exists ONLY at the UI and API level: it relies on `/api/auth/me.hasPayoutProfile` (the saved profile, not the draft form) and the market list's `owner_has_payout_profile` boolean, and fails closed when the state is unknown. Calling the contract directly BYPASSES this gate.
 - The real safeguard is the rule: **missing snapshot -> PII stays closed, the trade is resolved within the payment window.** A party without a profile leaves the snapshot incomplete, `/api/pii/*` access is not opened, and the trade is resolved inside the payment window (timeout/cancel flow).
-- **Profile lock during an active trade:** while the wallet has a `LOCKED`/`PAID`/`CHALLENGED` trade, `PUT /api/auth/profile` cannot write the payout profile (first creation included): `409 BANK_PROFILE_LOCKED_DURING_ACTIVE_TRADE`.
+- **Profile lock during an active trade:** while the wallet has a `LOCKED`/`PAID`/`CHALLENGED` trade, `PUT /api/auth/profile` cannot change the payout details (first creation included): `409 BANK_PROFILE_LOCKED_DURING_ACTIVE_TRADE`. Updating only the contact is free. Creating/changing a profile on a disabled payment rail (§17b) is `409 PAYMENT_RAIL_DISABLED`.
 
 ### 12.5 Encryption model
 - PII and receipt payload fields are persisted encrypted via AES-256-GCM.
-- Key derivation/governance follows HKDF + KMS/Vault-oriented design.
+- The master key is loaded per `KMS_PROVIDER` (`aws` = data key decrypted by AWS KMS, `vault` = HashiCorp Vault Transit, `env` = development only); a per-wallet DEK is derived with HKDF (RFC 5869, SHA-256) and never stored.
+- **Fail-closed (SEC-01):** `KMS_PROVIDER=env` is rejected in production; the only exception is `EXPECTED_CHAIN_ID=84532` (Base Sepolia) + `ALLOW_ENV_KMS_ON_TESTNET=yes` with the RPC verified to really be 84532 (no exception on mainnet). The production KMS self-test runs at boot and an invalid configuration stops the process. On a transient RPC failure the key is not loaded and encryption calls are rejected with `KMS_UNAVAILABLE_DEGRADED` (see "Degraded (restricted) mode").
 - Plaintext is not persisted; contract receives only hash traces for receipt proof linking.
 
 ### 12.6 Rate-limit classes and fallback behavior
-- Limiter classes are separated by surface: auth, nonce, market read, stats read, orders read/write, trade-room read, receipt upload, coordination write, PII (profile / taker-name / token / fetch), admin read, feedback, client logs.
+- Limiter classes are separated by surface: auth, nonce, market read, stats read, orders read/write, trade-room read, receipt upload, coordination write, PII (profile / taker-name / token / fetch), admin read, admin write, feedback, client logs.
+- Key: for unauthenticated requests `resolveClientIp(req)` (§10.9); for authenticated requests the wallet (tiered classes, admin, PII). PII limiters use a separate bucket per endpoint; with an authenticated wallet the key is the wallet only (changing IP cannot multiply the limit), and trade-scoped endpoints add a per-trade key.
 - Some of them (orders/room read, receipt upload, coordination write, feedback) apply limits tiered by the user's effective tier.
 - When Redis is unavailable the limiters keep protecting through a process-local (in-memory) fallback; no surface, auth/PII included, is deliberately fail-open.
 
@@ -908,7 +931,7 @@ erDiagram
 
 ## 13.4 Feedback / stats snapshot layer
 - Feedback is a separate operational/user-signal surface.
-- Other models: `TerminalTradeStat` (permanent terminal counter), `HistoricalStat`, `RevenueEvent` (vault/escrow revenue mirror), `RewardEpoch`, `RewardClaim`, `RewardFunding`, `RewardEpochAllocationEvent` (reward read-model), `TermsAcceptance` (terms-of-use acceptance).
+- Other models: `TerminalTradeStat` (permanent terminal counter), `HistoricalStat`, `RevenueEvent` (vault/escrow revenue mirror), `RewardEpoch`, `RewardClaim`, `RewardFunding`, `RewardEpochAllocationEvent` (reward read-model), `TermsAcceptance` (terms-of-use acceptance), `PaymentRailSetting` / `PaymentRailAudit` (§17b), `RuntimeSetting` / `RuntimeSettingAudit` (§14.7), `SocialLinkSetting` / `SocialLinkAudit` (footer links), `EscrowRegistry` (active escrow record; read-only for the backend, §10.8).
 - Stats/snapshot layer (daily aggregates, dashboard counters) supports observability and decisions, not protocol authority.
 - Read-model snapshots do not replace contract state; they improve operator visibility.
 
@@ -925,9 +948,12 @@ The V3 backend surface does not manufacture authority; routes apply projection, 
 | Auth (`/api/auth`) | `GET /nonce`, `POST /verify`, `POST /refresh`, `POST /logout`, `GET /me`, `PUT /profile` | Session and wallet-bound auth boundary |
 | PII (`/api/pii`) | `GET /my`, `GET /taker-name/:onchainId`, `POST /request-token/:tradeId`, trade-scoped retrieval | Snapshot-first, role-bound sensitive-data access |
 | Receipts (`/api/receipts`) | `POST /upload` | One-shot receipt upload for the taker while `LOCKED` |
-| Rewards (`/api/rewards`) | epochs, funding, `/:wallet/claimable`, `/:wallet/history`, `/health` | Read-only reward view; recording/claims live in the contract |
-| Admin (`/api/admin`) | `GET /revenue`, `/rewards/health`, `/summary`, `/feedback`, `/trades`, `/settlement-proposals` | Read-only observation, open only to sessions in the `ADMIN_WALLETS` list; no protocol authority |
+| Rewards (`/api/rewards`) | `GET /epochs/current`, `/epochs/:epoch`, `/health`, `/funding/global`, `/funding/product/:productId`, `/:wallet/claimable`, `/:wallet/history` | Read-only reward view; recording/claims live in the contract |
+| Admin (`/api/admin`) | Read: `GET /revenue`, `/rewards/health`, `/summary`, `/feedback`, `/trades`, `/settlement-proposals`. Operations settings: `GET/PUT /payment-rails`, `/runtime-settings`, `/social-links` (+ `/audit`) | Open only to sessions in the `ADMIN_WALLETS` list. Observation endpoints are read-only; the write endpoints are off-chain operations settings only (bounded, audited, behind `adminWriteLimiter`); no protocol authority |
+| Social links (`/api/social-links`) | `GET /` | Footer links (public read) |
 | Logs / stats / feedback / reference rates | `POST /api/logs/client-error`, `GET /api/stats`, `POST /api/feedback`, `GET /api/reference-rates/ticker` | Observability, product feedback and an informational rate ticker |
+
+The backend mounts every router under `/api` from the single source `routes/mounts.js`; while degraded and on an escrow mismatch the `requireFullService` gate is default-deny (§10.8, "Degraded (restricted) mode").
 
 ### 14.1 Orders routes
 - parent-order read/config surfaces
@@ -965,6 +991,13 @@ The V3 backend surface does not manufacture authority; routes apply projection, 
 - protocol stats read surface
 - feedback intake endpoint
 
+### 14.7 Admin operations settings
+- Admin rights come from `ADMIN_WALLETS` (`requireAuth` + wallet match + list check); when the list is empty nobody is admin and `/api/admin/*` answers 403. These endpoints write no protocol state.
+- **Payment rail switches** (`/payment-rails`): see §17b.
+- **Runtime settings** (`/runtime-settings`, `PUT /:key` = `{value}` or `{reset:true}`, optional `reason`, optimistic `expectedVersion`): performance/operations knobs only (worker polling/batch/backoff, watchdog thresholds, `WORKER_MAX_LAG_BLOCKS`, cache TTLs, reference-ticker TTLs, decay/recorder job limits, `RPC_MAX_REQUESTS_PER_SEC`). Precedence: admin value > env > in-code default; bounds are enforced server-side for every source. RPC URLs, secrets, contract addresses, `EXPECTED_CHAIN_ID`, finality, CORS, `ADMIN_WALLETS`, KMS and SEC-01 are deliberately out of scope (env only). Every change is written to `RuntimeSettingAudit`; if the DB cannot be read the last known/env/default values are used (fail-open, since these are performance knobs).
+- **Footer social links** (`/social-links`): https only, no userinfo, code/env allowlist (an admin cannot change it), IDN/punycode rejected, at most 8 links; `expectedVersion` required, audited in `SocialLinkAudit`.
+- Every write endpoint sits behind `adminWriteLimiter`; the audit trail stores only an HMAC'd IP digest.
+
 ---
 
 ## 15. Frontend UX guardrail layer
@@ -989,6 +1022,7 @@ flowchart TD
   - supported chain
 - After tx send, receipt is awaited; pending tx hash is persisted in `localStorage(araf_pending_tx)`.
 - Fill paths decode `OrderFilled` to extract `tradeId`; frontend does not fabricate trade identity.
+- If a BUY order's owner has not reached the 2-day wallet age, the contract rejects `fillBuyOrder` with `WalletTooYoung` (age is enforced at fill, not at create; §6). The frontend only shows this as a hint (`useOwnerWalletAge`; if the read fails nothing is locked, fail-open); the contract decides.
 
 ### 15.2 Runtime orchestration: `usePII`
 - PII flow is two-step:
@@ -1019,8 +1053,8 @@ Frontend does not replace contract enforcement; it is a guardrail/orchestration 
 ### 15.7 Code layout (`frontend/src`)
 - `hooks/`: `useArafContract` (escrow reads/writes), `usePII`, `useRewardsContract`
 - `app/providers/`: `SessionProvider` (SIWE session), `AppProviders`, `ThemeProvider`; `app/useAppSessionData.jsx` (`authenticatedFetch`, pending-tx recovery, return to the active trade)
-- `app/contexts/`: context-based screens — `marketplace`, `trade-room` (decision model, timeline, primary/secondary actions), `operations`, `profile` (payout profile, active trades, rewards), `settlement`, `admin` (read-only panel)
-- `app/actions/`: contract lifecycle and order-creation actions; `app/payoutProfileGate.js`: payout-profile gate (§12.4.1); `app/chainPolicy.js`, `app/apiConfig.js`: chain and API-path policy; `app/copy/`: user-facing copy
+- `app/contexts/`: context-based screens — `marketplace`, `trade-room` (decision model, timeline, primary/secondary actions), `operations`, `profile` (payout profile, active trades, rewards), `settlement`, `admin` (observation panel + payment-rail / runtime-settings / social-links management panels; §14.7)
+- `app/actions/`: contract lifecycle and order-creation actions; `app/payoutProfileGate.js`: payout-profile gate (§12.4.1); `app/chainPolicy.js`, `app/apiConfig.js`: chain and API-path policy; `app/chainFallback.js` + `useChainFallbackTrades.js`: backend-independent fallback view that reads known tradeIds from the contract (see "Frontend behaviour during infrastructure outages"); `app/tradeStateSync.js`: pins the on-chain state after a tx so a lagging mirror cannot overwrite an optimistic update (90 s); `app/txGate.js`: new-position gate; `app/walletAge.js` + `hooks/useOwnerWalletAge.js`: wallet-age hint; `app/copy/`: user-facing copy
 
 ---
 
@@ -1094,7 +1128,7 @@ Legacy references should be treated as historical context only; operational deci
 
 ## 17b. Payment rail switches (admin)
 
-Rail availability lives in one Mongo document (`PaymentRailSetting`, optimistic `version`), read through a 15 s in-process cache (`services/paymentRails.js`, invalidated on local writes; DB read failure falls back to last known / all-enabled). No record means every rail defined in `paymentRailRiskConfig.js` is enabled. Every change is appended to the immutable `PaymentRailAudit` collection (admin wallet, previous/new value, reason, HMAC'd IP). Disabling a rail blocks only NEW work: profile create/change, market-meta, and filling orders whose owner sits on a closed rail (`owner_rail_enabled=false`). Active trades, payout snapshots and the PII flow are untouched. The contract does not know rails; this is a UI/API gate and can be bypassed by calling the contract directly.
+Rail availability lives in one Mongo document (`PaymentRailSetting`, optimistic `version`), read through a 15 s in-process cache (`PAYMENT_RAILS_CACHE_TTL_MS`; `services/paymentRails.js`, invalidated on local writes; DB read failure falls back to last known / all-enabled). No record means every rail defined in `paymentRailRiskConfig.js` is enabled. Every change is appended to the immutable `PaymentRailAudit` collection (admin wallet, previous/new value, reason, HMAC'd IP). At least one rail must stay enabled (`LAST_ENABLED_RAIL`, 409); the write gate is fail-closed (503 if the state could never be read). Disabling a rail blocks only NEW work: profile create/change, market-meta, and filling orders whose owner sits on a closed rail (`owner_rail_enabled=false`). Active trades, payout snapshots and the PII flow are untouched. The contract does not know rails; this is a UI/API gate and can be bypassed by calling the contract directly.
 
 ---
 
@@ -1121,7 +1155,9 @@ So it is neither a shallow summary nor a stale legacy dump; it is a modern, oper
 
 - Boot requests use `fetchWithTimeout` (10 s; writes/uploads 60 s, never auto-resent). Backend/RPC failures feed the `infraHealth` store; `BACKEND_UNREACHABLE` / `RPC_UNREACHABLE` banners are dismissible, critical safety alerts (`ESCROW_MISMATCH` etc.) stay non-dismissible.
 - Recovery: one background probe with exponential backoff (5 s to 60 s, jitter); a successful probe clears the banner and refetches data without a reload.
-- Fail-closed: NEW-position txs (create order / fill order) are gated by `txGate` while paused, before the first chain read, or during an infra outage; action functions check it before approve. Exit actions on an existing trade are never gated (the contract enforces timers on-chain); the trade room only shows a calm notice.
+- Fail-closed: NEW-position txs (create order / fill order) are gated by `txGate` while paused, before the first chain read, during an infra outage, in degraded mode, on a stale config, or when the backend escrow registry mismatches (`503 ESCROW_MISMATCH` -> `escrow_mismatch`); action functions check it before approve. Exit actions on an existing trade are never gated (the contract enforces timers on-chain); the trade room only shows a calm notice.
+- Fallback trade view: when `/trades/my` is unavailable and a wallet is connected, the tradeIds the user knows (local record, at most 50, no PII) are read from the contract via `getTrade` (at most 4 concurrent reads, refreshed at most every 30 s). State, roles and timers come only from the contract read; actions still go to the contract. After a tx the on-chain state is pinned for up to 90 s so a lagging mirror cannot overwrite it with an older state.
+- RPC transport: `VITE_RPC_URL` (when set) is primary, the public RPC is the fallback.
 - A render error takes down only its own section (`ErrorBoundary scope="section"`); `public/boot-guard.js` shows a reload prompt if the main bundle never loads.
 
 ## Degraded (restricted) mode
