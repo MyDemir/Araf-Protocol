@@ -18,7 +18,13 @@ const RuntimeSettingAudit = require("../models/RuntimeSettingAudit");
 const logger = require("../utils/logger");
 
 const SETTING_KEY = "runtime_settings";
-const CACHE_TTL_MS = Math.min(Number(process.env.RUNTIME_SETTINGS_CACHE_TTL_MS ?? 15_000), 30_000);
+// [TR] B4-09: geçersiz (sayı olmayan/negatif/boş) env değeri 15 sn'ye döner; 0 bilinçli "önbellek kapalı"dır.
+function _ttlFromEnv(raw, fallback = 15_000, max = 30_000) {
+  if (raw === undefined || raw === null || String(raw).trim() === "") return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.min(n, max) : fallback;
+}
+const CACHE_TTL_MS = _ttlFromEnv(process.env.RUNTIME_SETTINGS_CACHE_TTL_MS);
 const NEGATIVE_CACHE_TTL_MS = 5_000;
 const DB_READ_TIMEOUT_MS = 2_000;
 
@@ -255,6 +261,7 @@ async function setSetting(rawKey, value, { wallet, reason = "", ipHash = null, e
   } catch (auditErr) {
     logger.error(`[RuntimeSettings] audit yazılamadı, değişiklik geri alınıyor: ${auditErr.message}`);
     let rollbackRes = null;
+    let rollbackFailed = false;
     try {
       const rollback = prevEntry
         ? { $set: { [`values.${key}`]: prevEntry }, $inc: { version: 1 } }
@@ -262,9 +269,16 @@ async function setSetting(rawKey, value, { wallet, reason = "", ipHash = null, e
       // Yalnız kendi yazdığımız version'a koşullu: araya giren başka admin değişikliği ezilmez.
       rollbackRes = await RuntimeSetting.updateOne({ key: SETTING_KEY, version: currentVersion + 1 }, rollback);
     } catch (rollbackErr) {
+      rollbackFailed = true;
       logger.error(`[RuntimeSettings] geri alma başarısız: ${rollbackErr.message}`);
     }
     invalidateCache();
+    if (rollbackFailed) {
+      // [TR] B4-08: değişiklik DB'de uygulanmış ve denetimsiz kaldı; yerel durum uygulanmış değeri yansıtır.
+      lastKnown = { overrides: nextOverrides, version: currentVersion + 1 };
+      logger.error(`[RuntimeSettings] UNAUDITED CHANGE: setting=${key} uygulandı, audit yazılamadı ve geri alınamadı; elle kontrol edin.`);
+      throw _err("SETTING_AUDIT_FAILED_APPLIED", "Denetim kaydı yazılamadı ve geri alma başarısız; değişiklik uygulanmış olabilir, durumu kontrol edin.");
+    }
     lastKnown = { overrides: currentOverrides, version: currentVersion + 2 };
     if (rollbackRes && rollbackRes.matchedCount === 0) {
       logger.error(`[RuntimeSettings] RUNTIME_SETTING_ROLLBACK_CONFLICT: audit yazılamadı ve araya başka değişiklik girdi (setting=${key}).`);

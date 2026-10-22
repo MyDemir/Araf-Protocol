@@ -63,9 +63,14 @@ function redactValue(value, keyHint = "") {
   if (value == null) return value;
 
   // [TR] Gelişmiş Error ve Hata Benzeri Nesne Yakalayıcı
-  if (value instanceof Error || (typeof value === "object" && (value.message || value.stack || value.code || value.name))) {
+  // B2-15: yalnız gerçek Error (ya da message+stack taşıyan duck-typed hata) özetlenir; {name, iban, code...}
+  //        gibi sıradan nesneler anahtar bazlı maskeleme döngüsüne girer (PII sızıntısı ve bağlam kaybı olmaz).
+  const isErrorLike =
+    value instanceof Error ||
+    (typeof value === "object" && typeof value.stack === "string" && typeof value.message === "string");
+  if (isErrorLike) {
     return {
-      name: value.name || "Error",
+      name: redactString(value.name || "Error"),
       message: redactString(value.message || String(value)),
       stack: value.stack ? redactString(value.stack) : undefined,
       code: value.code,

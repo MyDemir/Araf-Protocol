@@ -68,6 +68,20 @@ const COOKIE_OPTIONS_BASE = {
 };
 
 /**
+ * B2-09: jsonwebtoken ham hata mesajları (imza/biçim/süre ayrımı) istemciye dönmez.
+ * jsonwebtoken hataları için sabit mesaj + makine-okur `code`; diğer hatalar eski davranışta kalır.
+ */
+function _jwtErrorResponse(err) {
+  if (err?.name === "TokenExpiredError") {
+    return { status: 401, body: { error: "Oturum süresi doldu. Lütfen yeniden giriş yapın.", code: "TOKEN_EXPIRED" } };
+  }
+  if (err?.name === "JsonWebTokenError" || err?.name === "NotBeforeError") {
+    return { status: 401, body: { error: "Geçersiz oturum belirteci. Lütfen yeniden giriş yapın.", code: "TOKEN_INVALID" } };
+  }
+  return null;
+}
+
+/**
  * Yalnızca httpOnly auth cookie'den JWT okur.
  */
 async function _getTokenPayload(req) {
@@ -129,6 +143,8 @@ async function requireAuth(req, res, next) {
     next();
   } catch (err) {
     logger.warn(`[Auth] Token doğrulaması başarısız: ${err.message}`);
+    const jwtResp = _jwtErrorResponse(err);
+    if (jwtResp) return res.status(jwtResp.status).json(jwtResp.body);
     return res
       .status(err.statusCode || 401)
       .json({ error: err.message || "Geçersiz veya süresi dolmuş token." });
@@ -180,8 +196,10 @@ async function requireSessionWalletMatch(req, res, next) {
       logger.warn(`[Auth] Mismatch revoke başarısız: ${revokeErr.message}`);
     }
 
-    res.clearCookie("araf_jwt", { ...COOKIE_OPTIONS_BASE, path: "/" });
-    res.clearCookie("araf_refresh", { ...COOKIE_OPTIONS_BASE, path: "/api/auth" });
+    // B2-23: clearCookie, set ile aynı secure niteliğini taşır.
+    const secure = process.env.NODE_ENV === "production";
+    res.clearCookie("araf_jwt", { ...COOKIE_OPTIONS_BASE, secure, path: "/" });
+    res.clearCookie("araf_refresh", { ...COOKIE_OPTIONS_BASE, secure, path: "/api/auth" });
 
     return res.status(409).json({
       error: "Oturum cüzdanı aktif bağlı cüzdanla eşleşmiyor. Lütfen yeniden giriş yapın.",
@@ -236,6 +254,8 @@ function requirePIIToken(req, res, next) {
     next();
   } catch (err) {
     logger.warn(`[PIIAuth] Token doğrulaması başarısız: ${err.message}`);
+    const jwtResp = _jwtErrorResponse(err);
+    if (jwtResp) return res.status(jwtResp.status).json(jwtResp.body);
     return res
       .status(err.statusCode || 401)
       .json({ error: err.message || "Geçersiz PII token." });

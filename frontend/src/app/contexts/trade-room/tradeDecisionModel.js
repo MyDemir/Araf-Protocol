@@ -177,7 +177,16 @@ export function buildTradeDecisionModel({
   if (!isConnected) globalDisabledReasons.push(t(lang, 'Cüzdan bağlı değil.', 'Wallet not connected.'));
   if (!isAuthenticated) globalDisabledReasons.push(t(lang, 'Oturum doğrulanmamış.', 'Session is not authenticated.'));
   if (!isSupportedChain) globalDisabledReasons.push(t(lang, 'Desteklenmeyen ağ.', 'Unsupported network.'));
-  if (isPaused) globalDisabledReasons.push(t(lang, 'Sistem bakım modunda.', 'System is in maintenance mode.'));
+  // [TR] F2-04: Zincirden okunamayan işlemin korunan (eski) kaydı: zincire yazan aksiyonlar arayüzde kapalı.
+  //      Karar kontrattadır; bu yalnız eski bilgiyle yanlış aksiyonu önleyen kapıdır.
+  // [EN] F2-04: kept (stale) record of a trade whose chain read failed: on-chain actions are disabled in the UI only.
+  if (trade?.stale === true) globalDisabledReasons.push(t(lang,
+    'İşlem bilgisi zincirden yenilenemedi (eski olabilir); yenilenene kadar işlem yapılamaz.',
+    'Trade data could not be refreshed from the chain (it may be outdated); actions are disabled until it refreshes.'));
+  // [TR] F3-01: Kontratta yalnız createSellOrder/fillSellOrder/createBuyOrder/fillBuyOrder whenNotPaused'tır.
+  //      Pause'da release/ping/itiraz/iptal/yakım kapanmaz; bu yüzden isPaused kapı nedeni değil, yalnız bilgidir.
+  // [EN] F3-01: only order create/fill are whenNotPaused on-chain. Exit actions stay open during a pause, so
+  //      isPaused is an informational notice here, not a disabled reason.
 
   const primaryDisabledReasons = [...globalDisabledReasons];
 
@@ -202,7 +211,14 @@ export function buildTradeDecisionModel({
         requiresPaymentProof: !paymentIpfsHash,
       },
     );
-    if (chainFallback) primaryDisabledReasons.push(t(lang,
+    // [TR] Yedek mod + kontratta yaşayan (onchainId'li) LOCKED işlem + taker: ödeme bildirimi açılır; dekont cihazda
+    //      özetlenir (localReceiptHash.js). Bu yalnız ipucudur; süre ve durum kararı reportPayment'ta kontrattadır.
+    // [EN] Backup mode + live on-chain LOCKED trade + taker: reporting opens with a device-side digest (hint only).
+    const hasOnchainId = trade?.onchainId !== null && trade?.onchainId !== undefined && trade?.onchainId !== '';
+    const localReportOpen = chainFallback && hasOnchainId && !paymentWindowExpired;
+    if (localReportOpen) {
+      if (!paymentIpfsHash) primaryDisabledReasons.push(t(lang, 'Dekont dosyası seçin (cihazda özetlenir).', 'Select the receipt file (hashed on this device).'));
+    } else if (chainFallback) primaryDisabledReasons.push(t(lang,
       'Sunucuya ulaşılamadığı için ödeme bildirilemiyor (dekont sunucuya yüklenir). Ödeme penceresi dolmadan sunucu dönmezse: ödeme yaptıysanız karşı tarafla karşılıklı iptali birlikte onaylayın.',
       'Payment cannot be reported while the server is unreachable (the receipt is uploaded to the server). If the server does not return before the payment window ends and you have paid, agree on a mutual cancel with the counterparty.'));
     else if (!paymentIpfsHash) primaryDisabledReasons.push(t(lang, 'Dekont gerekli.', 'Payment proof is required.'));
@@ -221,12 +237,25 @@ export function buildTradeDecisionModel({
     secondaryActions = [action('contract', 'start_challenge', makerPinged
       ? t(lang, 'İtiraz Başlat', 'Open Challenge')
       : t(lang, 'Ödeme Gelmedi — Alıcıyı Uyar', 'Payment Not Received — Ping Taker'), null)];
-    if (!makerPinged) guidance.push(MAKER_PING_RULE(lang));
+    // [TR] F3-07: Taker ping attıysa maker ping atamaz (ConflictingPingPath); doğru rehber "24 saat içinde serbest bırakın"dır.
+    // [EN] F3-07: once the taker pinged, the maker cannot ping (ConflictingPingPath); the right hint is "release within 24h".
+    if (flags.takerPinged) guidance.push(t(lang,
+      'Alıcı sizi uyardı: ödemeyi kontrol edip 24 saat içinde serbest bırakın; aksi halde alıcı fonları otomatik serbest bırakabilir.',
+      'The buyer pinged you: check the payment and release within 24 hours, otherwise the buyer can auto-release the funds.'));
+    else if (!makerPinged) guidance.push(MAKER_PING_RULE(lang));
     else if (makerWindowOpen) guidance.push(t(lang,
       `Şu an itiraz açabilirsin — son süre: ${makerWindowDeadline}`,
       `You can open a challenge right now — deadline: ${makerWindowDeadline}`));
     else if (flags.pingLapsed) guidance.push(t(lang, 'İtiraz süresi doldu: ping düştü; alıcı artık sizi uyarıp otomatik serbest bırakma yoluna geçebilir. Ödeme geldiyse fonları serbest bırakın.', 'The challenge window closed: your ping lapsed; the taker can now ping you and move to auto-release. Release the funds if the payment arrived.'));
-    else guidance.push(MAKER_PING_RULE(lang));
+    else {
+      // [TR] F3-07: Ping atıldı, T+24s dolmadı: itiraz penceresi henüz kapalı (kontrat: ResponseWindowActive).
+      //      Mevcut test beklentisi (guidance[0] genel kural) korunur; bekleme süresi ek satır olarak eklenir.
+      guidance.push(MAKER_PING_RULE(lang));
+      const opensIn = formatTimerValue(derivedTimers.makerChallenge, lang);
+      guidance.push(opensIn
+        ? t(lang, `Ping gönderildi: itiraz penceresi ping + 24 saatte açılır (kalan: ${opensIn}).`, `Ping sent: the challenge window opens 24 hours after the ping (remaining: ${opensIn}).`)
+        : t(lang, 'Ping gönderildi: itiraz penceresi ping + 24 saatte açılır.', 'Ping sent: the challenge window opens 24 hours after the ping.'));
+    }
   }
 
   if (normalizedState === 'PAID' && normalizedRole === 'taker') {
@@ -249,7 +278,9 @@ export function buildTradeDecisionModel({
     // [TR] Maker itiraz sonrası da her an serbest bırakabilir; taker'ın yolu uzlaşma kartıdır.
     // [EN] The maker can still release at any time; the taker's path is the settlement card.
     primaryAction = normalizedRole === 'maker'
-      ? action('contract', 'release_funds', t(lang, 'Ödemeyi Onayla', 'Release Funds'), null)
+      ? action('contract', 'release_funds', t(lang, 'Ödemeyi Onayla', 'Release Funds'), t(lang,
+        'Ödemeyi onaylarsanız itirazınızdan vazgeçmiş olursunuz: işlem "itirazlı serbest bırakma" olarak kapanır ve itibar kaydınıza işlenir. Göndermeden önce onay penceresi açılır.',
+        'Releasing abandons your challenge: the trade closes as a disputed release and is recorded in your reputation. A confirmation step opens before anything is sent.'))
       : chainFallback
         ? action('waiting', 'chain_fallback_exits', t(lang, 'Uzlaşma teklifleri şu an gösterilemiyor', 'Settlement offers cannot be shown right now'), t(lang,
           'Sunucuya ulaşılamıyor. Kontrattaki çıkışlar açık: karşılıklı iptal teklif edebilirsiniz; satıcı her an serbest bırakabilir; 240 saatlik süre dolunca yakım herkes tarafından tetiklenebilir.',
@@ -264,6 +295,10 @@ export function buildTradeDecisionModel({
       // [TR] K10: süre dolduktan sonra ödeme bildirilemez (PaymentWindowClosed); birincil buton kapanır.
       primaryAction = action('waiting', 'payment_window_closed', t(lang, 'Süre doldu', 'Time expired'),
         t(lang, '48 saatlik ödeme süresi doldu: ödeme artık bildirilemez, satıcı işlemi her an iptal edebilir. Ödediyseniz satıcıyla iptali birlikte onaylayın.', 'The 48h payment window has passed: payment can no longer be reported and the maker can unwind the trade at any time. If you paid, agree on a mutual cancel with the maker.'));
+      // [TR] F3-06: Süre dolunca "Dekont gerekli"/yedek mod gerekçesi anlamsızdır; yalnız genel kapı nedenleri kalır.
+      // [EN] F3-06: once the window closed, the proof/fallback reasons are moot; only global gate reasons remain.
+      primaryDisabledReasons.length = 0;
+      primaryDisabledReasons.push(...globalDisabledReasons);
       secondaryActions.push(action('contract', 'expire_payment_window', t(lang, 'Ödemedim — kilidi çöz (teminattan ceza)', 'I did not pay — unlock (bond penalty)'), null));
     } else {
       primaryAction = action('contract', 'expire_payment_window', t(lang, 'Kilidi Çöz (48 saat doldu)', 'Unlock (48h passed)'), t(lang, 'Alıcı süresinde ödeme bildirmedi. Kilidi çözerseniz fonlarınız ve teminatınız iade edilir.', 'The taker did not report payment in time. Unlocking returns your funds and bond.'));
@@ -285,6 +320,12 @@ export function buildTradeDecisionModel({
     primaryAction = action('info', 'trade_closed', '', null);
     secondaryActions = [];
     primaryDisabledReasons.length = 0;
+  }
+
+  if (isPaused && !TERMINAL_TRADE_STATES.includes(normalizedState)) {
+    guidance.push(t(lang,
+      'Sistem bakım modunda: yeni işlem açılamaz, mevcut işlemler kapanabilir.',
+      'System is paused: new trades cannot be opened, existing trades can still be closed.'));
   }
 
   const decisionSummary = buildDecisionSummary(normalizedState, normalizedRole, lang);

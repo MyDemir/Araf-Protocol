@@ -1,4 +1,5 @@
-import { normalizeSettlementState } from '../settlement/settlementActionModel';
+import { isSettlementProposalExpired, normalizeSettlementState } from '../settlement/settlementActionModel';
+import { getChainNowMs } from '../../clock';
 
 // [TR] Operations Center lane modeli mevcut session verisinden türetilir.
 // [EN] Operations Center lane model is derived from existing session state.
@@ -22,9 +23,12 @@ const getSettlementProposer = (settlement) => settlement?.proposer || settlement
 
 const hasPendingBackendSync = (escrow) => Boolean(escrow?.rawTrade?._pendingBackendSync || escrow?._pendingBackendSync);
 
-const classifySettlementLane = (escrow, viewerAddress) => {
+const classifySettlementLane = (escrow, viewerAddress, nowSec) => {
   const settlement = getSettlementProposal(escrow);
   if (!settlement || normalizeSettlementState(settlement.state) !== 'PROPOSED') return null;
+  // [TR] F3-04: Süresi dolmuş teklife kontrat yanıt kabul etmez; "yanıtınız bekleniyor" şeridinden çıkar.
+  // [EN] F3-04: the contract rejects answers to an expired offer; it leaves the "needs your response" lane.
+  if (isSettlementProposalExpired(settlement, nowSec)) return null;
 
   const proposer = normalizeAddress(getSettlementProposer(settlement));
   const viewer = normalizeAddress(viewerAddress);
@@ -34,8 +38,8 @@ const classifySettlementLane = (escrow, viewerAddress) => {
   return 'informational';
 };
 
-const mapEscrowLane = (escrow, viewerAddress) => {
-  const settlementLane = classifySettlementLane(escrow, viewerAddress);
+const mapEscrowLane = (escrow, viewerAddress, nowSec) => {
+  const settlementLane = classifySettlementLane(escrow, viewerAddress, nowSec);
   if (settlementLane === 'settlement_action_required') return settlementLane;
   if (hasPendingBackendSync(escrow)) return 'pending_backend_sync';
 
@@ -64,11 +68,12 @@ export function buildOperationsContextModel({
   activeTrade = null,
   address = null,
   lang = 'EN',
+  nowSec = Math.floor(getChainNowMs() / 1000),
 }) {
   const groups = new Map(LANE_DEFS.map((lane) => [lane.key, []]));
 
   for (const escrow of activeEscrows || []) {
-    const laneKey = mapEscrowLane(escrow, address);
+    const laneKey = mapEscrowLane(escrow, address, nowSec);
     groups.get(laneKey).push(toLaneItem(escrow, laneKey, address));
   }
 

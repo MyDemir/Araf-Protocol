@@ -30,6 +30,25 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { buildApiUrl } from '../app/apiConfig';
+import { APP_LANG_STORAGE_KEY } from '../app/bootstrapState';
+
+const readLang = () => {
+  try {
+    return typeof window !== 'undefined' && window.localStorage.getItem(APP_LANG_STORAGE_KEY) === 'TR' ? 'TR' : 'EN';
+  } catch {
+    return 'EN';
+  }
+};
+
+// [TR] Backend production'da zinciri okuyamazsa 503 ONCHAIN_STATE_UNAVAILABLE döner: PII fail-closed gizlenir.
+export const piiErrorMessage = (status, body, lang = readLang()) => {
+  if (status === 503 && body?.code === 'ONCHAIN_STATE_UNAVAILABLE') {
+    return lang === 'TR'
+      ? 'Zincir şu an okunamıyor, ödeme bilgisi geçici olarak gizli.'
+      : 'The chain cannot be read right now, payout info is temporarily hidden.';
+  }
+  return null;
+};
 
 /**
  * @param {string}   tradeId           Backend trade ID (MongoDB _id)
@@ -78,7 +97,8 @@ export function usePII(tradeId, authenticatedFetch) {
 
     try {
       // ADIM 1: Kısa ömürlü PII erişim token'ı al
-      // YÜKS-06 Fix: authenticatedFetch prop'u yoksa düz fetch ile fallback yap
+      // F2-20 (DURDU, onay bekliyor): düz fetch yedeği KALDI; kaldırmak mevcut PIIDisplay testlerinin kurulumunu
+      //        (authenticatedFetch vermeden global fetch mock'u) bozar. Bkz. rapor.
       const doFetch = authenticatedFetch || ((url, opts) =>
         fetch(url, { ...opts, credentials: 'include' })
       );
@@ -98,7 +118,7 @@ export function usePII(tradeId, authenticatedFetch) {
 
       if (!tokenRes.ok) {
         const body = await tokenRes.json().catch(() => ({}));
-        throw new Error(body.error || `PII erişimi reddedildi (${tokenRes.status})`);
+        throw new Error(piiErrorMessage(tokenRes.status, body) || body.error || `PII erişimi reddedildi (${tokenRes.status})`);
       }
 
       const { piiToken } = await tokenRes.json();
@@ -116,7 +136,7 @@ export function usePII(tradeId, authenticatedFetch) {
 
       if (!piiRes.ok) {
         const body = await piiRes.json().catch(() => ({}));
-        throw new Error(body.error || `PII verisi alınamadı (${piiRes.status})`);
+        throw new Error(piiErrorMessage(piiRes.status, body) || body.error || `PII verisi alınamadı (${piiRes.status})`);
       }
 
       const data = await piiRes.json();
@@ -154,6 +174,8 @@ export function usePII(tradeId, authenticatedFetch) {
     }
     setPii(null);
     setError(null);
+    // [TR] F2-11: iptal edilen isteğin finally'si setLoading(false) yapmaz; burada sıfırlanmazsa loading takılı kalır.
+    setLoading(false);
   }, []);
 
   return { pii, loading, error, fetchPII, clearPII };

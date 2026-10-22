@@ -1,3 +1,5 @@
+import { safeStorage } from './safeStorage';
+
 export const APP_LANG_STORAGE_KEY = 'araf_lang';
 export const APP_THEME_STORAGE_KEY = 'araf_theme_mode';
 
@@ -7,7 +9,7 @@ export const APP_THEME_STORAGE_KEY = 'araf_theme_mode';
 //      1) persisted localStorage preference (EN/TR) 2) fallback EN.
 export const getInitialLang = () => {
   if (typeof window === 'undefined') return 'EN';
-  const savedLang = window.localStorage.getItem(APP_LANG_STORAGE_KEY);
+  const savedLang = safeStorage.get(APP_LANG_STORAGE_KEY);
   if (savedLang === 'TR' || savedLang === 'EN') return savedLang;
   return 'EN';
 };
@@ -18,7 +20,7 @@ export const getInitialLang = () => {
 // [EN] Hydrates theme mode in an SSR-safe manner (system/day/night).
 export const getInitialThemeMode = () => {
   if (typeof window === 'undefined') return 'system';
-  const savedTheme = window.localStorage.getItem(APP_THEME_STORAGE_KEY);
+  const savedTheme = safeStorage.get(APP_THEME_STORAGE_KEY);
   if (savedTheme === 'system' || savedTheme === 'day' || savedTheme === 'night') return savedTheme;
   return 'system';
 };

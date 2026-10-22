@@ -27,6 +27,7 @@ const IV_LENGTH  = 12;    // GCM recommended
 const TAG_LENGTH = 16;
 const KEY_LENGTH = 32;    // 256-bit
 const VAULT_TIMEOUT_MS = 10_000;
+const AWS_KMS_TIMEOUT_MS = 10_000; // B2-05: Vault yoluyla aynı zaman aşımı
 
 // Node.js native hkdf — callback tabanlı, promisify ile async kullanılır
 const hkdfAsync = promisify(crypto.hkdf);
@@ -35,6 +36,12 @@ const hkdfAsync = promisify(crypto.hkdf);
 // KMS çağrıları her encrypt/decrypt'te yapılmasın diye bellek içi cache.
 // Uygulama restart'ında otomatik temizlenir.
 let _masterKeyCache = null;
+
+// B2-05: Cache boşken eşanlı isteklerin tek bir KMS Decrypt çağrısını paylaşması (single-flight).
+// _masterKeyGeneration: clearMasterKeyCache/blockKeyLoadingUntilSelfTest sırasında uçuşta olan bir
+// çağrının sonucu cache'e yazılmasın (SEC-01 fail-closed bozulmasın).
+let _awsKeyInflight = null;
+let _masterKeyGeneration = 0;
 
 // [TR] Kısıtlı (degraded) açılışta SEC-01 zincir doğrulaması yapılamadıysa anahtar yüklemesi kapalıdır.
 //      Yalnız runProductionKmsStartupSelfTest başarıyla zinciri doğruladıktan sonra açılır (atlatma yolu yok).
@@ -130,6 +137,10 @@ async function _getMasterKey() {
     if (!hex || hex.length < 64) {
       throw new Error("MASTER_ENCRYPTION_KEY is missing or too short (need 32 bytes / 64 hex chars)");
     }
+    // B2-19(a): hex olmayan karakter Buffer.from ile sessizce kısa tampon üretirdi.
+    if (!/^[0-9a-fA-F]{64}$/.test(hex.slice(0, 64))) {
+      throw new Error("MASTER_ENCRYPTION_KEY must contain only hex characters (first 64 chars)");
+    }
     _masterKeyCache = Buffer.from(hex.slice(0, 64), "hex");
     if (_isEnvKmsTestnetExceptionActive()) {
       _warnEnvKmsTestnetException();
@@ -162,19 +173,53 @@ async function _getMasterKey() {
         throw new Error("AWS_ENCRYPTED_DATA_KEY .env'de tanımlı değil");
       }
 
-      const kms = new KMSClient({ region });
-      const command = new DecryptCommand({
-        CiphertextBlob: Buffer.from(encryptedKey, "base64"),
-      });
-
-      const response = await kms.send(command);
-      _masterKeyCache = Buffer.from(response.Plaintext);
-      _assertMasterKeyLengthOrThrow(_masterKeyCache, "AWS");
+      if (!_awsKeyInflight) {
+        const generation = _masterKeyGeneration;
+        const inflight = (async () => {
+          const kms = new KMSClient({ region });
+          const command = new DecryptCommand({
+            CiphertextBlob: Buffer.from(encryptedKey, "base64"),
+          });
+          const response = await kms.send(command, {
+            abortSignal: AbortSignal.timeout(AWS_KMS_TIMEOUT_MS),
+          });
+          // B2-04: önce yerel kopya + uzunluk doğrulaması, sonra cache; KMS tamponu sıfırlanır.
+          const plaintext = Buffer.from(response.Plaintext);
+          if (response.Plaintext && typeof response.Plaintext.fill === "function") {
+            response.Plaintext.fill(0);
+          }
+          try {
+            _assertMasterKeyLengthOrThrow(plaintext, "AWS");
+          } catch (lenErr) {
+            plaintext.fill(0);
+            throw lenErr;
+          }
+          if (generation !== _masterKeyGeneration) {
+            plaintext.fill(0);
+            const staleErr = new Error("KMS anahtarı yüklenirken önbellek geçersiz kılındı; yeniden deneyin.");
+            staleErr.code = "KMS_UNAVAILABLE_DEGRADED";
+            throw staleErr;
+          }
+          _masterKeyCache = plaintext;
+        })();
+        _awsKeyInflight = inflight;
+        const release = () => { if (_awsKeyInflight === inflight) _awsKeyInflight = null; };
+        inflight.then(release, release);
+      }
+      await _awsKeyInflight;
+      if (!_masterKeyCache) {
+        const clearedErr = new Error("KMS anahtarı yüklenirken önbellek geçersiz kılındı; yeniden deneyin.");
+        clearedErr.code = "KMS_UNAVAILABLE_DEGRADED";
+        throw clearedErr;
+      }
 
       logger.info("[Encryption] ✅ Master key AWS KMS'ten başarıyla çözüldü.");
       return _masterKeyCache;
     } catch (err) {
-      throw new Error(`AWS KMS master key çözme hatası: ${err.message}`);
+      const wrapped = new Error(`AWS KMS master key çözme hatası: ${err.message}`, { cause: err });
+      // Kısıtlı mod kodu sarmalamada kaybolmaz (çağıranlar err.code ile ayırt eder).
+      if (err?.code === "KMS_UNAVAILABLE_DEGRADED") wrapped.code = err.code;
+      throw wrapped;
     }
   }
 
@@ -240,7 +285,7 @@ async function _getMasterKey() {
       logger.info("[Encryption] ✅ Master key HashiCorp Vault transit/decrypt ile çözüldü.");
       return _masterKeyCache;
     } catch (err) {
-      throw new Error(`Vault master key alma hatası: ${err.message}`);
+      throw new Error(`Vault master key alma hatası: ${err.message}`, { cause: err });
     }
   }
 
@@ -577,7 +622,7 @@ async function decryptPayoutProfile(encProfile, walletAddress) {
     ? await decryptField(encProfile.contact.value_enc, addr)
     : null;
 
-  let details = {};
+  let details;
   try {
     details = JSON.parse(detailsJson);
   } catch {
@@ -599,6 +644,8 @@ async function decryptPayoutProfile(encProfile, walletAddress) {
  * Graceful shutdown veya key rotation sırasında çağrılabilir.
  */
 function clearMasterKeyCache() {
+  _masterKeyGeneration += 1;
+  _awsKeyInflight = null;
   if (_masterKeyCache) {
     // Hassas veriyi bellekten temizle (zero-fill)
     _masterKeyCache.fill(0);

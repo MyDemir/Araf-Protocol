@@ -174,8 +174,10 @@ library ArafReputationLib {
             _applyNegativeSignal(s, _taker, t, pts);
         } else {
             // PARTIAL_SETTLEMENT
-            // [TR] Ceza semantiği yok; sıfır puanlı pozitif sinyal yalnız firstSuccessfulTradeAt/lastPositiveEventAt'i tutarlı başlatır.
-            // [EN] Non-penal; the zero-point positive signal only keeps firstSuccessfulTradeAt/lastPositiveEventAt consistent.
+            // [TR] Ceza semantiği yok; K3-08: işlem nitelikliyse +1 başarı (successfulTrades), 0 puan. Sinyal ayrıca
+            //      firstSuccessfulTradeAt/lastPositiveEventAt'i tutarlı tutar.
+            // [EN] Non-penal; K3-08: +1 success (successfulTrades) when the trade qualifies, 0 points. The signal also
+            //      keeps firstSuccessfulTradeAt/lastPositiveEventAt consistent.
             m.partialSettlementCount++;
             t.partialSettlementCount++;
             _applyPositiveSignal(s, _maker, m, 0, _qualifies);
@@ -189,11 +191,16 @@ library ArafReputationLib {
     /**
      * @notice Temiz dönem sonrası ardışık ban geçmişini sıfırlar (kontrollü unutma kuralı).
      * @notice Resets consecutive ban history after a clean period (controlled forgetting rule).
+     * @dev    [TR] K3-01: temiz dönem hem ban bitiminden hem son olumsuz olaydan (lastNegativeEventAt) sonra
+     *         geçmiş olmalı; ban sonrası biriken risk affedilmez.
+     *         [EN] K3-01: the clean period must have elapsed after both the ban end and the last negative event
+     *         (lastNegativeEventAt); risk accumulated after the ban is not forgiven.
      */
     function decayReputation(Store storage s, address _wallet) external {
         Reputation storage rep = s.reputation[_wallet];
         if (rep.bannedUntil == 0) revert IArafEscrowErrors.NoPriorBanHistory();
         if (block.timestamp <= rep.bannedUntil + s.cleanPeriod) revert IArafEscrowErrors.CleanPeriodNotElapsed();
+        if (block.timestamp <= uint256(rep.lastNegativeEventAt) + s.cleanPeriod) revert IArafEscrowErrors.CleanPeriodNotElapsed();
         if (rep.consecutiveBans == 0) revert IArafEscrowErrors.NoBansToReset();
 
         rep.consecutiveBans = 0;

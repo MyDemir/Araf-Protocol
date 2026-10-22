@@ -119,6 +119,7 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
 
   const [lastRefreshedAt, setLastRefreshedAt] = React.useState(null);
   const authInvalidRef = React.useRef(false);
+  const latestRequestRef = React.useRef({ feedback: 0, trades: 0, settlement: 0 });
 
   // [TR] Admin summary fetch; 403 durumunu net ve görünür şekilde işler.
   // [EN] Admin summary fetch with explicit, visible 403 handling.
@@ -172,6 +173,10 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
   }, [authenticatedFetch, lang]);
 
   const fetchFeedback = React.useCallback(async () => {
+    // [TR] F4-07: yalnız en son istek state'e yazar (filtre hızlı değişince bayat yanıt ezmesin).
+    // [EN] F4-07: only the latest request may write state.
+    const seq = ++latestRequestRef.current.feedback;
+    const isStale = () => seq !== latestRequestRef.current.feedback;
     setFeedbackLoading(true);
     setFeedbackError('');
     setFeedbackUnauthorized(false);
@@ -187,6 +192,8 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
         skipRefresh: authInvalidRef.current,
         suppressAuthToast: true,
       });
+
+      if (isStale()) return;
 
       if (res.status === 403) {
         setFeedback([]);
@@ -214,18 +221,24 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
       }
 
       const data = await res.json();
+      if (isStale()) return;
       authInvalidRef.current = false;
       setFeedback(Array.isArray(data.feedback) ? data.feedback : []);
       setFeedbackTotal(Number(data.total) || 0);
       setLastRefreshedAt(new Date().toISOString());
     } catch (_err) {
+      if (isStale()) return;
       setFeedbackError(lang === 'TR' ? 'Feedback isteğinde hata oluştu.' : 'Feedback request failed.');
     } finally {
-      setFeedbackLoading(false);
+      if (!isStale()) setFeedbackLoading(false);
     }
   }, [authenticatedFetch, feedbackFilters, lang]);
 
   const fetchTrades = React.useCallback(async () => {
+    // [TR] F4-07: yalnız en son istek state'e yazar (filtre hızlı değişince bayat yanıt ezmesin).
+    // [EN] F4-07: only the latest request may write state.
+    const seq = ++latestRequestRef.current.trades;
+    const isStale = () => seq !== latestRequestRef.current.trades;
     setTradesLoading(true);
     setTradesError('');
     setTradesUnauthorized(false);
@@ -245,6 +258,8 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
         skipRefresh: authInvalidRef.current,
         suppressAuthToast: true,
       });
+
+      if (isStale()) return;
 
       if (res.status === 403) {
         setTrades([]);
@@ -274,19 +289,25 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
       }
 
       const data = await res.json();
+      if (isStale()) return;
       authInvalidRef.current = false;
       setTrades(Array.isArray(data.trades) ? data.trades : []);
       setTradesTotal(Number(data.total) || 0);
       setTradesPaginationScope(data?.paginationScope || null);
       setLastRefreshedAt(new Date().toISOString());
     } catch (_err) {
+      if (isStale()) return;
       setTradesError(lang === 'TR' ? 'Trades isteğinde hata oluştu.' : 'Trades request failed.');
     } finally {
-      setTradesLoading(false);
+      if (!isStale()) setTradesLoading(false);
     }
   }, [authenticatedFetch, lang, tradesFilters]);
 
   const fetchSettlementProposals = React.useCallback(async () => {
+    // [TR] F4-07: yalnız en son istek state'e yazar (filtre hızlı değişince bayat yanıt ezmesin).
+    // [EN] F4-07: only the latest request may write state.
+    const seq = ++latestRequestRef.current.settlement;
+    const isStale = () => seq !== latestRequestRef.current.settlement;
     setSettlementLoading(true);
     setSettlementError('');
     setSettlementUnauthorized(false);
@@ -302,6 +323,8 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
         skipRefresh: authInvalidRef.current,
         suppressAuthToast: true,
       });
+
+      if (isStale()) return;
 
       if (res.status === 403) {
         setSettlementProposals([]);
@@ -331,14 +354,16 @@ function AdminPanel({ lang, authenticatedFetch, isAuthenticated, authChecked, sh
       }
 
       const data = await res.json();
+      if (isStale()) return;
       authInvalidRef.current = false;
       setSettlementProposals(Array.isArray(data.proposals) ? data.proposals : []);
       setSettlementTotal(Number(data.total) || 0);
       setLastRefreshedAt(new Date().toISOString());
     } catch (_err) {
+      if (isStale()) return;
       setSettlementError(lang === 'TR' ? 'Settlement isteğinde hata oluştu.' : 'Settlement request failed.');
     } finally {
-      setSettlementLoading(false);
+      if (!isStale()) setSettlementLoading(false);
     }
   }, [authenticatedFetch, lang, settlementFilters]);
 
