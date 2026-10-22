@@ -103,6 +103,9 @@ Current architectural defenses:
 - Taker entry depends on wallet age, dust threshold, cooldown, ban, and tier checks.
 - Rewards are not fixed per-trade payouts; they are pro-rata against the epoch pool.
 - Sponsors/funders cannot choose recipients or multipliers.
+- K3-02: a side whose fee paid in the terminal snapshot is 0 gets no reward weight (even with fees set to 0, zero-fee wash trades cannot drain the pool for free).
+
+Known residual risk (documented only): weight is not proportional to the fee paid; with a very low but non-zero fee and other revenue in the pool (burn, decay, sponsor funding) the weight/fee ratio can be profitable. Fee settings (`setFeeConfig`) are weighed against this risk.
 
 Operational rule:
 

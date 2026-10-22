@@ -192,7 +192,7 @@ The contract is the single authoritative V3 state machine surface. The following
 - `decayReputation(wallet)` — permissionless clean-slate (see §8.3).
 
 ### 3.4 Governance / mutable admin surface
-- `setTreasury` (zero address rejected)
+- `setTreasury` (zero address rejected; the new treasury must be a vault wired to this escrow: its `escrow()` getter must return `address(this)`, otherwise EOAs, code-less addresses, contracts without the getter or wired to another escrow revert with `TreasuryEscrowMismatch`. The initial treasury set in the constructor is not subject to this check.)
 - `setFeeConfig` (≤ 2000 bps per side)
 - `setCooldownConfig` (≤ 30 days per tier)
 - `setTokenConfig` (decimals 1–18 and equal to the token's `decimals()`; all four tier caps > 0)
@@ -203,7 +203,7 @@ Owner powers per contract (none has a timelock; detailed runbook: [GOVERNANCE_RE
 
 | Contract | Owner functions | Code bound |
 |---|---|---|
-| `ArafEscrow` | `setTreasury`, `setFeeConfig`, `setCooldownConfig`, `setTokenConfig`, `setReputationPolicy`, `setReputationTierThresholds`, `pause`/`unpause` | Fee ≤ 2000 bps; cooldown ≤ 30 days; decimals must match the token; policy bounds §8.4; pause only stops create/fill |
+| `ArafEscrow` | `setTreasury`, `setFeeConfig`, `setCooldownConfig`, `setTokenConfig`, `setReputationPolicy`, `setReputationTierThresholds`, `pause`/`unpause` | Treasury must be a vault wired to this escrow (`TreasuryEscrowMismatch`); fee ≤ 2000 bps; cooldown ≤ 30 days; decimals must match the token; policy bounds §8.4; pause only stops create/fill |
 | `ArafRevenueVault` | `setRewardBps`, `setFinalTreasury`, `setRewards` (one-shot), `setSupportedToken`, `setProductPool`, `withdrawTreasuryShare`, `withdrawTreasuryShareToFinal`, `pause`/`unpause` | `rewardBps` 4000–7000; withdrawals only from the treasury reserve; pause only stops sponsor funding |
 | `ArafRewards` | `allocateEpochRewards`, `pause`/`unpause` | Source is the vault only; recording, finalize, claim and sweep are not pausable and no recipient can be chosen |
 
@@ -376,10 +376,10 @@ stateDiagram-v2
 ### 7.1 Resolution paths after `LOCKED` and `PAID`
 - **Normal close:** maker `releaseFunds`
 - **Dispute path:** maker `pingTakerForChallenge` (at the earliest `paidAt + 24h`; before that `PingCooldownNotElapsed`) → 24h response window → `challengeTrade` (maker only). The ping is a claim: if the maker does not open the challenge within `[ping+24h, ping+48h)` (`MAKER_CHALLENGE_WINDOW` = 24h, constant), the ping **lapses**; from second `ping+48h` on, `challengeTrade` reverts with `ChallengeWindowExpired`. The maker may ping once per trade (`AlreadyPinged`).
-- **Liveness path:** taker `pingMaker` (after `paidAt + GRACE_PERIOD` = `paidAt + 48h`) → 24h → `autoRelease` (`AUTO_RELEASE_PENALTY_BPS` = 2% from both bonds). While the maker's ping is valid (before `ping+48h`) `pingMaker` reverts with `ConflictingPingPath`; it opens from the second the ping lapses. A maker who pings and goes silent therefore cannot lock a PAID trade forever. In the other direction, once the taker has called `pingMaker`, the maker's `pingTakerForChallenge` reverts with `ConflictingPingPath`.
+- **Liveness path:** taker `pingMaker` (after `paidAt + GRACE_PERIOD` = `paidAt + 48h`) → 24h → `autoRelease` (per-side cut = max(`AUTO_RELEASE_PENALTY_BPS` = 2% of its bond, that side's `releaseFunds` fee); Tier 0 included, K2-01). While the maker's ping is valid (before `ping+48h`) `pingMaker` reverts with `ConflictingPingPath`; it opens from the second the ping lapses. A maker who pings and goes silent therefore cannot lock a PAID trade forever. In the other direction, once the taker has called `pingMaker`, the maker's `pingTakerForChallenge` reverts with `ConflictingPingPath`.
 - **The maker can always release:** `releaseFunds` from `PAID` is open at any time regardless of the ping (clean release); a release from `CHALLENGED` is `DISPUTED_RELEASE` + a maker dispute loss.
 - **Mutual cancel:** each party sends its own `proposeOrApproveCancel(tradeId)` tx (no separate signature); before the second consent a party may withdraw its own consent with `revokeCancel(tradeId)` (`CancelRevoked`; `NoCancelConsent` if there is none)
-- **Payment window expiry:** `reportPayment` is only accepted before `lockedAt + PAYMENT_WINDOW` (48h) (`PaymentWindowClosed` from the boundary second). If no payment is reported within 48h of LOCKED, either party calls `expirePaymentWindow` (`PaymentWindowActive` before that); the maker is refunded in full, the taker bond pays a 2% liveness penalty and the taker gets a negative reputation signal
+- **Payment window expiry:** `reportPayment` is only accepted before `lockedAt + PAYMENT_WINDOW` (48h) (`PaymentWindowClosed` from the boundary second). If no payment is reported within 48h of LOCKED, either party calls `expirePaymentWindow` (`PaymentWindowActive` before that); the maker is refunded in full, the taker bond pays a 2% liveness penalty that goes to the maker as compensation (K1-03; not to treasury, 0 on Tier 0 since there is no bond) and the taker gets a negative reputation signal
 - **Terminal burn:** `burnExpired` once `MAX_BLEEDING` (240h) has elapsed since the challenge
 
 ### 7.2 Bleeding components
@@ -422,7 +422,7 @@ only decays for the final 96 hours, so ≈ 34.7% of it is still there to settle 
 ### 7.5 Cancel semantics
 - `proposeOrApproveCancel` consent is proven by msg.sender; consents are valid only for the state they were given in (`reportPayment` / `challengeTrade` reset them).
 - Cancel finalization requires both party approvals; a consent can be withdrawn with `revokeCancel` before that.
-- **Design note (EIP-712 cancel signature):** The previous version required an EIP-712 signature in `proposeOrApproveCancel(tradeId, deadline, sig)` (`CANCEL_TYPEHASH`, `sigNonces`, `deadline`); it was removed on 2026-09-29 by commit `f4a3298` (PR #112). Because the contract required `recovered == msg.sender`, the signature was produced by the very wallet sending the tx: relaying was impossible and the signature added no protection beyond `msg.sender` authority. The `deadline` was only checked at submission and put no time limit on the given consent; the nonce was practically inert. The protections that replaced it: consent reset in `reportPayment` and `challengeTrade` (a consent given before payment cannot be used after it) and `revokeCancel`. The unused `MAX_CANCEL_DEADLINE` constant is a leftover of that flow.
+- **Design note (EIP-712 cancel signature):** The previous version required an EIP-712 signature in `proposeOrApproveCancel(tradeId, deadline, sig)` (`CANCEL_TYPEHASH`, `sigNonces`, `deadline`); it was removed on 2026-09-29 by commit `f4a3298` (PR #112). Because the contract required `recovered == msg.sender`, the signature was produced by the very wallet sending the tx: relaying was impossible and the signature added no protection beyond `msg.sender` authority. The `deadline` was only checked at submission and put no time limit on the given consent; the nonce was practically inert. The protections that replaced it: consent reset in `reportPayment` and `challengeTrade` (a consent given before payment cannot be used after it) and `revokeCancel`. The unused `MAX_CANCEL_DEADLINE` constant left over from that flow was removed in K1-07.
 - A `LOCKED` cancel carries no fee and fully refunds both sides. On a `PAID`/`CHALLENGED` cancel each side's fee (snapshot rate × current crypto) is capped by that side's current bond; in `CHALLENGED` the decayed part also goes to treasury.
 
 ### 7.6 Settlement semantics
@@ -437,14 +437,35 @@ only decays for the final 96 hours, so ≈ 34.7% of it is still there to settle 
 |---|---|---|---|
 | `releaseFunds` (PAID) | `makerBond − makerFee` (fee capped by bond) | `crypto − takerFee + takerBond` | `takerFee + makerFee` |
 | `releaseFunds` (CHALLENGED) | same formula on current (post-decay) amounts | same | fees + decayed part |
-| `autoRelease` | `makerBond − 2%` | `crypto + takerBond − 2%` | 2% of both bonds |
-| `expirePaymentWindow` | `crypto + makerBond` | `takerBond − 2%` | 2% of the taker bond |
+| `autoRelease` | `makerBond − makerCut` | `crypto + takerBond − takerCut` | `takerCut + makerCut`; `cut = max(bond × 2%, releaseFunds fee)` (K2-01) |
+| `expirePaymentWindow` | `crypto + makerBond + takerBond × 2%` | `takerBond − 2%` | — (K1-03: penalty to maker) |
 | Mutual cancel (LOCKED) | `crypto + makerBond` | `takerBond` | — |
 | Mutual cancel (PAID/CHALLENGED) | `crypto + makerBond − makerFee` | `takerBond − takerFee` | fees (+ decayed part) |
 | `acceptSettlement` | maker gross share − maker fee | taker gross share − taker fee | fees + decayed part |
 | `burnExpired` | — | — | `crypto + makerBond + takerBond` |
 
-Fees: `takerFee = crypto × takerFeeBpsSnapshot`, `makerFee = crypto × makerFeeBpsSnapshot` (default 15 bps = 0.15%; maker fee is 0 on Tier 0 orders). If the treasury is a contract (`ArafRevenueVault`), the transfer runs as `noteEscrowRevenueIntent` → transfer → `onArafRevenue`; if the hook reverts, the whole transaction reverts with `RevenueHookFailed`.
+Fees: `takerFee = crypto × takerFeeBpsSnapshot`, `makerFee = crypto × makerFeeBpsSnapshot` (default 15 bps = 0.15%; maker fee is 0 on Tier 0 orders). If the treasury is a contract (`ArafRevenueVault`), the transfer runs as `noteEscrowRevenueIntent` → transfer → `onArafRevenue`; if the hook reverts, the whole transaction reverts with `RevenueHookFailed`. If the intent call reverted with data, the error carries that root cause as `RevenueIntentFailed(bytes reason)` (K3-09; the transaction still reverts).
+
+### 7.8 Wave 5 contract notes (2026-10-21)
+
+Behaviour changes (user-approved; require a new deployment):
+
+- **K1-06 CEI order:** on terminal paths `_recordTerminalOutcome` and the reputation write happen **before** the treasury hook and token transfers. Views read during the hook (terminal snapshot, `getReputation`, `getRewardableTrade`) now return the current value. Log order changed: `ReputationUpdated` → (`BleedingDecayed`) → `ProtocolRevenueSent` / `Transfer` → terminal event (`EscrowReleased` etc.). The backend listener does not depend on that order (events are processed by block + log index; reputation and trade handlers do not read each other).
+- **K2-01 autoRelease:** per-side cut is `max(bond × 2%, releaseFunds fee)`; the maker fee is capped by the maker bond exactly as in `releaseFunds`. A silent maker therefore no longer pushes protocol revenue below `releaseFunds` (on Tier 0 the taker fee is taken; the maker cut is 0 because the maker bond is 0).
+- **K1-03 expirePaymentWindow:** on bonded tiers the taker penalty goes to the maker whose inventory was locked instead of the treasury; no `ProtocolRevenueSent` is emitted. `PaymentWindowExpired.makerRefund` is the maker's total (inventory + bond + penalty).
+- **K3-02 reward weight:** a side whose snapshot fee is 0 gets no reward weight (`TradeOutcomeRecorded` maker/taker weights may differ).
+- **K3-04 setRewards:** only a contract with code whose `revenueVault()` getter points to this vault is accepted (`InvalidRewardsBinding`). It does not by itself stop a fake contract that mimics the getter.
+- **K3-06 liability:** `outstandingExternalFunding[token]` (grows on sponsor funding, shrinks as `transferEpochAllocation` pays it out) is counted as liability in the `onArafRevenue` invariant; sponsor balances can no longer mask a shortfall.
+- **K3-07:** when an expired proposal that still reads PROPOSED is overwritten, `SettlementExpired` is emitted for the old id first.
+- **K2-07 / K2-08 / K1-07:** zero treasury/token reverts with `ZeroAddress()`; `setTokenConfig` additionally emits `TokenLimitsUpdated(token, decimals, tierMaxAmountsBaseUnit[4])` (`TokenConfigUpdated` keeps its signature); the unused `MAX_CANCEL_DEADLINE` and `MIN_SETTLEMENT_EXPIRY` were removed from the escrow (single source: `ArafSettlementLib`). `TradeState.OPEN` is never assigned and stays for ABI compatibility.
+
+Documented only (contract unchanged):
+
+- **K2-04 `burnExpired` front-run:** after `challengedAt + MAX_BLEEDING`, while the state is still CHALLENGED, `releaseFunds`, cancel and `acceptSettlement` remain valid; at that point ≈34.7% of the crypto, ≈50% of the maker bond and ≈19% of the taker bond are still recoverable. The permissionless `burnExpired` can front-run a late settlement seen in the mempool and send everything to the treasury. The attacker gains nothing (griefing; in the treasury's favour). Decision: unchanged; burn is the time-based final exit. Parties should settle before `MAX_BLEEDING` elapses.
+- **K1-05 / K2-05 cancel fee label:** a `PAID` cancel fee is emitted as `ProtocolRevenueSent.kind = MANUAL_RELEASE_FEE`, a `CHALLENGED` cancel fee as `DISPUTED_RELEASE_FEE`; `RevenueKind` has no cancel kind. To separate cancel revenue from release revenue, join `tradeId` with the terminal snapshot (`getRewardableTrade(...).outcome == MUTUAL_CANCEL`).
+- **K2-06 fee base:** `acceptSettlement` charges fees on the gross shares of the settlement pool (crypto + both bonds) without a cap; `releaseFunds` and cancel charge on the crypto only and cap the maker fee by the maker bond. On Tier 0 the maker therefore pays no fee on release but does on settlement. Conservation holds.
+- **K2-11 snapshot fee fields:** for `AUTO_RELEASE` the terminal snapshot `takerFeePaid`/`makerFeePaid` are the cut amounts (at least the release fee since K2-01). For `PAYMENT_WINDOW_EXPIRED`, `takerFeePaid` is no longer protocol revenue; it shows the penalty paid to the maker (`takerBond × 2%`, K1-03), and no `ProtocolRevenueSent`/`EscrowRevenueReceived` is emitted on this path. The reward engine gives both outcomes a 0 multiplier, so weight is unaffected. The backend does not count this field as revenue: escrow revenue rows (`RevenueEvent`) are written only by the `ProtocolRevenueSent`/`EscrowRevenueReceived` handlers, `getRewardableTrade` is read only for the outcome class (`resolution_type`), and the `PaymentWindowExpired` handler only marks the trade `CANCELED`.
+- **K3-05 permissionless finalize:** `finalizeEpochToken` is open to anyone from `recordingDeadline` (epoch end + 24h); a later `allocateEpochRewards` reverts with `EpochTokenFinalized` (no loss of funds; the reserve stays put). Operating rule: allocate before the epoch ends.
 
 ---
 
@@ -490,7 +511,7 @@ flowchart TD
 - **Ban:** after a negative signal, if `riskPoints ≥ banRiskPointsThreshold` (**100**): when the user is not currently banned, `consecutiveBans`+1 and the ban lasts `baseBanDuration × 2^(consecutiveBans−1)` (**30 days**, 60, 120 …, at most **365 days**). Under the same condition the tier ceiling drops one step every time (the first penalty seeds it at 4 and lowers it to 3).
 - **Ban effect:** taker entry (`TakerBanActive`) and maker roles (`MakerBanActive`: opening a sell order, having one's sell order filled, filling a buy order) are closed. Exit paths of open trades stay available.
 - **Bond pricing:** with `riskPoints == 0` and at least one success the bond rate drops by 100 bps; with `riskPoints > 0` it rises by 300 bps (Tier 0 bond is always 0).
-- **Clean-slate:** `decayReputation(wallet)` is permissionless; conditions: ban history exists (`NoPriorBanHistory`), `now > bannedUntil + cleanPeriod` (`CleanPeriodNotElapsed`), `consecutiveBans > 0` (`NoBansToReset`). Current `cleanPeriod`: **90 days**. It resets `consecutiveBans`, `riskPoints`, and the tier ceiling (back to 4). Not full amnesty: `failedDisputes`, outcome counters and `bannedUntil` are not erased.
+- **Clean-slate:** `decayReputation(wallet)` is permissionless; conditions: ban history exists (`NoPriorBanHistory`), `now > bannedUntil + cleanPeriod` and `now > lastNegativeEventAt + cleanPeriod` (both `CleanPeriodNotElapsed`), `consecutiveBans > 0` (`NoBansToReset`). Forgiveness therefore needs a full clean period after both the ban end and the last negative event; risk accumulated after the ban is not forgiven until a full clean period has elapsed since the last negative event (K3-01, 2026-10-21). Known limitation: a wallet that was never banned cannot call `decayReputation` (`NoPriorBanHistory`); its `riskPoints` only go down through positive signals. The perverse incentive (a banned wallet reaching full forgiveness faster) is narrowed but not closed. The backend decay job only sends txs for candidates that meet this rule; the contract decides. Current `cleanPeriod`: **90 days**. It resets `consecutiveBans`, `riskPoints`, and the tier ceiling (back to 4). Not full amnesty: `failedDisputes`, outcome counters and `bannedUntil` are not erased.
 - The backend `reputationDecay` job can trigger this call for candidate wallets after reading the contract's `getReputation()` / `cleanPeriod()` (optional `RELAYER_PRIVATE_KEY`); the decision stays in the contract.
 
 ### 8.4 Policy bounds (`setReputationPolicy` / `setReputationTierThresholds`)
@@ -669,7 +690,7 @@ Worker consumes contract events and updates Mongo without becoming authority.
 Child-trade authority is mirrored through explicit event + getter linkage rather than heuristics. The contract never emits `EscrowCreated` / `EscrowLocked`; the mirror is created as `LOCKED` on `OrderFilled`, and the one-shot payout snapshot is taken in the same step (§12.4.1).
 
 ### 11.6.1 Mirrored events and terminal counter
-- Escrow events: orders (`OrderCreated/Filled/Canceled`), trade lifecycle (`PaymentReported`, `EscrowReleased`, `DisputeOpened`, `MakerPinged`, `CancelProposed`, `CancelRevoked`, `EscrowCanceled`, `PaymentWindowExpired`, `BleedingDecayed`, `EscrowBurned`), settlement (`SettlementProposed/Rejected/Withdrawn/Expired/Finalized`), reputation/config (`ReputationUpdated`, `FeeConfigUpdated`, `CooldownConfigUpdated`, `TokenConfigUpdated`, `ReputationPolicyUpdated`, `ReputationTierThresholdsUpdated`), `WalletRegistered`, `ProtocolRevenueSent`. Vault events (`EscrowRevenueReceived`, `ExternalRewardFunded`, `ProductRewardFunded`) are read separately from the vault address.
+- Escrow events: orders (`OrderCreated/Filled/Canceled`), trade lifecycle (`PaymentReported`, `EscrowReleased`, `DisputeOpened`, `MakerPinged`, `CancelProposed`, `CancelRevoked`, `EscrowCanceled`, `PaymentWindowExpired`, `BleedingDecayed`, `EscrowBurned`), settlement (`SettlementProposed/Rejected/Withdrawn/Expired/Finalized`), reputation/config (`ReputationUpdated`, `FeeConfigUpdated`, `CooldownConfigUpdated`, `TokenConfigUpdated`, `TokenLimitsUpdated`, `ReputationPolicyUpdated`, `ReputationTierThresholdsUpdated`), `WalletRegistered`, `ProtocolRevenueSent`. Vault events (`EscrowRevenueReceived`, `ExternalRewardFunded`, `ProductRewardFunded`) are read separately from the vault address.
 - `CancelRevoked` clears the revoking party's consent flag in `cancel_proposal`; a missing mirror sends the event to retry/DLQ.
 - Manual vs auto release is read from the contract's terminal snapshot (`getRewardableTrade`), never inferred; a read error writes no permanent "UNKNOWN" and the event goes to retry/DLQ.
 - The terminal transition (`resolved_at` marker) is applied once per trade and writes a **permanent terminal counter** row (`TerminalTradeStat`, unique `trade_key`) in the same operation, so stats survive the Trade document's 1-year TTL.
@@ -1010,7 +1031,11 @@ Frontend does not replace contract enforcement; it is a guardrail/orchestration 
 | Maker pings and goes silent to hold a PAID trade hostage | The ping lapses at `ping+48h` (`MAKER_CHALLENGE_WINDOW`); the taker uses `pingMaker` → `autoRelease` |
 | Bond-free (Tier 0) taker holding a LOCKED trade hostage | `PAYMENT_WINDOW` (48h) + `expirePaymentWindow`; `reportPayment` reverts with `PaymentWindowClosed` afterwards |
 | Settlement split changed right before acceptance | `acceptSettlement(tradeId, expectedProposalId)`; mismatch reverts with `SettlementProposalMismatch` |
-| Owner repoints rewards to drain the reward reserve | `ArafRevenueVault.setRewards` is one-shot (`RewardsAlreadySet`) |
+| Paid exits halted by a misconfigured treasury (`RevenueHookFailed`) | `setTreasury` only accepts a vault whose `escrow()` getter points at this escrow (`TreasuryEscrowMismatch`). Not full protection against a malicious owner: it can still wire a contract to this escrow whose hook reverts; there is no timelock. |
+| Owner repoints rewards to drain the reward reserve | `ArafRevenueVault.setRewards` is one-shot (`RewardsAlreadySet`) and only accepts a contract whose `revenueVault()` points to this vault (`InvalidRewardsBinding`, K3-04; an EOA is rejected on the first assignment, not a full guarantee against a fake contract mimicking the getter) |
+| Sponsor funding masks a vault balance shortfall | `outstandingExternalFunding` is counted in the `onArafRevenue` liability (K3-06) |
+| Zero-fee wash trading drains the reward pool | A side whose paid fee is 0 gets weight 0 (K3-02). Arbitrage with a very low (non-zero) fee is a documented residual risk |
+| `autoRelease` leaves less fee than `releaseFunds` when the maker is silent | Per-side cut is at least the release fee (K2-01) |
 | Wrong token decimals corrupting tier caps / reward notional | `setTokenConfig` verifies the token's `decimals()` on-chain (`InvalidDecimals`) |
 | Decayed value locked forever in the escrow on burn | `burnExpired` sends the trade's full balance to treasury |
 | Filling the order of an owner penalized after create | The owner's ban and effective tier are re-checked at fill time |
@@ -1025,6 +1050,8 @@ Frontend does not replace contract enforcement; it is a guardrail/orchestration 
 | Risk | Description |
 |---|---|
 | Governance key risk | mutable fee/cooldown/token config/reputation policy/treasury surfaces remain owner-controlled without a timelock and require multisig/ops discipline. |
+| Blacklisted party (K1-01) | Payouts are pushed directly; if a party is put on the token's blacklist, a LOCKED Tier≥1 trade has no exit until the blacklist is lifted. By user decision (2026-10-21) no withdrawable (pull) balance was added. |
+| Decay perverse incentive (remaining after K3-01) | A never-banned wallet cannot call `decayReputation` (`NoPriorBanHistory`) and its `riskPoints` only go down through positive signals, while a banned wallet gets a `riskPoints` reset after the clean period. The last-negative-event condition narrows the gap but does not close it (§8.3). |
 | `renounceOwnership` | The inherited `Ownable` function is not disabled; calling it locks owner surfaces (pause included) permanently. |
 | Fake receipt / off-chain payment ambiguity | encrypted receipt + hash trace raises fraud cost but cannot cryptographically prove fiat transfer truth. |
 | Chargeback reality | banking reversals/disputes can make off-chain finality differ from on-chain expectations. |

@@ -82,4 +82,12 @@ interface IArafEscrowErrors {
     error NoCancelConsent();
     // K2(B): maker challenge penceresini kaçırdı, ping düştü / maker missed the challenge window, the ping lapsed.
     error ChallengeWindowExpired();
+    // [TR] K1-02: setTreasury yalnız bu escrow'a bağlı vault'u kabul eder (vault.escrow() == address(this)).
+    // [EN] K1-02: setTreasury only accepts a vault wired to this escrow (vault.escrow() == address(this)).
+    error TreasuryEscrowMismatch(address treasury);
+    // [TR] K2-07: sıfır treasury/token adresi (eskiden yanıltıcı OwnableInvalidOwner). [EN] K2-07: zero treasury/token address.
+    error ZeroAddress();
+    // [TR] K3-09: treasury intent çağrısı nedenli revert etti ve hook da başarısız oldu; kök neden intent revert verisidir.
+    // [EN] K3-09: the treasury intent call reverted with data and the hook failed too; the root cause is that data.
+    error RevenueIntentFailed(bytes reason);
 }

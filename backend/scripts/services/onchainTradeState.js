@@ -5,10 +5,11 @@
  *
  * [TR] PII kararı Mongo mirror'ına ek olarak zincirdeki gerçek state ile de doğrulanır: trade zincirde
  *      kapanmış ama event henüz mirror edilmemişse PII açılmaz. Yük bindirmemek için sonuçlar kısa süre
- *      önbelleğe alınır; RPC erişilemezse karar mirror'a bırakılır (aktif trade'de PII kilitlenmesin).
+ *      önbelleğe alınır; RPC erişilemezse null döner. routes/pii.js production'da null'ı reddeder (fail-closed,
+ *      B4-13); geliştirme/testte karar mirror'a bırakılır.
  * [EN] PII decisions are checked against the real on-chain state in addition to the Mongo mirror: a trade
  *      closed on-chain but not yet mirrored does not reveal PII. Results are cached briefly to avoid load;
- *      if the RPC is unreachable the mirror decides (so PII never locks up during an active trade).
+ *      if the RPC is unreachable it returns null; the PII route denies on null in production (fail-closed), elsewhere the mirror decides.
  */
 
 const { ethers } = require("ethers");
@@ -66,7 +67,7 @@ async function isTradeActiveOnChain(onchainId, { reader = getContract(), now = D
     cache.set(id, { active, expiresAt: now + (active ? ACTIVE_TTL_MS : TERMINAL_TTL_MS) });
     return active;
   } catch (err) {
-    logger.warn(`[PII] on-chain state okunamadı (#${id}), mirror kararı geçerli: ${err.message}`);
+    logger.warn(`[PII] on-chain state okunamadı (#${id}), null döner (production'da PII reddedilir): ${err.message}`);
     return null;
   }
 }

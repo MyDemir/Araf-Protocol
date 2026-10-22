@@ -43,8 +43,9 @@ describe("ArafRewards dust sweep claim window", function () {
       taker,
       token: "0x0000000000000000000000000000000000000001",
       stableNotional: ethers.parseUnits("100", DECIMALS),
-      takerFeePaid: 0,
-      makerFeePaid: 0,
+      // [TR] K3-02: ücret ödeyen taraf ağırlık alır. [EN] K3-02: only a fee-paying side is weighted.
+      takerFeePaid: 1,
+      makerFeePaid: 1,
       tier: 1,
       outcome: OUTCOME.CLEAN_RELEASE,
       lockedAt: paidAt - 60,

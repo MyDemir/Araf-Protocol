@@ -16,15 +16,17 @@
  * const { releaseFunds, proposeOrApproveCancel } = useArafContract();
  */
 
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { usePublicClient, useWalletClient, useChainId, useAccount } from 'wagmi';
 import { parseAbi, getAddress, decodeEventLog } from 'viem';
 import { resolveClientErrorLogUrl } from '../app/apiConfig';
 import { setMakerChallengeWindowMs } from '../app/contexts/trade-room/tradeTimeline';
 import { getSupportedChainsMap, isConfiguredTestToken, isFaucetChainId, isMintTokenEnabled } from '../app/chainPolicy';
-import { ARAF_CONTRACT_ERROR_ABI, decorateContractError } from '../app/contractErrors';
+import { ARAF_CONTRACT_ERROR_ABI, decorateContractError, RECEIPT_UNCERTAIN_NAMES, describeContractErrorName, extractContractErrorName } from '../app/contractErrors';
 import { diagnoseWriteError, applyDiagnosis, stripAddresses, isUserRejection } from '../app/walletRpcDiagnosis';
 import { addKnownTradeIds } from '../app/knownTrades';
+import { safeStorage } from '../app/safeStorage';
+import { prepareTxParams } from '../app/txGasFee';
 
 const ArafEscrowABI = parseAbi([
   'function registerWallet()',
@@ -332,7 +334,8 @@ export function useArafContract({ expectedChainId = null } = {}) {
   const account = useAccount();
   // [TR] Cüzdan bağlı değilse (chainId yok) config zincirine düşülür; yazma zaten walletClient ister.
   const chainId = account?.chainId ?? configChainId;
-  const supportedChains = getSupportedChainsMap();
+  // [TR] F2-13: getSupportedChainsMap her çağrıda yeni nesne üretir; memoize edilmezse writeContract ve türevleri her render'da değişir.
+  const supportedChains = useMemo(() => getSupportedChainsMap(), []);
   // [TR] Bilinen işlem kaydının zincir anahtarı: tx'in gönderildiği cüzdan zinciri (App/useAppSessionData ile aynı kaynak).
   const knownTradesChainId = chainId;
   const accountAddress = account?.address ?? null;
@@ -389,6 +392,11 @@ export function useArafContract({ expectedChainId = null } = {}) {
       // İşlem göndermeden önce tüm kontrolleri yap
       preflightChecks();
 
+      const txParams = await prepareTxParams({
+        publicClient, account: walletClient.account?.address,
+        address: getAddress(ESCROW_ADDRESS), abi: ArafEscrowABI, functionName, args,
+      });
+
       writeAttempted = true;
       const hash = await walletClient.writeContract({
         //Adresin geçerli ve checksum formatında olduğundan emin ol.
@@ -396,38 +404,56 @@ export function useArafContract({ expectedChainId = null } = {}) {
         abi:     ArafEscrowABI,
         functionName,
         args,
+        ...txParams,
       });
 
       submittedHash = hash;
       // [TR] Pending tx hash'ini sakla — sayfa yenilense bile işlem izi kaybolmasın
       // [EN] Persist pending tx hash so refresh does not lose transaction trace
-      if (typeof window !== "undefined") {
-        localStorage.setItem("araf_pending_tx", JSON.stringify({
-          hash,
-          functionName,
-          createdAt: Date.now(),
-          chainId,
-          escrow: getAddress(ESCROW_ADDRESS),
-        }));
-      }
+      // [TR] Depolama hatası başarılı gönderimi hataya çevirmez (safeStorage asla fırlatmaz).
+      safeStorage.set("araf_pending_tx", JSON.stringify({
+        hash,
+        functionName,
+        createdAt: Date.now(),
+        chainId,
+        escrow: getAddress(ESCROW_ADDRESS),
+      }));
 
       // İşlem onayını bekle
       const receipt = await publicClient.waitForTransactionReceipt({ hash });
-      if (typeof window !== "undefined") {
-        localStorage.removeItem("araf_pending_tx");
+      safeStorage.remove("araf_pending_tx");
+      try {
+        return assertReceiptSucceeded(receipt, functionName);
+      } catch (revertErr) {
+        // [TR] F2-21: zincirde revert olan tx'in nedeni, blok öncesi durumda simülasyonla çıkarılır (yalnız teşhis).
+        try {
+          if (receipt?.blockNumber && typeof publicClient.simulateContract === 'function') {
+            await publicClient.simulateContract({
+              account: walletClient.account?.address, address: getAddress(ESCROW_ADDRESS), abi: ArafEscrowABI,
+              functionName, args, blockNumber: BigInt(receipt.blockNumber) - 1n,
+            });
+          }
+        } catch (simError) {
+          const name = extractContractErrorName(simError);
+          if (name) {
+            revertErr.arafErrorName = name;
+            const friendly = describeContractErrorName(name);
+            if (friendly) revertErr.shortMessage = friendly;
+          }
+        }
+        throw revertErr;
       }
-      return assertReceiptSucceeded(receipt, functionName);
     } catch (error) {
       // [TR] Kesin başarısız olan işlemin izi silinir; aksi halde yenilemede "bekleyen işlem onaylandı" kurtarması
       //      başarısız işlemi de başarı gibi gösterirdi. Yalnız bu çağrının kaydı silinir; sonucu belirsiz
       //      (zaman aşımı) işlemler kurtarma için saklanır.
       // [EN] Definitively failed txs drop their pending record; timeouts keep it (outcome unknown).
-      if (submittedHash && typeof window !== "undefined" && !/Timeout|NotFound/i.test(String(error?.name || ''))) {
+      if (submittedHash && !RECEIPT_UNCERTAIN_NAMES.test(String(error?.name || ''))) {
         try {
-          const stored = JSON.parse(localStorage.getItem("araf_pending_tx") || 'null');
-          if (stored?.hash === submittedHash) localStorage.removeItem("araf_pending_tx");
+          const stored = JSON.parse(safeStorage.get("araf_pending_tx") || 'null');
+          if (stored?.hash === submittedHash) safeStorage.remove("araf_pending_tx");
         } catch {
-          localStorage.removeItem("araf_pending_tx");
+          safeStorage.remove("araf_pending_tx");
         }
       }
       decorateContractError(error);
@@ -452,7 +478,7 @@ export function useArafContract({ expectedChainId = null } = {}) {
       // [TR] Kullanıcı cüzdanda reddettiyse hata değildir: backend'e log gönderilmez.
       // [EN] Wallet rejection is not an error: nothing is sent to the backend.
       const logUrl = resolveClientErrorLogUrl();
-      if (!isUserRejection(error)) fetch(logUrl, {
+      if (!isUserRejection(error) && !error?.arafPreflight) fetch(logUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -610,11 +636,17 @@ export function useArafContract({ expectedChainId = null } = {}) {
     if (!_isValidAddress) throw new Error("VITE_ESCROW_ADDRESS tanımlı değil.");
 
     try {
+      const approveArgs = [getAddress(ESCROW_ADDRESS), amount];
+      const txParams = await prepareTxParams({
+        publicClient, account: walletClient.account?.address,
+        address: getAddress(tokenAddress), abi: ERC20_ABI, functionName: 'approve', args: approveArgs,
+      });
       const hash = await walletClient.writeContract({
         address: getAddress(tokenAddress),
         abi: ERC20_ABI,
         functionName: 'approve',
-        args: [getAddress(ESCROW_ADDRESS), amount],
+        args: approveArgs,
+        ...txParams,
       });
       return assertReceiptSucceeded(await publicClient.waitForTransactionReceipt({ hash }), 'approve');
     } catch (error) {
@@ -622,7 +654,7 @@ export function useArafContract({ expectedChainId = null } = {}) {
       // Token Onayı iptallerini backend'e logla
       const errorMessage = error.shortMessage || error.message || "Bilinmeyen Onay Hatası";
       const logUrl = resolveClientErrorLogUrl();
-      if (!isUserRejection(error)) fetch(logUrl, {
+      if (!isUserRejection(error) && !error?.arafPreflight) fetch(logUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -653,17 +685,23 @@ export function useArafContract({ expectedChainId = null } = {}) {
     _validateChain();
     
     try {
+      const mintAbi = parseAbi(['function mint()']); // Sabit parametresiz mint işlemi
+      const txParams = await prepareTxParams({
+        publicClient, account: walletClient.account?.address,
+        address: getAddress(tokenAddress), abi: mintAbi, functionName: 'mint', args: [],
+      });
       const hash = await walletClient.writeContract({
         address: getAddress(tokenAddress),
-        abi: parseAbi(['function mint()']), // Sabit parametresiz mint işlemi
+        abi: mintAbi,
         functionName: 'mint',
+        ...txParams,
       });
       return assertReceiptSucceeded(await publicClient.waitForTransactionReceipt({ hash }), 'mint');
     } catch (error) {
        // Faucet iptallerini backend'e logla
        const errorMessage = error.shortMessage || error.message || "Bilinmeyen Faucet Hatası";
        const logUrl = resolveClientErrorLogUrl();
-       if (!isUserRejection(error)) fetch(logUrl, {
+       if (!isUserRejection(error) && !error?.arafPreflight) fetch(logUrl, {
          method: 'POST',
          headers: { 'Content-Type': 'application/json' },
          body: JSON.stringify({

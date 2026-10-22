@@ -25,6 +25,44 @@ function WalletSheet({ title, closeLabel, note, onClose, children }) {
   );
 }
 
+// [TR] F3-09: Form içeren modal kabuğu: dialog semantiği, Esc ile kapanma, odak panele taşınır, Tab panel içinde döner,
+//      kapanınca odak açana döner. Arka plana tıklama KAPATMAZ (doldurulmuş form kaybolmasın).
+// [EN] F3-09: shell for form modals: dialog semantics, Esc closes, focus moves in and is trapped, restored on close.
+//      Backdrop click does NOT close it (a half-filled form must not be lost).
+const DIALOG_FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+function DialogShell({ onClose, labelledBy, testId, outerClassName, innerClassName, children }) {
+  const panelRef = React.useRef(null);
+  const onCloseRef = React.useRef(onClose);
+  React.useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+  React.useEffect(() => {
+    const opener = typeof document !== 'undefined' ? document.activeElement : null;
+    panelRef.current?.focus({ preventScroll: true });
+    const onKey = (e) => { if (e.key === 'Escape' && !e.defaultPrevented) onCloseRef.current?.(); };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      if (opener && opener !== document.body && opener.isConnected) opener.focus?.({ preventScroll: true });
+    };
+  }, []);
+  const onTrapKey = (e) => {
+    if (e.key !== 'Tab' || !panelRef.current) return;
+    const items = [...panelRef.current.querySelectorAll(DIALOG_FOCUSABLE)].filter((el) => !el.closest('[aria-hidden="true"]'));
+    if (!items.length) { e.preventDefault(); return; }
+    const first = items[0];
+    const last = items[items.length - 1];
+    const active = document.activeElement;
+    if (e.shiftKey && (active === first || active === panelRef.current)) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
+  };
+  return (
+    <div className={outerClassName} role="dialog" aria-modal="true" aria-labelledby={labelledBy} onKeyDown={onTrapKey}>
+      <div ref={panelRef} tabIndex={-1} className={`${innerClassName} outline-none`} data-testid={testId}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 function TermsModal({ lang = 'EN', onAcceptTerms, onDeclineTerms }) {
   const isTR = lang === 'TR';
   const acks = TERMS_ACKNOWLEDGEMENTS[isTR ? 'TR' : 'EN'];
@@ -318,10 +356,15 @@ export const buildAppModals = (ctx) => {
     const seg = (active) => `flex-1 h-9 rounded-lg text-sm font-semibold transition ${active ? 'bg-surface text-textPrimary shadow-sm' : 'text-textMuted hover:text-textPrimary'} disabled:opacity-40 disabled:cursor-not-allowed`;
 
     return (
-      <div className="fixed inset-0 max-w-full overflow-x-hidden bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center sm:p-4 safe-area-x z-[100]">
-        <div className="bg-surface border border-borderSubtle rounded-t-3xl sm:rounded-2xl p-5 sm:p-6 w-full max-w-md shadow-2xl max-h-[calc(100dvh_-_1rem_-_env(safe-area-inset-top))] overflow-x-hidden overflow-y-auto overscroll-contain" data-testid="maker-modal">
+      <DialogShell
+        onClose={() => setShowMakerModal(false)}
+        labelledBy="maker-modal-title"
+        testId="maker-modal"
+        outerClassName="fixed inset-0 max-w-full overflow-x-hidden bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center sm:p-4 safe-area-x z-[100]"
+        innerClassName="bg-surface border border-borderSubtle rounded-t-3xl sm:rounded-2xl p-5 sm:p-6 w-full max-w-md shadow-2xl max-h-[calc(100dvh_-_1rem_-_env(safe-area-inset-top))] overflow-x-hidden overflow-y-auto overscroll-contain"
+      >
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-bold text-textPrimary">{lang === 'TR' ? 'Emir oluştur' : 'Create order'}</h2>
+            <h2 id="maker-modal-title" className="text-lg font-bold text-textPrimary">{lang === 'TR' ? 'Emir oluştur' : 'Create order'}</h2>
             <button onClick={() => setShowMakerModal(false)} aria-label={tr ? 'Kapat' : 'Close'} className="w-9 h-9 -mr-2 flex items-center justify-center rounded-lg text-textMuted hover:text-textPrimary hover:bg-elevated"><X className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" /></button>
           </div>
 
@@ -461,8 +504,7 @@ export const buildAppModals = (ctx) => {
             </button>
             <p className="text-[11px] text-textMuted text-center">{tr ? 'Cüzdanınız önce token onayı (approve), ardından emir işlemini ister.' : 'Your wallet will ask for a token approval, then the order transaction.'}</p>
           </div>
-        </div>
-      </div>
+      </DialogShell>
     );
   };
 

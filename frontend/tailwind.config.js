@@ -1,9 +1,19 @@
+import { loadEnv } from 'vite';
+
+// [TR] E1-09: UI Lab sınıfları yalnız geliştirmede ya da VITE_ENABLE_UI_LAB=true build'de CSS'e girer
+//      (src/app/uiLab.js ile aynı koşul); normal production CSS'i lab utility'lerini taşımaz.
+// [EN] UI Lab classes only reach the CSS in dev or a VITE_ENABLE_UI_LAB=true build (same gate as uiLab.js).
+const isProd = process.env.NODE_ENV === 'production';
+const labFlag = process.env.VITE_ENABLE_UI_LAB
+  ?? loadEnv(isProd ? 'production' : 'development', process.cwd(), 'VITE_').VITE_ENABLE_UI_LAB;
+const includeUiLab = !isProd || String(labFlag || '').toLowerCase() === 'true';
+
 /** @type {import('tailwindcss').Config} */
 export default {
   content: [
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
-    "../test/ui-lab/**/*.{js,jsx}",
+    ...(includeUiLab ? ["../test/ui-lab/**/*.{js,jsx}"] : []),
   ],
   theme: {
     extend: {

@@ -35,6 +35,14 @@ export default function AdminRuntimeSettingsPanel({ lang = 'EN', authenticatedFe
   const [pending, setPending] = React.useState(null); // { setting, value (number|null = reset) }
   const [reason, setReason] = React.useState('');
   const [saving, setSaving] = React.useState(false);
+  // [TR] lang ve taslak durumu ref'te: dil değişimi yeniden yüklemeyi tetiklemez, kirli taslak ezilmez (F4-03).
+  // [EN] lang and dirty state live in refs: a language switch never reloads, and a dirty draft is never overwritten.
+  const langRef = React.useRef(lang);
+  langRef.current = lang;
+  const draftsRef = React.useRef(drafts);
+  draftsRef.current = drafts;
+  const baselineRef = React.useRef('{}');
+  const firstLoadRef = React.useRef(true);
   const [conflict, setConflict] = React.useState(false);
 
   const loadAudit = React.useCallback(async (page = 1) => {
@@ -51,7 +59,7 @@ export default function AdminRuntimeSettingsPanel({ lang = 'EN', authenticatedFe
     } catch { /* audit listesi ikincil; sessiz */ }
   }, [authenticatedFetch]);
 
-  const load = React.useCallback(async () => {
+  const load = React.useCallback(async ({ force = false } = {}) => {
     setState((s) => ({ ...s, loading: true, error: '' }));
     try {
       const res = await authenticatedFetch(buildApiUrl('admin/runtime-settings'), { suppressAuthToast: true });
@@ -59,17 +67,23 @@ export default function AdminRuntimeSettingsPanel({ lang = 'EN', authenticatedFe
       if (!res.ok) throw new Error('bad_status');
       const data = await res.json();
       const settings = Array.isArray(data?.settings) ? data.settings : [];
+      if (!force && JSON.stringify(draftsRef.current) !== baselineRef.current) {
+        setState((s) => ({ ...s, loading: false }));
+        return;
+      }
       setState({ loading: false, error: '', unauthorized: false, settings, version: Number(data?.version) || 0, degraded: data?.degraded === true });
-      setDrafts(Object.fromEntries(settings.map((s) => [s.key, String(s.value)])));
+      const nextDrafts = Object.fromEntries(settings.map((s) => [s.key, String(s.value)]));
+      baselineRef.current = JSON.stringify(nextDrafts);
+      setDrafts(nextDrafts);
       setFieldErrors({});
       setConflict(false);
       loadAudit(1);
     } catch {
-      setState((s) => ({ ...s, loading: false, error: t(lang, 'Çalışma ayarları alınamadı.', 'Failed to load runtime settings.') }));
+      setState((s) => ({ ...s, loading: false, error: t(langRef.current, 'Çalışma ayarları alınamadı.', 'Failed to load runtime settings.') }));
     }
-  }, [authenticatedFetch, lang, loadAudit]);
+  }, [authenticatedFetch, loadAudit]);
 
-  React.useEffect(() => { load(); }, [load]);
+  React.useEffect(() => { const force = firstLoadRef.current; firstLoadRef.current = false; load({ force }); }, [load]);
 
   const closeDialog = () => { if (!saving) { setPending(null); setReason(''); } };
 
@@ -103,7 +117,7 @@ export default function AdminRuntimeSettingsPanel({ lang = 'EN', authenticatedFe
         showToast(t(lang, 'Ayar güncellendi. Sonraki turdan itibaren geçerli.', 'Setting updated. Applies from the next round.'), 'success');
         setPending(null);
         setReason('');
-        await load();
+        await load({ force: true });
       } else if (res.status === 409) {
         setPending(null);
         setReason('');
@@ -163,7 +177,7 @@ export default function AdminRuntimeSettingsPanel({ lang = 'EN', authenticatedFe
               'Ayarlar başka bir yönetici tarafından değiştirilmiş. Değişikliğiniz kaydedilmedi; güncel değerleri yenileyin.',
               'Settings were changed by another admin. Your change was not saved; refresh to see the current values.')}
           </p>
-          <button type="button" onClick={load} className="min-h-[44px] px-4 rounded-lg border border-borderStrong text-sm font-semibold text-textPrimary">
+          <button type="button" onClick={() => load({ force: true })} className="min-h-[44px] px-4 rounded-lg border border-borderStrong text-sm font-semibold text-textPrimary">
             {t(lang, 'Yenile', 'Refresh')}
           </button>
         </div>

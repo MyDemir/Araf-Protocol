@@ -19,14 +19,17 @@
 
 const express = require("express");
 const Joi = require("joi");
+const { asyncHandler } = require("../utils/asyncHandler");
 const router = express.Router();
-
 const crypto = require("crypto");
 const { SiweMessage } = require("siwe");
 const { authLimiter, nonceLimiter } = require("../middleware/rateLimiter");
 const { ACCEPTED_TERMS_VERSIONS, CURRENT_TERMS_VERSION, parseTermsAcceptance } = require("../config/terms");
 const TermsAcceptance = require("../models/TermsAcceptance");
-const { requireAuth, requireSessionWalletMatch } = require("../middleware/auth");
+const { requireAuth: _requireAuth, requireSessionWalletMatch: _requireSessionWalletMatch } = require("../middleware/auth");
+// [TR] B2-17: async auth middleware'leri de reddi next(err)'e iletecek şekilde sarılır.
+const requireAuth = asyncHandler(_requireAuth);
+const requireSessionWalletMatch = asyncHandler(_requireSessionWalletMatch);
 const { isAdminWallet } = require("../utils/adminWallets");
 const { isRailEnabled, isRailEnabledStrict } = require("../services/paymentRails");
 const {
@@ -61,6 +64,11 @@ const COOKIE_OPTIONS_BASE = {
 };
 
 const ACTIVE_TRADE_STATUSES_FOR_BANK_PROFILE_LOCK = ["LOCKED", "PAID", "CHALLENGED"];
+// [TR] B2-23: set ve clearCookie aynı secure niteliğini kullanır.
+function _cookieSecure() {
+  return process.env.NODE_ENV === "production";
+}
+
 function _getJwtCookieOptions() {
   return {
     ...COOKIE_OPTIONS_BASE,
@@ -210,7 +218,7 @@ const PROFILE_SCHEMA = Joi.object({
       account_holder_name: Joi.string()
         .min(2)
         .max(100)
-        .pattern(/^[A-Za-zÀ-ÖØ-öø-ÿĀ-žĞğİıŞşÇçÑñŒœȘșȚțŽž\s.'’\-]+$/, "geçerli isim karakterleri")
+        .pattern(/^[A-Za-zÀ-ÖØ-öø-ÿĀ-žĞğİıŞşÇçÑñŒœȘșȚțŽž\s.'’-]+$/, "geçerli isim karakterleri")
         .required()
         .messages({
           "string.pattern.name": "Hesap sahibi adı harf, boşluk, apostrof, nokta ve tire içerebilir.",
@@ -288,11 +296,12 @@ function _isExpectedAuthError(err) {
  * GET /api/auth/nonce?wallet=0x...
  * Nonce üretir ve SIWE config bilgisini döndürür.
  */
-router.get("/nonce", authLimiter, nonceLimiter, async (req, res, next) => {
+router.get("/nonce", authLimiter, nonceLimiter, asyncHandler(async (req, res, next) => {
   try {
     const { wallet } = req.query;
 
-    if (!wallet || !/^0x[a-fA-F0-9]{40}$/.test(wallet)) {
+    // B2-08: qs ile wallet[]=... dizi/nesne olabilir; yalnız string kabul edilir.
+    if (typeof wallet !== "string" || !/^0x[a-fA-F0-9]{40}$/.test(wallet)) {
       return res.status(400).json({ error: "Geçerli bir Ethereum adresi gir." });
     }
 
@@ -302,17 +311,19 @@ router.get("/nonce", authLimiter, nonceLimiter, async (req, res, next) => {
     return res.json({ nonce, siweDomain, siweUri, termsVersion: CURRENT_TERMS_VERSION });
   } catch (err) {
     if (/SIWE_/.test(err.message)) {
-      return res.status(503).json({ error: err.message });
+      // B2-12: yapılandırma ayrıntısı anonim istemciye dönmez; ayrıntı yalnız log'da.
+      logger.error(`[Auth] SIWE yapılandırma hatası: ${err.message}`);
+      return res.status(503).json({ error: "Kimlik doğrulama servisi geçici olarak kullanılamıyor." });
     }
     next(err);
   }
-});
+}));
 
 /**
  * POST /api/auth/verify
  * SIWE imzasını doğrular, JWT ve refresh token'ı httpOnly cookie olarak set eder.
  */
-router.post("/verify", authLimiter, async (req, res) => {
+router.post("/verify", authLimiter, asyncHandler(async (req, res) => {
   try {
     const schema = Joi.object({
       message: Joi.string().max(2000).required(),
@@ -336,7 +347,7 @@ router.post("/verify", authLimiter, async (req, res) => {
       const parsedSiwe = new SiweMessage(value.message);
       clauseVersion = parseTermsAcceptance(parsedSiwe.statement);
       siweChainId = Number(parsedSiwe.chainId) || null;
-    } catch (_) {
+    } catch {
       clauseVersion = null;
     }
     if (clauseVersion && !ACCEPTED_TERMS_VERSIONS.has(clauseVersion)) {
@@ -429,13 +440,13 @@ router.post("/verify", authLimiter, async (req, res) => {
     logger.error(`[Auth] /verify beklenmeyen hata: ${err?.stack || err?.message || err}`);
     return res.status(500).json({ error: "Kimlik doğrulama sırasında sunucu hatası oluştu. Lütfen tekrar deneyin." });
   }
-});
+}));
 
 /**
  * POST /api/auth/refresh
  * Refresh token ile yeni JWT ve yeni refresh token üretir.
  */
-router.post("/refresh", authLimiter, async (req, res) => {
+router.post("/refresh", authLimiter, asyncHandler(async (req, res) => {
   try {
     const refreshToken = req.cookies?.araf_refresh;
     if (!refreshToken) {
@@ -448,6 +459,11 @@ router.post("/refresh", authLimiter, async (req, res) => {
     //      Sadece backward-compat amaçlı "expected wallet" olarak doğrulama girdiği olur.
     // [EN] Body wallet is compatibility-only; authority comes from verified refresh token.
     if (expectedWallet == null || expectedWallet === "") expectedWallet = null;
+
+    // B2-08: dizi/nesne wallet 500'e düşmesin.
+    if (expectedWallet !== null && typeof expectedWallet !== "string") {
+      return res.status(400).json({ error: "Wallet formatı geçersiz." });
+    }
 
     if (expectedWallet && !/^0x[a-fA-F0-9]{40}$/.test(expectedWallet)) {
       return res.status(400).json({ error: "Wallet formatı geçersiz." });
@@ -468,12 +484,21 @@ router.post("/refresh", authLimiter, async (req, res) => {
     logger.info(`[Auth] Token yenilendi: ${result.wallet}`);
     return res.json({ wallet: result.wallet });
   } catch (err) {
-    logger.warn(`[Auth] Refresh başarısız: ${err.message}`);
-    res.clearCookie("araf_jwt", { ...COOKIE_OPTIONS_BASE, path: "/" });
-    res.clearCookie("araf_refresh", { ...COOKIE_OPTIONS_BASE, path: "/api/auth" });
-    return res.status(401).json({ error: err.message, ...(err.code === "TERMS_NOT_ACCEPTED" ? { code: err.code } : {}) });
+    // [TR] Yalnız AuthError (geçersiz/iptal/süresi dolmuş token) oturumu sonlandırır: 401 + çerez silme.
+    //      Altyapı hatası (Redis/DB kesintisi) 503 + sabit kod döner, çerezler SİLİNMEZ; böylece geçici
+    //      kesinti toplu logout yaratmaz ve ham hata mesajı istemciye sızmaz.
+    // [EN] Only AuthError ends the session (401 + clear cookies). Infra errors → 503, cookies kept.
+    if (_isExpectedAuthError(err)) {
+      logger.warn(`[Auth] Refresh reddedildi: ${err.code || "AUTH_FAILED"}`);
+      res.clearCookie("araf_jwt", { ...COOKIE_OPTIONS_BASE, secure: _cookieSecure(), path: "/" });
+      res.clearCookie("araf_refresh", { ...COOKIE_OPTIONS_BASE, secure: _cookieSecure(), path: "/api/auth" });
+      return res.status(401).json({ error: err.message, ...(err.code === "TERMS_NOT_ACCEPTED" ? { code: err.code } : {}) });
+    }
+    // [TR] Ham err.message loglanmaz (bağlantı dizesi/kimlik bilgisi içerebilir); yalnız ad ve kod.
+    logger.error(`[Auth] /refresh altyapı hatası: ${err?.name || "Error"} ${err?.code || ""}`.trim());
+    return res.status(503).json({ error: "AUTH_REFRESH_UNAVAILABLE" });
   }
-});
+}));
 
 /**
  * POST /api/auth/logout
@@ -485,7 +510,7 @@ router.post("/refresh", authLimiter, async (req, res) => {
  *      sunucuda kayıtlı refresh token). Kimlik çözülemezse çerezler temizlenir, işlem başarılı döner.
  * [EN] Logout works with an expired-but-validly-signed JWT or with the refresh cookie alone.
  */
-router.post("/logout", authLimiter, async (req, res, next) => {
+router.post("/logout", authLimiter, asyncHandler(async (req, res, next) => {
   try {
     const currentJWT = req.cookies?.araf_jwt;
     const refreshCookie = req.cookies?.araf_refresh;
@@ -500,7 +525,7 @@ router.post("/logout", authLimiter, async (req, res, next) => {
           wallet = payload.sub.toLowerCase();
           jwtIsAuthoritative = true;
         }
-      } catch (_) {
+      } catch {
         // imza geçersiz → JWT'den kimlik türetilmez; refresh çerezine bakılır.
       }
     }
@@ -510,29 +535,40 @@ router.post("/logout", authLimiter, async (req, res, next) => {
       if (owner) wallet = owner.wallet;
     }
 
+    // B2-11: blacklist yazımı başarısızsa (false) çalıntı JWT TTL sonuna dek geçerli kalabilir;
+    //        çerezler yine silinir, istemciye 503 ile "tamamlanmadı" bildirilir.
+    let blacklistOk = true;
     if (jwtIsAuthoritative) {
-      await blacklistJWT(currentJWT);
+      blacklistOk = (await blacklistJWT(currentJWT)) !== false;
     }
     if (wallet) {
       await revokeRefreshToken(wallet);
     }
 
-    res.clearCookie("araf_jwt", { ...COOKIE_OPTIONS_BASE, path: "/" });
-    res.clearCookie("araf_refresh", { ...COOKIE_OPTIONS_BASE, path: "/api/auth" });
+    res.clearCookie("araf_jwt", { ...COOKIE_OPTIONS_BASE, secure: _cookieSecure(), path: "/" });
+    res.clearCookie("araf_refresh", { ...COOKIE_OPTIONS_BASE, secure: _cookieSecure(), path: "/api/auth" });
+
+    if (!blacklistOk) {
+      logger.warn(`[Auth] Çıkış tamamlanamadı (JWT blacklist yazılamadı): ${wallet}`);
+      return res.status(503).json({
+        error: "Çıkış tamamen tamamlanamadı. Lütfen tekrar deneyin.",
+        code: "LOGOUT_REVOKE_INCOMPLETE",
+      });
+    }
 
     logger.info(`[Auth] Çıkış yapıldı: ${wallet || "kimlik çözülemedi (yalnız çerezler temizlendi)"}`);
     return res.json({ success: true, message: "Oturum kapatıldı." });
   } catch (err) {
     next(err);
   }
-});
+}));
 
 /**
  * GET /api/auth/me
  * Cookie'deki JWT geçerliyse wallet adresini döndürür.
  * Bağlı cüzdan header ile gelmişse, cookie wallet ile birebir eşleşmesi gerekir.
  */
-router.get("/me", requireAuth, async (req, res) => {
+router.get("/me", requireAuth, asyncHandler(async (req, res) => {
   const headerWalletRaw = req.headers["x-wallet-address"];
 
   if (headerWalletRaw) {
@@ -543,12 +579,12 @@ router.get("/me", requireAuth, async (req, res) => {
         `[Auth] /me wallet mismatch: cookie=${req.wallet} header=${headerWallet} — session geçersiz`
       );
 
-      res.clearCookie("araf_jwt", { ...COOKIE_OPTIONS_BASE, path: "/" });
-      res.clearCookie("araf_refresh", { ...COOKIE_OPTIONS_BASE, path: "/api/auth" });
+      res.clearCookie("araf_jwt", { ...COOKIE_OPTIONS_BASE, secure: _cookieSecure(), path: "/" });
+      res.clearCookie("araf_refresh", { ...COOKIE_OPTIONS_BASE, secure: _cookieSecure(), path: "/api/auth" });
 
       try {
         await revokeRefreshToken(req.wallet);
-      } catch (_) {
+      } catch {
         // revoke hatası mismatch cevabını engellemez
       }
 
@@ -597,7 +633,7 @@ router.get("/me", requireAuth, async (req, res) => {
     payoutRail,
     payoutRailEnabled,
   });
-});
+}));
 
 /**
  * PUT /api/auth/profile
@@ -608,7 +644,7 @@ router.get("/me", requireAuth, async (req, res) => {
  *   - payout profile gerçekten değiştiyse User.js risk sayaçları güncellenir
  *   - aktif LOCKED / PAID / CHALLENGED trade varken payout profile değişimi engellenir
  */
-router.put("/profile", requireAuth, requireSessionWalletMatch, authLimiter, async (req, res, next) => {
+router.put("/profile", requireAuth, requireSessionWalletMatch, authLimiter, asyncHandler(async (req, res, next) => {
   try {
     const normalizedBody = _normalizePayoutProfileBody(req.body);
     const { error, value } = PROFILE_SCHEMA.validate(normalizedBody);
@@ -623,9 +659,15 @@ router.put("/profile", requireAuth, requireSessionWalletMatch, authLimiter, asyn
         "bankChangeCount7d bankChangeCount30d bank_change_history payout_profile"
       );
 
+    const isNewUser = !user;
     if (!user) {
       user = new User({ wallet_address: req.wallet });
     }
+
+    // [TR] Atomik yazım koşulu: okunan sürüm ve şifreli detay. Araya başka bir profil yazımı girerse
+    //      koşul eşleşmez ve istek 409 ile reddedilir (kayıp güncelleme olmaz).
+    const readProfileVersion = Number.isInteger(user.profileVersion) ? user.profileVersion : 0;
+    const readDetailsEnc = user.payout_profile?.payout_details_enc ?? null;
 
     // [TR] Şifreli profil varsa çözüp gerçek değişim olup olmadığını kıyaslıyoruz.
     let existingProfile = { rail: "", country: "", contact: { channel: null, value: null }, details: {} };
@@ -734,7 +776,43 @@ router.put("/profile", requireAuth, requireSessionWalletMatch, authLimiter, asyn
 
     user.payout_profile = genericProfile;
 
-    await user.save();
+    // [TR] Oku-değiştir-kaydet yarışı: save() koşulsuz yazar ve eşzamanlı bir değişikliği ezerdi.
+    //      Mevcut kullanıcıda okunan duruma koşullu tek updateOne (cleanupUserBankRiskMetadata deseni);
+    //      yeni kullanıcıda insert, eşzamanlı oluşturma duplicate-key ile yakalanır.
+    const conflictResponse = () => res.status(409).json({
+      error: "Profil başka bir istekle eşzamanlı güncellendi. Lütfen tekrar deneyin.",
+      code: "PROFILE_UPDATE_CONFLICT",
+    });
+    if (isNewUser) {
+      try {
+        await user.save();
+      } catch (saveErr) {
+        if (saveErr?.code === 11000) return conflictResponse();
+        throw saveErr;
+      }
+    } else {
+      const counterCond = (v) => (v === 0 ? { $in: [0, null] } : v);
+      const writeResult = await User.updateOne(
+        {
+          wallet_address: req.wallet,
+          profileVersion: counterCond(readProfileVersion),
+          "payout_profile.payout_details_enc": readDetailsEnc === null ? { $in: [null] } : readDetailsEnc,
+        },
+        {
+          $set: {
+            payout_profile: genericProfile,
+            profileVersion: user.profileVersion,
+            bank_change_history: user.bank_change_history,
+            bankChangeCount7d: user.bankChangeCount7d,
+            bankChangeCount30d: user.bankChangeCount30d,
+            lastBankChangeAt: user.lastBankChangeAt || null,
+          },
+        },
+        // save() ile eşdeğerlik: şema enum/min doğrulamaları updateOne yolunda da çalışır.
+        { runValidators: true }
+      );
+      if (!writeResult || writeResult.matchedCount === 0) return conflictResponse();
+    }
 
     logger.info(
       `[Auth] Profil güncellendi: ${req.wallet} bank_profile_changed=${bankProfileChanged}`
@@ -760,7 +838,7 @@ router.put("/profile", requireAuth, requireSessionWalletMatch, authLimiter, asyn
   } catch (err) {
     next(err);
   }
-});
+}));
 
 module.exports = router;
 // [TR] Test yüzeyi: deploy/cookie policy regression doğrulaması.

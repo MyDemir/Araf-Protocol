@@ -199,19 +199,24 @@ contract ArafRewards is Ownable, ReentrancyGuard, Pausable {
             }
         }
 
-        uint256 weight = 0;
+        uint256 makerWeight = 0;
+        uint256 takerWeight = 0;
         uint256 outcomeBps = _outcomeMultiplierBps(t);
         if (outcomeBps > 0) {
-            // [TR] Maker ve taker aynı ağırlığı alır: temiz sonuç iki tarafın ortak başarısıdır.
-            // [EN] Maker and taker get the same weight: a clean outcome is a joint success.
-            weight = (t.stableNotional * outcomeBps * _tierMultiplierBps(t.tier)) / SCALE;
-            userWeight[epoch][t.maker] += weight;
-            userWeight[epoch][t.taker] += weight;
-            totalWeight[epoch] += weight * 2;
+            // [TR] Temiz sonuç iki tarafın ortak başarısıdır; ağırlık iki tarafa aynı formülle yazılır. K3-02: ücret
+            //      ödemeyen taraf (snapshot fee 0) ağırlık almaz; sıfır ücretli wash-trade havuzu bedelsiz ememez.
+            // [EN] A clean outcome is a joint success and both sides use the same formula. K3-02: a side whose paid
+            //      fee is 0 gets no weight, so zero-fee wash trades cannot drain the pool for free.
+            uint256 weight = (t.stableNotional * outcomeBps * _tierMultiplierBps(t.tier)) / SCALE;
+            if (t.makerFeePaid > 0) makerWeight = weight;
+            if (t.takerFeePaid > 0) takerWeight = weight;
+            userWeight[epoch][t.maker] += makerWeight;
+            userWeight[epoch][t.taker] += takerWeight;
+            totalWeight[epoch] += makerWeight + takerWeight;
         }
 
         recordedTrade[tradeId] = true;
-        emit TradeOutcomeRecorded(tradeId, epoch, t.maker, t.taker, weight, weight, t.outcome);
+        emit TradeOutcomeRecorded(tradeId, epoch, t.maker, t.taker, makerWeight, takerWeight, t.outcome);
     }
 
     /**

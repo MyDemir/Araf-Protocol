@@ -28,6 +28,8 @@ describe("auth profile payout rail validation", () => {
         findOne: jest.fn().mockReturnValue({
           select: jest.fn().mockResolvedValue(existingUser),
         }),
+        // Atomik profil yazımı (updateOne) eski save() davranışını taklit eder: aynı belgeye yazar.
+        updateOne: jest.fn(async () => { await existingUser.save(); return { matchedCount: 1 }; }),
       };
 
       jest.doMock("../../backend/scripts/middleware/auth", () => ({
