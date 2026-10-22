@@ -1475,6 +1475,9 @@ export function useAppSessionData({
 
   const fetchMyTradesRef = React.useRef(fetchMyTrades);
   fetchMyTradesRef.current = fetchMyTrades;
+  // [TR] F1-08: kurtarma toast'ı güncel oturum durumuna bakar (auth/me bitmeden fetchMyTrades hiçbir şey çekmez).
+  const isAuthenticatedRef = React.useRef(isAuthenticated);
+  isAuthenticatedRef.current = isAuthenticated;
   useEffect(() => { fetchMyTrades(); }, [fetchMyTrades]);
 
   useEffect(() => {
@@ -1636,11 +1639,17 @@ export function useAppSessionData({
           return;
         }
         // [TR] F1-08: en güncel closure ref'ten çağrılır (bayat closure erken dönüp hiçbir şey çekmezdi).
+        // [TR] "Veriler yenilendi" yalnız oturum doğrulanmışken söylenir; değilse oturum açılınca liste zaten çekilir.
+        const refreshed = isAuthenticatedRef.current === true;
         fetchMyTradesRef.current();
         showToast(
-          lang === 'TR'
-            ? 'Bekleyen işlem bulundu ve onaylandı. Veriler yenilendi.'
-            : 'Recovered pending transaction and confirmed it. Data refreshed.',
+          refreshed
+            ? (lang === 'TR'
+              ? 'Bekleyen işlem bulundu ve onaylandı. Veriler yenilendi.'
+              : 'Recovered pending transaction and confirmed it. Data refreshed.')
+            : (lang === 'TR'
+              ? 'Bekleyen işlem bulundu ve onaylandı. Oturum doğrulanınca veriler yenilenecek.'
+              : 'Recovered pending transaction and confirmed it. Data will refresh once you are signed in.'),
           'success'
         );
       })
