@@ -119,6 +119,17 @@ describe('Ana sayfa (tanıtım)', () => {
     expect(HOME_VIDEO_EMBED_URL).toBe(`https://player.vimeo.com/video/${HOME_VIDEO_ID}?dnt=1`);
   });
 
+  it('CSP: frame-src yalnız Vimeo oynatıcısı ve gömme URL’iyle uyumlu; frame-ancestors none', () => {
+    const cfg = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), 'vercel.json'), 'utf8'));
+    const csp = cfg.headers.flatMap((h) => h.headers).find((i) => i.key === 'Content-Security-Policy').value;
+    const dir = (n) => (csp.split(';').map((s) => s.trim()).find((s) => s.startsWith(`${n} `)) || '').split(/\s+/).slice(1);
+    expect(dir('frame-src')).toEqual(['https://player.vimeo.com']);
+    expect(new URL(HOME_VIDEO_EMBED_URL).origin).toBe('https://player.vimeo.com');
+    expect(dir('frame-ancestors')).toEqual(["'none'"]);
+    expect(dir('script-src')).toEqual(["'self'"]);
+    expect(dir('child-src')).toEqual([]);
+  });
+
   it('video TR: düğme etiketi Türkçe', async () => {
     const user = userEvent.setup();
     renderHome({ lang: 'TR' });
