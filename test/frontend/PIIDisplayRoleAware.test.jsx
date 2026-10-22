@@ -4,6 +4,9 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import PIIDisplay from '../../frontend/src/components/PIIDisplay';
 
+// F2-20: usePII artik authenticatedFetch ister; sahte sarmalayici global.fetch mock'una devreder (cagri sayisi/URL iddialari ayni).
+const authFetch = (...args) => global.fetch(...args);
+
 const mockPiiFetch = (payoutProfile) => {
   global.fetch = vi.fn()
     .mockResolvedValueOnce({ ok: true, json: async () => ({ piiToken: 'pii-token' }) })
@@ -29,7 +32,7 @@ describe('PIIDisplay role-aware and rail-aware copy', () => {
   it('uses neutral secure payment details copy instead of seller-only copy', () => {
     mockPiiFetch({ rail: 'TR_IBAN', fields: { account_holder_name: 'Ada', iban: 'TR00' } });
 
-    render(<PIIDisplay tradeId="trade-copy" lang="EN" />);
+    render(<PIIDisplay tradeId="trade-copy" lang="EN" authenticatedFetch={authFetch} />);
 
     expect(screen.getAllByText(/Secure payment details/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/Payment profile and contact/i)).toBeInTheDocument();
@@ -45,7 +48,7 @@ describe('PIIDisplay role-aware and rail-aware copy', () => {
   ])('renders %s rail payment fields after secure reveal', async (rail, fields, primaryCopyAction) => {
     mockPiiFetch({ rail, fields });
 
-    render(<PIIDisplay tradeId={`trade-${rail}`} lang="EN" />);
+    render(<PIIDisplay tradeId={`trade-${rail}`} lang="EN" authenticatedFetch={authFetch} />);
     await reveal();
 
     await waitFor(() => expect(screen.getByText(fields.account_holder_name)).toBeInTheDocument());
@@ -76,7 +79,7 @@ describe('PIIDisplay role-aware and rail-aware copy', () => {
       fields: { account_holder_name: 'Contact User', iban: 'TR00 1111' },
     });
 
-    render(<PIIDisplay tradeId={`trade-${channel}`} lang="EN" />);
+    render(<PIIDisplay tradeId={`trade-${channel}`} lang="EN" authenticatedFetch={authFetch} />);
     await reveal();
 
     await waitFor(() => expect(screen.getByText('Contact User')).toBeInTheDocument());
@@ -87,7 +90,7 @@ describe('PIIDisplay role-aware and rail-aware copy', () => {
     Object.defineProperty(window, 'isSecureContext', { value: false, configurable: true });
     mockPiiFetch({ rail: 'TR_IBAN', fields: { account_holder_name: 'Hidden User', iban: 'TR00 1111' } });
 
-    render(<PIIDisplay tradeId="trade-hide" lang="EN" />);
+    render(<PIIDisplay tradeId="trade-hide" lang="EN" authenticatedFetch={authFetch} />);
 
     expect(screen.getByText(/HTTP connection/i)).toBeInTheDocument();
     const user = await reveal();

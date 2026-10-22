@@ -4,6 +4,9 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import PIIDisplay from '../../frontend/src/components/PIIDisplay';
 
+// F2-20: usePII artik authenticatedFetch ister; sahte sarmalayici global.fetch mock'una devreder (cagri sayisi/URL iddialari ayni).
+const authFetch = (...args) => global.fetch(...args);
+
 describe('PIIDisplay', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -28,7 +31,7 @@ describe('PIIDisplay', () => {
 
   it('reveal renders payload and hide clears UI', async () => {
     const user = userEvent.setup();
-    render(<PIIDisplay tradeId="trade-1" lang="EN" />);
+    render(<PIIDisplay tradeId="trade-1" lang="EN" authenticatedFetch={authFetch} />);
 
     expect(screen.getByText(/securely locked/i)).toBeInTheDocument();
     expect(screen.queryByText('Alice')).not.toBeInTheDocument();
@@ -50,7 +53,7 @@ describe('PIIDisplay', () => {
     const user = userEvent.setup();
     Object.defineProperty(window, 'isSecureContext', { value: false, configurable: true });
 
-    render(<PIIDisplay tradeId="trade-1" lang="EN" />);
+    render(<PIIDisplay tradeId="trade-1" lang="EN" authenticatedFetch={authFetch} />);
     await user.click(screen.getByRole('button', { name: /Reveal/i }));
     await waitFor(() => expect(screen.getByText('Alice')).toBeInTheDocument());
 
@@ -61,7 +64,7 @@ describe('PIIDisplay', () => {
   it('secure context copy writes the sanitized field value to clipboard', async () => {
     const user = userEvent.setup();
 
-    render(<PIIDisplay tradeId="trade-1" lang="EN" />);
+    render(<PIIDisplay tradeId="trade-1" lang="EN" authenticatedFetch={authFetch} />);
     await user.click(screen.getByRole('button', { name: /Reveal/i }));
     await waitFor(() => expect(screen.getByText('Alice')).toBeInTheDocument());
 
@@ -92,7 +95,7 @@ describe('PIIDisplay', () => {
         }),
       });
 
-    render(<PIIDisplay tradeId="trade-us" lang="EN" />);
+    render(<PIIDisplay tradeId="trade-us" lang="EN" authenticatedFetch={authFetch} />);
     await user.click(screen.getByRole('button', { name: /Reveal/i }));
     await waitFor(() => expect(screen.getByText('John Doe')).toBeInTheDocument());
     expect(screen.getByRole('button', { name: /Copy Routing/i })).toBeInTheDocument();

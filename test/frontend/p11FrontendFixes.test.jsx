@@ -6,6 +6,9 @@ import SettlementProposalCard from '../../frontend/src/components/SettlementProp
 import PIIDisplay from '../../frontend/src/components/PIIDisplay';
 import { piiCopy } from '../../frontend/src/app/copy/pii';
 
+// F2-20: usePII artik authenticatedFetch ister; sahte sarmalayici global.fetch mock'una devreder (cagri sayisi/URL iddialari ayni).
+const authFetch = (...args) => global.fetch(...args);
+
 afterEach(() => cleanup());
 
 const cardProps = (trade) => ({
@@ -56,7 +59,7 @@ describe('F4-04: US_ACH kopyalama düğmeleri hata durumunu gösterir', () => {
 
   it.each([['Copy Routing'], ['Copy Account']])('%s hata verince "Copy failed" gösterir', async (label) => {
     const user = userEvent.setup();
-    render(<PIIDisplay tradeId="trade-us" lang="EN" />);
+    render(<PIIDisplay tradeId="trade-us" lang="EN" authenticatedFetch={authFetch} />);
     await user.click(screen.getByRole('button', { name: /Reveal/i }));
     await waitFor(() => expect(screen.getByText('John Doe')).toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: new RegExp(label, 'i') }));
@@ -85,7 +88,7 @@ describe('C2: panoya yazma reddedilir ve execCommand false döner -> hata etiket
     global.fetch = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ piiToken: 't' }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ payoutProfile: { rail: 'US_ACH', fields: { account_holder_name: 'John Doe', routing_number: '021000021', account_number: '000123456789' } } }) });
-    render(<PIIDisplay tradeId="trade-us" lang="EN" />);
+    render(<PIIDisplay tradeId="trade-us" lang="EN" authenticatedFetch={authFetch} />);
     await user.click(screen.getByRole('button', { name: /Reveal/i }));
     await waitFor(() => expect(screen.getByText('John Doe')).toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: /Copy Routing/i }));
