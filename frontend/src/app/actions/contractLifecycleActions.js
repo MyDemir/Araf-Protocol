@@ -10,6 +10,9 @@ import { computeFillAllowance } from './allowanceMath';
 import { checkTokenBalance } from './balanceGuard';
 import { buildFillConfirmSummary } from '../fillConfirmSummary';
 import { clearAppHashRoute } from './tradeNavigationActions';
+import { getChainNowMs } from '../clock';
+import { RECEIPT_UNCERTAIN_NAMES } from '../contractErrors';
+import { isUserRejection } from '../walletRpcDiagnosis';
 import { isOwnerRailDisabled, ownerRailDisabledMessage, isOwnerPayoutProfileMissing, isPayoutProfileSaved, ownerProfileMissingMessage, profileRequiredMessage } from '../payoutProfileGate';
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
@@ -85,7 +88,11 @@ const findFilledTradeViaBackend = async ({ authenticatedFetch, order, address, s
         if (!res?.ok) break;
         const data = await res.json();
         const trades = data?.trades || [];
-        const found = trades.find(matches);
+        // [TR] F2-15: aynı emir + aynı tutarla birden çok dolum varsa en yeni (en büyük zincir id) seçilir; id'ler artandır.
+        const found = trades.filter(matches).reduce((best, t) => {
+          if (!best) return t;
+          try { return BigInt(t.onchain_escrow_id) > BigInt(best.onchain_escrow_id) ? t : best; } catch { return best; }
+        }, null);
         if (found?.onchain_escrow_id !== undefined && found?.onchain_escrow_id !== null && found?._id) {
           return { onchainId: String(found.onchain_escrow_id), id: found._id };
         }
@@ -444,11 +451,7 @@ export const buildStartTradeAction = ({
     } else if (err?.arafErrorName === 'TakerBanActive' && filledSide === 'BUY_CRYPTO') {
       errorMessage = lang === 'TR' ? 'Emir sahibi (alıcı) şu an kısıtlı; bu emir doldurulamaz. Başka bir emir deneyin.' : 'The order owner (buyer) is currently restricted; this order cannot be filled. Try another order.';
     }
-    if (errorMessage.includes('rejected') || errorMessage.includes('User rejected')) {
-      showToast(lang === 'TR' ? 'İşlem iptal edildi.' : 'Transaction cancelled.', 'error');
-    } else {
-      showToast(errorMessage, 'error');
-    }
+    showTxError(showToast, err, errorMessage, lang, lang === 'TR' ? 'İşlem iptal edildi.' : 'Transaction cancelled.');
   } finally {
     setIsContractLoading(false);
     setLoadingText('');
@@ -456,7 +459,20 @@ export const buildStartTradeAction = ({
 };
 
 const getTxErrorMessage = (err, fallback) => err?.shortMessage || err?.reason || err?.message || fallback;
-const isUserRejected = (message) => String(message || '').includes('rejected') || String(message || '').includes('User rejected');
+// [TR] F2-05: kullanıcı reddi hata NESNESİNDEN (code 4001 / ACTION_REJECTED / UserRejected) anlaşılır; mesajdaki "rejected"
+//      alt-dizgisi RevenueHookFailed ("treasury rejected") gibi kontrat hatalarını da iptal sanıyordu.
+// [EN] F2-05: detect rejection from the error object, not a "rejected" substring in the message.
+export const isUserRejectedError = (err) => isUserRejection(err);
+// [TR] F2-06: receipt zaman aşımı/bulunamadı = tx gönderildi, sonuç belirsiz; "başarısız" denmez, tekrar denetilmez.
+export const isReceiptUncertainError = (err) => RECEIPT_UNCERTAIN_NAMES.test(String(err?.name || ''));
+export const receiptUncertainMessage = (lang) => (lang === 'TR'
+  ? 'İşlem gönderildi, zincirde doğrulanıyor. Tekrar göndermeden önce birkaç dakika bekleyip durumu kontrol edin.'
+  : 'Transaction sent, verifying on-chain. Wait a few minutes and check the status before sending it again.');
+export const showTxError = (showToast, err, errorMessage, lang, cancelledText) => {
+  if (isUserRejectedError(err)) showToast(cancelledText, 'error');
+  else if (isReceiptUncertainError(err)) showToast(receiptUncertainMessage(lang), 'info');
+  else showToast(errorMessage, 'error');
+};
 
 export const buildMintAction = ({
   lang = 'EN',
@@ -494,6 +510,7 @@ export const buildMintAction = ({
 
 export const buildTradeRoomActions = ({
   lang = 'EN',
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   activeTrade,
   activeEscrows = [],
   paymentIpfsHash = '',
@@ -664,7 +681,7 @@ export const buildTradeRoomActions = ({
     } catch (err) {
       console.error('handleReportPayment error:', err);
       const errorMessage = getTxErrorMessage(err, lang === 'TR' ? 'Ödeme bildirimi başarısız.' : 'Payment report failed.');
-      showToast(isUserRejected(errorMessage) ? (lang === 'TR' ? 'İşlem iptal edildi.' : 'Transaction cancelled.') : errorMessage, 'error');
+      showTxError(showToast, err, errorMessage, lang, (lang === 'TR' ? 'İşlem iptal edildi.' : 'Transaction cancelled.'));
     } finally {
       setIsContractLoading(false);
     }
@@ -688,6 +705,12 @@ export const buildTradeRoomActions = ({
       let chainState = null;
       if (typeof getTrade === 'function') {
         try { chainState = mapChainTradeState(await getTrade(onchainId)); } catch (_) { chainState = null; }
+        // [TR] F2-08: karşı taraf zaten onaylamışsa bu tx iptali yürütmüş olmalı; okuma bir düğüm geride kalabilir
+        //      (fallback transport). Beklenen durum görünene kadar en fazla 2 kez kısa aralıkla yeniden okunur.
+        for (let i = 0; counterpartyAlreadyConsented && chainState && chainState !== 'CANCELED' && i < 2; i += 1) {
+          await sleep(1500);
+          try { chainState = mapChainTradeState(await getTrade(onchainId)); } catch (_) { break; }
+        }
       }
       const executed = chainState ? chainState === 'CANCELED' : counterpartyAlreadyConsented;
 
@@ -702,7 +725,7 @@ export const buildTradeRoomActions = ({
     } catch (err) {
       console.error('handleProposeCancel error:', err);
       const errorMessage = getTxErrorMessage(err, lang === 'TR' ? 'İptal teklifi başarısız.' : 'Cancel proposal failed.');
-      showToast(isUserRejected(errorMessage) ? (lang === 'TR' ? 'İşlem iptal edildi.' : 'Transaction cancelled.') : errorMessage, 'error');
+      showTxError(showToast, err, errorMessage, lang, (lang === 'TR' ? 'İşlem iptal edildi.' : 'Transaction cancelled.'));
     } finally {
       setIsContractLoading(false);
     }
@@ -724,7 +747,7 @@ export const buildTradeRoomActions = ({
     } catch (err) {
       console.error('handleRevokeCancel error:', err);
       const errorMessage = getTxErrorMessage(err, lang === 'TR' ? 'İptal onayı geri çekilemedi.' : 'Could not withdraw cancel consent.');
-      showToast(isUserRejected(errorMessage) ? (lang === 'TR' ? 'İşlem iptal edildi.' : 'Transaction cancelled.') : errorMessage, 'error');
+      showTxError(showToast, err, errorMessage, lang, (lang === 'TR' ? 'İşlem iptal edildi.' : 'Transaction cancelled.'));
     } finally {
       setIsContractLoading(false);
     }
@@ -777,7 +800,7 @@ export const buildTradeRoomActions = ({
     } catch (err) {
       console.error('releaseFunds error:', err);
       const errorMessage = getTxErrorMessage(err, lang === 'TR' ? 'Kontrat işlemi başarısız oldu.' : 'Contract transaction failed.');
-      showToast(isUserRejected(errorMessage) ? (lang === 'TR' ? 'İşlem sizin tarafınızdan iptal edildi.' : 'Transaction cancelled by you.') : errorMessage, 'error');
+      showTxError(showToast, err, errorMessage, lang, (lang === 'TR' ? 'İşlem sizin tarafınızdan iptal edildi.' : 'Transaction cancelled by you.'));
     } finally {
       setIsContractLoading(false);
     }
@@ -803,7 +826,7 @@ export const buildTradeRoomActions = ({
         showToast(lang === 'TR' ? 'Alıcıya uyarı gönderiliyor...' : 'Pinging taker...', 'info');
         const onchainId = activeTrade.onchainId;
         await pingTakerForChallenge(BigInt(onchainId));
-        const pingedAt = new Date().toISOString();
+        const pingedAt = new Date(getChainNowMs()).toISOString();
         setActiveTrade((prev) => (isSameTrade(prev, onchainId) ? { ...prev, challengePingedAt: pingedAt } : prev));
         await refreshTrades();
         showToast(lang === 'TR' ? 'Alıcı uyarıldı. İtiraz, 24. ile 48. saat arasında açılabilir; kaçırırsanız ping düşer.' : 'Taker pinged. You can challenge between hour 24 and hour 48; if you miss it the ping lapses.', 'success');
@@ -821,7 +844,7 @@ export const buildTradeRoomActions = ({
       showToast(lang === 'TR' ? 'İtiraz işlemi cüzdanınıza gönderildi...' : 'Challenge transaction sent to wallet...', 'info');
       const onchainId = activeTrade.onchainId;
       await challengeTrade(BigInt(onchainId));
-      await applyConfirmedState(onchainId, 'CHALLENGED', { challengedAt: new Date().toISOString() });
+      await applyConfirmedState(onchainId, 'CHALLENGED', { challengedAt: new Date(getChainNowMs()).toISOString() });
       await refreshTrades();
       showToast(lang === 'TR' ? 'İtiraz başlatıldı. Bleeding Escrow aktif.' : 'Challenge opened. Bleeding Escrow active.', 'success');
     } catch (err) {
@@ -839,16 +862,17 @@ export const buildTradeRoomActions = ({
       setIsContractLoading(true);
       showToast(lang === 'TR' ? 'Uyarı işlemi cüzdanınıza gönderiliyor...' : 'Pinging maker, please confirm in wallet...', 'info');
       await pingMaker(BigInt(tradeId));
-      const pingedAt = new Date().toISOString();
+      const pingedAt = new Date(getChainNowMs()).toISOString();
       setActiveTrade((prev) => (isSameTrade(prev, tradeId) ? { ...prev, pingedAt } : prev));
       showToast(lang === 'TR' ? 'Maker uyarıldı. Yanıt için 24 saati var.' : 'Maker has been pinged. They have 24h to respond.', 'success');
     } catch (err) {
       console.error('pingMaker error:', err);
       const errorMessage = getTxErrorMessage(err, lang === 'TR' ? 'Ping işlemi başarısız oldu.' : 'Ping failed.');
-      const message = errorMessage.includes('ConflictingPingPath')
-        ? (lang === 'TR' ? 'Karşı taraf farklı bir uyarı/itiraz akışı başlattı. Bu yolu artık kullanamazsınız.' : 'Counterparty already started another ping/challenge path. This flow is no longer available.')
-        : isUserRejected(errorMessage) ? (lang === 'TR' ? 'İşlem iptal edildi.' : 'Transaction cancelled.') : errorMessage;
-      showToast(message, 'error');
+      if (errorMessage.includes('ConflictingPingPath')) {
+        showToast(lang === 'TR' ? 'Karşı taraf farklı bir uyarı/itiraz akışı başlattı. Bu yolu artık kullanamazsınız.' : 'Counterparty already started another ping/challenge path. This flow is no longer available.', 'error');
+      } else {
+        showTxError(showToast, err, errorMessage, lang, lang === 'TR' ? 'İşlem iptal edildi.' : 'Transaction cancelled.');
+      }
     } finally {
       setIsContractLoading(false);
     }
@@ -865,7 +889,7 @@ export const buildTradeRoomActions = ({
     } catch (err) {
       console.error('autoRelease error:', err);
       const errorMessage = getTxErrorMessage(err, lang === 'TR' ? 'Otomatik serbest bırakma başarısız oldu.' : 'Auto-release failed.');
-      showToast(isUserRejected(errorMessage) ? (lang === 'TR' ? 'İşlem iptal edildi.' : 'Transaction cancelled.') : errorMessage, 'error');
+      showTxError(showToast, err, errorMessage, lang, (lang === 'TR' ? 'İşlem iptal edildi.' : 'Transaction cancelled.'));
     } finally {
       setIsContractLoading(false);
     }
@@ -940,6 +964,10 @@ export const buildProfileActions = ({
         // Oturum-cüzdan uyuşmazlığı authenticatedFetch tarafından zaten işlendi (çıkış + bildirim); yanıltıcı
         // "aktif trade" mesajı gösterme.
         if (body.code === 'SESSION_WALLET_MISMATCH') return;
+        // [TR] Eşzamanlı yazım çakışması (başka oturum profili güncelledi) "aktif trade" değildir; ayrı mesaj.
+        if (body.code === 'PROFILE_UPDATE_CONFLICT') {
+          throw new Error(lang === 'TR' ? 'Profil başka bir oturumda güncellendi, lütfen yeniden deneyin.' : 'Your profile was updated elsewhere, please try again.');
+        }
         throw new Error(lang === 'TR' ? 'Aktif trade varken ödeme profili oluşturulamaz ya da değiştirilemez.' : 'Payout profile cannot be created or changed during active trades.');
       }
       if (!res.ok) {
@@ -971,9 +999,9 @@ export const buildProfileActions = ({
       if (err?.arafErrorName === 'AlreadyRegistered' || errorMessage.includes('AlreadyRegistered')) {
         setIsWalletRegistered(true);
         showToast(lang === 'TR' ? 'Cüzdan zaten kayıtlı.' : 'Wallet already registered.', 'info');
-      } else if (isUserRejected(errorMessage)) {
+      } else if (isUserRejectedError(err)) {
         showToast(lang === 'TR' ? 'İşlem iptal edildi.' : 'Transaction cancelled.', 'error');
-      } else if (/Timeout|NotFound/i.test(String(err?.name || ''))) {
+      } else if (RECEIPT_UNCERTAIN_NAMES.test(String(err?.name || ''))) {
         // [TR] Receipt beklerken zaman aşımı/RPC hatası: tx gönderildi, sonucu belirsiz (useArafContract pending kaydını
         //      aynı sınıflandırmayla saklar). "Başarısız" denmez; kayıt durumu setIsRegisteringWallet(false) ile yeniden okunur.
         showToast(lang === 'TR' ? 'İşlem gönderildi, zincirde doğrulanıyor.' : 'Transaction sent, verifying on-chain.', 'info');
@@ -1023,7 +1051,7 @@ export const buildOrderActions = ({
     } catch (err) {
       console.error('handleDeleteOrder error:', err);
       const errorMessage = getTxErrorMessage(err, lang === 'TR' ? 'Order iptal edilemedi.' : 'Failed to cancel order.');
-      showToast(isUserRejected(errorMessage) ? (lang === 'TR' ? 'İşlem iptal edildi.' : 'Transaction cancelled.') : errorMessage, 'error');
+      showTxError(showToast, err, errorMessage, lang, (lang === 'TR' ? 'İşlem iptal edildi.' : 'Transaction cancelled.'));
     } finally {
       setIsContractLoading(false);
     }

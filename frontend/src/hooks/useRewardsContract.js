@@ -164,7 +164,8 @@ export function useRewardsContract() {
 
   const writeVault = useCallback(async (functionName, args = []) => {
     if (!isSupportedChain) throw new Error('Wrong chain: vault unavailable');
-    if (!_isValid(VAULT_ADDRESS) || !walletClient) throw new Error('Vault unavailable');
+    // [TR] F2-14: publicClient yoksa tx gönderilmeden önce dur (gönderim sonrası waitForTransactionReceipt TypeError verirdi).
+    if (!_isValid(VAULT_ADDRESS) || !walletClient || !publicClient) throw new Error('Vault unavailable');
     try {
       const hash = await walletClient.writeContract({ address: getAddress(VAULT_ADDRESS), abi: VAULT_ABI, functionName, args });
       return _assertSuccess(await publicClient.waitForTransactionReceipt({ hash }), functionName);
@@ -175,7 +176,8 @@ export function useRewardsContract() {
 
   const writeRewards = useCallback(async (functionName, args = []) => {
     if (!isSupportedChain) throw new Error('Wrong chain: rewards unavailable');
-    if (!_isValid(REWARDS_ADDRESS) || !walletClient) throw new Error('Rewards unavailable');
+    // [TR] F2-14: publicClient yoksa tx gönderilmeden önce dur (gönderim sonrası waitForTransactionReceipt TypeError verirdi).
+    if (!_isValid(REWARDS_ADDRESS) || !walletClient || !publicClient) throw new Error('Rewards unavailable');
     try {
       const hash = await walletClient.writeContract({ address: getAddress(REWARDS_ADDRESS), abi: REWARDS_ABI, functionName, args });
       return _assertSuccess(await publicClient.waitForTransactionReceipt({ hash }), functionName);
