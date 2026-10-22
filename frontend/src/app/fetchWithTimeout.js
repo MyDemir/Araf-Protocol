@@ -88,4 +88,20 @@ export const fetchWithTimeout = (urlOrThunk, options = {}) => requestWithTimeout
 // [TR] Başlık + JSON gövde tek zaman bütçesinde. res.ok denetimi çağırana aittir; gövde JSON değilse reddeder.
 export const fetchJsonWithTimeout = (urlOrThunk, options = {}) => requestWithTimeout(urlOrThunk, options, true);
 
+// [TR] F4-13: authenticatedFetch başlıklar gelince döner; gövde okuması bu yardımcıyla sınırlanır.
+//      Süre dolarsa gövde akışı iptal edilir (varsa) ve TimeoutError fırlar.
+// [EN] F4-13: bound a body read that happens after the response headers already arrived.
+export const readJsonWithTimeout = (res, timeoutMs = DEFAULT_FETCH_TIMEOUT_MS) => new Promise((resolve, reject) => {
+  const timer = setTimeout(() => {
+    try { res?.body?.cancel?.()?.catch?.(() => {}); } catch { /* yoksay */ }
+    const err = new Error(`Response body timed out after ${timeoutMs}ms`);
+    err.name = 'TimeoutError';
+    reject(err);
+  }, timeoutMs);
+  Promise.resolve()
+    .then(() => res.json())
+    .then(resolve, reject)
+    .finally(() => clearTimeout(timer));
+});
+
 export default fetchWithTimeout;

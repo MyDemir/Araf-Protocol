@@ -2,6 +2,7 @@ import React from 'react';
 import { buildApiUrl } from '../../apiConfig';
 import { shortAddress as short, tx as t } from '../../copy';
 import { fmtDateTime } from '../../format';
+import { readJsonWithTimeout } from '../../fetchWithTimeout';
 
 // [TR] "Çalışma ayarları" sekmesi: worker performans/operasyon ayarları (admin > env > varsayılan).
 //      Değişiklik yeniden başlatma gerekmeden sonraki turda etkili olur. Sınırlar sunucuda zorlanır.
@@ -49,7 +50,7 @@ export default function AdminRuntimeSettingsPanel({ lang = 'EN', authenticatedFe
     try {
       const res = await authenticatedFetch(buildApiUrl(`admin/runtime-settings/audit?page=${page}&limit=10`), { suppressAuthToast: true });
       if (!res.ok) return;
-      const data = await res.json();
+      const data = await readJsonWithTimeout(res);
       setAudit({
         items: Array.isArray(data?.items) ? data.items : [],
         total: Number(data?.total) || 0,
@@ -65,7 +66,7 @@ export default function AdminRuntimeSettingsPanel({ lang = 'EN', authenticatedFe
       const res = await authenticatedFetch(buildApiUrl('admin/runtime-settings'), { suppressAuthToast: true });
       if (res.status === 403) { setState({ loading: false, error: '', unauthorized: true, settings: [], version: 0, degraded: false }); return; }
       if (!res.ok) throw new Error('bad_status');
-      const data = await res.json();
+      const data = await readJsonWithTimeout(res);
       const settings = Array.isArray(data?.settings) ? data.settings : [];
       if (!force && JSON.stringify(draftsRef.current) !== baselineRef.current) {
         setState((s) => ({ ...s, loading: false }));
@@ -108,7 +109,7 @@ export default function AdminRuntimeSettingsPanel({ lang = 'EN', authenticatedFe
       const body = pending.value === null ? { reset: true } : { value: pending.value };
       body.expectedVersion = state.version;
       if (reason.trim()) body.reason = reason.trim().slice(0, REASON_MAX);
-      const res = await authenticatedFetch(buildApiUrl(`admin/runtime-settings/${pending.setting.key}`), {
+      const res = await authenticatedFetch(buildApiUrl(`admin/runtime-settings/${encodeURIComponent(pending.setting.key)}`), {
         method: 'PUT',
         body: JSON.stringify(body),
         suppressAuthToast: true,
@@ -124,7 +125,7 @@ export default function AdminRuntimeSettingsPanel({ lang = 'EN', authenticatedFe
         setConflict(true);
       } else {
         let msg = '';
-        try { msg = (await res.json())?.error || ''; } catch { /* yoksay */ }
+        try { msg = (await readJsonWithTimeout(res))?.error || ''; } catch { /* yoksay */ }
         showToast(res.status === 400 && msg ? msg : t(lang, 'Güncelleme başarısız.', 'Update failed.'), 'error');
         setPending(null);
         setReason('');
