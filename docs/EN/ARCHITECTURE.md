@@ -184,8 +184,8 @@ The contract is the single authoritative V3 state machine surface. The following
 > settlement proposal management). They run via DELEGATECALL on escrow storage; events are emitted from the escrow
 > address with identical signatures, access control stays in the escrow, addresses are baked into the bytecode at deploy
 > (no upgrade path). Deploy order: `ArafReputationLib` → `ArafSettlementLib` (independent of each other) → linked `ArafEscrow` (`contracts/scripts/deploy.js`).
-> Runtime bytecode sizes (solc 0.8.24, `viaIR`, optimizer 200 runs, `cancun`): `ArafEscrow` 22,061 bytes (EIP-170 limit 24,576),
-> `ArafReputationLib` 4,705, `ArafSettlementLib` 2,168 bytes. The Hardhat network sets `allowUnlimitedContractSize: false`, so the limit is enforced locally too.
+> Runtime bytecode sizes (solc 0.8.24, `viaIR`, optimizer 200 runs, `cancun`): `ArafEscrow` 22,585 bytes (headroom 1,991) (EIP-170 limit 24,576),
+> `ArafReputationLib` 4,732, `ArafSettlementLib` 2,394 bytes. The Hardhat network sets `allowUnlimitedContractSize: false`, so the limit is enforced locally too.
 
 ### 3.3 Liveness / auxiliary write surface
 - `registerWallet` — starts the wallet-age clock (once; `AlreadyRegistered`).

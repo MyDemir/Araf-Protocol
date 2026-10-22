@@ -994,7 +994,7 @@ Minimum recommended response headers for frontend hosting (Nginx/Cloudflare/Verc
 - `Permissions-Policy: geolocation=(), microphone=(), camera=()` (expand only if needed)
 
 ### Cache policy
-`frontend/vercel.json` only sets `Content-Type: application/json; charset=utf-8` and `Cache-Control: public, max-age=300` for `/.well-known/farcaster.json`; the `index.html` and `/assets/*` values below are the recommended policy and are not configured in `vercel.json`.
+In `frontend/vercel.json`, `Cache-Control` is defined only for `/.well-known/farcaster.json` (`public, max-age=300`, plus `Content-Type: application/json; charset=utf-8`); no other path has `Cache-Control` configured (the security headers apply to all paths separately); the `index.html` and `/assets/*` `Cache-Control` values below are the recommended policy and are not configured in `vercel.json`.
 - `index.html`: `Cache-Control: no-cache, no-store, must-revalidate`
 - versioned static assets (`/assets/*`): `Cache-Control: public, max-age=31536000, immutable`
 - keep `/health` (liveness) and `/ready` (readiness) as non-cached health endpoints.

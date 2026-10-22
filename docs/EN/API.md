@@ -274,7 +274,7 @@ All trade routes use `requireAuth` + `requireSessionWalletMatch`; access is rest
 - preview surface (`POST /api/trades/:id/settlement-proposal/preview`) for informational split math
 - event mirror from contract logs
 - read model projection for query/UX
-- audit/observability for operations (including admin read-only analytics)
+- audit/observability for operations (including admin read analytics and settings writes)
 
 ### Backend is NOT allowed to do
 - determine settlement outcome
@@ -417,7 +417,7 @@ Public, read-only mirror of reward events; the whole router sits behind `marketR
 
 ---
 
-## 10) Admin read-only observability (`/api/admin`)
+## 10) Admin observability and operational settings (`/api/admin`; reads + `PUT /payment-rails`, `/runtime-settings`, `/social-links`)
 
 The whole router runs `requireAuth` → `requireSessionWalletMatch` → `requireAdminWallet` → `adminReadLimiter` (60 / min per wallet). No write or override action that affects protocol outcomes is exposed; the only write surface is the operational settings below (payment rails, runtime settings, social links). Admin access is controlled only by `ADMIN_WALLETS`.
 

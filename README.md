@@ -130,7 +130,7 @@ lowers the bond by 1 percentage point; open risk points raise it by 3
 | 4 | 2% | 2% | 200 | 15 |
 
 Sources: bonds [`#L244-L254`](contracts/src/ArafEscrow.sol#L244-L254) (constant); thresholds
-[`#L516-L517`](contracts/src/ArafEscrow.sol#L516-L517) (defaults, owner-adjustable). Tiers above 0 also require
+[`#L521-L522`](contracts/src/ArafEscrow.sol#L521-L522) (defaults, owner-adjustable). Tiers above 0 also require
 15 days since the first successful trade ([`ArafReputationLib.sol#L77`](contracts/src/ArafReputationLib.sol#L77)),
 and the owner sets per-token amount caps for Tiers 0-3 (`setTokenConfig`). Only trades of at least 20 USD count
 toward reputation ([`#L290`](contracts/src/ArafEscrow.sol#L290)).
