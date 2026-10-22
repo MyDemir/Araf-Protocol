@@ -91,18 +91,50 @@ describe('Ana sayfa (tanıtım)', () => {
     expect(screen.getByRole('button', { name: '+ Create order' })).toBeDisabled();
   });
 
-  it('video: yeni sekmede açan poster, iframe yok, URL tek sabitte', () => {
+  it('video: başta yalnız poster (iframe/istek yok), tıklayınca dnt=1 Vimeo oynatıcısı; yeni sekme bağlantısı kalır', async () => {
+    const user = userEvent.setup();
     renderHome();
-    const link = screen.getByTestId('home-video');
-    expect(link.tagName).toBe('A');
+    expect(document.querySelector('iframe')).toBeNull();
+    expect(document.querySelector('img')).toBeNull();
+    const play = screen.getByRole('button', { name: /Play the Araf intro video/ });
+    expect(play).toHaveAttribute('type', 'button');
+    // [TR] Klavye ile erişilebilir: odaklanıp Enter ile açılır. [EN] Keyboard accessible.
+    play.focus();
+    expect(play).toHaveFocus();
+    await user.keyboard('{Enter}');
+    const frame = screen.getByTestId('home-video-player');
+    expect(frame.tagName).toBe('IFRAME');
+    expect(frame).toHaveAttribute('src', `https://player.vimeo.com/video/${HOME_VIDEO_ID}?dnt=1`);
+    expect(frame).toHaveAttribute('title', 'Araf intro video (Vimeo)');
+    expect(frame).toHaveAttribute('loading', 'lazy');
+    expect(frame).toHaveAttribute('allow', 'autoplay; fullscreen; picture-in-picture');
+    expect(frame).toHaveAttribute('allowfullscreen');
+    expect(frame).toHaveAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+    expect(screen.queryByRole('button', { name: /Play the Araf intro video/ })).not.toBeInTheDocument();
+    const link = screen.getByTestId('home-video-link');
     expect(link).toHaveAttribute('href', HOME_VIDEO_URL);
     expect(link).toHaveAttribute('target', '_blank');
     expect(link.getAttribute('rel').split(' ')).toEqual(expect.arrayContaining(['noopener', 'noreferrer']));
-    expect(link).toHaveAccessibleName(/Vimeo/);
-    expect(document.querySelector('iframe')).toBeNull();
-    expect(document.querySelector('img')).toBeNull();
     expect(HOME_VIDEO_URL).toBe(`https://vimeo.com/${HOME_VIDEO_ID}`);
     expect(HOME_VIDEO_EMBED_URL).toBe(`https://player.vimeo.com/video/${HOME_VIDEO_ID}?dnt=1`);
+  });
+
+  it('CSP: frame-src yalnız Vimeo oynatıcısı ve gömme URL’iyle uyumlu; frame-ancestors none', () => {
+    const cfg = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), 'vercel.json'), 'utf8'));
+    const csp = cfg.headers.flatMap((h) => h.headers).find((i) => i.key === 'Content-Security-Policy').value;
+    const dir = (n) => (csp.split(';').map((s) => s.trim()).find((s) => s.startsWith(`${n} `)) || '').split(/\s+/).slice(1);
+    expect(dir('frame-src')).toEqual(['https://player.vimeo.com']);
+    expect(new URL(HOME_VIDEO_EMBED_URL).origin).toBe('https://player.vimeo.com');
+    expect(dir('frame-ancestors')).toEqual(["'none'"]);
+    expect(dir('script-src')).toEqual(["'self'"]);
+    expect(dir('child-src')).toEqual([]);
+  });
+
+  it('video TR: düğme etiketi Türkçe', async () => {
+    const user = userEvent.setup();
+    renderHome({ lang: 'TR' });
+    await user.click(screen.getByRole('button', { name: /Araf tanıtım videosunu oynat/ }));
+    expect(screen.getByTestId('home-video-player')).toHaveAttribute('title', 'Araf tanıtım videosu (Vimeo)');
   });
 
   it('istatistik yokken tire, hata varken tekrar dene fetchStats çağırır', async () => {

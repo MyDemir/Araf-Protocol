@@ -4,10 +4,10 @@
 // [EN] Home (landing) copy and constants. Every number/rule is backed by the contract or README; the source line
 //      sits next to it. No marketing claims: the contract is not audited and is testnet-only.
 
-// [TR] Tanıtım videosu: tek yer. CSP (frontend/vercel.json) frame-src içermediği için şimdilik yeni sekmede açılır;
-//      sayfa içi oynatmaya geçilirse yalnız HOME_VIDEO_EMBED_URL kullanılır.
-// [EN] Intro video: single source. CSP has no frame-src, so it opens in a new tab for now; an in-page player
-//      would use HOME_VIDEO_EMBED_URL.
+// [TR] Tanıtım videosu: tek yer. Sayfa içi oynatıcı HOME_VIDEO_EMBED_URL'i (dnt=1) tıklamadan sonra yükler; bunun
+//      için CSP'de `frame-src https://player.vimeo.com` gerekir (frontend/vercel.json). HOME_VIDEO_URL yeni sekme bağlantısı.
+// [EN] Intro video: single source. The in-page player loads HOME_VIDEO_EMBED_URL (dnt=1) only after a click and needs
+//      `frame-src https://player.vimeo.com` in the CSP. HOME_VIDEO_URL is the new-tab link.
 export const HOME_VIDEO_ID = '1234203639';
 export const HOME_VIDEO_URL = `https://vimeo.com/${HOME_VIDEO_ID}`;
 export const HOME_VIDEO_EMBED_URL = `https://player.vimeo.com/video/${HOME_VIDEO_ID}?dnt=1`;
@@ -35,9 +35,11 @@ const TR = {
   video: {
     eyebrow: 'Tanıtım videosu',
     title: 'Araf’ı izleyin',
-    text: 'Protokolün nasıl çalıştığını anlatan kısa tanıtım. Video Vimeo’da yeni sekmede açılır.',
-    cta: 'Vimeo’da izle',
-    aria: 'Araf tanıtım videosunu Vimeo’da yeni sekmede aç',
+    text: 'Protokolün nasıl çalıştığını anlatan kısa tanıtım. Oynat’a basana kadar Vimeo’ya bağlantı kurulmaz.',
+    cta: 'Oynat',
+    playAria: 'Araf tanıtım videosunu oynat (Vimeo oynatıcısı yüklenir)',
+    iframeTitle: 'Araf tanıtım videosu (Vimeo)',
+    openLink: 'Vimeo’da aç',
   },
   about: {
     eyebrow: 'Proje',
@@ -136,9 +138,11 @@ const EN = {
   video: {
     eyebrow: 'Intro video',
     title: 'Watch Araf',
-    text: 'A short introduction to how the protocol works. The video opens on Vimeo in a new tab.',
-    cta: 'Watch on Vimeo',
-    aria: 'Open the Araf intro video on Vimeo in a new tab',
+    text: 'A short introduction to how the protocol works. Nothing connects to Vimeo until you press Play.',
+    cta: 'Play',
+    playAria: 'Play the Araf intro video (loads the Vimeo player)',
+    iframeTitle: 'Araf intro video (Vimeo)',
+    openLink: 'Open on Vimeo',
   },
   about: {
     eyebrow: 'Project',

@@ -21,8 +21,8 @@ describe('vercel.json CSP for WalletConnect', () => {
     expect(csp).not.toMatch(/(^|\s)wss?:(\s|;|$)/);
   });
 
-  it('does not open frame-src (verify iframe is wallet-side only; measured not needed) and keeps hardening', () => {
-    expect(directives['frame-src']).toBeUndefined();
+  it('opens frame-src only for the Vimeo player (intro video, user-approved) and keeps hardening', () => {
+    expect(directives['frame-src']).toEqual(['https://player.vimeo.com']);
     expect(directives['default-src']).toEqual(["'self'"]);
     expect(directives['frame-ancestors']).toEqual(["'none'"]);
     expect(directives['object-src']).toEqual(["'none'"]);
