@@ -297,8 +297,8 @@ function createRpcPool({ urls, surface = "RpcPool", probeFor = createChainProbe,
           lastErr = lastErr || err; // asıl (birincil) hata öncelikli
           continue;
         }
-        // [TR] B4-03: yerel hız sınırlayıcı reddi sağlayıcı hatası değildir; sağlıklı RPC'yi soğumaya alma.
-        if (err?.code === "RPC_LOCAL_RATE_LIMIT") throw err;
+        // [TR] B4-03: yerel hız sınırlayıcı reddi sağlayıcı hatası değildir; soğumaya alma, sıradaki URL'ye geç.
+        if (err?.code === "RPC_LOCAL_RATE_LIMIT") { lastErr = err; continue; }
         markCooldown(entry, err);
         lastErr = err;
         continue;
@@ -311,7 +311,8 @@ function createRpcPool({ urls, surface = "RpcPool", probeFor = createChainProbe,
         return result;
       } catch (err) {
         lastErr = err;
-        // [TR] B4-03: yerel limiter reddi (RPC_LOCAL_RATE_LIMIT) cooldown'a sayılmaz, doğrudan fırlatılır.
+        // [TR] B4-03: yerel limiter reddi cooldown'a sayılmaz; sıradaki URL denenir, hepsi reddederse hata fırlar.
+        if (err?.code === "RPC_LOCAL_RATE_LIMIT" && entries.length > 1) continue;
         if (err?.code === "RPC_LOCAL_RATE_LIMIT") throw err;
         if (entries.length > 1 && (isRateLimitError(err) || isNetworkError(err))) {
           markCooldown(entry, err);

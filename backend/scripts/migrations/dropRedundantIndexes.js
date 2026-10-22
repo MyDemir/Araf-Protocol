@@ -22,6 +22,11 @@ const TARGETS = [
   { collection: "historical_stats", drop: { date: -1 }, coveredBy: { date: 1 } },
 ];
 
+// [TR] Bağlantı hatası mesajlarında mongodb(+srv)://kullanıcı:şifre@ kimlik bilgisini maskeler.
+function maskMongoUri(text) {
+  return String(text).replace(/mongodb(\+srv)?:\/\/[^@\s/]*@/gi, "mongodb$1://***@");
+}
+
 function parseArgs(argv = process.argv.slice(2)) {
   return { apply: argv.includes("--apply") };
 }
@@ -42,7 +47,7 @@ function decide(target, indexes) {
   if (!victim) return { action: "absent" };
   if (victim.unique) return { action: "skip_unique", name: victim.name };
   const cover = indexes.find((ix) => sameKey(ix.key, target.coveredBy));
-  if (!cover || !cover.unique) return { action: "skip_not_covered", name: victim.name };
+  if (!cover || !cover.unique || cover.partialFilterExpression || cover.sparse) return { action: "skip_not_covered", name: victim.name };
   return { action: "drop", name: victim.name };
 }
 
@@ -87,9 +92,9 @@ async function main() {
 
 if (require.main === module) {
   main().then(() => process.exit(0)).catch((err) => {
-    console.error(`[dropRedundantIndexes] ${err.message}`);
+    console.error(`[dropRedundantIndexes] ${maskMongoUri(err.message)}`);
     process.exit(1);
   });
 }
 
-module.exports = { TARGETS, parseArgs, decide, runDropRedundantIndexes };
+module.exports = { maskMongoUri, TARGETS, parseArgs, decide, runDropRedundantIndexes };

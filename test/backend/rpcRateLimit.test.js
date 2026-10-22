@@ -101,7 +101,7 @@ describe("RPC rate limiter", () => {
     expect(isRateLimitError(errs[0])).toBe(true);
   });
 
-  it("B4-03: a local limiter rejection is not a provider failure (no cooldown, no fallback)", async () => {
+  it("B4-03: a local limiter rejection is not a provider failure (no cooldown, next URL is used)", async () => {
     const clock = fakeClock();
     const sentB = jest.fn().mockResolvedValue([{ id: 1, result: "0x2" }]);
     const full = { acquire: () => Promise.reject(Object.assign(new Error("[RpcRateLimiter] Too Many Requests: queue full (1)"), { code: "RPC_LOCAL_RATE_LIMIT" })) };
@@ -111,9 +111,21 @@ describe("RPC rate limiter", () => {
       createInner: (url) => ({ _send: url === B ? sentB : jest.fn() }),
       rateLimiterFor: (url) => (url === A ? full : limiterWith(clock, { v: 50 })),
     });
+    await expect(pool.send([{ id: 1 }])).resolves.toEqual([{ id: 1, result: "0x2" }]);
+    expect(pool.entries[0].cooldownUntil).toBe(0);
+    expect(sentB).toHaveBeenCalled();
+  });
+
+  it("B4-03: a single URL rejected by the local limiter throws RPC_LOCAL_RATE_LIMIT", async () => {
+    const full = { acquire: () => Promise.reject(Object.assign(new Error("[RpcRateLimiter] Too Many Requests: queue full (1)"), { code: "RPC_LOCAL_RATE_LIMIT" })) };
+    const pool = createRpcPool({
+      urls: [A],
+      probeFor: () => ({ getNetwork: async () => ({ chainId: 8453n }) }),
+      createInner: () => ({ _send: jest.fn() }),
+      rateLimiterFor: () => full,
+    });
     await expect(pool.send([{ id: 1 }])).rejects.toMatchObject({ code: "RPC_LOCAL_RATE_LIMIT" });
     expect(pool.entries[0].cooldownUntil).toBe(0);
-    expect(sentB).not.toHaveBeenCalled();
   });
 
   it("does not batch: 12 concurrent eth_calls are 12 single-request payloads", async () => {

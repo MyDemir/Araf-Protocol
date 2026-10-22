@@ -101,18 +101,31 @@ describe("P25 B4-03: yerel limiter reddi cooldown'a girmez", () => {
     return { pool, sentB };
   };
 
-  it("send: acquire reddi -> hata fırlar, birincil soğumaya girmez, yedeğe kayılmaz", async () => {
+  it("send: acquire reddi -> birincil soğumaya girmez, yedek kullanılır", async () => {
     const { pool, sentB } = mk({ acquire: () => Promise.reject(localErr()) }, jest.fn());
-    await expect(pool.send([{ id: 1 }])).rejects.toMatchObject({ code: "RPC_LOCAL_RATE_LIMIT" });
+    await expect(pool.send([{ id: 1 }])).resolves.toEqual([{ id: 1, result: "0x2" }]);
     expect(pool.entries[0].cooldownUntil).toBe(0);
-    expect(sentB).not.toHaveBeenCalled();
+    expect(sentB).toHaveBeenCalled();
+  });
+
+  it("tüm URL'ler yerel limiter ile reddederse RPC_LOCAL_RATE_LIMIT fırlar, kimse soğumaya girmez", async () => {
+    const reject = { acquire: () => Promise.reject(localErr()) };
+    const pool = createRpcPool({
+      urls: [A, B],
+      log: quiet,
+      probeFor: () => ({ getNetwork: async () => ({ chainId: 8453n }) }),
+      createInner: () => ({ _send: jest.fn() }),
+      rateLimiterFor: () => reject,
+    });
+    await expect(pool.send([{ id: 1 }])).rejects.toMatchObject({ code: "RPC_LOCAL_RATE_LIMIT" });
+    expect(pool.entries.map((e) => e.cooldownUntil)).toEqual([0, 0]);
   });
 
   it("zincir doğrulaması sırasındaki yerel limiter reddi de soğumaya girmez", async () => {
     let first = true;
     const limiter = { acquire: () => (first ? ((first = false), Promise.reject(localErr())) : Promise.resolve()) };
     const { pool } = mk(limiter, jest.fn().mockResolvedValue([{ id: 1, result: "0x1" }]));
-    await expect(pool.send([{ id: 1 }])).rejects.toMatchObject({ code: "RPC_LOCAL_RATE_LIMIT" });
+    await expect(pool.send([{ id: 1 }])).resolves.toEqual([{ id: 1, result: "0x2" }]);
     expect(pool.entries[0].cooldownUntil).toBe(0);
   });
 
@@ -308,6 +321,25 @@ describe("P25 B4-17: dropRedundantIndexes migrasyonu", () => {
     expect(dropped).toEqual([]);
     expect(out.results.find((r) => r.collection === "historical_stats").action).toBe("skip_unique");
     expect(out.results.find((r) => r.collection === "revenueevents").action).toBe("absent");
+  });
+
+  it("kapsayan unique index partialFilterExpression ya da sparse ise tam kapsama sayılmaz", async () => {
+    for (const extra of [{ partialFilterExpression: { a: 1 } }, { sparse: true }]) {
+      const { db, dropped } = fakeDb({
+        revenueevents: [{ name: "tx_hash_1", key: { tx_hash: 1 } }, { name: "u", key: { tx_hash: 1, log_index: 1 }, unique: true, ...extra }],
+      });
+      const out = await mig.runDropRedundantIndexes({ db, apply: true, targets: [mig.TARGETS[0]] });
+      expect(dropped).toEqual([]);
+      expect(out.results[0].action).toBe("skip_not_covered");
+    }
+  });
+
+  it("maskMongoUri: kimlik bilgisi maskelenir", () => {
+    const msg = "connect failed mongodb+srv://user:p4ss@cluster0.x.mongodb.net/db and mongodb://a:b@h:1/x";
+    const out = mig.maskMongoUri(msg);
+    expect(out).not.toMatch(/user|p4ss|a:b/);
+    expect(out).toContain("mongodb+srv://***@cluster0.x.mongodb.net/db");
+    expect(out).toContain("mongodb://***@h:1/x");
   });
 
   it("idempotent: ikinci çalıştırma düşecek bir şey bulmaz", async () => {
