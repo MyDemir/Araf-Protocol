@@ -16,13 +16,20 @@ The previous implementation used two chained HMAC operations instead of RFC 5869
 
 ### 1.1) Master key sources (`KMS_PROVIDER`)
 
-The master key is resolved once per process (cached, zeroed on shutdown) and must be exactly 32 bytes:
+The master key is resolved once per process (in-memory cache) and must be exactly 32 bytes. The cache is zeroed on shutdown (`clearMasterKeyCache`, `app.js:358`). An empty `KMS_PROVIDER` defaults to `env`; an unknown value throws (`encryption.js:125`, `:292`).
 
-- `env` — `MASTER_ENCRYPTION_KEY` (64 hex chars). **Development only**; production refuses to start.
-- `aws` — `AWS_ENCRYPTED_DATA_KEY` (base64 `CiphertextBlob`) decrypted with AWS KMS (`AWS_REGION`, default `eu-west-1`). `AWS_KMS_KEY_ARN` is not read by the code.
-- `vault` — HashiCorp Vault Transit: the **fixed wrapped data key** `VAULT_ENCRYPTED_DATA_KEY` (`vault:v1:…`) is decrypted through `transit/decrypt/<VAULT_KEY_NAME>` (`VAULT_ADDR`, `VAULT_TOKEN`; key name default `araf-master-key`). The wrapped key must be created once and kept: generating a new data key per start would make all existing PII undecryptable, so a missing value fails closed.
+- `env` — `MASTER_ENCRYPTION_KEY`: must be at least 64 characters and the **first 64 characters must all be hex**; only the first 64 characters are used. A short value throws "missing or too short", a non-hex character throws "must contain only hex characters (first 64 chars)" (so a non-hex character cannot silently yield a short buffer) (`encryption.js:136-143`). **Development only**; production rejects it with a `SEC-01 BLOCKER` error (except the narrow exception below).
+  - **Testnet exception:** if `NODE_ENV=production` + `EXPECTED_CHAIN_ID=84532` + `ALLOW_ENV_KMS_ON_TESTNET=yes` are **all** true, `env` is accepted in production and a large warning is logged on every start. The startup self-test then verifies that the RPC really is chain 84532: it retries transient errors (429, network) at 1/3/9 s, and startup stops on a different chain or when `BASE_RPC_URL` is missing (the error may carry `SEC01_WRONG_CHAIN` / `definitiveWrongChain`) (`encryption.js:69-98`, `:307-361`). There is no exception on mainnet (8453). Real PII must not be entered.
+- `aws` — `AWS_ENCRYPTED_DATA_KEY` (base64 `CiphertextBlob`) decrypted with AWS KMS (`AWS_REGION`, default `eu-west-1`). `AWS_KMS_KEY_ARN` is not read by the code. The call times out after 10 s; while the cache is empty, concurrent requests share one KMS Decrypt call (single-flight); a result that is not exactly 32 bytes is rejected; the buffer returned by KMS is zeroed (`encryption.js:29-30`, `:164-217`).
+- `vault` — HashiCorp Vault Transit: the **fixed wrapped data key** `VAULT_ENCRYPTED_DATA_KEY` (`vault:v1:…`) is decrypted through `transit/decrypt/<VAULT_KEY_NAME>` (`VAULT_ADDR`, `VAULT_TOKEN`; key name default `araf-master-key`). The call times out after 10 s; the Vault response body is never put in the error message, only the HTTP status code. The wrapped key must be created once and kept: generating a new data key per start would make all existing PII undecryptable, so a missing `VAULT_ADDR`, `VAULT_TOKEN` or `VAULT_ENCRYPTED_DATA_KEY` fails closed (`encryption.js:243-289`).
 
-In production a startup self-test (`runProductionKmsStartupSelfTest`) checks the provider variables and resolves the key before the server listens.
+### 1.1.1) Startup self-test and degraded mode (`KMS_UNAVAILABLE_DEGRADED`)
+
+- The self-test (`runProductionKmsStartupSelfTest`) runs **before** `connectDB` (`app.js:444`, `:452`). It is skipped unless `NODE_ENV=production`. In production: for `env` the SEC-01 rule (plus the RPC chain check under the exception); for `aws`/`vault` the presence of the required variables; then it resolves the key and checks it is 32 bytes (`encryption.js:374-412`).
+- If the self-test fails with a **transient** RPC error (e.g. 429, network), the process does not exit: it enters degraded mode and `blockKeyLoadingUntilSelfTest()` closes key loading. The cache is cleared and `_getMasterKey` throws an error with `code: "KMS_UNAVAILABLE_DEGRADED"`, so no encryption or decryption can happen (fail-closed) (`app.js:446-450`, `encryption.js:52-55`, `:120-124`).
+- The gate opens only when the self-test re-verifies the chain successfully (the first step of the recovery loop is `sec01_kms`); there is no other bypass. A failed retry leaves the gate closed (`app.js:492-493`, `encryption.js:364-372`).
+- If the cache is invalidated while an AWS call is in flight (`clearMasterKeyCache` / `blockKeyLoadingUntilSelfTest`), that call also fails with `KMS_UNAVAILABLE_DEGRADED` and its result is not written to the cache (`encryption.js:197-202`, `:210-214`).
+- Non-transient errors (wrong chain, missing/invalid configuration, unknown provider) do not take this path; the process exits (`app.js:447`).
 
 ### 1.2) Purpose-separated HMAC (fingerprints and IP hashes)
 
@@ -54,7 +61,7 @@ Any field encrypted with `encryptField(...)` before the HKDF change may require 
 | `trades` | `payout_snapshot.taker.contact_value_enc` | Optional encrypted taker contact snapshot. |
 | `trades` | `evidence.receipt_encrypted` | Encrypted receipt/base64 payload. Cleared by retention once the trade is terminal and `receipt_delete_at` (30 days after upload) has passed. |
 
-Non-encrypted metadata such as `rail`, `country`, fingerprint hashes, profile version, timestamps, and bank-change counters is not re-encrypted by this migration. Payout snapshots (`payout_snapshot.*`, including `fingerprint_hash_at_lock`) are wiped by the retention job 30 days after the lock once the trade is terminal.
+Non-encrypted metadata such as `rail`, `country`, fingerprint hashes, profile version, timestamps, and bank-change counters is not re-encrypted by this migration. Payout snapshots (`payout_snapshot.*`, including `fingerprint_hash_at_lock`) are wiped by the retention job 30 days after the lock once the trade is terminal (`jobs/cleanupSensitiveData.js`). For archived trade collections (`archive_<chainId>_<escrow>_trades`), `jobs/archiveRetention.js` clears the same fields with no status filter; the deadline is `min(existing delete_at, _archive.archived_at + 30 days)` and encrypted fields are never decrypted by this job.
 
 Hash-type fields (`payout_profile.fingerprint.hash`, `payout_snapshot.*.fingerprint_hash_at_lock`, `chargeback_ack.ip_hash`) are not ciphertext, but they depend on the master key (section 1.2). They are unaffected by the HKDF DEK change (that change only touches the `*_enc` fields above), yet they do change if the master key is ever rotated.
 
@@ -128,7 +135,8 @@ Before production migration:
 - [ ] Verified backup restore in staging.
 - [ ] Read-only diagnostic completed with aggregate counts only.
 - [ ] Migration write mode has tests and an explicit production confirmation guard.
-- [ ] `KMS_PROVIDER=env` is not used in production.
+- [ ] `KMS_PROVIDER=env` is not used in production (except under the documented Base Sepolia exception; never on mainnet).
+- [ ] No degraded-mode / `KMS_UNAVAILABLE_DEGRADED` warning at startup; the migration is not started while degraded.
 - [ ] App, worker, and migration process use the same KMS provider (for `vault`: the same fixed `VAULT_ENCRYPTED_DATA_KEY`; for `aws`: the same `AWS_ENCRYPTED_DATA_KEY`) and expected chain/environment config.
 - [ ] PII endpoints are monitored for decrypt/auth failures without logging plaintext.
 - [ ] All logs are checked for PII redaction before and after the migration.

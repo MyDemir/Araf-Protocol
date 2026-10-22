@@ -16,13 +16,20 @@
 
 ### 1.1) Master key kaynakları (`KMS_PROVIDER`)
 
-Master key süreç başına bir kez çözülür (önbelleklenir, shutdown'da sıfırlanır) ve tam 32 bayt olmalıdır:
+Master key süreç başına bir kez çözülür (bellek içi önbellek) ve tam 32 bayt olmalıdır. Önbellek shutdown'da sıfırlanır (`clearMasterKeyCache`, `app.js:358`). `KMS_PROVIDER` boşsa `env` varsayılır; bilinmeyen değer hata verir (`encryption.js:125`, `:292`).
 
-- `env` — `MASTER_ENCRYPTION_KEY` (64 hex karakter). **Yalnız geliştirme**; production başlamayı reddeder.
-- `aws` — `AWS_ENCRYPTED_DATA_KEY` (base64 `CiphertextBlob`) AWS KMS ile çözülür (`AWS_REGION`, varsayılan `eu-west-1`). `AWS_KMS_KEY_ARN` kod tarafından okunmaz.
-- `vault` — HashiCorp Vault Transit: **sabit wrapped data key** `VAULT_ENCRYPTED_DATA_KEY` (`vault:v1:…`) `transit/decrypt/<VAULT_KEY_NAME>` ile çözülür (`VAULT_ADDR`, `VAULT_TOKEN`; anahtar adı varsayılanı `araf-master-key`). Wrapped key bir kez üretilip saklanmalıdır: her açılışta yeni data key üretmek mevcut tüm PII'ı çözülemez yapardı, bu yüzden değer eksikse fail-closed davranılır.
+- `env` — `MASTER_ENCRYPTION_KEY`: en az 64 karakter olmalı ve **ilk 64 karakterin hepsi hex** olmalıdır; yalnız ilk 64 karakter kullanılır. Kısa değer "missing or too short", hex olmayan karakter "must contain only hex characters (first 64 chars)" hatası verir (hex olmayan karakter sessizce kısa tampon üretmesin diye) (`encryption.js:136-143`). **Yalnız geliştirme**; production `SEC-01 BLOCKER` hatasıyla reddeder (aşağıdaki dar istisna hariç).
+  - **Testnet istisnası:** `NODE_ENV=production` + `EXPECTED_CHAIN_ID=84532` + `ALLOW_ENV_KMS_ON_TESTNET=yes` üçü **birlikte** doğruysa production'da `env` kabul edilir; her başlatmada büyük uyarı loglanır. Bu durumda açılış self-test'i RPC'nin gerçekten 84532 olduğunu doğrular: geçici hatalarda (429, ağ) 1/3/9 sn aralıkla yeniden dener, farklı zincir ya da `BASE_RPC_URL` yokluğunda başlatma durur (hata `SEC01_WRONG_CHAIN` / `definitiveWrongChain` taşıyabilir) (`encryption.js:69-98`, `:307-361`). Mainnet'te (8453) istisna yoktur. Gerçek PII girilmemeli.
+- `aws` — `AWS_ENCRYPTED_DATA_KEY` (base64 `CiphertextBlob`) AWS KMS ile çözülür (`AWS_REGION`, varsayılan `eu-west-1`). `AWS_KMS_KEY_ARN` kod tarafından okunmaz. Çağrı 10 sn'de zaman aşımına uğrar; önbellek boşken eşzamanlı istekler tek bir KMS Decrypt çağrısını paylaşır (single-flight); sonuç tam 32 bayt değilse reddedilir; KMS'ten dönen tampon sıfırlanır (`encryption.js:29-30`, `:164-217`).
+- `vault` — HashiCorp Vault Transit: **sabit wrapped data key** `VAULT_ENCRYPTED_DATA_KEY` (`vault:v1:…`) `transit/decrypt/<VAULT_KEY_NAME>` ile çözülür (`VAULT_ADDR`, `VAULT_TOKEN`; anahtar adı varsayılanı `araf-master-key`). Çağrı 10 sn'de zaman aşımına uğrar; hata mesajına Vault yanıt gövdesi konmaz, yalnız HTTP durum kodu yazılır. Wrapped key bir kez üretilip saklanmalıdır: her açılışta yeni data key üretmek mevcut tüm PII'ı çözülemez yapardı, bu yüzden `VAULT_ADDR`, `VAULT_TOKEN` ya da `VAULT_ENCRYPTED_DATA_KEY` eksikse fail-closed davranılır (`encryption.js:243-289`).
 
-Production'da açılış self-test'i (`runProductionKmsStartupSelfTest`) provider değişkenlerini kontrol eder ve sunucu dinlemeye başlamadan anahtarı çözer.
+### 1.1.1) Açılış self-test'i ve kısıtlı mod (`KMS_UNAVAILABLE_DEGRADED`)
+
+- Self-test (`runProductionKmsStartupSelfTest`) `connectDB`'den **önce** çalışır (`app.js:444`, `:452`). `NODE_ENV=production` değilse atlanır. Production'da: `env` için SEC-01 kuralı (istisnada RPC zincir doğrulaması); `aws`/`vault` için gerekli değişkenlerin varlığı; sonra anahtarı çözer ve 32 bayt olduğunu doğrular (`encryption.js:374-412`).
+- Self-test **geçici** bir RPC hatasıyla (ör. 429, ağ) başarısız olursa süreç çıkmaz: kısıtlı (degraded) moda girer ve `blockKeyLoadingUntilSelfTest()` anahtar yüklemeyi kapatır. Önbellek temizlenir; `_getMasterKey` `code: "KMS_UNAVAILABLE_DEGRADED"` taşıyan hata fırlatır, yani hiçbir şifreleme/çözme yapılamaz (fail-closed) (`app.js:446-450`, `encryption.js:52-55`, `:120-124`).
+- Kapı yalnız self-test zinciri başarıyla yeniden doğruladığında açılır (toparlanma döngüsünün ilk adımı `sec01_kms`); başka atlatma yolu yoktur. Başarısız yeniden deneme kapıyı kapalı bırakır (`app.js:492-493`, `encryption.js:364-372`).
+- Önbellek, uçuştaki bir AWS çağrısı sırasında geçersiz kılınırsa (`clearMasterKeyCache` / `blockKeyLoadingUntilSelfTest`) o çağrı da `KMS_UNAVAILABLE_DEGRADED` ile başarısız olur ve sonuç önbelleğe yazılmaz (`encryption.js:197-202`, `:210-214`).
+- Geçici olmayan hatalar (yanlış zincir, eksik/yanlış yapılandırma, bilinmeyen sağlayıcı) bu yola girmez; süreç çıkar (`app.js:447`).
 
 ### 1.2) Amaç-ayrımlı HMAC (fingerprint ve IP hash'leri)
 
@@ -54,7 +61,7 @@ HKDF değişikliğinden önce `encryptField(...)` ile şifrelenen her alan migra
 | `trades` | `payout_snapshot.taker.contact_value_enc` | Opsiyonel şifreli taker contact snapshot'ı. |
 | `trades` | `evidence.receipt_encrypted` | Şifreli dekont/base64 payload. Trade terminal olduğunda ve `receipt_delete_at` (yüklemeden 30 gün sonrası) geçince retention ile temizlenir. |
 
-`rail`, `country`, fingerprint hash'leri, profile version, timestamp'ler ve bank-change sayaçları gibi şifrelenmemiş metadata bu migration ile yeniden şifrelenmez. Payout snapshot'ları (`payout_snapshot.*`, `fingerprint_hash_at_lock` dahil) trade terminal olduktan sonra kilitten 30 gün sonra retention işi tarafından silinir.
+`rail`, `country`, fingerprint hash'leri, profile version, timestamp'ler ve bank-change sayaçları gibi şifrelenmemiş metadata bu migration ile yeniden şifrelenmez. Payout snapshot'ları (`payout_snapshot.*`, `fingerprint_hash_at_lock` dahil) trade terminal olduktan sonra kilitten 30 gün sonra retention işi tarafından silinir (`jobs/cleanupSensitiveData.js`). Arşivlenmiş trade koleksiyonları (`archive_<chainId>_<escrow>_trades`) için `jobs/archiveRetention.js` aynı alanları durum filtresi olmadan temizler; silme zamanı `min(mevcut delete_at, _archive.archived_at + 30 gün)`'dür ve şifreli alanlar bu işte asla çözülmez.
 
 Hash tipi alanlar (`payout_profile.fingerprint.hash`, `payout_snapshot.*.fingerprint_hash_at_lock`, `chargeback_ack.ip_hash`) ciphertext değildir ama master key'e bağlıdır (bölüm 1.2). HKDF DEK değişikliğinden etkilenmezler (o değişiklik yalnız yukarıdaki `*_enc` alanlarına dokunur), fakat master key döndürülürse değişirler.
 
@@ -128,7 +135,8 @@ Production migration öncesi:
 - [ ] Backup restore staging'de doğrulandı.
 - [ ] Read-only diagnostic yalnız aggregate count üreterek tamamlandı.
 - [ ] Migration write mode testlere ve explicit production confirmation guard'a sahip.
-- [ ] Production'da `KMS_PROVIDER=env` kullanılmıyor.
+- [ ] Production'da `KMS_PROVIDER=env` kullanılmıyor (yalnız belgelenmiş Base Sepolia istisnası dışında; mainnet'te asla).
+- [ ] Açılışta kısıtlı mod / `KMS_UNAVAILABLE_DEGRADED` uyarısı yok; migration kısıtlı modda başlatılmıyor.
 - [ ] App, worker ve migration process aynı KMS provider'ı (`vault` için aynı sabit `VAULT_ENCRYPTED_DATA_KEY`; `aws` için aynı `AWS_ENCRYPTED_DATA_KEY`) ve beklenen chain/environment config'i kullanıyor.
 - [ ] PII endpoint'leri plaintext loglamadan decrypt/auth failure için monitor ediliyor.
 - [ ] Migration öncesi ve sonrası log'larda PII redaction kontrol edildi.

@@ -91,11 +91,11 @@ Rollout fazları ürün ve operasyon aşamalarıdır. On-chain'de kayıt, finali
 | Clean release weight (`terminalAt - paidAt`'e göre) | ≤ 1 sa: 2.5× · ≤ 24 sa: 1.5× · ≤ 72 sa: 1.0× · daha yavaş ya da `paidAt` yok: 0.5× |
 | Partial settlement weight | 0.3× |
 | Tier çarpanları | Tier 1: 1.0× · Tier 2: 1.1× · Tier 3: 1.2× · Tier 4: 1.3× · Tier 0: eligible değil |
-| Weight formülü | `stableNotional × outcome × tier`; maker ve taker aynı weight'i alır |
+| Weight formülü | `stableNotional × outcome × tier`; maker ve taker aynı formülü kullanır, ancak ücret ödemeyen (snapshot ücreti 0) taraf weight almaz (K3-02) |
 | Claim tutarı | `epochRewardPool × userWeight / totalWeight` |
 | Dust | claim penceresi bittikten sonra (ya da tüm weight claim edildiyse) `sweepEpochDust` talep edilmeyen kalanı **içinde bulunulan** epoch'un havuzuna devreder; alıcı seçilemez |
 | Funding | sponsor fonu mevcut ya da gelecek bir epoch'u hedefler; epoch havuzu = o epoch için sponsor fonu + owner'ın tetiklediği, reward reserve'den `allocateEpochRewards` |
-| Owner yetkileri | `setRewardBps` (4000–7000), `allocateEpochRewards`, `setProductPool`, `withdrawTreasuryShare*` (yalnız treasury reserve; reward reserve çekilemez), `setSupportedToken`, `setFinalTreasury`, `pause()` / `unpause()`; `setRewards` tek seferliktir. `allocateEpochRewards` `whenNotPaused`'tır (`ArafRewards.sol:225`); bu yüzden owner'ın `ArafRewards`'ı pause etmesi yalnız allocation'ı durdurur; kayıt, finalize, claim ve sweep açık kalır |
+| Owner yetkileri | `setRewardBps` (4000–7000), `allocateEpochRewards`, `setProductPool`, `withdrawTreasuryShare*` (yalnız treasury reserve; reward reserve çekilemez), `setSupportedToken`, `setFinalTreasury`, `pause()` / `unpause()`; `setRewards` tek seferliktir. `allocateEpochRewards` `whenNotPaused`'tır (`ArafRewards.sol:230`); bu yüzden owner'ın `ArafRewards`'ı pause etmesi yalnız allocation'ı durdurur; kayıt, finalize, claim ve sweep açık kalır |
 
 Backend/frontend yüzeyleri: `/api/rewards/*` altında public read-only mirror ve admin `/api/admin/revenue`, `/api/admin/rewards/health`; `claimable` backend tarafından asla tahmin edilmez (on-chain getter'ı kullanın). `.env.example` dosyalarındaki rewards bayrakları (`REWARDS_READ_ONLY`, `REWARDS_SOURCE`) belge amaçlı sabitlerdir ve kod tarafından okunmaz.
 
