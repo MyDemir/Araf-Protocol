@@ -15,12 +15,12 @@ Aşağıdakiler K2(B) "ping düşer" kuralı sonrasında bilinçli olarak ertele
    Kapattığı suistimal: Küçük işlemlerle itibar şişirip büyük tutarda düşük teminatla şantaj.
 
 3. **Kısmi uzlaşma başarı sayısını artırıyor; risk puanı ucuzca sıfırlanabiliyor.**
-   Sorun: Birkaç ucuz temiz işlem risk puanını sıfırlıyor; uzlaşma sonucu itibar kazandırıyor.
+   Sorun: Birkaç ucuz temiz serbest bırakma risk puanını düşürüyor (her biri 8 puan); kısmi uzlaşma puan vermiyor ama nitelikli işlemde (en az 20 USD) başarı sayısını +1 artırıyor. `decayReputation` affı artık ban bitişinin yanında son olumsuz olaydan da temiz dönem (varsayılan 90 gün) bekliyor; temiz serbest bırakma yolu bu bekleyişe tabi değil.
    Öneri: Uyuşmazlık sonucu itibar kazandırmasın; risk puanı son negatif olaydan 30 gün geçmeden düşmesin.
    Kapattığı suistimal: Uyuşmazlık çıkarıp itibar kazanma ve geçmişi hızlı temizleme.
 
 4. **Düşen ping cezasız; cezalar mağdura değil hazineye gidiyor.**
-   Sorun: Düşen ping maker'a +48 saat bedava fren sağlıyor. Dürüst taker autoRelease'te kendi bond'undan %2 ödüyor.
+   Sorun: Düşen ping maker'a +48 saat bedava fren sağlıyor. Dürüst taker autoRelease'te kendi bond'undan %2 (en az release ücreti kadar) ödüyor ve bu kesinti hazineye gidiyor. İstisna: ödeme penceresi aşımı cezası artık kilitlenen maker'a gidiyor (K1-03, kullanıcı kararı).
    Öneri: Düşmüş ping sonrası release temiz sayılmasın; cezalar mağdura ödensin; dürüst taker'dan autoRelease cezası kesilmesin.
    Kapattığı suistimal: Ping atıp susarak karşı tarafı bekletme; dürüst tarafın cezalandırılması.
 
@@ -35,7 +35,7 @@ Aşağıdakiler K2(B) "ping düşer" kuralı sonrasında bilinçli olarak ertele
    Kapattığı suistimal: Fiatı alıp challenge açarak uzlaşma şantajı yapma.
 
 7. **Karar notu: yakılan/eriyen tutarlar hazineye gidiyor.**
-   Sorun: Protokol uyuşmazlıktan gelir elde ediyor; bu bilinçli bir tercih mi, açık bir karar gerekiyor.
+   Sorun: Protokol uyuşmazlıktan gelir elde ediyor; bu bilinçli bir tercih mi, açık bir karar gerekiyor. Bugün burnExpired ve autoRelease kesintisi hazineye gider; yalnız ödeme penceresi cezası maker'a gider (K1-03).
    Öneri: Ürün sahibi kararı alınsın ve belgelensin (alternatif: mağdura ödeme, madde 4).
    Kapattığı suistimal: Teşvik çatışması algısı (uyuşmazlıktan kâr eden protokol).
 
@@ -45,6 +45,6 @@ Aşağıdakiler K2(B) "ping düşer" kuralı sonrasında bilinçli olarak ertele
    Kapattığı suistimal: Uzlaşma kabulünün hemen öncesinde yakımı tetikleyerek uzlaşmayı bozma.
 
 9. **Profil kilidi Trade aynasına bakıyor.**
-   Sorun: Zincirde kilitlenip aynaya yazılmadan önceki kısa pencerede profil yazılabilir (snapshot ilk yakalamayla sabit; düşük risk).
+   Sorun: Zincirde kilitlenip aynaya yazılmadan önceki kısa pencerede profil yazılabilir. Worker snapshot'ı artık yalnız iki profilin de kilit anından (güvenlik payıyla) önce değiştiği kanıtlanırsa alır; kanıt yoksa snapshot alınmaz ve eksik işaretlenir (B1-01). Kalan risk düşük.
    Öneri: Kilit kontrolünü zincirdeki işlem durumuna da bağla ya da aynalama gecikmesini kapat.
    Kapattığı suistimal: Kilit anında ödeme profilini değiştirerek snapshot'ı etkileme.
