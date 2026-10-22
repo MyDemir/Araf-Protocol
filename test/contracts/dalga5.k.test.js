@@ -301,6 +301,76 @@ describe("Dalga 5 K paketi / Wave 5 contract package", function () {
   });
 });
 
+// [TR] K1-06 CEI: releaseFunds dışındaki gelir üreten terminal yollar. expirePaymentWindow K1-03 sonrası hazineye
+//      çağrı yapmadığı için (hook yok) bu testte yer almaz.
+// [EN] K1-06 CEI on the other revenue-producing terminal paths. expirePaymentWindow makes no treasury call after
+//      K1-03 (no hook), so it is not applicable here.
+describe("Dalga 5 K1-06 CEI: every revenue-producing terminal path", function () {
+  async function withProbe(c, wallet) {
+    const probe = await (await ethers.getContractFactory("MockRevenueProbe")).deploy(await c.escrow.getAddress());
+    await c.escrow.setTreasury(await probe.getAddress());
+    if (wallet) await probe.setProbeWallet(wallet);
+    return probe;
+  }
+
+  // [TR] Aynı tx'te: hook terminal snapshot'ı görür ve ReputationUpdated log'ları gelir/transfer log'larından önce gelir.
+  // [EN] Same tx: the hook sees the terminal snapshot and ReputationUpdated precedes revenue/transfer logs.
+  async function expectCei(c, probe, txPromise, outcome, expectFirstSuccess) {
+    const r = await (await txPromise).wait();
+    expect(await probe.hookCount()).to.equal(1n);
+    expect(await probe.seenOutcome()).to.equal(outcome);
+    expect(await probe.seenTerminalAt()).to.be.gt(0n);
+    if (expectFirstSuccess) expect(await probe.seenFirstSuccessAt()).to.be.gt(0n);
+    const esc = parseAll(r, c.escrow.interface);
+    const tok = parseAll(r, c.token.interface).filter((e) => e.name === "Transfer");
+    const firstRep = esc.find((e) => e.name === "ReputationUpdated").index;
+    const revenue = esc.find((e) => e.name === "ProtocolRevenueSent").index;
+    expect(firstRep).to.be.lt(revenue);
+    expect(firstRep).to.be.lt(Math.min(...tok.map((t) => t.index)));
+  }
+
+  it("autoRelease (tier 0, taker fee floor): hook sees AUTO_RELEASE and the taker's first success", async function () {
+    const c = await loadFixture(base);
+    const tid = await sellTrade(c, U(100));
+    await c.escrow.connect(c.taker).reportPayment(tid, "Qm");
+    await time.increase(48 * H);
+    await c.escrow.connect(c.taker).pingMaker(tid);
+    await time.increase(24 * H);
+    expect(await c.escrow.getFirstSuccessfulTradeAt(c.taker.address)).to.equal(0n);
+    const probe = await withProbe(c, c.taker.address);
+    await expectCei(c, probe, c.escrow.connect(c.taker).autoRelease(tid), Outcome.AUTO_RELEASE, true);
+  });
+
+  it("acceptSettlement: hook sees PARTIAL_SETTLEMENT and the maker's first success", async function () {
+    const c = await loadFixture(base);
+    const tid = await sellTrade(c, U(100));
+    await toChallenged(c, tid);
+    await c.escrow.connect(c.maker).proposeSettlement(tid, 5000, (await time.latest()) + 3600);
+    const pid = (await c.escrow.getSettlementProposal(tid)).id;
+    const probe = await withProbe(c, c.maker.address);
+    await expectCei(c, probe, c.escrow.connect(c.taker).acceptSettlement(tid, pid), Outcome.PARTIAL_SETTLEMENT, true);
+  });
+
+  it("mutual cancel (PAID, bonded tier so fees > 0): hook sees MUTUAL_CANCEL", async function () {
+    const c = await loadFixture(base);
+    await liftAll(c);
+    const tid = await sellTrade(c, U(1000), 1);
+    await c.escrow.connect(c.taker).reportPayment(tid, "Qm");
+    await c.escrow.connect(c.maker).proposeOrApproveCancel(tid);
+    const probe = await withProbe(c);
+    await expectCei(c, probe, c.escrow.connect(c.taker).proposeOrApproveCancel(tid), 3n, false);
+  });
+
+  it("burnExpired: hook sees BURNED", async function () {
+    const c = await loadFixture(base);
+    const tid = await sellTrade(c, U(100));
+    await toChallenged(c, tid);
+    await time.increase(240 * H);
+    const probe = await withProbe(c);
+    await expectCei(c, probe, c.escrow.connect(c.other).burnExpired(tid), 6n, false);
+  });
+});
+
 describe("Dalga 5 K paketi: rewards and vault", function () {
   const SCALE = 10_000n * 10_000n;
 
