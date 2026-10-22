@@ -6,8 +6,8 @@ const ICONS = { order: ListPlus, payment: Banknote, release: CircleCheck, disput
 // [TR] "Nasıl çalışır": dört adım (metinler eski renderHome ile aynı, homeContent.how).
 // [EN] "How it works": four steps (copy unchanged, from homeContent.how).
 const HomeHowItWorks = ({ content }) => (
-  <section className="min-w-0 bg-surface border border-borderSubtle rounded-2xl p-5 md:p-6" data-testid="home-how-it-works">
-    <HomeSectionHeader eyebrow={content.eyebrow} title={content.title} className="!mb-4" />
+  <section className="min-w-0 bg-surface border border-borderSubtle rounded-2xl p-5 md:p-6" data-testid="home-how-it-works" aria-labelledby="home-how-title">
+    <HomeSectionHeader eyebrow={content.eyebrow} title={content.title} id="home-how-title" className="!mb-4" />
     <ol className="space-y-3">
       {content.steps.map((step, i) => {
         const Icon = ICONS[step.key] || ListPlus;

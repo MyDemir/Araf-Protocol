@@ -14,7 +14,7 @@ export const HOME_VIDEO_EMBED_URL = `https://player.vimeo.com/video/${HOME_VIDEO
 
 const TR = {
   hero: {
-    eyebrow: 'Base üzerinde P2P USDT/USDC',
+    eyebrow: 'P2P USDT/USDC · Base Sepolia testnet',
     titleLine1: 'Sistem yargılamaz.',
     titleLine2: 'Dürüstsüzlüğü pahalıya mal eder.',
     lead: 'Emanet tutmayan, hakemsiz eşten eşe USDT/USDC takası. Kurallar kontratta.',
@@ -53,7 +53,7 @@ const TR = {
       'Kuralları önceden ve açıkça bilmek isteyenler',
     ],
     facts: [
-      { k: 'Ağ', v: 'Base' },
+      { k: 'Ağ', v: 'Base Sepolia' },
       { k: 'Varlık', v: 'USDT · USDC' },
       { k: 'Hakem', v: 'Yok' },
     ],
@@ -80,26 +80,26 @@ const TR = {
   },
   features: {
     eyebrow: 'Özellikler',
-    title: 'Kontratta yazılı, zincirde doğrulanabilir.',
+    title: 'Her kural kontratta yazılı.',
     items: [
       // README.md "Trust boundaries"; ArafEscrow.sol fon tutan tek kaynak
       { key: 'custody', title: 'Emanet tutmaz', text: 'Fonlar ArafEscrow kontratında kilitlidir. Backend fon tutmaz ve emaneti hareket ettiremez.' },
       // ArafEscrow.sol:244-254
       { key: 'bond', title: 'İki taraflı teminat', text: 'Satıcı ve alıcı teminat yatırır. Oran tier’a göre satıcıda %0–8, alıcıda %0–10’dur.' },
       // ArafEscrow.sol:271, :266, :909
-      { key: 'window', title: '48 saat ödeme penceresi', text: 'Alıcı 48 saat içinde ödemeyi bildirmezse işlem iptal edilebilir; alıcı teminatının %2’si satıcıya geçer.' },
-      // ArafEscrow.sol:1133, :1161, :266
-      { key: 'ping', title: 'Ping ve otomatik serbest bırakma', text: 'Satıcı susarsa alıcı uyarır; 24 saat içinde yanıt yoksa kripto alıcıya geçer. İki taraf da teminatının en az %2’sini kaybeder.' },
+      { key: 'window', title: '48 saat ödeme penceresi', text: 'Alıcı 48 saat içinde ödemeyi bildirmezse işlem iptal edilebilir; alıcının teminatı varsa %2’si satıcıya geçer.' },
+      // ArafEscrow.sol:1133, :1161, :266, :1167-1178 (max(%2 bond, ücret); maker ücreti bond ile sınırlı)
+      { key: 'ping', title: 'Ping ve otomatik serbest bırakma', text: 'Satıcı susarsa alıcı uyarır; 24 saat içinde yanıt yoksa kripto alıcıya geçer. Teminatı olan taraf teminatının en az %2’sini kaybeder (Tier 0’da teminat yoktur).' },
       // ArafEscrow.sol:268, :272-273, :292-294, :1095
       { key: 'bleed', title: 'İtirazda erime ve yakım', text: 'İtirazda 48 saat sonra teminatlar, 144. saatten sonra ana para erir. 240. saatte kalan tutar yakılır.' },
-      // ArafEscrow.sol:1039, :1210, :1265
-      { key: 'settle', title: 'Her an uzlaşma', text: 'Taraflar itiraz sürerken bile birlikte iptal edebilir ya da paylaşım teklifinde anlaşabilir.' },
-      // README.md "Tiers"; ArafEscrow.sol:256-257, :715
-      { key: 'tier', title: 'Zincir üstü itibar ve tier', text: 'Beş kademe (0–4). Üst tier daha düşük teminat ister; temiz sicil teminatı 1 puan düşürür, risk puanı 3 puan artırır.' },
-      // ArafEscrow.sol:558, :583, :628, :659 whenNotPaused
-      { key: 'pause', title: 'Duraklatma yalnız yeni işlemi durdurur', text: 'Duraklatma yeni emir ve eşleşmeyi engeller. Açık işlemler her zaman kapatılabilir.' },
-      // README.md "Trust boundaries": no withdraw/rescue function
-      { key: 'owner', title: 'Sahip fon çekemez', text: 'Kontratta çekme ya da kurtarma fonksiyonu yoktur. Sahip emanetteki fonu alamaz, işlemin sonucuna karar veremez.' },
+      // ArafEscrow.sol:1039-1052 (LOCKED/PAID/CHALLENGED, iki onay); ArafSettlementLib.sol:154 (paylaşım yalnız CHALLENGED)
+      { key: 'settle', title: 'Birlikte iptal, itirazda uzlaşma', text: 'İşlem açıkken (itiraz dahil) taraflar iki onayla birlikte iptal edebilir. İtiraz sürerken paylaşım teklifinde de anlaşabilirler.' },
+      // README.md "Tiers"; ArafEscrow.sol:244-254, :256-257, :715, :1461-1472 / :1486-1497 (Tier 0 erken döner)
+      { key: 'tier', title: 'Zincir üstü itibar ve tier', text: 'Beş kademe (0–4). Tier 0’da teminat yoktur; Tier 1’den 4’e çıktıkça teminat düşer (satıcı %8→%2, alıcı %10→%2). Tier 1 ve üstünde temiz sicil (risk puanı yok, en az bir başarılı işlem) oranı 1 yüzde puan düşürür; herhangi bir risk puanı 3 yüzde puan artırır.' },
+      // ArafEscrow.sol:558, :583, :628, :659 whenNotPaused (yalnız bunlar). Çıkışlar taraf hareketi bekler; garanti verilmez.
+      { key: 'pause', title: 'Duraklatma yalnız yeni işlemi durdurur', text: 'Duraklatma yeni emir ve eşleşmeyi engeller; açık işlemlerin çıkış fonksiyonları duraklatmadan etkilenmez.' },
+      // README.md "Trust boundaries"; ArafEscrow.sol:1790 setTreasury, :1814-1818 setFeeConfig, :310 MAX_FEE_CONFIG_BPS = 2000
+      { key: 'owner', title: 'Sahip fon çekemez', text: 'Kontratta çekme ya da kurtarma fonksiyonu yoktur. Sahip hazine adresini, ücretleri (taraf başına en fazla %20) ve ayarları değiştirebilir; ama emanetteki fonu alamaz ve işlemin sonucunu seçemez.' },
     ],
   },
   how: {
@@ -117,7 +117,7 @@ const TR = {
 
 const EN = {
   hero: {
-    eyebrow: 'P2P USDT/USDC on Base',
+    eyebrow: 'P2P USDT/USDC · Base Sepolia testnet',
     titleLine1: 'The system does not judge.',
     titleLine2: 'It makes dishonesty expensive.',
     lead: 'Non-custodial, arbitrator-free P2P USDT/USDC trading. The rules live in the contract.',
@@ -154,7 +154,7 @@ const EN = {
       'People who want the rules known up front',
     ],
     facts: [
-      { k: 'Network', v: 'Base' },
+      { k: 'Network', v: 'Base Sepolia' },
       { k: 'Assets', v: 'USDT · USDC' },
       { k: 'Arbitrator', v: 'None' },
     ],
@@ -180,17 +180,17 @@ const EN = {
   },
   features: {
     eyebrow: 'Features',
-    title: 'Written in the contract, verifiable on-chain.',
+    title: 'Every rule is written in the contract.',
     items: [
       { key: 'custody', title: 'Non-custodial', text: 'Funds are locked in the ArafEscrow contract. The backend holds no funds and cannot move escrow.' },
       { key: 'bond', title: 'Bonds on both sides', text: 'Seller and buyer both post a bond. By tier it is 0–8% for the seller and 0–10% for the buyer.' },
-      { key: 'window', title: '48-hour payment window', text: 'If the buyer does not report payment within 48 hours the trade can be canceled; 2% of the buyer bond goes to the seller.' },
-      { key: 'ping', title: 'Ping and auto-release', text: 'If the seller goes silent the buyer pings; with no reply within 24 hours the crypto goes to the buyer. Both sides lose at least 2% of their bond.' },
+      { key: 'window', title: '48-hour payment window', text: 'If the buyer does not report payment within 48 hours the trade can be canceled; if the buyer posted a bond, 2% of it goes to the seller.' },
+      { key: 'ping', title: 'Ping and auto-release', text: 'If the seller goes silent the buyer pings; with no reply within 24 hours the crypto goes to the buyer. Each side that posted a bond loses at least 2% of it (Tier 0 has no bond).' },
       { key: 'bleed', title: 'Decay and burn in disputes', text: 'In a dispute, bonds decay after 48 hours and principal after hour 144. At hour 240 the rest is burned.' },
-      { key: 'settle', title: 'Settle at any time', text: 'Even during a dispute the parties can cancel together or agree on a split proposal.' },
-      { key: 'tier', title: 'On-chain reputation and tiers', text: 'Five tiers (0–4). Higher tiers post smaller bonds; a clean record lowers the bond by 1 point, risk points raise it by 3.' },
-      { key: 'pause', title: 'Pause stops new trades only', text: 'Pause blocks new orders and fills. Open trades can always be closed.' },
-      { key: 'owner', title: 'The owner cannot take funds', text: 'There is no withdraw or rescue function. The owner cannot take escrowed funds or decide a trade.' },
+      { key: 'settle', title: 'Cancel together, settle a dispute', text: 'While a trade is open (dispute included) the parties can cancel with both approvals. During a dispute they can also agree on a split proposal.' },
+      { key: 'tier', title: 'On-chain reputation and tiers', text: 'Five tiers (0–4). Tier 0 has no bond; from Tier 1 to 4 the bond falls (seller 8%→2%, buyer 10%→2%). From Tier 1 up, a clean record (no risk points, at least one successful trade) lowers the rate by 1 percentage point; any risk points raise it by 3.' },
+      { key: 'pause', title: 'Pause stops new trades only', text: 'Pause blocks new orders and fills; the exit functions of open trades are not affected by pause.' },
+      { key: 'owner', title: 'The owner cannot take funds', text: 'There is no withdraw or rescue function. The owner can change the treasury address, fees (at most 20% per side) and settings, but cannot take escrowed funds or choose a trade’s outcome.' },
     ],
   },
   how: {

@@ -4,8 +4,8 @@ import HomeSectionHeader from './HomeSectionHeader';
 // [TR] SSS: öğeler AppViews.buildFaqItems'tan gelir (kontrat sabitleri + kontrattan okunan ücret).
 // [EN] FAQ: items come from AppViews.buildFaqItems (contract constants + fee read from the contract).
 const HomeFaq = ({ content, items }) => (
-  <section className="min-w-0 bg-surface border border-borderSubtle rounded-2xl p-5 md:p-6" data-testid="home-faq">
-    <HomeSectionHeader eyebrow={content.eyebrow} title={content.title} tone="muted" className="!mb-4" />
+  <section className="min-w-0 bg-surface border border-borderSubtle rounded-2xl p-5 md:p-6" data-testid="home-faq" aria-labelledby="home-faq-title">
+    <HomeSectionHeader eyebrow={content.eyebrow} title={content.title} id="home-faq-title" tone="muted" className="!mb-4" />
     <div className="min-w-0 divide-y divide-borderSubtle">
       {items.map((item) => (
         <details key={item.q} className="group py-3 first:pt-0">

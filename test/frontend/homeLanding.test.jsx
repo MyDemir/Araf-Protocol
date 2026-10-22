@@ -54,6 +54,8 @@ describe('Ana sayfa (tanıtım)', () => {
       expect(screen.getByTestId(id)).toBeInTheDocument();
     }
     expect(screen.getByText('Trust the Time, Not the Oracle.', { selector: 'h2' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Common questions' })).toHaveAttribute('data-testid', 'home-faq');
+    expect(screen.getByRole('region', { name: 'The contract decides, not the backend.' })).toHaveAttribute('data-testid', 'home-how-it-works');
     expect(within(screen.getByTestId('home-features')).getAllByRole('listitem')).toHaveLength(getHomeContent('EN').features.items.length);
   });
 
@@ -123,6 +125,11 @@ describe('Ana sayfa (tanıtım)', () => {
     for (const lang of ['TR', 'EN']) {
       const json = JSON.stringify(getHomeContent(lang));
       expect(json).not.toMatch(/risksiz|risk[- ]free|denetlendi|denetimden geçti|audited by|is audited|guarantee|garanti/i);
+      // [TR] Denetçi bulgusu: çıkış taraf hareketi bekler; "her zaman kapatılabilir" garanti verilemez.
+      expect(json).not.toMatch(/her zaman kapatılabilir|can always be closed/i);
+      // [TR] Dağıtım Base Sepolia testnet (README.md:17, :188); "zincirde doğrulanabilir" bugün doğru değil.
+      expect(json).not.toMatch(/zincirde doğrulanabilir|verifiable on-chain/i);
+      expect(getHomeContent(lang).hero.eyebrow).toMatch(/Base Sepolia testnet/);
     }
     renderHome();
     expect(screen.getByTestId('home-status-note')).toHaveTextContent(/not externally audited/);
@@ -165,8 +172,22 @@ describe('ana sayfa metni ↔ ArafEscrow sabitleri', () => {
     const tr = getHomeContent('TR').features.items.find((i) => i.key === 'bond').text;
     expect(tr).toContain(`%${Math.min(...maker)}–${Math.max(...maker)}`);
     expect(tr).toContain(`%${Math.min(...taker)}–${Math.max(...taker)}`);
+    // [TR] Tier 0 teminatsız; Tier 1→4 azalan (denetçi bulgusu: "üst tier daha düşük" Tier 0 için yanlıştı).
+    expect(maker[0]).toBe(0);
+    expect(taker[0]).toBe(0);
+    const tierTr = getHomeContent('TR').features.items.find((i) => i.key === 'tier').text;
+    const tierEn = getHomeContent('EN').features.items.find((i) => i.key === 'tier').text;
+    expect(tierTr).toContain(`satıcı %${maker[1]}→%${maker[4]}, alıcı %${taker[1]}→%${taker[4]}`);
+    expect(tierEn).toContain(`seller ${maker[1]}%→${maker[4]}%, buyer ${taker[1]}%→${taker[4]}%`);
+    expect(tierTr).toContain('Tier 0’da teminat yoktur');
     expect(bps('GOOD_REP_DISCOUNT_BPS')).toBe(100);
     expect(bps('BAD_REP_PENALTY_BPS')).toBe(300);
+    expect(tierTr).toMatch(/1 yüzde puan düşürür; herhangi bir risk puanı 3 yüzde puan/);
+    expect(tierEn).toMatch(/1 percentage point; any risk points raise it by 3/);
+    // [TR] Ücret tavanı: MAX_FEE_CONFIG_BPS / 100 = sahip kartındaki yüzde.
+    const feeCapPct = Number(sol.match(/MAX_FEE_CONFIG_BPS\s*=\s*([\d_]+)/)[1].replace(/_/g, '')) / 100;
+    expect(getHomeContent('TR').features.items.find((i) => i.key === 'owner').text).toContain(`en fazla %${feeCapPct}`);
+    expect(getHomeContent('EN').features.items.find((i) => i.key === 'owner').text).toContain(`at most ${feeCapPct}%`);
   });
 
   it('duraklatma yalnız emir oluşturma ve eşleşmede; çekme/kurtarma fonksiyonu yok', () => {
