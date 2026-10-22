@@ -43,7 +43,7 @@ const SECRETS = {
       || v.includes("BURAYA_")
       || shannonEntropy(v) < 3.5,
   },
-  MASTER_ENCRYPTION_KEY: { bytes: 32, isPlaceholder: (v) => !/^[0-9a-fA-F]{64}/.test(v) },
+  MASTER_ENCRYPTION_KEY: { bytes: 32, isPlaceholder: (v) => !/^[0-9a-fA-F]{64}$/.test(v) },
 };
 
 function secretLineRegex(name) {

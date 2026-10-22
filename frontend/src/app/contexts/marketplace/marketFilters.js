@@ -54,9 +54,14 @@ const SIDE_TO_ORDER_SIDE = { BUY: 'SELL_CRYPTO', SELL: 'BUY_CRYPTO' };
 
 // [TR] Sunucu sorgusu. ELIGIBLE yalnız kullanıcı tier'ı biliniyorsa max_tier gönderir.
 // [EN] Server query. ELIGIBLE sends max_tier only when the viewer's tier is known.
-export const buildMarketOrdersQuery = ({ filters = MARKET_FILTER_DEFAULTS, tokenAddresses = {}, userTier = null } = {}) => {
+export const MARKET_PAGE_LIMIT = 50;
+// [TR] Yoklamada yeniden çekilen en çok sayfa; fazlası için kullanıcı "daha fazla yükle" ile tekrar yükler.
+// [EN] Max pages re-fetched per poll; beyond it the user reloads with "load more".
+export const MARKET_POLL_MAX_PAGES = 5;
+
+export const buildMarketOrdersQuery = ({ filters = MARKET_FILTER_DEFAULTS, tokenAddresses = {}, userTier = null, page = 1 } = {}) => {
   const f = { ...MARKET_FILTER_DEFAULTS, ...filters };
-  const params = new URLSearchParams({ status: 'ACTIVE', limit: '50' });
+  const params = new URLSearchParams({ status: 'ACTIVE', limit: String(MARKET_PAGE_LIMIT) });
   const side = SIDE_TO_ORDER_SIDE[f.side] || null;
   if (side) params.set('side', side);
   const tokenAddress = f.token !== 'ALL' ? tokenAddresses?.[f.token] : null;
@@ -68,8 +73,38 @@ export const buildMarketOrdersQuery = ({ filters = MARKET_FILTER_DEFAULTS, token
   else if (f.tier === 'ELIGIBLE' && Number.isInteger(userTier) && userTier >= 0 && userTier <= 4) params.set('max_tier', String(userTier));
   if (f.sort === 'NEWEST') params.set('sort', 'newest');
   else if (f.sort === 'AUTO' && side) params.set('sort', 'best_rate');
+  // [TR] 1. sayfa için page gönderilmez (mevcut sorgu aynı kalır); sonraki sayfalar "daha fazla yükle" ile gelir.
+  // [EN] Page 1 sends no page param (query unchanged); later pages come from "load more".
+  const safePage = Number.isInteger(page) && page > 1 ? page : 1;
+  if (safePage > 1) params.set('page', String(safePage));
   return `orders?${params.toString()}`;
 };
+
+// [TR] Sayfaları birleştirir: id'ye göre tekilleştirir, ilk görülen kalır, sıralama korunur (sunucu sırası).
+//      id'siz kayıtlar elenmez, olduğu gibi eklenir.
+// [EN] Merges pages: dedupes by id, first occurrence wins, order is preserved (server order).
+export const mergeOrdersById = (existing = [], incoming = []) => {
+  const seen = new Set();
+  const out = [];
+  for (const order of [...existing, ...incoming]) {
+    const id = order?.id;
+    if (id !== undefined && id !== null && id !== '') {
+      if (seen.has(id)) continue;
+      seen.add(id);
+    }
+    out.push(order);
+  }
+  return out;
+};
+
+// [TR] Daha fazla sayfa var mı: sunucu toplamı yüklenen sayfa kapasitesinden büyükse ve son sayfa boş değilse.
+// [EN] Is there another page: server total exceeds loaded page capacity and the last page was not empty.
+// [TR] Backend GET /orders page<=200 sınırını uygular (aşınca 400); 200. sayfadan sonra "daha fazla yükle" kapanır.
+// [EN] The backend rejects page>200 with 400; the load-more control closes once page 200 is loaded.
+export const MARKET_MAX_PAGE = 200;
+export const hasMoreMarketOrders = ({ total, page = 1, lastPageCount = 0, limit = MARKET_PAGE_LIMIT } = {}) => (
+  Number.isFinite(total) && lastPageCount > 0 && page < MARKET_MAX_PAGE && total > page * limit
+);
 
 // [TR] Sunucudaki kuralın aynısı: tutar tek fill'e sığmalı (kalan ≥ tutar ve min fill ≤ tutar ya da tam kalan).
 // [EN] Mirrors the server rule: the amount must fit one fill (remaining ≥ amount and min fill ≤ amount, or all of it).

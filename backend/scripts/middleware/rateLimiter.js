@@ -17,8 +17,8 @@ That meant `/nonce`, `/verify`, and `/refresh` could become temporarily unprotec
 ### Existing fix that remains
 The earlier fix for proxy/load-balancer environments still stands:
 
-- rate limit keys are still based on `req.ip`
-- this assumes `trust proxy` is correctly enabled in `app.js`
+- rate limit keys are based on `resolveClientIp(req)` (utils/clientIp.js): `req.ip` by default,
+  or `x-real-ip` only when ORIGIN_SHARED_SECRET matches the `x-araf-origin-secret` header
 - without that, all users behind the same proxy/load balancer could collapse into one IP bucket
 
 That part is preserved and not changed here.
@@ -53,6 +53,7 @@ const { RedisStore } = require("rate-limit-redis");
 const { getRedisClient, isReady } = require("../config/redis");
 const User = require("../models/User");
 const logger = require("../utils/logger");
+const { resolveClientIp } = require("../utils/clientIp");
 
 /**
  * Redis store oluşturur.
@@ -94,12 +95,16 @@ function onLimitReached(req) {
  * [EN] When Redis is down, sensitive surfaces such as auth / PII do not fail-open.
  *      They fall back to a process-local temporary counter.
  */
+// B2-14: Redis kesintisi uzarsa benzersiz anahtarlar belleği şişirmesin (limiter başına üst sınır).
+const IN_MEMORY_MAX_KEYS = 50_000;
+
 function makeInMemoryLimiter({
   label,
   windowMs,
   max,
   keyGenerator,
   errorMessage,
+  maxKeys = IN_MEMORY_MAX_KEYS,
 }) {
   const bucket = new Map(); // key -> { count, resetAt }
 
@@ -121,7 +126,7 @@ function makeInMemoryLimiter({
 
   let fallbackModeLogged = false;
 
-  return function inMemoryLimiter(req, res, next) {
+  const inMemoryLimiter = function inMemoryLimiter(req, res, next) {
     const now = Date.now();
     const key = keyGenerator(req);
     const current = bucket.get(key);
@@ -132,6 +137,14 @@ function makeInMemoryLimiter({
     }
 
     if (!current || now > current.resetAt) {
+      if (!current && bucket.size >= maxKeys) {
+        cleanupExpiredEntries();
+        // [TR] Hâlâ doluysa en eski anahtar (Map ekleme sırası) atılır.
+        if (bucket.size >= maxKeys) {
+          const oldest = bucket.keys().next().value;
+          bucket.delete(oldest);
+        }
+      }
       bucket.set(key, { count: 1, resetAt: now + windowMs });
       return next();
     }
@@ -139,12 +152,16 @@ function makeInMemoryLimiter({
     current.count += 1;
 
     if (current.count > max) {
-      logger.warn(`[RateLimit:${label}-FALLBACK] In-memory limit aşıldı: ${key}`);
+      logger.warn(`[RateLimit:${label}-FALLBACK] In-memory limit aşıldı.`);
       return res.status(429).json(errorMessage(req));
     }
 
     return next();
   };
+
+  // [TR] Redis geri geldiğinde çağrılır; sonraki kesintide uyarı yeniden yazılır.
+  inMemoryLimiter.onRedisRecovered = () => { fallbackModeLogged = false; };
+  return inMemoryLimiter;
 }
 
 /**
@@ -152,12 +169,12 @@ function makeInMemoryLimiter({
  * [EN] Uses Redis-backed limiter when Redis is ready, otherwise falls back to in-memory protection.
  */
 function makeSensitiveLimiter({
-  label,
   redisLimiter,
   inMemoryLimiter,
 }) {
   return (req, res, next) => {
     if (isReady()) {
+      if (typeof inMemoryLimiter.onRedisRecovered === "function") inMemoryLimiter.onRedisRecovered();
       return redisLimiter(req, res, next);
     }
     return inMemoryLimiter(req, res, next);
@@ -307,7 +324,7 @@ function makeTieredSensitiveLimiter({
 function makePiiLimiter({ label, storePrefix, windowMs, max, extraKey = () => "", message }) {
   const keyGenerator = (req) => {
     const extra = extraKey(req);
-    return `${req.ip}:${req.wallet || "anon"}${extra ? `:${extra}` : ""}`;
+    return `${resolveClientIp(req)}:${req.wallet || "anon"}${extra ? `:${extra}` : ""}`;
   };
   const errorBody = () => ({
     error: message,
@@ -389,7 +406,7 @@ const piiLimiter = piiProfileLimiter;
 const authRedisLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 10,
-  keyGenerator: (req) => req.ip,
+  keyGenerator: (req) => resolveClientIp(req),
   store: makeStore("auth"),
   handler: (req, res) => {
     onLimitReached(req);
@@ -403,7 +420,7 @@ const authInMemoryLimiter = makeInMemoryLimiter({
   label: "AUTH",
   windowMs: 60 * 1000,
   max: 10,
-  keyGenerator: (req) => req.ip,
+  keyGenerator: (req) => resolveClientIp(req),
   errorMessage: () => ({
     error: "Çok fazla auth isteği. 1 dakika sonra tekrar deneyin.",
   }),
@@ -423,7 +440,7 @@ const authLimiter = makeSensitiveLimiter({
 const nonceRedisLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 6,
-  keyGenerator: (req) => `${req.ip}:${String(req.query?.wallet || "anon").toLowerCase()}`,
+  keyGenerator: (req) => `${resolveClientIp(req)}:${String(req.query?.wallet || "anon").toLowerCase()}`,
   store: makeStore("auth-nonce"),
   handler: (req, res) => {
     onLimitReached(req);
@@ -437,7 +454,7 @@ const nonceInMemoryLimiter = makeInMemoryLimiter({
   label: "AUTH-NONCE",
   windowMs: 60 * 1000,
   max: 6,
-  keyGenerator: (req) => `${req.ip}:${String(req.query?.wallet || "anon").toLowerCase()}`,
+  keyGenerator: (req) => `${resolveClientIp(req)}:${String(req.query?.wallet || "anon").toLowerCase()}`,
   errorMessage: () => ({
     error: "Çok fazla nonce isteği. Lütfen kısa bir süre sonra tekrar deneyin.",
   }),
@@ -454,7 +471,7 @@ const nonceLimiter = makeSensitiveLimiter({
 const marketReadRedisLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 100,
-  keyGenerator: (req) => req.ip,
+  keyGenerator: (req) => resolveClientIp(req),
   store: makeStore("market-read"),
   handler: (req, res) => {
     onLimitReached(req);
@@ -468,7 +485,7 @@ const marketReadInMemoryLimiter = makeInMemoryLimiter({
   label: "MARKET-READ",
   windowMs: 60 * 1000,
   max: 100,
-  keyGenerator: (req) => req.ip,
+  keyGenerator: (req) => resolveClientIp(req),
   errorMessage: () => ({
     error: "Çok fazla istek. Yavaşlayın.",
   }),
@@ -484,7 +501,7 @@ const marketReadLimiter = makeSensitiveLimiter({
 const statsReadRedisLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 60,
-  keyGenerator: (req) => req.ip,
+  keyGenerator: (req) => resolveClientIp(req),
   store: makeStore("stats-read"),
   handler: (req, res) => {
     onLimitReached(req);
@@ -498,7 +515,7 @@ const statsReadInMemoryLimiter = makeInMemoryLimiter({
   label: "STATS-READ",
   windowMs: 60 * 1000,
   max: 60,
-  keyGenerator: (req) => req.ip,
+  keyGenerator: (req) => resolveClientIp(req),
   errorMessage: () => ({
     error: "Stats isteği limiti aşıldı. Lütfen kısa bir süre sonra tekrar deneyin.",
   }),
@@ -515,7 +532,7 @@ const statsReadLimiter = makeSensitiveLimiter({
 const ordersWriteLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 5,
-  keyGenerator: (req) => req.wallet || req.ip,
+  keyGenerator: (req) => req.wallet || resolveClientIp(req),
   store: makeStore("orders-write"),
   skip: makeSkipFn(),
   handler: (req, res) => {
@@ -530,7 +547,7 @@ const ordersWriteInMemoryLimiter = makeInMemoryLimiter({
   label: "ORDERS-WRITE",
   windowMs: 60 * 60 * 1000,
   max: 5,
-  keyGenerator: (req) => req.wallet || req.ip,
+  keyGenerator: (req) => req.wallet || resolveClientIp(req),
   errorMessage: () => ({
     error: "Order oluşturma limiti: Saatte 5 istek.",
   }),
@@ -550,7 +567,7 @@ const ordersWriteLimiterWithFallback = makeSensitiveLimiter({
 const ordersReadLimiter = makeTieredSensitiveLimiter({
   label: "ORDERS-READ",
   windowMs: 60 * 1000,
-  keyGenerator: (req) => req.wallet || req.ip,
+  keyGenerator: (req) => req.wallet || resolveClientIp(req),
   storePrefix: "orders-read",
   // [TR] Tier-aware throughput farkı yalnız abuse/fair-use içindir; authority üretmez.
   // [EN] Tier-aware throughput only tunes fair-use capacity and remains non-authoritative.
@@ -565,7 +582,7 @@ const ordersReadLimiter = makeTieredSensitiveLimiter({
 const roomReadLimiter = makeTieredSensitiveLimiter({
   label: "ROOM-READ",
   windowMs: 60 * 1000,
-  keyGenerator: (req) => req.wallet || req.ip,
+  keyGenerator: (req) => req.wallet || resolveClientIp(req),
   storePrefix: "room-read",
   limitsByTier: [20, 30, 40, 55, 70],
   errorMessageFactory: (_req, { max }) => ({
@@ -581,7 +598,7 @@ const roomReadLimiter = makeTieredSensitiveLimiter({
 const receiptUploadLimiter = makeTieredSensitiveLimiter({
   label: "RECEIPT-UPLOAD",
   windowMs: 10 * 60 * 1000,
-  keyGenerator: (req) => req.wallet || req.ip,
+  keyGenerator: (req) => req.wallet || resolveClientIp(req),
   storePrefix: "receipt-upload",
   limitsByTier: [6, 8, 10, 12, 14],
   errorMessageFactory: (_req, { max }) => ({
@@ -593,7 +610,7 @@ const receiptUploadLimiter = makeTieredSensitiveLimiter({
 const coordinationWriteLimiter = makeTieredSensitiveLimiter({
   label: "COORDINATION-WRITE",
   windowMs: 10 * 60 * 1000,
-  keyGenerator: (req) => req.wallet || req.ip,
+  keyGenerator: (req) => req.wallet || resolveClientIp(req),
   storePrefix: "coordination-write",
   limitsByTier: [8, 12, 16, 20, 24],
   errorMessageFactory: (_req, { max }) => ({
@@ -608,7 +625,7 @@ const coordinationWriteLimiter = makeTieredSensitiveLimiter({
 const adminReadLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 60,
-  keyGenerator: (req) => req.wallet || req.ip,
+  keyGenerator: (req) => req.wallet || resolveClientIp(req),
   store: makeStore("admin-read"),
   skip: makeSkipFn(),
   handler: (req, res) => {
@@ -623,7 +640,7 @@ const adminReadInMemoryLimiter = makeInMemoryLimiter({
   label: "ADMIN-READ",
   windowMs: 60 * 1000,
   max: 60,
-  keyGenerator: (req) => req.wallet || req.ip,
+  keyGenerator: (req) => req.wallet || resolveClientIp(req),
   errorMessage: () => ({
     error: "Admin gözlem limiti aşıldı. Kısa süre sonra tekrar deneyin.",
   }),
@@ -648,7 +665,7 @@ const adminWriteErrorBody = () => ({
 const adminWriteRedisLimiter = rateLimit({
   windowMs: ADMIN_WRITE_WINDOW_MS,
   max: ADMIN_WRITE_MAX,
-  keyGenerator: (req) => req.wallet || req.ip,
+  keyGenerator: (req) => req.wallet || resolveClientIp(req),
   store: makeStore("admin-write"),
   skip: makeSkipFn(),
   handler: (req, res) => {
@@ -662,7 +679,7 @@ const adminWriteInMemoryLimiter = makeInMemoryLimiter({
   label: "ADMIN-WRITE",
   windowMs: ADMIN_WRITE_WINDOW_MS,
   max: ADMIN_WRITE_MAX,
-  keyGenerator: (req) => req.wallet || req.ip,
+  keyGenerator: (req) => req.wallet || resolveClientIp(req),
   errorMessage: adminWriteErrorBody,
 });
 const adminWriteLimiter = makeSensitiveLimiter({
@@ -675,7 +692,7 @@ const adminWriteLimiter = makeSensitiveLimiter({
 const clientLogRedisLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 10,
-  keyGenerator: (req) => req.ip,
+  keyGenerator: (req) => resolveClientIp(req),
   store: makeStore("client-log"),
   handler: (req, res) => {
     onLimitReached(req);
@@ -689,7 +706,7 @@ const clientLogInMemoryLimiter = makeInMemoryLimiter({
   label: "CLIENT-LOG",
   windowMs: 60 * 1000,
   max: 10,
-  keyGenerator: (req) => req.ip,
+  keyGenerator: (req) => resolveClientIp(req),
   errorMessage: () => ({
     error: "Client log limiti aşıldı. Lütfen daha sonra tekrar deneyin.",
   }),
@@ -706,7 +723,7 @@ const clientLogLimiter = makeSensitiveLimiter({
 const feedbackLimiter = makeTieredSensitiveLimiter({
   label: "FEEDBACK",
   windowMs: 60 * 60 * 1000,
-  keyGenerator: (req) => req.wallet || req.ip,
+  keyGenerator: (req) => req.wallet || resolveClientIp(req),
   storePrefix: "feedback",
   limitsByTier: [2, 3, 4, 5, 6],
   errorMessageFactory: (_req, { max }) => ({
@@ -734,6 +751,7 @@ module.exports = {
   clientLogLimiter,
   feedbackLimiter,
   __private: {
+    makeInMemoryLimiter,
     clampTier,
     normalizeTierFromMirror,
     resolveRequestTier,

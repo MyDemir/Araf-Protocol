@@ -23,6 +23,7 @@ export const OperationLaneTabs = ({ lanes = [], activeLaneKey, setActiveLaneKey 
           <button
             key={lane.key}
             onClick={() => setActiveLaneKey(lane.key)}
+            aria-pressed={activeLaneKey === lane.key}
             className={`px-3 py-2 rounded-xl text-sm font-bold border transition ${className}`}
           >
             {lane.label} ({lane.items.length})

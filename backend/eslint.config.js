@@ -1,9 +1,11 @@
 "use strict";
 
+const js = require("@eslint/js");
+
 module.exports = [
   {
     linterOptions: {
-      reportUnusedDisableDirectives: false,
+      reportUnusedDisableDirectives: "error",
     },
   },
   {
@@ -15,17 +17,27 @@ module.exports = [
       ecmaVersion: "latest",
       sourceType: "commonjs",
       globals: {
+        AbortController: "readonly",
+        AbortSignal: "readonly",
         Buffer: "readonly",
+        URL: "readonly",
         __dirname: "readonly",
         clearInterval: "readonly",
         clearTimeout: "readonly",
         console: "readonly",
+        fetch: "readonly",
         module: "readonly",
         process: "readonly",
         require: "readonly",
         setInterval: "readonly",
         setTimeout: "readonly",
       },
+    },
+    rules: {
+      ...js.configs.recommended.rules,
+      "no-eval": "error",
+      "no-implied-eval": "error",
+      "no-new-func": "error",
     },
   },
 ];

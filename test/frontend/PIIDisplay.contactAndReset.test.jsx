@@ -4,6 +4,9 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import PIIDisplay, { buildContactHref } from '../../frontend/src/components/PIIDisplay';
 
+// F2-20: usePII artik authenticatedFetch ister; sahte sarmalayici global.fetch mock'una devreder (cagri sayisi/URL iddialari ayni).
+const authFetch = (...args) => global.fetch(...args);
+
 const profile = (contact, holder = 'Ada') => ({
   payoutProfile: { rail: 'TR_IBAN', fields: { account_holder_name: holder, iban: 'TR00 1111' }, contact },
 });
@@ -58,7 +61,7 @@ describe('PIIDisplay contact rendering and trade switch', () => {
   it('renders no link (only the no-contact notice) for an invalid email', async () => {
     mockFetchSequence(profile({ channel: 'email', value: 'x@y.com?bcc=evil@z.com' }));
     const user = userEvent.setup();
-    render(<PIIDisplay tradeId="t1" lang="EN" />);
+    render(<PIIDisplay tradeId="t1" lang="EN" authenticatedFetch={authFetch} />);
     await reveal(user);
     await waitFor(() => expect(screen.getByText('Ada')).toBeInTheDocument());
     expect(document.querySelector('a[href^="mailto:"]')).toBeNull();
@@ -67,7 +70,7 @@ describe('PIIDisplay contact rendering and trade switch', () => {
   it('renders a valid mailto link', async () => {
     mockFetchSequence(profile({ channel: 'email', value: 'alice@example.com' }));
     const user = userEvent.setup();
-    render(<PIIDisplay tradeId="t1" lang="EN" />);
+    render(<PIIDisplay tradeId="t1" lang="EN" authenticatedFetch={authFetch} />);
     await reveal(user);
     await waitFor(() => expect(document.querySelector('a[href="mailto:alice@example.com"]')).not.toBeNull());
   });
@@ -75,11 +78,11 @@ describe('PIIDisplay contact rendering and trade switch', () => {
   it('re-locks the view when tradeId changes (F19.3)', async () => {
     mockFetchSequence(profile(null, 'Ada'));
     const user = userEvent.setup();
-    const { rerender } = render(<PIIDisplay tradeId="trade-A" lang="EN" />);
+    const { rerender } = render(<PIIDisplay tradeId="trade-A" lang="EN" authenticatedFetch={authFetch} />);
     await reveal(user);
     await waitFor(() => expect(screen.getByText('Ada')).toBeInTheDocument());
 
-    rerender(<PIIDisplay tradeId="trade-B" lang="EN" />);
+    rerender(<PIIDisplay tradeId="trade-B" lang="EN" authenticatedFetch={authFetch} />);
 
     expect(screen.queryByText('Ada')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Reveal|göster/i })).toBeInTheDocument();
@@ -88,12 +91,12 @@ describe('PIIDisplay contact rendering and trade switch', () => {
   it('does not restore the revealed state when switching A -> B -> A', async () => {
     mockFetchSequence(profile(null, 'Ada'));
     const user = userEvent.setup();
-    const { rerender } = render(<PIIDisplay tradeId="trade-A" lang="EN" />);
+    const { rerender } = render(<PIIDisplay tradeId="trade-A" lang="EN" authenticatedFetch={authFetch} />);
     await reveal(user);
     await waitFor(() => expect(screen.getByText('Ada')).toBeInTheDocument());
 
-    rerender(<PIIDisplay tradeId="trade-B" lang="EN" />);
-    rerender(<PIIDisplay tradeId="trade-A" lang="EN" />);
+    rerender(<PIIDisplay tradeId="trade-B" lang="EN" authenticatedFetch={authFetch} />);
+    rerender(<PIIDisplay tradeId="trade-A" lang="EN" authenticatedFetch={authFetch} />);
 
     expect(screen.getByRole('button', { name: /Reveal|göster/i })).toBeInTheDocument();
   });

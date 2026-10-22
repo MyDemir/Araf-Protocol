@@ -15,9 +15,14 @@
  */
 
 const express = require("express");
+const { asyncHandler } = require("../utils/asyncHandler");
 const router = express.Router();
 
-const { requireAuth, requirePIIToken, requireSessionWalletMatch } = require("../middleware/auth");
+const { requireAuth: _requireAuth, requirePIIToken: _requirePIIToken, requireSessionWalletMatch: _requireSessionWalletMatch } = require("../middleware/auth");
+// [TR] B2-17: async auth middleware'leri de reddi next(err)'e iletecek şekilde sarılır.
+const requireAuth = asyncHandler(_requireAuth);
+const requirePIIToken = asyncHandler(_requirePIIToken);
+const requireSessionWalletMatch = asyncHandler(_requireSessionWalletMatch);
 const {
   piiProfileLimiter,
   piiTakerNameLimiter,
@@ -62,8 +67,22 @@ function hasTakerNameSnapshot(trade) {
 
 // [TR] Mirror aktif dese bile zincir trade'i kapatmışsa PII açılmaz (event gecikmesi penceresi).
 // [EN] Even if the mirror says active, PII stays closed once the chain has closed the trade.
-async function closedOnChain(trade) {
-  return (await isTradeActiveOnChain(trade?.onchain_escrow_id)) === false;
+//      B4-13/B3-18: production'da zincir durumu okunamazsa (RPC hatası/zaman aşımı → null) PII AÇILMAZ (fail-closed):
+//      karar mercii kontrattır, zincir okunamıyorsa mirror tek başına yetmez. Geliştirme/testte mirror karar verir.
+// [EN] In production an unreadable chain state (null) denies PII (fail-closed); elsewhere the mirror decides.
+// @returns {Promise<"closed"|"unknown"|"open">}
+async function onChainClosure(trade) {
+  const active = await isTradeActiveOnChain(trade?.onchain_escrow_id);
+  if (active === false) return "closed";
+  if (active === null && process.env.NODE_ENV === "production") return "unknown";
+  return "open";
+}
+
+function sendOnChainUnavailable(res) {
+  return res.status(503).json({
+    error: "Zincir durumu şu an doğrulanamadı; PII geçici olarak kapalı. Biraz sonra tekrar deneyin.",
+    code: "ONCHAIN_STATE_UNAVAILABLE",
+  });
 }
 
 function hasCompletePayoutSnapshot(trade) {
@@ -96,7 +115,7 @@ async function ensureIdentityNormalizedForPIIRoutes() {
 // ─── GET /api/pii/my ─────────────────────────────────────────────────────────
 // [TR] Kullanıcının kendi kayıtlı PII profilini döndürür.
 //      V3'te economic authority üretmez; yalnız şifreli profil bilgisini çözer.
-router.get("/my", requireAuth, requireSessionWalletMatch, piiProfileLimiter, async (req, res, next) => {
+router.get("/my", requireAuth, requireSessionWalletMatch, piiProfileLimiter, asyncHandler(async (req, res, next) => {
   try {
     const user = await User.findOne({ wallet_address: req.wallet })
       .select("payout_profile")
@@ -119,12 +138,12 @@ router.get("/my", requireAuth, requireSessionWalletMatch, piiProfileLimiter, asy
   } catch (err) {
     next(err);
   }
-});
+}));
 
 // ─── GET /api/pii/taker-name/:onchainId ──────────────────────────────────────
 // [TR] Maker, aktif child trade'inde karşı tarafın banka sahibi adını görebilir.
 //      Parent order değil, gerçek escrow/trade kimliği kullanılır.
-router.get("/taker-name/:onchainId", requireAuth, requireSessionWalletMatch, piiTakerNameLimiter, async (req, res, next) => {
+router.get("/taker-name/:onchainId", requireAuth, requireSessionWalletMatch, piiTakerNameLimiter, asyncHandler(async (req, res, next) => {
   try {
     try {
       await ensureIdentityNormalizedForPIIRoutes();
@@ -160,9 +179,11 @@ router.get("/taker-name/:onchainId", requireAuth, requireSessionWalletMatch, pii
       });
     }
 
-    if (await closedOnChain(trade)) {
+    const closure = await onChainClosure(trade);
+    if (closure === "closed") {
       return res.status(400).json({ error: "İşlem zincirde kapanmış. Erişim yalnız aktif child trade'lerde geçerlidir." });
     }
+    if (closure === "unknown") return sendOnChainUnavailable(res);
 
     if (!trade.taker_address) {
       return res.json({ bankOwner: null });
@@ -204,12 +225,12 @@ router.get("/taker-name/:onchainId", requireAuth, requireSessionWalletMatch, pii
   } catch (err) {
     next(err);
   }
-});
+}));
 
 // ─── POST /api/pii/request-token/:tradeId ────────────────────────────────────
 // [TR] Taker, aktif child trade için kısa ömürlü trade-scoped PII token talep eder.
 //      Bu token parent order'a değil, tek bir trade belgesine bağlıdır.
-router.post("/request-token/:tradeId", requireAuth, requireSessionWalletMatch, piiTokenRequestLimiter, async (req, res, next) => {
+router.post("/request-token/:tradeId", requireAuth, requireSessionWalletMatch, piiTokenRequestLimiter, asyncHandler(async (req, res, next) => {
   try {
     const { tradeId } = req.params;
     const callerWallet = req.wallet;
@@ -240,7 +261,7 @@ router.post("/request-token/:tradeId", requireAuth, requireSessionWalletMatch, p
   } catch (err) {
     next(err);
   }
-});
+}));
 
 // ─── GET /api/pii/:tradeId ────────────────────────────────────────────────────
 // [TR] Trade-scoped token ile maker'ın ödeme bilgilerini çözer.
@@ -251,7 +272,7 @@ router.get(
   requireSessionWalletMatch,
   requirePIIToken,
   piiFetchLimiter,
-  async (req, res, next) => {
+  asyncHandler(async (req, res, next) => {
     try {
       const { tradeId } = req.params;
       const callerWallet = req.wallet;
@@ -280,9 +301,11 @@ router.get(
         });
       }
 
-      if (await closedOnChain(trade)) {
+      const closure = await onChainClosure(trade);
+      if (closure === "closed") {
         return res.status(403).json({ error: "İşlem zincirde kapanmış. PII erişimi kaldırıldı." });
       }
+      if (closure === "unknown") return sendOnChainUnavailable(res);
 
       // [TR] V3 güvenlik sınırında current profile fallback kapalıdır.
       //      Gerekli maker snapshot alanları yoksa kontrollü hata döneriz.
@@ -341,7 +364,7 @@ router.get(
 
       next(err);
     }
-  }
+  })
 );
 
 module.exports = router;

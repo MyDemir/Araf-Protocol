@@ -2,6 +2,7 @@ import React from 'react';
 import { buildApiUrl } from '../../apiConfig';
 import { shortAddress as short, tx as t } from '../../copy';
 import { fmtDateTime } from '../../format';
+import { readJsonWithTimeout } from '../../fetchWithTimeout';
 
 // [TR] "Ödeme yöntemleri" sekmesi: rail açma/kapama (switch), onay penceresi, audit listesi.
 //      Kapatılan rail yalnız YENİ profil/emir açılışını engeller; aktif işlemler etkilenmez.
@@ -27,7 +28,7 @@ export default function AdminRailsPanel({ lang = 'EN', authenticatedFetch, showT
     try {
       const res = await authenticatedFetch(buildApiUrl(`admin/payment-rails/audit?page=${page}&limit=10`), { suppressAuthToast: true });
       if (!res.ok) return;
-      const data = await res.json();
+      const data = await readJsonWithTimeout(res);
       setAudit({
         items: Array.isArray(data?.items) ? data.items : [],
         total: Number(data?.total) || 0,
@@ -43,7 +44,7 @@ export default function AdminRailsPanel({ lang = 'EN', authenticatedFetch, showT
       const res = await authenticatedFetch(buildApiUrl('admin/payment-rails'), { suppressAuthToast: true });
       if (res.status === 403) { setState({ loading: false, error: '', unauthorized: true, rails: [] }); return; }
       if (!res.ok) throw new Error('bad_status');
-      const data = await res.json();
+      const data = await readJsonWithTimeout(res);
       setState({ loading: false, error: '', unauthorized: false, rails: Array.isArray(data?.rails) ? data.rails : [] });
       loadAudit(1);
     } catch {
@@ -61,7 +62,7 @@ export default function AdminRailsPanel({ lang = 'EN', authenticatedFetch, showT
     try {
       const body = { enabled: pending.nextEnabled };
       if (reason.trim()) body.reason = reason.trim();
-      const res = await authenticatedFetch(buildApiUrl(`admin/payment-rails/${pending.rail.code}`), {
+      const res = await authenticatedFetch(buildApiUrl(`admin/payment-rails/${encodeURIComponent(pending.rail.code)}`), {
         method: 'PUT',
         body: JSON.stringify(body),
         suppressAuthToast: true,
@@ -73,7 +74,7 @@ export default function AdminRailsPanel({ lang = 'EN', authenticatedFetch, showT
         await load();
       } else {
         let code = '';
-        try { code = (await res.json())?.code || ''; } catch { /* yoksay */ }
+        try { code = (await readJsonWithTimeout(res))?.code || ''; } catch { /* yoksay */ }
         const msg = code === 'LAST_ENABLED_RAIL'
           ? t(lang, 'En az bir ödeme yöntemi açık kalmalıdır.', 'At least one payment method must stay enabled.')
           : t(lang, 'Güncelleme başarısız.', 'Update failed.');

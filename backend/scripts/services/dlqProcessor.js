@@ -18,6 +18,7 @@ const crypto = require("crypto");
 const { getRedisClient } = require("../config/redis");
 const eventWorker = require("./eventListener");
 const logger = require("../utils/logger");
+const { redactRpcSecrets } = require("../utils/logRedaction");
 
 const DLQ_KEY = "worker:dlq";
 const DLQ_ARCHIVE_KEY = "worker:dlq:archive"; // İnceleme için arşiv (7 gün TTL)
@@ -31,10 +32,18 @@ const BATCH_SIZE = 10;
 const MAX_REDRIVE_ATTEMPTS = 10;
 const BASE_BACKOFF_MS = 30_000;
 const ALERT_COOLDOWN_MS = 10 * 60 * 1000;
+// [TR] B4-06: karantina listesi sınırsız büyümesin (adli veri en yeni 1000 girdiyle sınırlı). İndeks seti
+//      (worker:dlq:quarantine:keys) silinmez; budanan girdinin event'i yine de ack'li sayılır.
+// [EN] B4-06: bound the quarantine list (forensics keep the newest 1000). The index set is untouched so a
+//      trimmed entry's event still counts as acked.
+const MAX_QUARANTINE_SIZE = 1000;
+const MAX_RAW_QUARANTINE_BYTES = 4096;
 
 let _lastAlertTimestamp = 0;
 let _redriveSuccess = 0;
 let _redriveFailure = 0;
+let _overflowArchived = 0;
+let _parseQuarantined = 0;
 
 function getRetrySuccessRate() {
   const total = _redriveSuccess + _redriveFailure;
@@ -47,6 +56,8 @@ function getDlqMetrics() {
     redriveSuccess: _redriveSuccess,
     redriveFailure: _redriveFailure,
     retrySuccessRate: getRetrySuccessRate(),
+    overflowArchived: _overflowArchived,
+    parseQuarantined: _parseQuarantined,
   };
 }
 
@@ -118,10 +129,10 @@ async function archiveOverflow(redis, length) {
     multi.lPush(DLQ_ARCHIVE_KEY, entry);
     // [TR] Arşivlenen girdinin anahtarı arşiv indeksine geçer: aynı event tekrar DLQ'ya eklenmez.
     // [EN] The archived entry's key moves to the archive index so the same event is not re-added to the DLQ.
-    let key = null;
+    let key;
     try {
       key = JSON.parse(entry)?.idempotencyKey;
-    } catch (_) {
+    } catch {
       key = null;
     }
     if (key) {
@@ -135,10 +146,44 @@ async function archiveOverflow(redis, length) {
   multi.lTrim(DLQ_KEY, overflow, -1);
   await multi.exec();
 
-  logger.info(`[DLQ] ${oldEntries.length} eski entry arşive taşındı, DLQ ${MAX_DLQ_SIZE}'a kırpıldı.`);
+  // [TR] B4-06: taşma sessiz veri kaybı riskidir (arşivdeki event re-drive edilmez): logger.error + sayaç.
+  // [EN] B4-06: overflow risks silent data loss (archived events are not re-driven): logger.error + counter.
+  _overflowArchived += oldEntries.length;
+  logger.error(
+    `[DLQ][ALARM] Taşma: ${oldEntries.length} eski entry arşive taşındı (re-drive edilmez), ` +
+    `DLQ ${MAX_DLQ_SIZE}'a kırpıldı. toplam_arşivlenen=${_overflowArchived}`
+  );
 }
 
-async function processDLQ() {
+async function quarantineUnparseable(redis, raw) {
+  // [TR] B4-06: parse edilemeyen girdi arşivsiz silinmez; ham metin loglanmaz (PII/sır riski), karantinaya gider.
+  // [EN] B4-06: an unparseable entry is not deleted without a trace; the raw text is not logged, it goes to quarantine.
+  const wrapped = JSON.stringify({
+    eventName: "unparseable_entry",
+    parse_error: true,
+    quarantined_at: new Date().toISOString(),
+    raw: String(raw).slice(0, MAX_RAW_QUARANTINE_BYTES),
+  });
+  await redis.lPush(DLQ_QUARANTINE_KEY, wrapped);
+  await redis.lRem(DLQ_KEY, 1, raw);
+  _parseQuarantined += 1;
+  await capQuarantine(redis);
+  logger.error(
+    `[DLQ][ALARM] Ham entry parse edilemedi; karantinaya taşındı (uzunluk=${String(raw).length}). ` +
+    `toplam_parse_karantina=${_parseQuarantined}`
+  );
+}
+
+async function capQuarantine(redis) {
+  try {
+    await redis.lTrim(DLQ_QUARANTINE_KEY, 0, MAX_QUARANTINE_SIZE - 1);
+  } catch (err) {
+    logger.warn(`[DLQ] Karantina kırpılamadı: ${err.message}`);
+  }
+}
+
+async function processDLQ(lockCtx = {}) {
+  const lockLost = () => typeof lockCtx?.isLockLost === "function" && lockCtx.isLockLost();
   try {
     // [TR] Worker henüz bağlanmadıysa (arka plan start) re-drive zincir okuyamaz; deneme hakkı yakılmaz.
     // [EN] While the worker is still connecting (background start) a re-drive cannot read the chain; do not
@@ -160,18 +205,28 @@ async function processDLQ() {
     length = await redis.lLen(DLQ_KEY);
 
     const now = Date.now();
-    const entries = await redis.lRange(DLQ_KEY, 0, BATCH_SIZE - 1);
+    // [TR] B4-06: yalnız listenin başı değil tüm kuyruk taranır (boyut MAX_DLQ_SIZE ile sınırlı); backoff'ta
+    //      bekleyen başlar hazır girdileri engellemez. Her turda en çok BATCH_SIZE hazır girdi işlenir.
+    // [EN] B4-06: scan the whole queue (bounded by MAX_DLQ_SIZE) so entries waiting in backoff at the head do
+    //      not block ready ones. At most BATCH_SIZE ready entries are processed per run.
+    const entries = await redis.lRange(DLQ_KEY, 0, -1);
 
     let poisonCount = 0;
     let processedCount = 0;
 
     for (const raw of entries) {
+      if (processedCount >= BATCH_SIZE) break;
+      // [TR] D1: Redis iş kilidi kaybolduysa başka makine de çalışıyor olabilir; yeni öğe işlenmez.
+      // [EN] D1: if the Redis job lock was lost another machine may be running; process no further entries.
+      if (lockLost()) {
+        logger.error("[DLQ] İş kilidi kaybedildi; kalan girdiler işlenmeden duruldu.");
+        return { success: false, error: "lock_lost", processed: processedCount };
+      }
       let entry;
       try {
         entry = parseEntry(raw);
       } catch {
-        logger.error(`[DLQ] Ham entry parse edilemedi: ${raw}`);
-        await redis.lRem(DLQ_KEY, 1, raw);
+        await quarantineUnparseable(redis, raw);
         continue;
       }
 
@@ -217,17 +272,22 @@ async function processDLQ() {
         idempotencyKey,
         attempt: nextAttempt,
         next_retry_at: nextRetryAt,
-        last_error: result.error || entry.last_error || "Re-drive sırasında hata",
+        // [TR] B1-08: eski (redaksiyonsuz) girdilerin last_error değeri de geri yazılmadan maskelenir.
+        last_error: redactRpcSecrets(result.error || entry.last_error || "Re-drive sırasında hata").slice(0, 500),
       };
 
-      await redis.lRem(DLQ_KEY, 1, raw);
-
+      // [TR] B4-05: sıra YAZ-sonra-SİL: eskiden lRem->rPush arasında çökme girdiyi kaybettirirdi; şimdi en kötü
+      //      durumda girdi iki kez kalır (re-drive idempotency anahtarıyla zararsız), asla kaybolmaz.
+      // [EN] B4-05: write-then-remove: a crash between the two used to lose the entry; now the worst case is a
+      //      duplicate (harmless: re-drive is idempotent), never a loss.
       if (nextAttempt >= MAX_REDRIVE_ATTEMPTS) {
         // [TR] Kalıcı poison: karantinaya taşı (DLQ'dan çıkar), event "acked-poison" sayılsın ki checkpoint
         //      sonsuza dek takılmasın. Alarm: logger.error + worker sayaç (getDiagnostics.quarantinedEvents).
         // [EN] Permanent poison: move to quarantine (out of the DLQ) and mark the event "acked-poison" so the
         //      checkpoint is not frozen forever. Alarm: logger.error + worker counter.
         await redis.lPush(DLQ_QUARANTINE_KEY, toRaw(updated));
+        await redis.lRem(DLQ_KEY, 1, raw);
+        await capQuarantine(redis);
         await redis.sAdd(DLQ_QUARANTINE_KEYS_SET, idempotencyKey);
         await redis.sRem(DLQ_LIVE_KEYS_SET, idempotencyKey);
         poisonCount += 1;
@@ -240,6 +300,7 @@ async function processDLQ() {
       }
 
       await redis.rPush(DLQ_KEY, toRaw(updated));
+      await redis.lRem(DLQ_KEY, 1, raw);
 
       logger.warn(
         `[DLQ] Re-drive başarısız event=${entry.eventName} key=${idempotencyKey} ` +

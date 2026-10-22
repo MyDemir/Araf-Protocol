@@ -103,6 +103,9 @@ Mevcut mimari savunmalar:
 - Taker entry wallet age, dust threshold, cooldown, ban ve tier kontrollerine bağlıdır.
 - Reward fixed per-trade ödeme değil, epoch pool’a karşı pro-rata dağılımdır.
 - Sponsor/funder recipient veya multiplier seçemez.
+- K3-02: terminal snapshot'ta ödediği ücret 0 olan taraf ödül ağırlığı almaz (fee 0'a indirilse bile sıfır ücretli wash-trade havuzu bedelsiz ememez).
+
+Bilinen kalan risk (yalnız belgelendi): ağırlık ödenen ücretle orantılı değildir; ücret çok düşük ama sıfır değilse ve havuzda başka gelir (burn, decay, sponsor fonu) varsa ağırlık/ücret oranı kârlı olabilir. Ücret ayarı (`setFeeConfig`) bu riskle birlikte değerlendirilir.
 
 Operasyonel kural:
 

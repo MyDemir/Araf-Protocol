@@ -62,10 +62,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .nvmrc
 
@@ -114,8 +114,8 @@ jobs:
           fi
 
           [[ "${TREASURY_ADDRESS,,}" != "${FINAL_OWNER_ADDRESS,,}" ]] || { echo "::error::FINAL_OWNER_ADDRESS must differ from TREASURY_ADDRESS (deploy.js rejects equal values on public chains)."; exit 1; }
-          [[ "$FRONTEND_DOMAIN" != http* && "$FRONTEND_DOMAIN" != */* ]] || { echo "::error::FRONTEND_DOMAIN must be a bare host (no https://, no path)."; exit 1; }
-          [[ "$FRONTEND_DOMAIN" != "localhost" ]] || { echo "::error::FRONTEND_DOMAIN cannot be localhost."; exit 1; }
+          [[ "$FRONTEND_DOMAIN" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?$ ]] || { echo "::error::FRONTEND_DOMAIN must be a lowercase bare host[:port] (no https://, no path, no spaces)."; exit 1; }
+          [[ "${FRONTEND_DOMAIN%%:*}" != "localhost" ]] || { echo "::error::FRONTEND_DOMAIN cannot be localhost."; exit 1; }
           [[ "$BASE_SEPOLIA_RPC_URL" == http* ]] || { echo "::error::BASE_SEPOLIA_RPC_URL must be http(s)."; exit 1; }
           [[ "$BASE_SEPOLIA_WS_RPC_URL" == wss://* ]] || { echo "::error::BASE_SEPOLIA_WS_RPC_URL must start with wss:// (backend eventListener only uses wss://; ws:// silently falls back to HTTP)."; exit 1; }
           [[ "$REDIS_URL" == rediss://* ]] || { echo "::error::REDIS_URL must be rediss:// (backend requires Redis TLS in production)."; exit 1; }
@@ -162,12 +162,19 @@ jobs:
         shell: bash
         env:
           MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          VAR_ESCROW_ADDRESS: ${{ vars.ARAF_ESCROW_ADDRESS }}
         run: |
           set -euo pipefail
           out="$(node .github/scripts/escrow-registry.js --status)"
           state="$(printf '%s\n' "$out" | sed -n 's/^registry_state=//p')"
           case "$state" in
-            none|ACTIVE) echo "REGISTRY_STATE=$state" >> "$GITHUB_ENV"; echo "Escrow registry state: $state" ;;
+            none)
+              # K4-02: registry yok ama variable dolu = ilk kurulum DEĞİL (adopt edilmemiş mevcut escrow). Arşiv/precheck/pause/açık işlem kontrolü atlanmasın.
+              if [ -n "${VAR_ESCROW_ADDRESS:-}" ]; then
+                echo "::error::Escrow registry state is none but vars.ARAF_ESCROW_ADDRESS is set (an existing escrow is not adopted). This is not a first install; archive, precheck, pause and open-trade checks would be skipped. Run escrow-registry-adopt.yml first, then re-run this deploy. Note: if the GH_VARIABLES_TOKEN secret is missing the variable is never written after a deploy and an empty variable gives a false negative; confirm the variable by hand."; exit 1
+              fi
+              echo "REGISTRY_STATE=none" >> "$GITHUB_ENV"; echo "Escrow registry state: none" ;;
+            ACTIVE) echo "REGISTRY_STATE=$state" >> "$GITHUB_ENV"; echo "Escrow registry state: $state" ;;
             ROTATING) echo "::error::Escrow registry is ROTATING (an earlier rotation is incomplete). No contract is deployed. Complete it with the rotate-escrow.yml workflow (mode=rotate), then re-run this deploy."; exit 1 ;;
             *) echo "::error::Could not determine escrow registry state."; exit 1 ;;
           esac
@@ -202,7 +209,6 @@ jobs:
           DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
           BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
           BASE_SEPOLIA_USDT_ADDRESS: ${{ vars.BASE_SEPOLIA_USDT_ADDRESS }}
-          GH_TOKEN: ${{ secrets.GH_VARIABLES_TOKEN }}
         run: |
           set -euo pipefail
           if [ -n "$BASE_SEPOLIA_USDT_ADDRESS" ]; then
@@ -220,14 +226,23 @@ jobs:
           [[ "$addr" =~ ^0x[a-fA-F0-9]{40}$ ]] || { echo "::error::test token manifest address invalid."; exit 1; }
           echo "TEST_USDT_ADDRESS=$addr" >> "$GITHUB_ENV"
           echo "Test USDT deployed: $addr"
+          # Aynı DEPLOYER anahtarı deploy.js'te hemen kullanılacak; nonce/RPC yayılım çakışmasını önlemek için kısa bekleme.
+          sleep 15
+
+      # K4-09: GH_VARIABLES_TOKEN (PAT) hardhat sürecinin ortamına verilmez; yalnız bu adımda, adres GITHUB_ENV'den gelir.
+      - name: Persist test USDT variable (optional)
+        if: ${{ inputs.deploy_test_usdt && env.TEST_USDT_ADDRESS != '' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GH_VARIABLES_TOKEN }}
+        run: |
+          set -euo pipefail
           if [ -n "$GH_TOKEN" ]; then
-            gh variable set BASE_SEPOLIA_USDT_ADDRESS --body "$addr" --repo "$GITHUB_REPOSITORY"
+            gh variable set BASE_SEPOLIA_USDT_ADDRESS --body "$TEST_USDT_ADDRESS" --repo "$GITHUB_REPOSITORY"
             echo "Repository variable BASE_SEPOLIA_USDT_ADDRESS updated."
           else
             echo "::warning::GH_VARIABLES_TOKEN secret is not set; BASE_SEPOLIA_USDT_ADDRESS was NOT persisted (command is in the job summary)."
           fi
-          # Aynı DEPLOYER anahtarı deploy.js'te hemen kullanılacak; nonce/RPC yayılım çakışmasını önlemek için kısa bekleme.
-          sleep 15
 
       # Secret'lar yalnız bu adımın ortam değişkenlerinde; contracts/.env dosyası yazılmaz.
       - name: Deploy contracts to Base Sepolia
@@ -277,7 +292,7 @@ jobs:
               ];
               fs.appendFileSync(process.env.GITHUB_ENV, out.join("\n") + "\n");
               console.log(out.join("\n"));
-            })().catch((e) => { console.error("::error::" + e.message); process.exit(1); });
+            })().catch((e) => { console.error("::error::" + require("../.github/scripts/lib/redact.js").redactError(e)); process.exit(1); });
           '
 
       # deployRewards.js: Vault(escrow, FINAL_TREASURY, deployer) -> Rewards(escrow, vault, deployer) ->
@@ -341,26 +356,10 @@ jobs:
           export REVENUE_VAULT REWARDS
           bash .github/scripts/stage-runtime-env.sh rewards-binding
 
-      # Deneysel: scripts/verify.js (Etherscan V2 + Sourcify). Library'ler, escrow ve (varsa) vault/rewards,
-      # constructor argümanları deployments/*.json manifestlerinden okunur. Başarısızlık deploy'u durdurmaz.
-      # Secret adı ETHERSCAN_API_KEY; eski BASESCAN_API_KEY geriye uyumlu okunur. Değer asla yazdırılmaz.
-      - name: Verify contracts on BaseScan (experimental)
-        if: ${{ inputs.verify_contracts }}
-        continue-on-error: true
-        working-directory: contracts
-        shell: bash
-        env:
-          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY || secrets.BASESCAN_API_KEY }}
-          BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
-        run: |
-          set -euo pipefail
-          if [ -z "$ETHERSCAN_API_KEY" ]; then
-            echo "::warning::ETHERSCAN_API_KEY (or legacy BASESCAN_API_KEY) secret is not set; Etherscan will be skipped, keyless Sourcify + Blockscout will be used."
-          fi
-          npm run verify:base-sepolia
-
       - name: Setup Fly CLI
-        uses: superfly/flyctl-actions/setup-flyctl@1.5
+        uses: superfly/flyctl-actions/setup-flyctl@fc53c09e1bc3be6f54706524e3b82c4f462f77be # 1.5
+        with:
+          version: 0.4.120
 
       # App yoksa oluşturur (FLY_API_TOKEN org/kişisel token olmalı); var olan app'e dokunmaz.
       - name: Ensure Fly app exists
@@ -411,13 +410,23 @@ jobs:
         working-directory: backend
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: flyctl deploy --remote-only -a "$FLY_APP_NAME"
+        shell: bash
+        run: |
+          set -euo pipefail
+          flyctl deploy --remote-only -a "$FLY_APP_NAME"
+          # K4-01: Rotasyon (makineleri durdurma + arşivleme) ÖNCESİ canlı bekçi modu "enforce" olmalı; değilse ::error::
+          # ile düşer ve rotasyon adımı hiç başlamaz. (Ayrı adım olarak eklenemez: mevcut testler Fly deploy -> rotasyon
+          # bitişikliğini sabitler.) Enforce + yeni ESCROW + eski registry = escrow_mismatch (beklenen engel); yalnız mod okunur.
+          if [ "${REGISTRY_STATE:-}" = "ACTIVE" ]; then
+            bash ../.github/scripts/stage-runtime-env.sh guard-mode
+          fi
 
       # Arşiv Faz 2b (tasarım §3b): rotasyon, health kontrolünden önce. Makineler durdurulur ve doğrulanır; Mongo koleksiyonları
       # arşive taşınır, User aynası, Redis anahtarları ve checkpoint'ler (manifeste yazılıp silinir) işlenir; registry ROTATING -> ACTIVE
       # (commit noktası) en son yazılır; makineler `trap` ile başlatılır. Kaldığı yerden devam eder (yarım kalırsa rotate-escrow.yml).
       # Yalnız bu adımda MONGODB_URI/REDIS_URL/FLY_API_TOKEN var; JWT_SECRET/MASTER_ENCRYPTION_KEY YOK. Secret basılmaz.
       - name: Rotate escrow state (archive + registry switch)
+        id: rotate_state
         if: ${{ env.REGISTRY_STATE == 'ACTIVE' }}
         shell: bash
         env:
@@ -443,6 +452,7 @@ jobs:
         run: bash .github/scripts/reset-worker-checkpoint.sh
 
       - name: Write active escrow registry (first install)
+        id: registry_first
         if: ${{ env.REGISTRY_STATE == 'none' }}
         shell: bash
         env:
@@ -456,6 +466,33 @@ jobs:
       - name: Check backend health
         shell: bash
         run: bash .github/scripts/stage-runtime-env.sh health
+
+      # K4-01: Deploy sonrası canlı /ready escrowRegistry.mode == enforce doğrulaması (warn/off ise job düşer).
+      - name: Verify registry guard mode (enforce)
+        shell: bash
+        run: bash .github/scripts/stage-runtime-env.sh guard-mode
+
+      # K4-03: Doğrulama kritik yoldan (Fly deploy, rotasyon, health) SONRA koşar ve kendi zaman sınırı vardır;
+      # yavaş indeksleme rotasyonun ortasında job'u kesemez. Deneysel: scripts/verify.js (Etherscan V2 + Sourcify + Blockscout).
+      # Library'ler, escrow ve (varsa) vault/rewards, constructor argümanları deployments/*.json manifestlerinden okunur.
+      # Başarısızlık deploy'u durdurmaz. Secret adı ETHERSCAN_API_KEY; eski BASESCAN_API_KEY geriye uyumlu okunur. Değer asla yazdırılmaz.
+      - name: Verify contracts on BaseScan (experimental)
+        if: ${{ inputs.verify_contracts }}
+        continue-on-error: true
+        timeout-minutes: 12
+        working-directory: contracts
+        shell: bash
+        env:
+          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY || secrets.BASESCAN_API_KEY }}
+          BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+          VERIFY_RETRIES: "3"
+          VERIFY_RETRY_DELAY_MS: "15000"
+        run: |
+          set -euo pipefail
+          if [ -z "$ETHERSCAN_API_KEY" ]; then
+            echo "::warning::ETHERSCAN_API_KEY (or legacy BASESCAN_API_KEY) secret is not set; Etherscan will be skipped, keyless Sourcify + Blockscout will be used."
+          fi
+          npm run verify:base-sepolia
 
       - name: Validate Vercel config
         if: ${{ inputs.deploy_frontend }}
@@ -507,8 +544,11 @@ jobs:
         run: bash ../.github/scripts/stage-runtime-env.sh vercel-deploy
 
       # GITHUB_TOKEN repo variable yazamaz; opsiyonel GH_VARIABLES_TOKEN (fine-grained PAT, Variables: read and write) varsa kalıcılaştırılır.
+      # K4-04: Yalnız registry yeni escrow'a geçtikten sonra (rotasyon ya da ilk kurulum registry yazımı BAŞARILI) yazılır;
+      # böylece rotasyon/Fly öncesi bir hata variable ile registry'yi ayrıştırmaz. Sonraki adımlar (health, Vercel) başarısız
+      # olsa da registry geçtiği için variable yazılır (!cancelled()).
       - name: Persist deployment variables
-        if: ${{ always() && env.ESCROW != '' }}
+        if: ${{ !cancelled() && env.ESCROW != '' && (steps.rotate_state.outcome == 'success' || steps.registry_first.outcome == 'success') }}
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GH_VARIABLES_TOKEN }}
@@ -533,10 +573,12 @@ jobs:
         shell: bash
         env:
           FINAL_OWNER_ADDRESS: ${{ vars.FINAL_OWNER_ADDRESS }}
+          OLD_ESCROW_ADDRESS: ${{ vars.ARAF_ESCROW_ADDRESS }}
         run: |
           set -euo pipefail
           {
             echo "### Base Sepolia deployment"
+            echo "- OLD_ESCROW_ADDRESS (previous escrow; rotate-escrow.yml mode=rotate recovery needs it as old_escrow_address): ${OLD_ESCROW_ADDRESS:-n/a}"
             echo "- Final owner (escrow; vault/rewards when deployed): ${FINAL_OWNER_ADDRESS:-n/a}"
             echo "- Backend: https://$FLY_APP_NAME.fly.dev"
             echo "- Frontend domain (SIWE/CORS): https://$FRONTEND_DOMAIN"
