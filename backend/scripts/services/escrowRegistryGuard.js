@@ -3,7 +3,7 @@
 /**
  * [TR] Escrow kayıt bekçisi (Arşiv Faz 1). Mongo `escrow_registry` içindeki `_id:"active"` belgesini YALNIZ OKUR ve
  *      ARAF_ESCROW_ADDRESS / EXPECTED_CHAIN_ID ile karşılaştırır. Veri silmez/değiştirmez, tx göndermez.
- *      Modlar (ESCROW_REGISTRY_GUARD_MODE): off | warn (varsayılan) | enforce.
+ *      Modlar (ESCROW_REGISTRY_GUARD_MODE): off | warn | enforce (varsayılan: production'da enforce, diğerlerinde warn).
  *        - warn: yalnız log (tek seferlik + durum değişince) ve /ready bilgi alanı; hiçbir şeyi kapatmaz.
  *        - enforce: uyumsuzsa (veya kayıt okunamazsa, fail-closed) worker başlamaz/durur, CHAIN_BOUND işler atlanır,
  *          escrow'a bağlı route'lar 503 ESCROW_MISMATCH döner. app.js ve middleware/requireFullService.js bağlar.
@@ -19,12 +19,17 @@ const DEFAULT_MODE = "warn";
 const ADDRESS_RE = /^0x[0-9a-f]{40}$/;
 const READ_TIMEOUT_MS = 5_000;
 
-/** [TR] Geçersiz/boş değer -> warn (+ uyarı). Hata fırlatmaz. */
-function resolveMode(raw = process.env.ESCROW_REGISTRY_GUARD_MODE) {
+/**
+ * [TR] Boş/geçersiz değer -> varsayılan (+ geçersizse uyarı). Hata fırlatmaz.
+ *      B4-12: NODE_ENV=production iken varsayılan enforce (fail-closed; identityNormalizationGuard ile simetrik);
+ *      diğer ortamlarda warn. Açıkça yazılmış geçerli değer (off/warn/enforce) her zaman saygı görür.
+ */
+function resolveMode(raw = process.env.ESCROW_REGISTRY_GUARD_MODE, nodeEnv = process.env.NODE_ENV) {
+  const fallback = nodeEnv === "production" ? "enforce" : DEFAULT_MODE;
   const configured = String(raw ?? "").trim().toLowerCase();
-  if (!configured) return { mode: DEFAULT_MODE, invalid: false };
+  if (!configured) return { mode: fallback, invalid: false };
   if (VALID_MODES.includes(configured)) return { mode: configured, invalid: false };
-  return { mode: DEFAULT_MODE, invalid: true, requested: configured.slice(0, 32) };
+  return { mode: fallback, invalid: true, requested: configured.slice(0, 32) };
 }
 
 /**
@@ -71,10 +76,11 @@ function createEscrowRegistryGuard({
   let inFlight = null;
 
   function refreshMode() {
-    const r = resolveMode(getEnv().ESCROW_REGISTRY_GUARD_MODE);
+    const env = getEnv();
+    const r = resolveMode(env.ESCROW_REGISTRY_GUARD_MODE, env.NODE_ENV);
     if (r.invalid && r.requested !== lastInvalid) {
       lastInvalid = r.requested;
-      log.warn(`[EscrowRegistryGuard] ESCROW_REGISTRY_GUARD_MODE geçersiz ("${r.requested}"); warn kullanılıyor.`);
+      log.warn(`[EscrowRegistryGuard] ESCROW_REGISTRY_GUARD_MODE geçersiz ("${r.requested}"); ${r.mode} kullanılıyor.`);
     }
     mode = r.mode;
     return mode;

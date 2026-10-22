@@ -1,5 +1,6 @@
 import { CircleCheck, Info, MessageSquare, TriangleAlert, Wallet, X } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
+import { safeStorage } from './app/safeStorage';
 import { isWalletProviderDisconnectedError, walletDisconnectedToast } from './app/walletDisconnect';
 import { useAccount, useConnect, useDisconnect, useSignMessage, useSwitchChain, useChainId, usePublicClient } from 'wagmi';
 import { canonicalizePayoutProfileDraft, formatTokenAmount as formatTokenAmountFromRaw, tokenToNumber as rawTokenToDisplayNumber } from './app/orderUiModel';
@@ -133,7 +134,11 @@ function App() {
     activeToastKeyRef.current = key;
     setToast({ id, message, type, key, action });
     if (action) return;
-    setTimeout(() => setToast((current) => (current?.id === id ? null : current)), type === 'error' ? 6000 : 4000);
+    setTimeout(() => {
+      // [TR] F1-10: otomatik kapanan anahtarlı toast, anahtarını da bırakır (ref hâlâ onunsa); sonraki aynı anahtar bastırılmaz.
+      if (key && activeToastKeyRef.current === key) activeToastKeyRef.current = null;
+      setToast((current) => (current?.id === id ? null : current));
+    }, type === 'error' ? 6000 : 4000);
   }, []);
   const dismissToast = React.useCallback(() => {
     activeToastKeyRef.current = null;
@@ -158,7 +163,7 @@ function App() {
   // 2. WEB3 BAĞLANTI VE KONTRAT HOOK'LARI
   //    Wallet connection + all contract methods
   // ═══════════════════════════════════════════
-  const { address, isConnected, connector, chainId: walletChainId } = useAccount();
+  const { address, isConnected, isReconnecting, connector, chainId: walletChainId } = useAccount();
   const { connect, connectors } = useConnect();
   const { disconnect } = useDisconnect();
   const { signMessageAsync } = useSignMessage();
@@ -179,7 +184,7 @@ function App() {
   // [EN] Persist language changes so refresh keeps the same locale.
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
-    window.localStorage.setItem(APP_LANG_STORAGE_KEY, lang);
+    safeStorage.set(APP_LANG_STORAGE_KEY, lang);
   }, [lang]);
 
   // [TR] <html lang> seçili dille eşlenir: CSS uppercase "i/İ" ve ekran okuyucu doğru çalışır.
@@ -310,6 +315,10 @@ function App() {
     formatAddress,
     filteredOrders,
     marketOrdersTotal,
+    marketHasMore,
+    marketLoadingMore,
+    marketLoadMoreError,
+    loadMoreMarketOrders,
     activeEscrowCounts,
     chainOffsetMs,
     canMakerStartChallengeFlow,
@@ -319,6 +328,8 @@ function App() {
   } = useAppSessionData({
     address,
     isConnected,
+    // [TR] F1-01: sayfa yenilemede wagmi reconnect sürerken oturum silinmez / derin bağlantı korunur.
+    isWalletResolving: Boolean(isReconnecting),
     connector,
     chainId,
     publicClient,
@@ -372,9 +383,10 @@ function App() {
     trades: chainFallbackState.trades,
     loading: chainFallbackState.loading,
     loadedAt: chainFallbackState.loadedAt,
+    failedIds: chainFallbackState.failedIds,
     submitManualId: chainFallbackState.submitManualId,
     openTrade: openChainFallbackTrade,
-  }), [chainFallbackEnabled, chainFallbackState.trades, chainFallbackState.loading, chainFallbackState.loadedAt, chainFallbackState.submitManualId, openChainFallbackTrade]);
+  }), [chainFallbackEnabled, chainFallbackState.trades, chainFallbackState.loading, chainFallbackState.loadedAt, chainFallbackState.failedIds, chainFallbackState.submitManualId, openChainFallbackTrade]);
 
   // [TR] Açık yedek odayı zincirle eşitler; cüzdan değişip görüntüleyen artık aynı rolde taraf değilse odayı kapatır.
   useChainFallbackRoomSync({
@@ -695,9 +707,6 @@ function App() {
     hasPayoutProfile,
     openProfilePage,
     effectiveTier: Number((labMaker ? labMaker.reputation : userReputation)?.effectiveTier ?? 0),
-    // [TR] Lab modunda gerçek cüzdan yaşı uygulanmaz (null = engel yok).
-    walletAged: !labMaker && typeof sybilStatus?.aged === 'boolean' ? sybilStatus.aged : null,
-    walletAgeRemainingDays: !labMaker ? walletAgeRemainingDays : null,
   });
 
   // [TR] Lab "Emir oluşturma": formu senaryo değerleriyle doldurup modalı açar (kontrat çağrısı yapılmaz).
@@ -941,6 +950,7 @@ function App() {
 
   const {
     handleFileUpload,
+    handleLocalReceiptSelect,
     handleReportPayment,
     handleProposeCancel,
     handleRevokeCancel,
@@ -1092,6 +1102,10 @@ function App() {
     setMarketFilter,
     resetMarketFilters,
     marketOrdersTotal,
+    marketHasMore,
+    marketLoadingMore,
+    marketLoadMoreError,
+    loadMoreMarketOrders,
     filteredOrders,
     orders,
     ordersFeedError,
@@ -1137,6 +1151,7 @@ function App() {
     setChargebackAccepted,
     paymentIpfsHash: room.paymentIpfsHash,
     handleFileUpload,
+    handleLocalReceiptSelect,
     handleReportPayment,
     handleProposeCancel,
     handleRevokeCancel,
@@ -1151,6 +1166,7 @@ function App() {
     // [TR] Gerçek sayaçlar saat sınırında (AppViews/NowBoundary) türetilir; burada yalnız lab geçersiz kılmaları taşınır.
     tradeTimers: labTradeRoom ? labTradeRoom.timers : undefined,
     chainOffsetMs,
+    getWalletRegisteredAt,
     canMakerStartChallengeFlow,
     canMakerChallenge,
     // [TR] Lab'da kontrat okuması yok; eriyen tutar kontrat formülünün aynasıyla tahmin edilir.

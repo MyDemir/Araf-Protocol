@@ -8,6 +8,18 @@ import { signInWrongNetworkMessage } from '../switchNetwork';
 import { buildApiUrl } from '../apiConfig';
 import { buildTermsStatement, isTermsAcceptedLocally, markTermsAcceptedLocally, TERMS_VERSION } from '../legal/terms';
 
+// [TR] F1-14: giriş istekleri (nonce/verify) asılı kalırsa isLoggingIn takılmasın. İmza adımı bu süreye dahil
+//      değildir (yalnız ağ istekleri sarılır). Not: fetch çağrı biçimi değişmez (signal eklenmez).
+// [EN] F1-14: bound the sign-in network calls so a hung request cannot leave isLoggingIn stuck.
+export const LOGIN_FETCH_TIMEOUT_MS = 20000;
+const withLoginTimeout = (promise) => new Promise((resolve, reject) => {
+  const timer = setTimeout(() => reject(new Error('Login request timed out')), LOGIN_FETCH_TIMEOUT_MS);
+  promise.then(
+    (value) => { clearTimeout(timer); resolve(value); },
+    (err) => { clearTimeout(timer); reject(err); },
+  );
+});
+
 export const createSessionActions = ({
   address,
   connectedWallet,
@@ -58,7 +70,16 @@ export const createSessionActions = ({
   };
 
   const handleLogoutAndDisconnect = async () => {
-    await bestEffortBackendLogout();
+    const serverLoggedOut = await bestEffortBackendLogout();
+    // [TR] F1-14: sunucu çıkışı yapılamadıysa (ağ yok) httpOnly çerez geçerli kalabilir; kullanıcı uyarılır.
+    if (serverLoggedOut === false) {
+      showToast(
+        lang === 'TR'
+          ? 'Sunucu oturumu kapatılamadı; çevrimdışıydınız. Oturum çerezi süresi dolana dek geçerli kalabilir.'
+          : 'Could not end the server session (offline). The session cookie may stay valid until it expires.',
+        'info',
+      );
+    }
     // [TR] Gerçek çıkış: bekleyen tx kaydı yalnız burada silinir (F7).
     clearLocalSessionState({ navigateHome: true, closeModals: true, clearPendingTx: true });
     disconnect();
@@ -80,7 +101,7 @@ export const createSessionActions = ({
       setIsLoggingIn(true);
       showToast(lang === 'TR' ? 'Lütfen cüzdanınızdan imza isteğini onaylayın' : 'Please approve the signature request in your wallet', 'info');
 
-      const nonceRes = await fetch(buildApiUrl(`auth/nonce?wallet=${address}`), { credentials: 'include' });
+      const nonceRes = await withLoginTimeout(fetch(buildApiUrl(`auth/nonce?wallet=${address}`), { credentials: 'include' }));
       if (!nonceRes.ok) {
         throw new Error('Nonce alınamadı');
       }
@@ -102,12 +123,12 @@ export const createSessionActions = ({
       });
       const signature = await signMessageAsync({ message });
 
-      const verifyRes = await fetch(buildApiUrl('auth/verify'), {
+      const verifyRes = await withLoginTimeout(fetch(buildApiUrl('auth/verify'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({ message, signature }),
-      });
+      }));
 
       if (verifyRes.ok) {
         const verifyData = await verifyRes.json().catch(() => ({}));

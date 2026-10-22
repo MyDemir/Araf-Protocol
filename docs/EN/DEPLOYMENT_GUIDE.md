@@ -612,6 +612,8 @@ CONFIRM_PUBLIC_DEPLOY=yes NODE_ENV=production npx hardhat run scripts/deploy.js 
 npm run migrate:identity:dry
 node scripts/migrations/backfillTerminalTradeStats.js            # dry-run
 node scripts/migrations/dedupeRevenueEvents.js                   # dry-run
+# back up before --apply: dedupeRevenueEvents.js --apply --backup=<file>
+# (the backup file contains wallet addresses and transaction data; store it securely, keep it out of the repo)
 
 # Fly.io backend logs
 fly logs --app araf-protocol-backend
@@ -654,6 +656,9 @@ Extracted from every `process.env` / `import.meta.env` use in the code. *Require
 | `REDIS_TLS` | no | `false` | `true` or a `rediss://` URL enables TLS; mandatory in production. |
 | `REDIS_TLS_SKIP_VERIFY` | no | `false` | Self-signed dev Redis only; `true` in production aborts startup. |
 | `REDIS_READY_WAIT_MS` | no | `5000` | Wait for Redis to become ready. |
+| `REDIS_CONNECT_TIMEOUT_MS` | no | `10000` | Redis connect timeout, ms. |
+| `JOB_LOCK_TTL_MS` | no | `120000` | Distributed job-lock lifetime (ms); renewed every ttl/3. |
+| `JOB_LOCK_COMMAND_TIMEOUT_MS` | no | `5000` | Timeout of a single lock command (Redis), ms. |
 
 ### 6.2 Backend — auth, session, CORS
 
@@ -742,13 +747,18 @@ The `escrow_registry` Mongo collection holds one document, `_id: "active"`: `esc
 
 | Variable | Required | Default | Notes |
 |---|---|---|---|
-| `ESCROW_REGISTRY_GUARD_MODE` | no | `warn` | `off` · `warn` · `enforce`. Invalid value = `warn` plus a warning log. `warn`: log only (once and on change) and an `escrowRegistry` info field in `/ready`; nothing is closed and no HTTP status changes. `enforce`: on a mismatch (or an unreadable registry, fail-closed) the worker is not started (or is stopped), chain-bound scheduled jobs are skipped, and escrow-bound routes (orders, trades, pii, receipts, stats, rewards, admin) return `503 ESCROW_MISMATCH` with the reason. Auth, client logs, social links, reference ticker, feedback and `/health` stay open; `/ready` returns 503 with the reason. Exits are not blocked: users send exit transactions straight to the contract. |
+| `ESCROW_REGISTRY_GUARD_MODE` | no | `warn` (`enforce` in production) | `off` · `warn` · `enforce`. In production, if ESCROW_REGISTRY_GUARD_MODE is unset it is enforce. Invalid value = the default (`warn`, `enforce` in production) plus a warning log. `warn`: log only (once and on change) and an `escrowRegistry` info field in `/ready`; nothing is closed and no HTTP status changes. `enforce`: on a mismatch (or an unreadable registry, fail-closed) the worker is not started (or is stopped), chain-bound scheduled jobs are skipped, and escrow-bound routes (orders, trades, pii, receipts, stats, rewards, admin) return `503 ESCROW_MISMATCH` with the reason. Auth, client logs, social links, reference ticker, feedback and `/health` stay open; `/ready` returns 503 with the reason. Exits are not blocked: users send exit transactions straight to the contract. |
 | `ESCROW_REGISTRY_GUARD_INTERVAL_MS` | no | `60000` | Re-check interval. |
 
 **First-time setup order**
-1. Deploy the guard code with `deploy-runtime` while the mode is still `warn` (the default). Nothing is closed.
+1. Deploy the guard code. In production the default is `enforce`; the registry document must be adopted first (`escrow-registry-adopt.yml`, step 2), otherwise the backend starts blocked with `registry_missing`. To deploy without blocking temporarily, set the mode explicitly to `warn`.
 2. Run the **Escrow Registry Adopt** workflow (`escrow-registry-adopt.yml`) with `dry_run=true` and read the output, then run it again with `dry_run=false`. It writes the live escrow (`ARAF_ESCROW_ADDRESS` / `ARAF_DEPLOYMENT_BLOCK` repository variables, chain 84532) as `active`.
 3. If the backend log shows no `[EscrowRegistryGuard] UYUMSUZ` line and `/ready` reports `escrowRegistry.ok: true`, switch on enforcement: `flyctl secrets set ESCROW_REGISTRY_GUARD_MODE=enforce -a <app>`.
+
+**Status: enforce is on for Base Sepolia.** The code default is `enforce` in production and `warn` elsewhere (local development is unaffected); the Base Sepolia workflows set and verify the mode themselves:
+- `stage-runtime-env.sh fly-secrets` (used by both `deploy-base-sepolia.yml` and `deploy-runtime-base-sepolia.yml`) writes `ESCROW_REGISTRY_GUARD_MODE=enforce` on every run; no manual `flyctl secrets set` is needed.
+- `stage-runtime-env.sh guard-mode` reads `escrowRegistry.mode` from the live `/ready`; if it is not `enforce` (or cannot be read) the job fails with `::error::`. It runs after the health step following the Fly deploy (both deploy workflows), before the rotation (stopping machines and archiving) in the full deploy (registry ACTIVE path), and after an applied rotate/restore in `rotate-escrow.yml` (recovery paths are not blocked beforehand). The mode is retried until `enforce` is seen (during a rolling deploy an old machine may briefly report `warn`).
+- Expected side effect: under enforce, a backend that does not match the registry (`registry_missing`, `escrow_mismatch`, `chain_mismatch`, `rotating`, `registry_unreadable`) starts without the worker and with escrow routes returning 503; the process does not exit, `/health` stays 200, and the guard re-checks every 60 s. On a first install the registry is written after the Fly deploy (checkpoint reset and `--adopt --apply`), so the backend starts blocked and unblocks itself within about 60 s after the registry is written. For an existing install whose registry was never written, run Escrow Registry Adopt before `deploy-runtime`; otherwise the backend stays blocked.
 
 A full contract deploy (`deploy-base-sepolia.yml`) writes the registry in one of two ways: if **no registry exists** (first install) the old behaviour is kept (the "first install" steps: checkpoint reset + `--adopt --apply`, no `--force-switch` because there is nothing to overwrite); if the registry is **ACTIVE**, the escrow rotation runs (see 6.6b). If it is **ROTATING**, the deploy stops before deploying a contract; `--force-switch` never overwrites a ROTATING record. The runtime deploy does not change the escrow and never writes the registry; if its `araf_escrow_address` override differs from the registry, the guard reports `escrow_mismatch`.
 
@@ -897,7 +907,7 @@ Run the scripts from `backend/` (`node scripts/migrations/<name>.js`). They read
 | `normalizeIdentityFields.js` (`npm run migrate:identity`) | **writes** | dry-run by default; writes only with `--apply` (`npm run migrate:identity:dry` = dry-run, `npm run migrate:identity` = `--apply`; `--dry-run` still accepted with a warning) | Converts legacy numeric `Order.onchain_order_id`, `Trade.onchain_escrow_id`, `Trade.parent_order_id` to canonical strings. |
 | `backfillTerminalTradeStats.js` | dry-run | `--apply` | Fills the permanent `TerminalTradeStat` counters from existing terminal trades. Idempotent (`$setOnInsert` on `trade_key`). |
 | `backfillLastBanEndsAt.js` (`npm run migrate:last-ban-ends-at`; `:dry` = dry-run) | dry-run | `--apply` | Fills `User.last_ban_ends_at` from chain (`getReputation().bannedUntil`) for users whose `banned_until` was nulled earlier, so the reputation-decay job can pick them up. Idempotent, read-only RPC (`BASE_RPC_URL`, `ARAF_ESCROW_ADDRESS`). |
-| `dedupeRevenueEvents.js` | dry-run | `--apply` | Removes duplicate `RevenueEvent` rows written by the old worker (escrow row duplicating the vault row for the same tx/token/amount/kind/trade). Idempotent. |
+| `dedupeRevenueEvents.js` | dry-run | `--apply` (recommended: `--apply --backup=<file>`; rows to delete are written to JSON first) | Removes duplicate `RevenueEvent` rows written by the old worker (escrow row duplicating the vault row for the same tx/token/amount/kind/trade). Idempotent. |
 
 Order of operations for an upgrade:
 1. **Before** the new backend: `npm run migrate:identity:dry`, then `npm run migrate:identity` if it reports numeric ids. `IDENTITY_NORMALIZATION_GUARD` defaults to `enforce` in production, so the backend refuses to start while legacy ids exist.
@@ -924,7 +934,7 @@ PII re-encryption after the HKDF change has no tool in the repository; see `PII_
 - Concurrency `connections`, soft 80 / hard 100; VM `shared` 1 CPU, 512 MB.
 - Health check: `GET /health` every 30 s, 15 s grace period, 5 s timeout, HTTP inside the container (`force_https = true` outside).
 - `/health` is the **liveness** signal tied to the worker: it returns `503 "stale"` when no block was seen for `WORKER_LIVENESS_STALE_MS`; independently the worker watchdog reconnects after `WORKER_BLOCK_STALE_MS` and exits the process if blocks still do not arrive (the platform then restarts it). `/ready` (readiness) is not wired into `fly.toml`; use it for deploy gates and monitoring (full detail with `x-internal-token: $READY_INTERNAL_TOKEN`).
-- The image (`backend/Dockerfile`) is `node:22-alpine`, installs with `npm ci --omit=dev`, runs as the non-root `nodeapp` user and starts `node scripts/app.js`.
+- The image (`backend/Dockerfile`) is `node:22-alpine` pinned by index digest (to update, put the new index digest of the Docker Hub `library/node` `22-alpine` tag into the `FROM` line), installs with `npm ci --omit=dev`, runs as the non-root `nodeapp` user and starts `node scripts/app.js`.
 
 ---
 

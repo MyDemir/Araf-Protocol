@@ -42,6 +42,16 @@ export default [
       //      catch blocks are the deliberate exception (best-effort cleanup/telemetry); everything else is an error.
       'no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrors: 'all', caughtErrorsIgnorePattern: '^_' }],
       'no-empty': ['error', { allowEmptyCatch: true }],
+      // [TR] E1-07: eval / dinamik kod / javascript: URL yüzeyi çekirdek kurallarla kilitli (yeni bağımlılık yok).
+      //      eslint-plugin-react kurulu olmadığından react/no-danger yerine çekirdek no-restricted-syntax kullanılır.
+      'no-eval': 'error',
+      'no-implied-eval': 'error',
+      'no-new-func': 'error',
+      'no-script-url': 'error',
+      'no-restricted-syntax': ['error', {
+        selector: "JSXAttribute[name.name='dangerouslySetInnerHTML']",
+        message: 'dangerouslySetInnerHTML yasak (XSS yüzeyi).',
+      }],
     },
   },
   {

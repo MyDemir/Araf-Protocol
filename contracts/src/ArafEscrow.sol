@@ -52,6 +52,8 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
     // ═══════════════════════════════════════════════════
 
     enum TradeState {
+        // [TR] K1-07: V3'te hiçbir trade OPEN'a atanmaz; boş mapping'in varsayılanıdır. ABI uyumu için korunur.
+        // [EN] K1-07: no V3 trade is ever set to OPEN; it is the empty-mapping default, kept for ABI compatibility.
         OPEN,
         LOCKED,
         PAID,
@@ -280,8 +282,9 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
     uint256 internal constant WALLET_AGE_MIN       =   2 days;
     uint256 internal constant DEFAULT_TIER0_TRADE_COOLDOWN = 4 hours;
     uint256 internal constant DEFAULT_TIER1_TRADE_COOLDOWN = 4 hours;
-    uint256 internal constant MAX_CANCEL_DEADLINE  =   7 days;
-    uint256 internal constant MIN_SETTLEMENT_EXPIRY = 10 minutes;
+    // [TR] K1-07/K2-09: kullanılmayan MAX_CANCEL_DEADLINE ve MIN_SETTLEMENT_EXPIRY kaldırıldı; settlement süre
+    //      sınırlarının tek kaynağı ArafSettlementLib'dir. [EN] Unused constants removed; ArafSettlementLib is the
+    //      single source of the settlement deadline bounds.
     uint256 public constant MIN_ACTIVE_PERIOD    =  15 days;
     // [TR] Reputation'a sayılan en küçük trade (6 ondalığa normalize, 20 USD). [EN] Smallest trade counted for reputation.
     uint256 internal constant MIN_REPUTATION_NOTIONAL = 20e6;
@@ -432,6 +435,13 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
         bool allowSellOrders,
         bool allowBuyOrders
     );
+    // [TR] K2-08: setTokenConfig'in decimals ve tier limitleri (TokenConfigUpdated'ın imzası geriye uyum için aynı kalır).
+    // [EN] K2-08: decimals and tier limits of setTokenConfig (TokenConfigUpdated keeps its signature for compatibility).
+    event TokenLimitsUpdated(
+        address indexed token,
+        uint8 decimals,
+        uint256[4] tierMaxAmountsBaseUnit
+    );
     event SettlementProposed(
         uint256 indexed tradeId,
         uint256 indexed proposalId,
@@ -486,7 +496,7 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
     constructor(address _treasury)
         Ownable(msg.sender)
     {
-        if (_treasury == address(0)) revert OwnableInvalidOwner(address(0));
+        if (_treasury == address(0)) revert ZeroAddress();
         treasury = _treasury;
 
         // [TR] Mutable fee / cooldown için varsayılan başlangıç değerleri
@@ -624,11 +634,15 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
         PaymentRiskLevel _paymentRiskLevel
     ) external nonReentrant whenNotPaused returns (uint256 orderId) {
         if (!_isTokenAllowedForBuyOrder(_token)) revert TokenDirectionNotAllowed();
-        // [TR] Buy order sahibi child trade'de taker rolünü üstleneceği için
-        //      create aşamasında da taker giriş kapısı zorlanır.
-        // [EN] Since buy order owner becomes taker in child trades,
-        //      enforce taker entry gate at create time as well.
-        _enforceTakerEntry(msg.sender, _tier);
+        // [TR] Buy order sahibi child trade'de taker olacağı için create'te ban, kayıt, DUST ve
+        //      cooldown kontrolleri zorlanır (bu sırayla); 2 günlük cüzdan yaşı kontrolü create'te
+        //      YOKTUR, fillBuyOrder'da (_enforceTakerEntry) uygulanır.
+        // [EN] The buy order owner becomes taker in child trades, so ban, registration, DUST and
+        //      cooldown checks are enforced at create (in this order); the 2-day wallet-age check
+        //      is NOT applied at create and is enforced at fillBuyOrder time (_enforceTakerEntry).
+        _enforceNotBanned(msg.sender, false);
+        if (walletRegisteredAt[msg.sender] == 0) revert WalletTooYoung();
+        _enforceTakerDustAndCooldown(msg.sender, _tier);
 
         uint256 takerBondTotal = (_totalAmount * _getTakerBondBps(msg.sender, _tier)) / BPS_DENOMINATOR;
         orderId = _createOrder(OrderSide.BUY_CRYPTO, _token, _totalAmount, _minFillAmount, _tier, _orderRef, _paymentRiskLevel, 0, takerBondTotal);
@@ -867,11 +881,13 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
     /**
      * @notice LOCKED trade'de taker PAYMENT_WINDOW içinde ödeme bildirmezse kilit çözülür.
      *         Kontrat kimin haklı olduğunu yorumlamaz; yalnız zamanın dolduğunu uygular: maker envanter + bond'unu
-     *         geri alır, taker bond'undan küçük bir liveness cezası kesilir ve taker'a negatif sinyal yazılır.
+     *         geri alır, taker bond'undan küçük bir liveness cezası kesilip maker'a ödenir (K1-03) ve taker'a negatif
+     *         sinyal yazılır.
      *         Bu yol olmadan bond'suz (Tier 0) bir taker maker fonunu süresiz rehin tutabilirdi.
      * @notice If the taker does not report payment within PAYMENT_WINDOW, the lock unwinds.
      *         The contract does not judge; it only enforces elapsed time: the maker gets inventory + bond back,
-     *         a small liveness penalty is taken from the taker bond and the taker receives a negative signal.
+     *         a small liveness penalty is taken from the taker bond and paid to the maker (K1-03), and the taker
+     *         receives a negative signal.
      *         Without this path a bond-free (Tier 0) taker could hold maker funds hostage indefinitely.
      */
     function expirePaymentWindow(uint256 _tradeId)
@@ -886,14 +902,20 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
 
         t.state = TradeState.CANCELED;
 
+        // [TR] K1-03: ceza envanteri kilitlenen maker'a tazminat olarak gider (hazineye değil). Tier 0'da bond 0
+        //      olduğundan ceza 0 kalır. makerRefund maker'ın aldığı toplamdır (envanter + bond + ceza).
+        // [EN] K1-03: the penalty compensates the maker whose inventory was locked (not the treasury). Tier 0 has no
+        //      bond, so the penalty stays 0. makerRefund is the maker's total (inventory + bond + penalty).
         uint256 takerPenalty = (t.takerBond * AUTO_RELEASE_PENALTY_BPS) / BPS_DENOMINATOR;
-        uint256 makerRefund  = t.cryptoAmount + t.makerBond;
+        uint256 makerRefund  = t.cryptoAmount + t.makerBond + takerPenalty;
         uint256 takerRefund  = t.takerBond - takerPenalty;
 
-        _payout(t, _tradeId, makerRefund, takerRefund, takerPenalty, 0, RevenueKind.AUTO_RELEASE_FEE_OR_PENALTY);
-
+        // [TR] K1-06 CEI: terminal snapshot ve itibar dış çağrılardan (hazine hook'u, transferler) önce yazılır.
+        // [EN] K1-06 CEI: terminal snapshot and reputation are written before external calls (treasury hook, transfers).
         _recordTerminalOutcome(_tradeId, TerminalOutcome.PAYMENT_WINDOW_EXPIRED, takerPenalty, 0);
         _recordReputation(t, ArafReputationLib.Outcome.PAYMENT_WINDOW_EXPIRED);
+
+        _payout(t, _tradeId, makerRefund, takerRefund, 0, 0, RevenueKind.AUTO_RELEASE_FEE_OR_PENALTY);
 
         emit PaymentWindowExpired(_tradeId, makerRefund, takerRefund, takerPenalty);
     }
@@ -927,16 +949,7 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
         uint256 makerFee       = (currentCrypto * t.makerFeeBpsSnapshot) / BPS_DENOMINATOR;
         uint256 actualMakerFee = currentMakerBond > makerFee ? makerFee : currentMakerBond;
 
-        _payout(
-            t,
-            _tradeId,
-            currentMakerBond - actualMakerFee,
-            currentCrypto - takerFee + currentTakerBond,
-            decayed + takerFee + actualMakerFee,
-            decayed,
-            disputed ? RevenueKind.DISPUTED_RELEASE_FEE : RevenueKind.MANUAL_RELEASE_FEE
-        );
-
+        // [TR] K1-06 CEI: terminal snapshot ve itibar dış çağrılardan önce yazılır. [EN] K1-06 CEI: records before external calls.
         if (disputed) {
             // [TR] CHALLENGED→RESOLVED yolu maker'ın challenge iddiasının başarısızlığı olarak sınıflanır.
             // [EN] CHALLENGED→RESOLVED path is classified as maker challenge-loss semantics.
@@ -946,6 +959,16 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
             _recordTerminalOutcome(_tradeId, TerminalOutcome.CLEAN_RELEASE, takerFee, actualMakerFee);
             _recordReputation(t, ArafReputationLib.Outcome.MANUAL_RELEASE);
         }
+
+        _payout(
+            t,
+            _tradeId,
+            currentMakerBond - actualMakerFee,
+            currentCrypto - takerFee + currentTakerBond,
+            decayed + takerFee + actualMakerFee,
+            decayed,
+            disputed ? RevenueKind.DISPUTED_RELEASE_FEE : RevenueKind.MANUAL_RELEASE_FEE
+        );
 
         emit EscrowReleased(_tradeId, t.maker, t.taker, takerFee, actualMakerFee);
     }
@@ -1083,10 +1106,11 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
 
         t.state = TradeState.BURNED;
 
-        _payout(t, _tradeId, 0, 0, totalBurn, 0, RevenueKind.BURN_RESIDUAL);
-
+        // [TR] K1-06 CEI: kayıtlar dış çağrılardan önce. [EN] K1-06 CEI: records before external calls.
         _recordTerminalOutcome(_tradeId, TerminalOutcome.BURNED, 0, 0);
         _recordReputation(t, ArafReputationLib.Outcome.BURN);
+
+        _payout(t, _tradeId, 0, 0, totalBurn, 0, RevenueKind.BURN_RESIDUAL);
 
         emit EscrowBurned(_tradeId, totalBurn);
     }
@@ -1142,6 +1166,21 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
 
         uint256 makerPenalty = (t.makerBond * AUTO_RELEASE_PENALTY_BPS) / BPS_DENOMINATOR;
         uint256 takerPenalty = (t.takerBond * AUTO_RELEASE_PENALTY_BPS) / BPS_DENOMINATOR;
+        // [TR] K2-01: her tarafın kesintisi en az releaseFunds'ta ödeyeceği ücret kadardır (Tier 0 dahil); böylece
+        //      maker'ın susması protokol ücretini düşürmez. Maker ücreti releaseFunds'taki gibi bond ile sınırlıdır.
+        // [EN] K2-01: each side's cut is at least its releaseFunds fee (Tier 0 included), so a silent maker does not
+        //      lower protocol revenue. The maker fee is capped by the maker bond exactly as in releaseFunds.
+        {
+            uint256 takerFee = (t.cryptoAmount * t.takerFeeBpsSnapshot) / BPS_DENOMINATOR;
+            uint256 makerFee = (t.cryptoAmount * t.makerFeeBpsSnapshot) / BPS_DENOMINATOR;
+            if (makerFee > t.makerBond) makerFee = t.makerBond;
+            if (takerFee > takerPenalty) takerPenalty = takerFee;
+            if (makerFee > makerPenalty) makerPenalty = makerFee;
+        }
+
+        // [TR] K1-06 CEI: kayıtlar dış çağrılardan önce. [EN] K1-06 CEI: records before external calls.
+        _recordTerminalOutcome(_tradeId, TerminalOutcome.AUTO_RELEASE, takerPenalty, makerPenalty);
+        _recordReputation(t, ArafReputationLib.Outcome.AUTO_RELEASE);
 
         _payout(
             t,
@@ -1152,9 +1191,6 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
             0,
             RevenueKind.AUTO_RELEASE_FEE_OR_PENALTY
         );
-
-        _recordTerminalOutcome(_tradeId, TerminalOutcome.AUTO_RELEASE, takerPenalty, makerPenalty);
-        _recordReputation(t, ArafReputationLib.Outcome.AUTO_RELEASE);
 
         // Event payload order must stay aligned with EscrowReleased(takerFee, makerFee)
         // so off-chain listeners book penalties to the correct party.
@@ -1254,12 +1290,12 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
         sp.state = SettlementProposalState.FINALIZED;
         t.state = TradeState.RESOLVED;
 
-        // [TR] CEI korunur: state güncellendi, ardından dış transferler yapılır.
-        // [EN] CEI preserved: state is updated before external transfers.
-        _payout(t, _tradeId, makerPayout, takerPayout, decayed + makerFee + takerFee, decayed, RevenueKind.PARTIAL_SETTLEMENT_FEE);
-
+        // [TR] CEI (K1-06): state, terminal snapshot ve itibar güncellendi, ardından dış transferler yapılır.
+        // [EN] CEI (K1-06): state, terminal snapshot and reputation are updated before external transfers.
         _recordTerminalOutcome(_tradeId, TerminalOutcome.PARTIAL_SETTLEMENT, takerFee, makerFee);
         _recordReputation(t, ArafReputationLib.Outcome.PARTIAL_SETTLEMENT);
+
+        _payout(t, _tradeId, makerPayout, takerPayout, decayed + makerFee + takerFee, decayed, RevenueKind.PARTIAL_SETTLEMENT_FEE);
 
         emit SettlementFinalized(_tradeId, sp.id, makerPayout, takerPayout, takerFee, makerFee);
     }
@@ -1293,6 +1329,10 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
         uint256 makerRefund = currentCrypto + currentMakerBond - makerFee;
         uint256 takerRefund = currentTakerBond - takerFee;
 
+        // [TR] K1-06 CEI: kayıtlar dış çağrılardan önce. [EN] K1-06 CEI: records before external calls.
+        _recordTerminalOutcome(_tradeId, TerminalOutcome.MUTUAL_CANCEL, takerFee, makerFee);
+        _recordReputation(t, ArafReputationLib.Outcome.MUTUAL_CANCEL);
+
         _payout(
             t,
             _tradeId,
@@ -1302,9 +1342,6 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
             decayed,
             currentState == TradeState.CHALLENGED ? RevenueKind.DISPUTED_RELEASE_FEE : RevenueKind.MANUAL_RELEASE_FEE
         );
-
-        _recordTerminalOutcome(_tradeId, TerminalOutcome.MUTUAL_CANCEL, takerFee, makerFee);
-        _recordReputation(t, ArafReputationLib.Outcome.MUTUAL_CANCEL);
 
         emit EscrowCanceled(_tradeId, makerRefund, takerRefund);
     }
@@ -1742,9 +1779,20 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
      *         Treasury payout yönü protokol ekonomisinin canonical parçasıdır.
      * @notice Updates the treasury address.
      *         Treasury payout routing is a canonical part of the protocol economy.
+     * @dev    [TR] K1-02: yeni hazine bu escrow'a bağlı bir ArafRevenueVault olmalı: `escrow()` getter'ı
+     *         address(this) döndürmeli. EOA, kodsuz adres, getter'ı olmayan/revert eden ya da başka escrow'a
+     *         bağlı kontrat TreasuryEscrowMismatch ile reddedilir. Low-level staticcall kullanılır ki kodsuz
+     *         adres ve bozuk dönüş de custom error ile reddedilsin. Constructor yolu değişmedi.
+     *         [EN] K1-02: the new treasury must be an ArafRevenueVault wired to this escrow (`escrow()` returns
+     *         address(this)). EOAs, code-less addresses, contracts without/reverting the getter or wired to another
+     *         escrow revert with TreasuryEscrowMismatch. The constructor path is unchanged.
      */
     function setTreasury(address _treasury) external onlyOwner {
-        if (_treasury == address(0)) revert OwnableInvalidOwner(address(0));
+        if (_treasury == address(0)) revert ZeroAddress();
+        (bool ok, bytes memory ret) = _treasury.staticcall(abi.encodeWithSignature("escrow()"));
+        if (!ok || ret.length < 32 || abi.decode(ret, (bytes32)) != bytes32(uint256(uint160(address(this))))) {
+            revert TreasuryEscrowMismatch(_treasury);
+        }
         treasury = _treasury;
         emit TreasuryUpdated(_treasury);
     }
@@ -1803,7 +1851,7 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
         uint8 _decimals,
         uint256[4] calldata _tierMaxAmountsBaseUnit
     ) external onlyOwner {
-        if (_token == address(0)) revert OwnableInvalidOwner(address(0));
+        if (_token == address(0)) revert ZeroAddress();
         if (_decimals == 0 || _decimals > 18) revert InvalidDecimals();
         // [TR] K14: girilen ondalık token'ın kendi decimals() değeriyle aynı olmalı; çağrı başarısızsa (kod yok,
         //      fonksiyon yok, kısa dönüş) da revert. Yanlış decimals tier limitlerini ve reward notional'ını bozar.
@@ -1823,6 +1871,7 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
         cfg.tierMaxAmountsBaseUnit = _tierMaxAmountsBaseUnit;
 
         emit TokenConfigUpdated(_token, _supported, _allowSellOrders, _allowBuyOrders);
+        emit TokenLimitsUpdated(_token, _decimals, _tierMaxAmountsBaseUnit);
     }
 
     /**
@@ -1931,8 +1980,10 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
     /**
      * @notice Taker giriş kapısını tek yerden zorlar.
      *         V3 order child-trade girişleri (fillSellOrder/fillBuyOrder) bu helper'ı ortak kullanır.
+     *         createBuyOrder bunu KULLANMAZ; kendi ban/kayıt/DUST/cooldown kontrolünü yapar (yaş yok).
      * @notice Enforces the taker entry gate in one place.
      *         V3 order child-trade entries (fillSellOrder/fillBuyOrder) share this helper.
+     *         createBuyOrder does NOT use it; it runs its own ban/registration/DUST/cooldown checks (no age).
      */
     function _enforceTakerEntry(address _wallet, uint8 _tier) internal view {
         _enforceNotBanned(_wallet, false);
@@ -1942,6 +1993,16 @@ contract ArafEscrow is IArafEscrowErrors, ReentrancyGuard, Ownable, Pausable {
             revert WalletTooYoung();
         }
 
+        _enforceTakerDustAndCooldown(_wallet, _tier);
+    }
+
+    /**
+     * @notice Taker giriş kapısının yaş dışı kısmı: DUST bakiyesi ve tier cooldown (bu sırayla).
+     *         createBuyOrder (ban ile birlikte) ve _enforceTakerEntry tarafından kullanılır.
+     * @notice The non-age part of the taker entry gate: DUST balance and tier cooldown (in that order).
+     *         Used by createBuyOrder (together with the ban check) and by _enforceTakerEntry.
+     */
+    function _enforceTakerDustAndCooldown(address _wallet, uint8 _tier) internal view {
         if (_wallet.balance < DUST_LIMIT) revert InsufficientNativeBalance();
 
         uint256 cooldown = _getCooldownForTier(_tier);

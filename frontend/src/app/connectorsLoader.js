@@ -12,7 +12,7 @@ export const loadConnectorsSafely = async (importer = () => import('wagmi/connec
     const { coinbaseWallet, injected, walletConnect } = await importer();
     const list = [
       injected(), // OKX Wallet ve diğer injected cüzdanlar
-      coinbaseWallet({ appName: 'Araf Protocol' }),
+      coinbaseWallet({ appName: 'Araf Protocol', preference: { telemetry: false } }), // [TR] telemetry:false -> SDK inline script enjekte etmez (CSP script-src 'self'); options varsayılanı wagmi'de 'all'.
     ];
     if (walletConnectOptions && isValidWalletConnectProjectId(walletConnectOptions.projectId) && typeof walletConnect === 'function') {
       try {

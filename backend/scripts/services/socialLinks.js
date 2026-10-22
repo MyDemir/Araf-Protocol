@@ -84,13 +84,20 @@ async function replaceLinks(rawLinks, { wallet, reason = "", ipHash = null, expe
   } catch (auditErr) {
     logger.error(`[SocialLinks] audit yazılamadı, değişiklik geri alınıyor: ${auditErr.message}`);
     let rollbackRes = null;
+    let rollbackFailed = false;
     try {
       rollbackRes = await SocialLinkSetting.updateOne(
         { key: SETTING_KEY, version: currentVersion + 1 },
         { $set: { links: previous, updated_at: now }, $inc: { version: 1 } }
       );
     } catch (rollbackErr) {
+      rollbackFailed = true;
       logger.error(`[SocialLinks] geri alma başarısız: ${rollbackErr.message}`);
+    }
+    if (rollbackFailed) {
+      // [TR] B4-08: değişiklik DB'de uygulanmış ve denetimsiz kaldı; "uygulanmadı" denemez.
+      logger.error(`[SocialLinks] UNAUDITED CHANGE: version=${currentVersion + 1} uygulandı, audit yazılamadı ve geri alınamadı; elle kontrol edin.`);
+      throw _err("SOCIAL_LINKS_AUDIT_FAILED_APPLIED", "Denetim kaydı yazılamadı ve geri alma başarısız; değişiklik uygulanmış olabilir, durumu kontrol edin.");
     }
     if (rollbackRes && rollbackRes.matchedCount === 0) {
       throw _err("SOCIAL_LINKS_CONFLICT", "Eşzamanlı değişiklik; denetim kaydı yazılamadı, yenileyin.");

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchWithTimeout } from '../app/fetchWithTimeout';
 import { buildApiUrl } from '../app/apiConfig';
+import { fmtNumber } from '../app/format';
 import { Activity, CloudOff, Info, RotateCw, TriangleAlert } from 'lucide-react';
 
 const POLL_MS = 60_000;
@@ -12,13 +13,16 @@ const sourceLabel = (item, lang) => {
   return lang === 'TR' ? 'bilgilendirici ref.' : 'informational ref.';
 };
 
-const formatRate = (value) => {
+// [TR] F4-14: kur biçimi tarayıcı locale'ine değil uygulamanın TR/EN seçimine bağlıdır (format.js).
+const formatRate = (value, lang) => {
   if (!Number.isFinite(Number(value))) return '—';
   const num = Number(value);
-  if (num >= 1000) return num.toLocaleString(undefined, { maximumFractionDigits: 2 });
-  if (num >= 1) return num.toLocaleString(undefined, { maximumFractionDigits: 4 });
-  return num.toLocaleString(undefined, { maximumFractionDigits: 8 });
+  const maxFractionDigits = num >= 1000 ? 2 : num >= 1 ? 4 : 8;
+  return fmtNumber(num, lang, { maxFractionDigits });
 };
+
+// [TR] F4-14: art arda bu kadar yenileme hatasından sonra gösterilen son kurlar "gecikmiş" işaretlenir.
+const AGED_AFTER_FAILURES = 2;
 
 export default function ReferenceRateTicker({ lang = 'TR' }) {
   const [payload, setPayload] = useState(null);
@@ -27,6 +31,7 @@ export default function ReferenceRateTicker({ lang = 'TR' }) {
   // [EN] Previously the ticker silently disappeared when no data arrived.
   const [status, setStatus] = useState('loading');
   const intervalRef = useRef(null);
+  const [failures, setFailures] = useState(0);
 
   const fetchTicker = useCallback(async () => {
     if (typeof document !== 'undefined' && document.hidden) return;
@@ -39,10 +44,12 @@ export default function ReferenceRateTicker({ lang = 'TR' }) {
       const nextPayload = await res.json();
       const hasItems = Array.isArray(nextPayload?.items) && nextPayload.items.length > 0;
       setPayload((prev) => (hasItems ? nextPayload : prev));
+      setFailures((n) => (hasItems ? 0 : n + 1));
       setStatus((prev) => (hasItems ? 'ready' : (prev === 'ready' ? 'ready' : 'unavailable')));
     } catch {
       // [TR] Network/provider sorunlarında son başarılı payload tutulur.
       // [EN] Keep last successful payload on network/provider failures.
+      setFailures((n) => n + 1);
       setStatus((prev) => (prev === 'ready' ? 'ready' : 'unavailable'));
     }
   }, []);
@@ -126,7 +133,7 @@ export default function ReferenceRateTicker({ lang = 'TR' }) {
               className="inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 text-xs"
             >
               <span className="font-semibold text-textSecondary">{item.symbol}</span>
-              <span className="font-mono font-semibold tabular-nums text-textPrimary">{formatRate(item.rate)}</span>
+              <span className="font-mono font-semibold tabular-nums text-textPrimary">{formatRate(item.rate, lang)}</span>
               <span className="sr-only">{sourceLabel(item, lang)}</span>
               {item.stale && (
                 <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-warning">
@@ -138,6 +145,11 @@ export default function ReferenceRateTicker({ lang = 'TR' }) {
           ))}
         </div>
       </div>
+      {failures >= AGED_AFTER_FAILURES && (
+        <span data-testid="reference-rate-ticker-aged" className="inline-flex shrink-0 items-center gap-1 px-1 text-[10px] font-semibold text-warning" title={tr ? 'Kurlar güncellenemiyor; gösterilenler eski olabilir.' : 'Rates cannot be refreshed; shown values may be outdated.'}>
+          <span className="h-1.5 w-1.5 rounded-full bg-warning" aria-hidden="true" />{tr ? 'gecikmiş' : 'stale'}
+        </span>
+      )}
       {!informationalOnly && (
         <span className="flex h-7 w-7 shrink-0 items-center justify-center text-warning" title={tr ? 'Bilgilendirme bayrağı doğrulanamadı.' : 'Informational flag could not be verified.'}>
           <TriangleAlert className="h-3.5 w-3.5" strokeWidth={2.2} aria-hidden="true" />
