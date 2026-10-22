@@ -181,7 +181,7 @@ Reward weight is intentionally outcome-sensitive:
 | Payment window expiry (`PAYMENT_WINDOW_EXPIRED`) | Zero weight | An unreported payment is not a successful trade |
 | Burned | Zero weight | Deadlock must never become rewardable |
 
-Weight formula (`ArafRewards`): `weight = stableNotional × outcomeMultiplier × tierMultiplier`; the tier multiplier is ×1.0 / ×1.1 / ×1.2 / ×1.3 for Tier 1–4, Tier 0 is not recorded. Maker and taker receive the same weight. `stableNotional` is the token amount normalized to 6 decimals.
+Weight formula (`ArafRewards`): `weight = stableNotional × outcomeMultiplier × tierMultiplier`; the tier multiplier is ×1.0 / ×1.1 / ×1.2 / ×1.3 for Tier 1–4, Tier 0 is not recorded. Maker and taker use the same formula, but a side whose paid fee in the terminal snapshot is 0 receives no weight (K3-02), so zero-fee wash-trade pools cannot be drained for free. `stableNotional` is the token amount normalized to 6 decimals. Recording (`recordTradeOutcome` / `recordTradeOutcomes`) is permissionless and closes by time at epoch end + 24 hours (`claimDelay`); after that `finalizeEpochToken` is open to anyone.
 
 This creates a simple incentive ladder:
 
