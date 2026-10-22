@@ -137,6 +137,10 @@ async function _getMasterKey() {
     if (!hex || hex.length < 64) {
       throw new Error("MASTER_ENCRYPTION_KEY is missing or too short (need 32 bytes / 64 hex chars)");
     }
+    // B2-19(a): hex olmayan karakter Buffer.from ile sessizce kısa tampon üretirdi.
+    if (!/^[0-9a-fA-F]{64}$/.test(hex.slice(0, 64))) {
+      throw new Error("MASTER_ENCRYPTION_KEY must contain only hex characters (first 64 chars)");
+    }
     _masterKeyCache = Buffer.from(hex.slice(0, 64), "hex");
     if (_isEnvKmsTestnetExceptionActive()) {
       _warnEnvKmsTestnetException();

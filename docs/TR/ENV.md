@@ -136,6 +136,9 @@ Ortak okuma: Y = Yerel, S = Base Sepolia (Fly'da yine `NODE_ENV=production` çal
 | Değişken | Ne işe yarar | Zorunlu mu? | Y | S | M | Nereye | Kullanıldığı yer |
 |---|---|---|---|---|---|---|---|
 | `MONGODB_URI` | MongoDB bağlantı adresi | Her zaman (yoksa `connectDB` hata verir) | `mongodb://127.0.0.1:27017/araf_protocol` | `mongodb+srv://…` | `mongodb+srv://…` | B/.env, Fly | `config/db.js:34`, `health.js:96` |
+| `MONGO_MAX_POOL_SIZE` | Mongo bağlantı havuzu üst sınırı (1-1000) | Opsiyonel | 100 | boş (100) | boş (100); makine sayısı × değer Atlas limitini aşmamalı | B/.env, Fly | `config/db.js` |
+| `MONGO_SOCKET_TIMEOUT_MS` | Mongo socket zaman aşımı ms (1000-600000) | Opsiyonel | 20000 | boş (20000) | boş (20000) | B/.env, Fly | `config/db.js` |
+| `MONGO_DISCONNECT_GRACE_MS` | Bağlantı kopunca süreç çıkmadan önce yeniden bağlanma süresi ms (0-120000); dolunca `exit(1)` | Opsiyonel | 10000 | boş (10000) | boş (10000) | B/.env, Fly | `config/db.js` |
 | 🔒 `REDIS_URL` | Redis bağlantı adresi (şifre içerebilir) | Prod'da; dev'de `redis://127.0.0.1:6379` | `redis://127.0.0.1:6379` | `rediss://…` | `rediss://…` | B/.env, Fly | `config/redis.js:89` |
 | `REDIS_TLS` | `true` ise `redis://` ile de TLS | Opsiyonel; prod'da TLS şart (`rediss://` ya da bu) | boş | `rediss://` yeter | `rediss://` yeter | B/.env, Fly | `config/redis.js:96` |
 | `REDIS_TLS_SKIP_VERIFY` | Self-signed dev Redis için sertifika doğrulamayı kapatır | Opsiyonel (`false`); prod'da `true` ise backend başlamaz | `false` | asla | asla | B/.env | `config/redis.js:97` |

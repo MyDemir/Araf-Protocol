@@ -138,6 +138,9 @@ Shared reading: L = Local, S = Base Sepolia (still runs with `NODE_ENV=productio
 | Variable | What it does | Required? | L | S | M | Where | Used at |
 |---|---|---|---|---|---|---|---|
 | `MONGODB_URI` | MongoDB connection URL | Always (`connectDB` errors if missing) | `mongodb://127.0.0.1:27017/araf_protocol` | `mongodb+srv://…` | `mongodb+srv://…` | B/.env, Fly | `config/db.js:34`, `health.js:96` |
+| `MONGO_MAX_POOL_SIZE` | Mongo connection pool cap (1-1000) | Optional | 100 | empty (100) | empty (100); machines × value must stay under the Atlas limit | B/.env, Fly | `config/db.js` |
+| `MONGO_SOCKET_TIMEOUT_MS` | Mongo socket timeout in ms (1000-600000) | Optional | 20000 | empty (20000) | empty (20000) | B/.env, Fly | `config/db.js` |
+| `MONGO_DISCONNECT_GRACE_MS` | Reconnect grace in ms (0-120000) before `exit(1)` after a disconnect | Optional | 10000 | empty (10000) | empty (10000) | B/.env, Fly | `config/db.js` |
 | 🔒 `REDIS_URL` | Redis connection URL (may contain a password) | In prod; in dev `redis://127.0.0.1:6379` | `redis://127.0.0.1:6379` | `rediss://…` | `rediss://…` | B/.env, Fly | `config/redis.js:89` |
 | `REDIS_TLS` | If `true`, TLS even with `redis://` | Optional; TLS is mandatory in prod (`rediss://` or this) | empty | `rediss://` is enough | `rediss://` is enough | B/.env, Fly | `config/redis.js:96` |
 | `REDIS_TLS_SKIP_VERIFY` | Disables certificate verification for a self-signed dev Redis | Optional (`false`); if `true` in prod the backend will not start | `false` | never | never | B/.env | `config/redis.js:97` |
