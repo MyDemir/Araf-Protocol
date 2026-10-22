@@ -33,7 +33,6 @@ const HomeAbout = ({ about, video }) => (
     </div>
     <div className="min-w-0">
       <HomeVideoCard content={video} />
-      <p className="mt-3 text-xs text-textMuted leading-relaxed">{video.text}</p>
     </div>
   </section>
 );
