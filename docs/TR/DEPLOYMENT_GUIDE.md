@@ -414,6 +414,18 @@ SIWE domain/URI ve CORS origin'i **frontend** origin'i olmalıdır (kullanıcın
 fly secrets set SIWE_DOMAIN="araf-protocol.vercel.app" SIWE_URI="https://araf-protocol.vercel.app"
 ```
 
+### GitHub `base-sepolia` environment ve CODEOWNERS (deploy onay kapısı)
+
+`deploy-base-sepolia`, `deploy-runtime-base-sepolia`, `escrow-registry-adopt` ve `rotate-escrow` job'ları `environment: base-sepolia` kullanır. GitHub belgesine göre var olmayan bir environment'a başvuran workflow onu otomatik oluşturur ve "koruma kuralı ya da secret içermez" (yani kural koymazsanız bugünkü gibi onaysız çalışır). Kapıyı siz kurarsınız:
+
+1. Repo → **Settings → Environments → `base-sepolia`** (yoksa bir workflow çalışınca ya da **New environment** ile oluşur).
+2. **Required reviewers**: en az bir kişi ekleyin (en çok 6; biri onaylarsa yeter). Tek kişilik ekipte **Prevent self-review** kapalı kalmalı, yoksa kendi çalıştırmanızı onaylayamazsınız.
+3. **Deployment branches and tags** → *Selected branches and tags* → yalnız `main` ekleyin. Böylece başka dalda değiştirilmiş bir workflow bu environment'a erişemez.
+4. (İsteğe bağlı) Secret'ları **Environment secrets** altına taşıyın (DEPLOYER_PRIVATE_KEY, FLY_API_TOKEN, MONGODB_URI, REDIS_URL, JWT_SECRET, MASTER_ENCRYPTION_KEY, GH_VARIABLES_TOKEN, vb.). Belgeye göre environment secret'ları yalnız o environment'ı kullanan job'larda ve reviewer onayından sonra kullanılabilir. Repo seviyesindeki aynı adlı secret'ı silmediğiniz sürece dal kısıtı o secret'ı korumaz: taşıdıktan sonra repo seviyesindekini silin. (Repo secret'larının environment'lı job'da erişilebilir kalması ve aynı ad önceliği resmi belgede açıkça yazılı bulunamadı; ilk çalıştırmada doğrulayın.)
+5. **Settings → Branches → main için kural → Require a pull request before merging → Require review from Code Owners**. `.github/CODEOWNERS` `.github/`, `contracts/src/`, `encryption.js`, `siwe.js` ve `frontend/vercel.json` için `@MyDemir` ister; bu ayar açılmazsa CODEOWNERS zorlayıcı olmaz.
+
+`release.yml` secret kullanmadığı ve canlıya dokunmadığı için environment taşımaz; `ci.yml` de taşımaz.
+
 ### Testnet Kontrol Listesi
 
 - [ ] `https://sepolia.basescan.org/address/<ESCROW_ADDRESS>` — kontrat ve library'ler doğrulandı ✅

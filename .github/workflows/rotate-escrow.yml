@@ -60,6 +60,7 @@ jobs:
     name: Escrow rotation (${{ inputs.mode }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    environment: base-sepolia
 
     env:
       FLY_APP_NAME: ${{ vars.FLY_APP_NAME || 'araf-protocol-backend' }}

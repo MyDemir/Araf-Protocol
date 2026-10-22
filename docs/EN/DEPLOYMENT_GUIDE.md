@@ -414,6 +414,18 @@ The SIWE domain/URI and the CORS origin must be the **frontend** origin (the pag
 fly secrets set SIWE_DOMAIN="araf-protocol.vercel.app" SIWE_URI="https://araf-protocol.vercel.app"
 ```
 
+### GitHub `base-sepolia` environment and CODEOWNERS (deploy approval gate)
+
+The `deploy-base-sepolia`, `deploy-runtime-base-sepolia`, `escrow-registry-adopt` and `rotate-escrow` jobs use `environment: base-sepolia`. Per GitHub's documentation, a workflow that references a missing environment creates it, and the new environment "will not have any protection rules or secrets configured" (so without rules it runs unapproved, as before). You set up the gate:
+
+1. Repo → **Settings → Environments → `base-sepolia`** (it appears after a workflow run, or use **New environment**).
+2. **Required reviewers**: add at least one person (up to 6; one approval is enough). On a one-person team keep **Prevent self-review** off, otherwise you cannot approve your own run.
+3. **Deployment branches and tags** → *Selected branches and tags* → add only `main`, so a workflow edited on another branch cannot reach this environment.
+4. (Optional) Move secrets to **Environment secrets** (DEPLOYER_PRIVATE_KEY, FLY_API_TOKEN, MONGODB_URI, REDIS_URL, JWT_SECRET, MASTER_ENCRYPTION_KEY, GH_VARIABLES_TOKEN, etc.). Per the docs, environment secrets are available only to jobs that use the environment, after reviewer approval. A same-named repository-level secret is not protected by the branch rule, so delete the repository copy after moving it. (That repository secrets stay reachable in environment jobs, and the same-name precedence, could not be found stated in the official docs; verify on the first run.)
+5. **Settings → Branches → rule for main → Require a pull request before merging → Require review from Code Owners**. `.github/CODEOWNERS` requires `@MyDemir` for `.github/`, `contracts/src/`, `encryption.js`, `siwe.js` and `frontend/vercel.json`; without this setting CODEOWNERS is not enforced.
+
+`release.yml` uses no secrets and does not touch live systems, so it carries no environment; neither does `ci.yml`.
+
 ### Testnet Checklist
 
 - [ ] `https://sepolia.basescan.org/address/<ESCROW_ADDRESS>` — contract and libraries verified ✅
