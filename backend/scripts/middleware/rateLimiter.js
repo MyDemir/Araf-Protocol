@@ -324,7 +324,12 @@ function makeTieredSensitiveLimiter({
 function makePiiLimiter({ label, storePrefix, windowMs, max, extraKey = () => "", message }) {
   const keyGenerator = (req) => {
     const extra = extraKey(req);
-    return `${resolveClientIp(req)}:${req.wallet || "anon"}${extra ? `:${extra}` : ""}`;
+    const suffix = extra ? `:${extra}` : "";
+    // [TR] B2-02: doğrulanmış cüzdan varsa anahtar yalnız cüzdana bağlı (IP değiştirerek limit katlanamaz).
+    // [EN] B2-02: authenticated wallet keys on wallet only; anonymous requests stay IP-keyed.
+    const wallet = String(req.wallet || "").toLowerCase();
+    if (wallet) return `wallet:${wallet}${suffix}`;
+    return `${resolveClientIp(req)}:anon${suffix}`;
   };
   const errorBody = () => ({
     error: message,
