@@ -517,11 +517,12 @@ jobs:
             const fs = require("fs");
             const p = "frontend/vercel.json";
             const cfg = JSON.parse(fs.readFileSync(p, "utf8"));
-            const r = (cfg.rewrites || []).find((x) => x.source === "/api/(.*)");
-            if (!r) throw new Error("vercel.json has no /api/(.*) rewrite");
-            r.destination = "https://" + process.env.FLY_APP_NAME + ".fly.dev/api/$1";
+            const r = (cfg.routes || []).find((x) => x.src === "/api/(.*)");
+            if (!r) throw new Error("vercel.json has no /api/(.*) route");
+            if (!(r.transforms || []).some((t) => t.type === "request.headers" && t.op === "set" && t.target && t.target.key === "x-araf-origin-secret")) throw new Error("vercel.json /api route has no x-araf-origin-secret transform");
+            r.dest = "https://" + process.env.FLY_APP_NAME + ".fly.dev/api/$1";
             fs.writeFileSync(p, JSON.stringify(cfg, null, 2) + "\n");
-            console.log("vercel.json /api rewrite destination: " + r.destination);
+            console.log("vercel.json /api route dest: " + r.dest);
           '
 
       - name: Install Vercel CLI

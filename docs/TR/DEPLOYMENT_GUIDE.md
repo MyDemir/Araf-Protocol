@@ -387,7 +387,7 @@ npm install -g vercel
 cd frontend
 
 # vercel.json'daki proxy URL'sini güncelle
-# "destination" → "https://araf-protocol-backend.fly.dev/api/$1"
+# routes[src=/api/(.*)].dest → "https://araf-protocol-backend.fly.dev/api/$1"
 
 # Production env dosyası oluştur (tüm VITE_* değerleri public'tir; bkz. 6. bölüm)
 cat > .env.production << 'EOF'
@@ -405,6 +405,16 @@ vercel --prod
 ```
 
 Vercel'de Environment Variables de ayarlanmalıdır (Dashboard → Settings → Environment Variables).
+
+**Gerçek istemci IP'si (rate limit):** `frontend/vercel.json` içinde `/api/(.*)` için bir `routes` girdisi (`dest` → Fly) vardır; `request.headers` transform'u `x-araf-origin-secret` başlığını `$ORIGIN_SHARED_SECRET` değerine `set` eder ve değeri istek anında Vercel proje env'inden okur (sır repoda yoktur). Aynı rastgele değeri iki yere de girin:
+
+```bash
+openssl rand -hex 32                      # bir kez üret
+fly secrets set ORIGIN_SHARED_SECRET="<değer>" -a <FLY_APP_NAME>
+# Vercel → Settings → Environment Variables → ORIGIN_SHARED_SECRET = <değer> (Production), sonra yeniden deploy
+```
+
+İkisinden biri yoksa davranış öncekiyle aynı kalır: başlık eşleşmez ve rate limit IP'si altyapı adresi olur. [kaynak: https://vercel.com/docs/routing/rewrites "Restricting your origin to Vercel traffic"]
 
 > **Zincir politikası:** frontend production build'lerde (`import.meta.env.PROD`) varsayılan olarak yalnız Base Mainnet'i açar; `VITE_TARGET_CHAIN=base-sepolia` verilirse production build yalnız Base Sepolia'yı açar (`frontend/src/app/chainPolicy.js`). Hardhat zinciri yalnız production olmayan build'lere bağlanır. `main.jsx` üzerinde yapılacak bir düzenleme yoktur; barındırılan Sepolia frontend'i için aşağıdaki `VITE_TARGET_CHAIN` notuna ve [DEPLOY_BASE_SEPOLIA.md](./DEPLOY_BASE_SEPOLIA.md)'ye bakın.
 

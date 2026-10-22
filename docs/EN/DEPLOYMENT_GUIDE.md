@@ -387,7 +387,7 @@ npm install -g vercel
 cd frontend
 
 # Update the proxy URL in vercel.json
-# "destination" → "https://araf-protocol-backend.fly.dev/api/$1"
+# routes[src=/api/(.*)].dest → "https://araf-protocol-backend.fly.dev/api/$1"
 
 # Create Production env file (all VITE_* values are public; see section 6)
 cat > .env.production << 'EOF'
@@ -405,6 +405,16 @@ vercel --prod
 ```
 
 Environment Variables must also be set in Vercel (Dashboard → Settings → Environment Variables).
+
+**Real client IP (rate limit):** `frontend/vercel.json` has a `routes` entry for `/api/(.*)` (`dest` → Fly) whose `request.headers` transform sets `x-araf-origin-secret` to `$ORIGIN_SHARED_SECRET`, read from the Vercel project env at request time (the secret is never in the repo). Enter the same random value in both places:
+
+```bash
+openssl rand -hex 32                      # generate once
+fly secrets set ORIGIN_SHARED_SECRET="<value>" -a <FLY_APP_NAME>
+# Vercel → Settings → Environment Variables → ORIGIN_SHARED_SECRET = <value> (Production), then redeploy
+```
+
+If either side is missing the behavior stays as before: the header does not match and the rate-limit IP is the infrastructure address. [source: https://vercel.com/docs/routing/rewrites "Restricting your origin to Vercel traffic"]
 
 > **Chain policy:** production builds (`import.meta.env.PROD`) enable only Base Mainnet by default; with `VITE_TARGET_CHAIN=base-sepolia` a production build enables only Base Sepolia (`frontend/src/app/chainPolicy.js`). The Hardhat chain is wired only into non-production builds. There is no `main.jsx` edit to make; for a hosted Sepolia frontend see the `VITE_TARGET_CHAIN` note below and [DEPLOY_BASE_SEPOLIA.md](./DEPLOY_BASE_SEPOLIA.md).
 
