@@ -50,7 +50,7 @@ Tam deploy, `deploy_rewards=true` ile revenue vault + rewards'ı da deploy edebi
 | `FLY_ORG` | Opsiyonel; workflow app'i oluşturmak zorunda kalırsa kullanılan Fly org'u; varsayılan `personal` | `personal` |
 | `ADMIN_WALLETS` | Opsiyonel; admin paneli cüzdanları (virgüllü, her biri adres olarak doğrulanır). Boşsa Fly'daki değer korunur | `0xabc...,0xdef...` |
 | `FINAL_TREASURY_ADDRESS` | Yalnız `deploy_rewards=true`: vault'un final treasury'si | `0x...` |
-| `LIVE_POLL_INTERVAL_MS` | Opsiyonel backend ayarı [2000-300000]; boşsa Fly'daki değer korunur | `15000` |
+| `LIVE_POLL_INTERVAL_MS` | Opsiyonel backend ayarı [5000-300000]; boşsa Fly'daki değer korunur | `15000` |
 | `WORKER_BLOCK_BATCH_SIZE` | Opsiyonel [1-2000] (Alchemy ücretsiz: 10) | `10` |
 | `WORKER_REPLAY_BATCH_DELAY_MS` | Opsiyonel [0-10000] | `250` |
 | `EXPECTED_CHAIN_ID` | Opsiyonel; boş ya da `84532` olmalı (workflow her zaman 84532 yazar) | `84532` |

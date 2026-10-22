@@ -755,7 +755,7 @@ Production runs a KMS self-test at startup (`runProductionKmsStartupSelfTest`). 
 | `WORKER_FINALITY_DEPTH` | no | `6` prod / `1` otherwise | Safe-checkpoint depth. |
 | `WORKER_BLOCK_BATCH_SIZE` | no | `1000` | Replay batch size (range 1–2000; 10 on the Alchemy free plan). |
 | `WORKER_REPLAY_BATCH_DELAY_MS` | no | `250` | Delay between replay/live chunks (range 0–10000). |
-| `LIVE_POLL_INTERVAL_MS` | no | `15000` | Live polling interval (allowed range 2000–300000 for the workflow variable). |
+| `LIVE_POLL_INTERVAL_MS` | no | `15000` | Live polling interval (allowed range 5000–300000 for the workflow variable). |
 | `WORKER_CHECKPOINT_INTERVAL_BLOCKS` | no | `50` | |
 | `WORKER_REPLAY_BACKOFF_BASE_MS` | no | `5000` | Replay retry backoff base. |
 | `WORKER_REPLAY_BACKOFF_MAX_MS` | no | `300000` | Replay retry backoff cap. |
