@@ -6,13 +6,15 @@
 [![Version](https://img.shields.io/badge/versiyon-V3_Order--First-00c9a7?style=flat-square)](.)
 [![Network](https://img.shields.io/badge/ağ-Base_L2_(8453)-0052FF?style=flat-square&logo=coinbase)](.)
 [![Status](https://img.shields.io/badge/durum-Canonical-f5a623?style=flat-square)](.)
-[![Updated](https://img.shields.io/badge/güncelleme-Ekim_2026-purple?style=flat-square)](.)
+[![Updated](https://img.shields.io/badge/güncelleme-2026--10--22-purple?style=flat-square)](.)
 [![Solidity](https://img.shields.io/badge/Solidity-0.8.24-363636?style=flat-square&logo=solidity)](.)
 [![Docs](https://img.shields.io/badge/docs-Source_of_Truth-green?style=flat-square)](.)
 
 ---
 
 *Parent-order first market modeli ile çalışan, child-trade seviyesinde gerçek escrow lifecycle yürüten, non-custodial ve oracle-free P2P protocol.*
+
+*Son doğrulama: 2026-10-22 (kod gerçekliği: `contracts/src`, `backend/scripts`, `frontend/src`; çelişkide kod esastır).*
 
 > **"Contract decides. Off-chain only mirrors, coordinates, and accelerates."**
 
@@ -156,7 +158,7 @@ Kontrat, V3’ün tek authoritative state machine yüzeyidir. Aşağıdaki fonks
 
 ### 3.1 Parent-order write surface
 - `createSellOrder(token, totalAmount, minFillAmount, tier, orderRef, paymentRiskLevel)` — satıcı envanteri + toplam maker bond rezervini peşin kilitler. Order sahibi için yalnız aktif ban kontrol edilir (`MakerBanActive`).
-- `createBuyOrder(...)` — alıcı yalnız kendi toplam taker bond rezervini kilitler; sahibi child trade'de taker olacağı için taker giriş kapısından geçer.
+- `createBuyOrder(...)` — alıcı yalnız kendi toplam taker bond rezervini kilitler; sahibi child trade'de taker olacağı için create anında ban (`TakerBanActive`), kayıt (`registerWallet` yapılmamışsa `WalletTooYoung`), dust (`InsufficientNativeBalance`) ve tier cooldown (`TierCooldownActive`) kontrollerinden geçer (bu sırayla). **2 günlük cüzdan yaşı kontrolü create'te yoktur**; `fillBuyOrder` anında `_enforceTakerEntry` ile uygulanır (§6).
 - `fillSellOrder(orderId, fillAmount, childListingRef)` / `fillBuyOrder(...)` — exact fill; child trade aynı tx'te `LOCKED` doğar. Son fill kalan rezervin tamamını süpürür (yuvarlama birikmez).
 - `cancelSellOrder` / `cancelBuyOrder` — yalnız order sahibi, yalnız `OPEN`/`PARTIALLY_FILLED`; doldurulmamış envanter (sell) ve kullanılmamış bond rezervi iade edilir.
 - Order doğrulaması: `totalAmount > 0`, `0 < minFillAmount ≤ totalAmount`, `tier ≤ 4`, `orderRef ≠ 0`, tier ≤ sahibinin efektif tier'ı (`TierNotAllowed`), tutar ≤ token'ın tier tavanı (`AmountExceedsTierLimit`; Tier 4 sınırsız). Token yönü kapalıysa `TokenDirectionNotAllowed`. Fee-on-transfer token girişleri `InvalidTransferAmount` ile reddedilir.
@@ -189,10 +191,10 @@ Kontrat, V3’ün tek authoritative state machine yüzeyidir. Aşağıdaki fonks
 - `decayReputation(wallet)` — permissionless clean-slate (bkz. §8.3).
 
 ### 3.4 Governance / mutable admin surface
-- `setTreasury` (sıfır adres yasak; yeni hazine bu escrow'a bağlı vault olmalı: `escrow()` getter'ı `address(this)` döndürmeli, aksi hâlde EOA, kodsuz adres, getter'ı olmayan ya da başka escrow'a bağlı kontrat `TreasuryEscrowMismatch` ile reddedilir. Constructor'daki ilk hazine bu kontrole tabi değildir.)
+- `setTreasury` (sıfır adres yasak: `ZeroAddress`; yeni hazine bu escrow'a bağlı vault olmalı: `escrow()` getter'ı `address(this)` döndürmeli, aksi hâlde EOA, kodsuz adres, getter'ı olmayan ya da başka escrow'a bağlı kontrat `TreasuryEscrowMismatch` ile reddedilir. Constructor'daki ilk hazine bu kontrole tabi değildir.)
 - `setFeeConfig` (taraf başına ≤ 2000 bps)
 - `setCooldownConfig` (her tier için ≤ 30 gün)
-- `setTokenConfig` (decimals 1–18 ve token'ın `decimals()` değerine eşit; dört tier tavanı > 0)
+- `setTokenConfig` (token sıfır adres olamaz: `ZeroAddress`; decimals 1–18 ve token'ın `decimals()` değerine eşit, aksi `InvalidDecimals`; dört tier tavanı > 0, aksi `ZeroAmount`). `TokenConfigUpdated(token, supported, allowSellOrders, allowBuyOrders)` ile birlikte `TokenLimitsUpdated(token, decimals, tierMaxAmountsBaseUnit[4])` yayar. Constructor da sıfır hazineyi `ZeroAddress` ile reddeder.
 - `setReputationPolicy`, `setReputationTierThresholds` (sınırlar §8.4)
 - `pause` / `unpause`
 
@@ -294,9 +296,9 @@ flowchart LR
 5. Maker `releaseFunds` veya dispute/cancel yolları
 
 ### 5.2 Buy flow
-1. Owner `createBuyOrder` (owner eventual taker olduğu için gate create-time’da uygulanır)
+1. Owner `createBuyOrder` (owner eventual taker olduğu için ban/kayıt/dust/cooldown create-time’da uygulanır; cüzdan yaşı uygulanmaz)
 2. Filler `fillBuyOrder`
-3. Owner (taker) fill-time’da yeniden gate kontrolünden geçer
+3. Owner (taker) fill-time’da tam taker giriş kapısından (ban, kayıt + 2 gün yaş, dust, cooldown) geçer; owner yaşını doldurmamışsa `fillBuyOrder` `WalletTooYoung` ile revert eder
 4. Child trade `LOCKED`
 5. `reportPayment` → `releaseFunds` / dispute / cancel
 
@@ -309,7 +311,7 @@ Mutlak “maker=seller, taker=buyer” yoktur:
 |---|---|---|---|---|
 | `SELL_CRYPTO` | Owner = maker (kripto satıcısı) | create'te envanter + toplam maker bond rezervi | create ve fill anında aktif ban; create'te tier ≤ efektif tier, fill'de tekrar | `releaseFunds`, `pingTakerForChallenge`, `challengeTrade`, iptal, settlement |
 | `SELL_CRYPTO` | Filler = taker (kripto alıcısı) | fill'de taker bond | taker giriş kapısı + tier | `reportPayment`, `pingMaker`, `autoRelease`, iptal, settlement |
-| `BUY_CRYPTO` | Owner = taker (kripto alıcısı) | create'te toplam taker bond rezervi | create ve fill anında taker giriş kapısı + tier | `reportPayment`, `pingMaker`, `autoRelease`, iptal, settlement |
+| `BUY_CRYPTO` | Owner = taker (kripto alıcısı) | create'te toplam taker bond rezervi | create'te ban/kayıt/dust/cooldown (yaş yok) + tier; fill'de tam taker giriş kapısı (yaş dahil) + tier | `reportPayment`, `pingMaker`, `autoRelease`, iptal, settlement |
 | `BUY_CRYPTO` | Filler = maker (kripto satıcısı) | fill'de kripto + maker bond | aktif ban + tier | `releaseFunds`, `pingTakerForChallenge`, `challengeTrade`, iptal, settlement |
 
 Her iki taraf `expirePaymentWindow` çağırabilir; `burnExpired` ve `expireSettlement` herkese açıktır.
@@ -318,7 +320,7 @@ Her iki taraf `expirePaymentWindow` çağırabilir; `burnExpired` ve `expireSett
 
 ## 6. Anti-sybil enforcement semantiği (V3)
 
-Kanonik gate helper: `_enforceTakerEntry(wallet, tier)`
+Kanonik gate helper: `_enforceTakerEntry(wallet, tier)` (ban + yaş + `_enforceTakerDustAndCooldown`: dust, cooldown)
 
 ```mermaid
 flowchart TD
@@ -340,9 +342,9 @@ Gate bileşenleri:
 - tier bazlı cooldown: order tier'ı 0 ise `tier0TradeCooldown`, 1 ise `tier1TradeCooldown` (varsayılan ikisi de **4 saat**, üst sınır 30 gün); Tier 2+ için cooldown yoktur (`TierCooldownActive`). `lastTradeAt` yalnız Tier 0/1 fill'lerinde taker için yazılır.
 
 V3 uygulama noktaları:
-- `fillSellOrder` (filler taker)
-- `createBuyOrder` (owner eventual taker)
-- `fillBuyOrder` (owner taker re-check)
+- `fillSellOrder` (filler taker): tam kapı (`_enforceTakerEntry`)
+- `fillBuyOrder` (owner taker re-check): tam kapı (`_enforceTakerEntry`); cüzdan yaşı bu yolda uygulanır
+- `createBuyOrder` (owner eventual taker): `_enforceTakerEntry` KULLANMAZ; ban, kayıt (`walletRegisteredAt == 0` ise `WalletTooYoung`), dust ve cooldown ayrı çağrılır, 2 günlük yaş kontrolü yoktur (fill'e taşınmıştır)
 
 Maker rolü için yalnız aktif ban bakılır (`MakerBanActive`): `createSellOrder` (owner), `fillSellOrder` (owner), `fillBuyOrder` (filler). Yaş/dust/cooldown kapıları taker girişine özgüdür; maker zaten envanter + bond kilitler. Tier kapısı ayrıca uygulanır: order tier'ı create anında sahibinin, fill anında hem sahibinin hem filler'ın efektif tier'ını aşamaz.
 
@@ -550,7 +552,7 @@ Bu bölüm immutable parametreler ile runtime’da owner tarafından değiştiri
 | `MAX_TRADE_COOLDOWN` | 30 gün | Cooldown setter üst sınırı |
 | `MAX_FEE_CONFIG_BPS` | 2000 bps | Fee setter üst sınırı (taraf başına) |
 
-`MAX_CANCEL_DEADLINE` (7 gün) ve `MIN_SETTLEMENT_EXPIRY` sabitleri escrow'da tanımlıdır ama escrow kodunda kullanılmaz; settlement süre sınırları (10 dakika – 7 gün) `ArafSettlementLib` içindeki kendi sabitleriyle uygulanır.
+Kullanılmayan `MAX_CANCEL_DEADLINE` ve `MIN_SETTLEMENT_EXPIRY` sabitleri escrow'dan silinmiştir (K1-07); settlement süre sınırları (10 dakika – 7 gün) yalnız `ArafSettlementLib` içindeki sabitlerle uygulanır.
 
 ### 9.2 Mutable runtime config
 - `takerFeeBps`, `makerFeeBps` — varsayılan **15 / 15 bps** (%0,15), taraf başına ≤ 2000 bps
