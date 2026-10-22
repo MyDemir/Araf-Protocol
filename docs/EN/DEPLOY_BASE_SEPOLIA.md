@@ -52,7 +52,7 @@ Important: `MASTER_ENCRYPTION_KEY` must be generated once and NEVER CHANGED (exi
 | `FLY_ORG` | Optional; Fly org used when the workflow has to create the app; default `personal` | `personal` |
 | `ADMIN_WALLETS` | Optional; admin panel wallets (comma-separated, each validated as an address). When empty the Fly value is kept | `0xabc...,0xdef...` |
 | `FINAL_TREASURY_ADDRESS` | Only with `deploy_rewards=true`: the vault's final treasury | `0x...` |
-| `LIVE_POLL_INTERVAL_MS` | Optional backend setting [2000-300000]; when empty the Fly value is kept | `15000` |
+| `LIVE_POLL_INTERVAL_MS` | Optional backend setting [5000-300000]; when empty the Fly value is kept | `15000` |
 | `WORKER_BLOCK_BATCH_SIZE` | Optional [1-2000] (Alchemy free: 10) | `10` |
 | `WORKER_REPLAY_BATCH_DELAY_MS` | Optional [0-10000] | `250` |
 | `EXPECTED_CHAIN_ID` | Optional; must be empty or `84532` (the workflow always writes 84532) | `84532` |

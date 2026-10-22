@@ -759,7 +759,7 @@ Production açılışta KMS self-test çalıştırır (`runProductionKmsStartupS
 | `WORKER_FINALITY_DEPTH` | hayır | prod `6` / diğer `1` | Safe-checkpoint derinliği. |
 | `WORKER_BLOCK_BATCH_SIZE` | hayır | `1000` | Replay batch boyutu (aralık 1–2000; Alchemy ücretsiz planda 10). |
 | `WORKER_REPLAY_BATCH_DELAY_MS` | hayır | `250` | Replay/canlı parçaları arası bekleme (aralık 0–10000). |
-| `LIVE_POLL_INTERVAL_MS` | hayır | `15000` | Canlı izleme turu aralığı (workflow değişkeni için izinli aralık 2000–300000). |
+| `LIVE_POLL_INTERVAL_MS` | hayır | `15000` | Canlı izleme turu aralığı (workflow değişkeni için izinli aralık 5000–300000). |
 | `WORKER_CHECKPOINT_INTERVAL_BLOCKS` | hayır | `50` | |
 | `WORKER_REPLAY_BACKOFF_BASE_MS` | hayır | `5000` | Replay yeniden deneme backoff tabanı. |
 | `WORKER_REPLAY_BACKOFF_MAX_MS` | hayır | `300000` | Replay yeniden deneme backoff tavanı. |
