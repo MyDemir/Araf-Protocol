@@ -45,11 +45,12 @@ function buildCandidateQuery() {
  * Bu job:
  *   - 30 günden eski bank_change_history kayıtlarını budar
  *   - rolling sayaçları yeniden üretir
- *   - yalnız gerçekten değişen belgeleri kaydeder
+ *   - yalnız gerçekten değişen belgeleri koşullu atomik updateOne ile yazar
  */
 async function runUserBankRiskMetadataCleanup(now = new Date()) {
   let scanned = 0;
   let updated = 0;
+  let skipped = 0;
 
   try {
     const cursor = User.find(buildCandidateQuery())
@@ -63,6 +64,11 @@ async function runUserBankRiskMetadataCleanup(now = new Date()) {
       scanned += 1;
 
       try {
+        // [TR] B4-04: okunan ham durum, atomik güncellemenin koşulu olur.
+        const beforeHistory = Array.isArray(user.bank_change_history)
+          ? user.bank_change_history.map((d) => (d instanceof Date ? d : new Date(d)))
+          : [];
+        const beforeLastRaw = user.lastBankChangeAt || null;
         const beforeHistoryLength = Array.isArray(user.bank_change_history)
           ? user.bank_change_history.length
           : 0;
@@ -89,8 +95,33 @@ async function runUserBankRiskMetadataCleanup(now = new Date()) {
           continue;
         }
 
-        await user.save();
-        updated += 1;
+        // [TR] B4-04: User şeması versionKey:false; save() eşzamanlı profil değişikliğini ezerdi.
+        //      Okunan dizi/sayaçlar koşul: araya yeni değişiklik girdiyse eşleşme olmaz, bu tur atlanır
+        //      (sonraki çalıştırmada yeniden denenir). profileVersion'a dokunulmaz.
+        // [EN] Conditional atomic update; a concurrent profile change makes the filter miss, so nothing is overwritten.
+        const counterCond = (v) => (v === 0 ? { $in: [0, null] } : v);
+        const res = await User.updateOne(
+          {
+            _id: user._id,
+            // [TR] Legacy: alan DB'de hiç yoksa (okunan dizi boş) {alan: []} eşleşmez; yokluk da kabul edilir.
+            ...(beforeHistory.length === 0
+              ? { $or: [{ bank_change_history: beforeHistory }, { bank_change_history: { $exists: false } }] }
+              : { bank_change_history: beforeHistory }),
+            bankChangeCount7d: counterCond(beforeCount7d),
+            bankChangeCount30d: counterCond(beforeCount30d),
+            lastBankChangeAt: beforeLastRaw,
+          },
+          {
+            $set: {
+              bank_change_history: user.bank_change_history,
+              bankChangeCount7d: afterCount7d,
+              bankChangeCount30d: afterCount30d,
+              lastBankChangeAt: user.lastBankChangeAt || null,
+            },
+          }
+        );
+        if ((res?.matchedCount ?? res?.n ?? 0) > 0) updated += 1;
+        else skipped += 1; // eşzamanlı değişiklik: sonraki turda yeniden denenir
       } catch (perUserErr) {
         logger.warn(
           `[Job:UserBankRiskCleanup] Kullanıcı atlandı: wallet=${user.wallet_address || "unknown"} err=${perUserErr.message}`
@@ -98,16 +129,16 @@ async function runUserBankRiskMetadataCleanup(now = new Date()) {
       }
     }
 
-    if (updated > 0) {
+    if (updated > 0 || skipped > 0) {
       logger.info(
-        `[Job:UserBankRiskCleanup] ${updated} kullanıcı belgesinde bank risk metadata prune edildi (scanned=${scanned}).`
+        `[Job:UserBankRiskCleanup] scanned=${scanned} updated=${updated} skipped=${skipped}`
       );
     }
 
-    return { success: true, scanned, updated };
+    return { success: true, scanned, updated, skipped };
   } catch (err) {
     logger.error(`[Job:UserBankRiskCleanup] Temizlik başarısız: ${err.message}`);
-    return { success: false, scanned, updated, error: err.message };
+    return { success: false, scanned, updated, skipped, error: err.message };
   }
 }
 

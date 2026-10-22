@@ -1,3 +1,7 @@
+// [TR] Kontrat sabitleri (yalnız ayna; karar kontrattadır): MIN_SETTLEMENT_EXPIRY=10 dk, MAX_SETTLEMENT_DEADLINE=7 gün.
+// [EN] Contract constants (mirror only; the contract decides): MIN_SETTLEMENT_EXPIRY=10 min, MAX_SETTLEMENT_DEADLINE=7 days.
+export const SETTLEMENT_MIN_EXPIRY_SEC = 10 * 60;
+export const SETTLEMENT_MAX_EXPIRY_SEC = 7 * 24 * 60 * 60;
 const ACTIVE_ROOM_STATES = ['CHALLENGED'];
 const TERMINAL_PROPOSAL_STATES = ['FINALIZED', 'REJECTED', 'WITHDRAWN', 'EXPIRED'];
 const SETTLEMENT_STATE_BY_INDEX = ['NONE', 'PROPOSED', 'REJECTED', 'WITHDRAWN', 'EXPIRED', 'FINALIZED'];
@@ -20,6 +24,13 @@ export const toUnixSeconds = (value) => {
   if (Number.isFinite(asNumber)) return asNumber > 1e12 ? Math.floor(asNumber / 1000) : Math.floor(asNumber);
   const asDateMs = new Date(value).getTime();
   return Number.isFinite(asDateMs) ? Math.floor(asDateMs / 1000) : 0;
+};
+
+// [TR] F3-04: Teklif süresi doldu mu? Kontrat: now > expiresAt (sınır saniyesi canlı). Zincir saati çağırandan gelir.
+// [EN] F3-04: has the offer expired? Contract: now > expiresAt (boundary second is still live). Chain time comes from the caller.
+export const isSettlementProposalExpired = (proposal, nowTs = Math.floor(Date.now() / 1000)) => {
+  const expiresAt = toUnixSeconds(proposal?.expiresAt ?? proposal?.expires_at ?? 0);
+  return expiresAt > 0 && nowTs > expiresAt;
 };
 
 export const normalizeAddress = (address) => address?.toLowerCase?.() || null;
@@ -83,6 +94,13 @@ export const validateSettlementProposalInput = ({ tradeId, makerShareBps, expire
   const expiry = Number(expiresAt);
   if (!Number.isInteger(expiry) || expiry <= nowTs) {
     return lang === 'TR' ? 'Geçerli bir settlement bitiş zamanı girin.' : 'Enter a valid settlement expiry.';
+  }
+  // [TR] F3-11: Kontrat aralığı (ArafSettlementLib.proposeSettlement): now+10dk <= expiresAt <= now+7gün; ikisi de dahil.
+  // [EN] F3-11: contract range: now+10min <= expiresAt <= now+7 days, both inclusive (InvalidSettlementDeadline).
+  if (expiry < nowTs + SETTLEMENT_MIN_EXPIRY_SEC || expiry > nowTs + SETTLEMENT_MAX_EXPIRY_SEC) {
+    return lang === 'TR'
+      ? 'Settlement bitiş zamanı şu andan itibaren 10 dakika ile 7 gün arasında olmalı.'
+      : 'Settlement expiry must be between 10 minutes and 7 days from now.';
   }
   return null;
 };

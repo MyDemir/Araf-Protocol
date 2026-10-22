@@ -2,6 +2,7 @@ import React from 'react';
 import { buildApiUrl } from '../../apiConfig';
 import { shortAddress as short, tx as t } from '../../copy';
 import { fmtDateTime } from '../../format';
+import { readJsonWithTimeout } from '../../fetchWithTimeout';
 
 // [TR] "Çalışma ayarları" sekmesi: worker performans/operasyon ayarları (admin > env > varsayılan).
 //      Değişiklik yeniden başlatma gerekmeden sonraki turda etkili olur. Sınırlar sunucuda zorlanır.
@@ -35,13 +36,21 @@ export default function AdminRuntimeSettingsPanel({ lang = 'EN', authenticatedFe
   const [pending, setPending] = React.useState(null); // { setting, value (number|null = reset) }
   const [reason, setReason] = React.useState('');
   const [saving, setSaving] = React.useState(false);
+  // [TR] lang ve taslak durumu ref'te: dil değişimi yeniden yüklemeyi tetiklemez, kirli taslak ezilmez (F4-03).
+  // [EN] lang and dirty state live in refs: a language switch never reloads, and a dirty draft is never overwritten.
+  const langRef = React.useRef(lang);
+  langRef.current = lang;
+  const draftsRef = React.useRef(drafts);
+  draftsRef.current = drafts;
+  const baselineRef = React.useRef('{}');
+  const firstLoadRef = React.useRef(true);
   const [conflict, setConflict] = React.useState(false);
 
   const loadAudit = React.useCallback(async (page = 1) => {
     try {
       const res = await authenticatedFetch(buildApiUrl(`admin/runtime-settings/audit?page=${page}&limit=10`), { suppressAuthToast: true });
       if (!res.ok) return;
-      const data = await res.json();
+      const data = await readJsonWithTimeout(res);
       setAudit({
         items: Array.isArray(data?.items) ? data.items : [],
         total: Number(data?.total) || 0,
@@ -51,25 +60,31 @@ export default function AdminRuntimeSettingsPanel({ lang = 'EN', authenticatedFe
     } catch { /* audit listesi ikincil; sessiz */ }
   }, [authenticatedFetch]);
 
-  const load = React.useCallback(async () => {
+  const load = React.useCallback(async ({ force = false } = {}) => {
     setState((s) => ({ ...s, loading: true, error: '' }));
     try {
       const res = await authenticatedFetch(buildApiUrl('admin/runtime-settings'), { suppressAuthToast: true });
       if (res.status === 403) { setState({ loading: false, error: '', unauthorized: true, settings: [], version: 0, degraded: false }); return; }
       if (!res.ok) throw new Error('bad_status');
-      const data = await res.json();
+      const data = await readJsonWithTimeout(res);
       const settings = Array.isArray(data?.settings) ? data.settings : [];
+      if (!force && JSON.stringify(draftsRef.current) !== baselineRef.current) {
+        setState((s) => ({ ...s, loading: false }));
+        return;
+      }
       setState({ loading: false, error: '', unauthorized: false, settings, version: Number(data?.version) || 0, degraded: data?.degraded === true });
-      setDrafts(Object.fromEntries(settings.map((s) => [s.key, String(s.value)])));
+      const nextDrafts = Object.fromEntries(settings.map((s) => [s.key, String(s.value)]));
+      baselineRef.current = JSON.stringify(nextDrafts);
+      setDrafts(nextDrafts);
       setFieldErrors({});
       setConflict(false);
       loadAudit(1);
     } catch {
-      setState((s) => ({ ...s, loading: false, error: t(lang, 'Çalışma ayarları alınamadı.', 'Failed to load runtime settings.') }));
+      setState((s) => ({ ...s, loading: false, error: t(langRef.current, 'Çalışma ayarları alınamadı.', 'Failed to load runtime settings.') }));
     }
-  }, [authenticatedFetch, lang, loadAudit]);
+  }, [authenticatedFetch, loadAudit]);
 
-  React.useEffect(() => { load(); }, [load]);
+  React.useEffect(() => { const force = firstLoadRef.current; firstLoadRef.current = false; load({ force }); }, [load]);
 
   const closeDialog = () => { if (!saving) { setPending(null); setReason(''); } };
 
@@ -94,7 +109,7 @@ export default function AdminRuntimeSettingsPanel({ lang = 'EN', authenticatedFe
       const body = pending.value === null ? { reset: true } : { value: pending.value };
       body.expectedVersion = state.version;
       if (reason.trim()) body.reason = reason.trim().slice(0, REASON_MAX);
-      const res = await authenticatedFetch(buildApiUrl(`admin/runtime-settings/${pending.setting.key}`), {
+      const res = await authenticatedFetch(buildApiUrl(`admin/runtime-settings/${encodeURIComponent(pending.setting.key)}`), {
         method: 'PUT',
         body: JSON.stringify(body),
         suppressAuthToast: true,
@@ -103,14 +118,14 @@ export default function AdminRuntimeSettingsPanel({ lang = 'EN', authenticatedFe
         showToast(t(lang, 'Ayar güncellendi. Sonraki turdan itibaren geçerli.', 'Setting updated. Applies from the next round.'), 'success');
         setPending(null);
         setReason('');
-        await load();
+        await load({ force: true });
       } else if (res.status === 409) {
         setPending(null);
         setReason('');
         setConflict(true);
       } else {
         let msg = '';
-        try { msg = (await res.json())?.error || ''; } catch { /* yoksay */ }
+        try { msg = (await readJsonWithTimeout(res))?.error || ''; } catch { /* yoksay */ }
         showToast(res.status === 400 && msg ? msg : t(lang, 'Güncelleme başarısız.', 'Update failed.'), 'error');
         setPending(null);
         setReason('');
@@ -163,7 +178,7 @@ export default function AdminRuntimeSettingsPanel({ lang = 'EN', authenticatedFe
               'Ayarlar başka bir yönetici tarafından değiştirilmiş. Değişikliğiniz kaydedilmedi; güncel değerleri yenileyin.',
               'Settings were changed by another admin. Your change was not saved; refresh to see the current values.')}
           </p>
-          <button type="button" onClick={load} className="min-h-[44px] px-4 rounded-lg border border-borderStrong text-sm font-semibold text-textPrimary">
+          <button type="button" onClick={() => load({ force: true })} className="min-h-[44px] px-4 rounded-lg border border-borderStrong text-sm font-semibold text-textPrimary">
             {t(lang, 'Yenile', 'Refresh')}
           </button>
         </div>

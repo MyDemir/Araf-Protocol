@@ -1,14 +1,14 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 const { loadFixture } = require("@nomicfoundation/hardhat-network-helpers");
-const { deployRevenueEscrow, pushRevenue } = require("./helpers/revenue");
+const { deployRevenueEscrow, pushRevenue, bindRewardsSigner } = require("./helpers/revenue");
 
 describe("ArafRevenueVault", function () {
   const DECIMALS = 6;
   const AMOUNT = ethers.parseUnits("100", DECIMALS);
 
   async function deployFixture() {
-    const [owner, , finalTreasury, rewards, stranger, recipient] = await ethers.getSigners();
+    const [owner, , finalTreasury, , stranger, recipient] = await ethers.getSigners();
     // [TR] Vault'un escrow'u tek tx'te intent → transfer → hook yapan test kontratıdır (G2 transient handshake).
     // [EN] The vault's escrow is a test contract doing intent → transfer → hook in one tx (G2 transient handshake).
     const escrow = await deployRevenueEscrow();
@@ -18,7 +18,9 @@ describe("ArafRevenueVault", function () {
     const Vault = await ethers.getContractFactory("ArafRevenueVault");
     const vault = await Vault.deploy(await escrow.getAddress(), finalTreasury.address, owner.address);
     await vault.connect(owner).setSupportedToken(await token.getAddress(), true);
-    await vault.connect(owner).setRewards(rewards.address);
+    // [TR] K3-04: rewards bu vault'a bağlı bir kontrat olmalı; testler onun adresini impersonate eder.
+    // [EN] K3-04: rewards must be a contract bound to this vault; tests impersonate its address.
+    const rewards = await bindRewardsSigner(vault, owner);
 
     return { vault, token, owner, escrow, finalTreasury, rewards, stranger, recipient };
   }
@@ -347,10 +349,10 @@ describe("ArafRevenueVault", function () {
     const dbl = await (await ethers.getContractFactory("MockRevenueEscrowDoubleHook")).deploy();
     await dbl.waitForDeployment();
     const Vault = await ethers.getContractFactory("ArafRevenueVault");
-    const [, , finalTreasury, rewards] = await ethers.getSigners();
+    const [, , finalTreasury] = await ethers.getSigners();
     const v2 = await Vault.deploy(await dbl.getAddress(), finalTreasury.address, owner.address);
     await v2.connect(owner).setSupportedToken(await token.getAddress(), true);
-    await v2.connect(owner).setRewards(rewards.address);
+    await bindRewardsSigner(v2, owner);
 
     await token.mint(await dbl.getAddress(), AMOUNT);
     await expect(

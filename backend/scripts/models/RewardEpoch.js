@@ -11,7 +11,7 @@ if (typeof mongoose.Schema !== "function") {
 
 const rewardEpochSchema = new mongoose.Schema(
   {
-    epoch: { type: String, required: true, index: true },
+    epoch: { type: String, required: true },
     token: { type: String, required: true, lowercase: true, index: true },
     epoch_pool: { type: String, required: true, default: "0" },
     total_weight: { type: String, default: null },

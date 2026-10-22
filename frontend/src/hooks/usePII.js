@@ -30,6 +30,25 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { buildApiUrl } from '../app/apiConfig';
+import { APP_LANG_STORAGE_KEY } from '../app/bootstrapState';
+
+const readLang = () => {
+  try {
+    return typeof window !== 'undefined' && window.localStorage.getItem(APP_LANG_STORAGE_KEY) === 'TR' ? 'TR' : 'EN';
+  } catch {
+    return 'EN';
+  }
+};
+
+// [TR] Backend production'da zinciri okuyamazsa 503 ONCHAIN_STATE_UNAVAILABLE döner: PII fail-closed gizlenir.
+export const piiErrorMessage = (status, body, lang = readLang()) => {
+  if (status === 503 && body?.code === 'ONCHAIN_STATE_UNAVAILABLE') {
+    return lang === 'TR'
+      ? 'Zincir şu an okunamıyor, ödeme bilgisi geçici olarak gizli.'
+      : 'The chain cannot be read right now, payout info is temporarily hidden.';
+  }
+  return null;
+};
 
 /**
  * @param {string}   tradeId           Backend trade ID (MongoDB _id)
@@ -66,6 +85,19 @@ export function usePII(tradeId, authenticatedFetch) {
       return;
     }
 
+    // [TR] F2-20: authenticatedFetch zorunlu. Düz fetch yedeği x-wallet-address olmadan gidip sessiz 401 üretiyordu;
+    //      artık istek atılmaz, açık durum gösterilir ve bellekteki PII temizlenir.
+    // [EN] F2-20: authenticatedFetch is required; no plain-fetch fallback, no request, explicit error state.
+    if (typeof authenticatedFetch !== 'function') {
+      if (abortCtrlRef.current) abortCtrlRef.current.abort();
+      setPii(null);
+      setLoading(false);
+      setError(readLang() === 'TR'
+        ? 'Oturum doğrulanamadı, ödeme bilgisi şu an alınamıyor. Cüzdanı yeniden bağlayıp tekrar deneyin.'
+        : 'Session is not verified, payout info cannot be loaded right now. Reconnect your wallet and try again.');
+      return null;
+    }
+
     // YÜKS-07 Fix: Önceki istek varsa iptal et, yeni AbortController oluştur
     if (abortCtrlRef.current) {
       abortCtrlRef.current.abort();
@@ -78,10 +110,7 @@ export function usePII(tradeId, authenticatedFetch) {
 
     try {
       // ADIM 1: Kısa ömürlü PII erişim token'ı al
-      // YÜKS-06 Fix: authenticatedFetch prop'u yoksa düz fetch ile fallback yap
-      const doFetch = authenticatedFetch || ((url, opts) =>
-        fetch(url, { ...opts, credentials: 'include' })
-      );
+      const doFetch = authenticatedFetch;
 
       const tokenRes = await doFetch(
         // [TR] API base çözümlemesi tek canonical helper üzerinden yapılır.
@@ -98,7 +127,7 @@ export function usePII(tradeId, authenticatedFetch) {
 
       if (!tokenRes.ok) {
         const body = await tokenRes.json().catch(() => ({}));
-        throw new Error(body.error || `PII erişimi reddedildi (${tokenRes.status})`);
+        throw new Error(piiErrorMessage(tokenRes.status, body) || body.error || `PII erişimi reddedildi (${tokenRes.status})`);
       }
 
       const { piiToken } = await tokenRes.json();
@@ -116,7 +145,7 @@ export function usePII(tradeId, authenticatedFetch) {
 
       if (!piiRes.ok) {
         const body = await piiRes.json().catch(() => ({}));
-        throw new Error(body.error || `PII verisi alınamadı (${piiRes.status})`);
+        throw new Error(piiErrorMessage(piiRes.status, body) || body.error || `PII verisi alınamadı (${piiRes.status})`);
       }
 
       const data = await piiRes.json();
@@ -154,6 +183,8 @@ export function usePII(tradeId, authenticatedFetch) {
     }
     setPii(null);
     setError(null);
+    // [TR] F2-11: iptal edilen isteğin finally'si setLoading(false) yapmaz; burada sıfırlanmazsa loading takılı kalır.
+    setLoading(false);
   }, []);
 
   return { pii, loading, error, fetchPII, clearPII };

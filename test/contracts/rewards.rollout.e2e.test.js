@@ -36,8 +36,9 @@ describe('Proof of Peace Rewards rollout safety e2e', function () {
       taker,
       token: '0x0000000000000000000000000000000000000001',
       stableNotional: NOTIONAL,
-      takerFeePaid: 0,
-      makerFeePaid: 0,
+      // [TR] K3-02: ücret ödeyen taraf ağırlık alır. [EN] K3-02: only a fee-paying side is weighted.
+      takerFeePaid: 1,
+      makerFeePaid: 1,
       tier: 1,
       outcome,
       lockedAt: terminalAt - 600,

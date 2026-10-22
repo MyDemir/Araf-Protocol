@@ -138,6 +138,9 @@ Shared reading: L = Local, S = Base Sepolia (still runs with `NODE_ENV=productio
 | Variable | What it does | Required? | L | S | M | Where | Used at |
 |---|---|---|---|---|---|---|---|
 | `MONGODB_URI` | MongoDB connection URL | Always (`connectDB` errors if missing) | `mongodb://127.0.0.1:27017/araf_protocol` | `mongodb+srv://…` | `mongodb+srv://…` | B/.env, Fly | `config/db.js:34`, `health.js:96` |
+| `MONGO_MAX_POOL_SIZE` | Mongo connection pool cap (1-1000) | Optional | 100 | empty (100) | empty (100); machines × value must stay under the Atlas limit | B/.env, Fly | `config/db.js` |
+| `MONGO_SOCKET_TIMEOUT_MS` | Mongo socket timeout in ms (1000-600000) | Optional | 20000 | empty (20000) | empty (20000) | B/.env, Fly | `config/db.js` |
+| `MONGO_DISCONNECT_GRACE_MS` | Reconnect grace in ms (0-120000) before `exit(1)` after a disconnect | Optional | 10000 | empty (10000) | empty (10000) | B/.env, Fly | `config/db.js` |
 | 🔒 `REDIS_URL` | Redis connection URL (may contain a password) | In prod; in dev `redis://127.0.0.1:6379` | `redis://127.0.0.1:6379` | `rediss://…` | `rediss://…` | B/.env, Fly | `config/redis.js:89` |
 | `REDIS_TLS` | If `true`, TLS even with `redis://` | Optional; TLS is mandatory in prod (`rediss://` or this) | empty | `rediss://` is enough | `rediss://` is enough | B/.env, Fly | `config/redis.js:96` |
 | `REDIS_TLS_SKIP_VERIFY` | Disables certificate verification for a self-signed dev Redis | Optional (`false`); if `true` in prod the backend will not start | `false` | never | never | B/.env | `config/redis.js:97` |
@@ -481,10 +484,10 @@ RPC URLs (`BASE_RPC_URL`, `BASE_RPC_URL_FALLBACKS`) are intentionally not in the
 Precedence: admin (DB) > env > default; bounds apply to every source; no restart needed (cache up to ~15 s). Groups and bounds live in `backend/scripts/config/runtimeSettingDefs.js`.
 
 - Worker: `LIVE_POLL_INTERVAL_MS`, `WORKER_BLOCK_BATCH_SIZE`, `WORKER_REPLAY_BATCH_DELAY_MS`, `WORKER_CHECKPOINT_INTERVAL_BLOCKS` (1-1000), `WORKER_REPLAY_BACKOFF_BASE_MS` (500-60000), `WORKER_REPLAY_BACKOFF_MAX_MS` (5000-1800000)
-- Watchdog/Health: `WORKER_BLOCK_STALE_MS` (30000-900000), `WORKER_WATCHDOG_INTERVAL_MS` (5000-120000), `WORKER_LIVENESS_STALE_MS` (60000-1800000; default 2x block stale + 30 s), `WORKER_MAX_LAG_BLOCKS` (1-1000)
+- Watchdog/Health: `WORKER_BLOCK_STALE_MS` (30000-900000), `WORKER_WATCHDOG_INTERVAL_MS` (5000-120000), `WORKER_LIVENESS_STALE_MS` (60000-1800000; default 2x block stale + 30 s), `WORKER_MAX_LAG_BLOCKS` (1-100)
 - Caches: `READY_CACHE_TTL_MS` (5000-10000), `MARKET_CACHE_TTL_MS` (0-60000), `CONFIG_CACHE_TTL_SECONDS` (60-21600), `RATE_LIMIT_TIER_CACHE_TTL_SECONDS` (10-600; tier cache only, not limit counts)
 - Rate reference: `REFERENCE_TICKER_CRYPTO_TTL_SECONDS`, `..._FIAT_TTL_SECONDS`, `..._LAST_GOOD_TTL_SECONDS`, `..._MAX_STALE_SECONDS`
-- Background jobs: `REPUTATION_DECAY_CANDIDATE_LIMIT`, `REPUTATION_DECAY_TX_LIMIT` (1-100, relayer gas), `REWARD_RECORDER_CANDIDATE_LIMIT`, `REWARD_RECORDER_BATCH_LIMIT` (1-50, relayer gas; ~100k gas per id estimated, the same ids are retried if the tx reverts)
+- Background jobs: `REPUTATION_DECAY_CANDIDATE_LIMIT`, `REPUTATION_DECAY_TX_LIMIT` (1-50, relayer gas), `REWARD_RECORDER_CANDIDATE_LIMIT`, `REWARD_RECORDER_BATCH_LIMIT` (1-50, relayer gas; ~100k gas per id estimated, the same ids are retried if the tx reverts)
 
 Cross-field constraints (on effective values, `400` on violation): liveness >= 2 x block stale; replay backoff base <= max; block stale >= 3 x `LIVE_POLL_INTERVAL_MS`; ticker last-good TTL >= max stale; ticker fiat TTL <= max stale.
 

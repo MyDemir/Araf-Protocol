@@ -106,10 +106,11 @@ Sınır saniyesi tektir: `T+48sa` anında challenge reddedilir ve aynı saniyede
 |---|---|---|
 | Dürüst maker, ödeme gerçekten gelmedi | Ping atar, `T+24sa`–`T+48sa` arasında `challengeTrade` açar | Bleeding başlar; uzlaşma, iptal ya da `burnExpired` ile biter. İddiasını zamanında desteklediği için ping kuralından ek kaybı yok |
 | Dürüst maker, ödeme sonradan geldi | Ping attıktan sonra da `releaseFunds` çağırır (her an açık) | Clean release; ping maliyetsizdir |
-| Kötü niyetli maker: ping atıp susar (fonu rehin tutmak) | `T+48sa` anında ping düşer; taker `pingMaker` → 24 saat → `autoRelease` | Taker kriptoyu alır; iki bond'dan `AUTO_RELEASE_PENALTY` kesilir, auto-release itibar sinyali. Süresiz kilit yok |
+| Kötü niyetli maker: ping atıp susar (fonu rehin tutmak) | `T+48sa` anında ping düşer; taker `pingMaker` → 24 saat → `autoRelease` | Taker kriptoyu alır; taraf başına max(`AUTO_RELEASE_PENALTY`, release ücreti) kesilir (K2-01), auto-release itibar sinyali. Süresiz kilit yok |
 | Kötü niyetli maker: ödeme geldiği halde challenge açar | Bleeding başlar, iki tarafın bond'u ve kripto erir | Maker de kaybeder; `CHALLENGED`'dan geç release `DISPUTED_RELEASE` + maker dispute kaybı |
 | Kötü niyetli taker: ödemeden `reportPayment` | Maker ping atar ve pencerede challenge açar | Bleeding taker bond'unu eritir; taker challenge açamaz, ping'i düşüremez, pencere boyunca `pingMaker` ile maker'ı aşamaz |
 | Taker önce `pingMaker` atar | Maker artık ping atamaz (`ConflictingPingPath`) | Maker 24 saat içinde `releaseFunds` (ya da iptal/uzlaşma) yapmazsa `autoRelease` |
+| Maker ödemeyi zorlaştırır (K1-03 sonrası küçük teşvik) | Maker ödeme bilgisini eksik/geç verir ya da yanıt vermez; taker 48 saatte `reportPayment` yapamaz → `expirePaymentWindow` | Taker cezası (`takerBond × %2`) artık maker'a gider; bonded tier'larda maker'ın bu yoldan kazancı fill'in ≈%0,2'si (Tier 1, taker bond %10) ile ≈%0,04'ü (Tier 4, taker bond %2) arasıdır, itibar ayarı ±. Tier 0'da 0. Taker ayrıca +60 risk alır. Kontrat ödemenin neden yapılmadığını yorumlamaz. Dikkat: profil kapısı yalnız arayüz/API düzeyindedir, kontrat doğrudan çağrılarak atlanabilir ve eksik snapshot'lı işlem ödeme penceresinde çözülür (ARCHITECTURE §12.4.1); yani ödeme profili olmayan maker bu yoldan cezayı alabilir. Bu küçük teşvik bilinçli kabul edilen kalan risktir. Sybil kendi-kendine işlemde net kazanç yoktur: ceza aynı sahibin taker cüzdanından maker cüzdanına geçer, eksi gas, taker cüzdanı +60 risk ve `failedDisputes`+1 alır |
 
 ---
 

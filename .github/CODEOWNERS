@@ -1,0 +1,7 @@
+# K4-07: Gizli değerli/canlıya dokunan yollar için zorunlu inceleme.
+# Etkisi için branch protection'da "Require review from Code Owners" açılmalıdır (docs/TR/DEPLOYMENT_GUIDE.md).
+/.github/ @MyDemir
+/contracts/src/ @MyDemir
+/backend/scripts/services/encryption.js @MyDemir
+/backend/scripts/services/siwe.js @MyDemir
+/frontend/vercel.json @MyDemir
