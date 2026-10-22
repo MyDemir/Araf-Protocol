@@ -6,6 +6,8 @@ ArafRevenueVault, rewards connected, warm wallets, median of repeated runs). Val
 `npm --prefix contracts run gas:baseline` ile ölçüldü (üretim bağlantısı: escrow treasury = RevenueVault,
 rewards bağlı, ısınmış cüzdanlar, tekrarların medyanı). Değerler `gasUsed`'dır.
 
+> Güncel değerler / Current values: "Re-verification (2026-10-22)" bölümü / section (aşağıda / below).
+
 ## Storage packing (2026-09)
 
 - Trade: 18 → 9 slots. ids `uint64`, timestamps `uint64` packed with the snapshot/state slot; cancel and ping
@@ -242,3 +244,15 @@ Vault'a gelir gönderen her yol ≈+2,1k öder (K3-06 soğuk slot okuması); `au
 | `ArafRevenueVault` | 6,547 | 6,838 | +291 | 17,738 |
 | `ArafRewards` | 7,215 | 7,230 | +15 | 17,346 |
 | `ArafReputationLib` | 4,732 | 4,732 | +0 | 19,844 |
+
+## Re-verification (2026-10-22) / Yeniden doğrulama
+
+`npm --prefix contracts run gas:baseline` was re-run on main at `071817b` (no `contracts/src` change since the
+Wave 5 package). All 26 rows match the "After" columns above exactly (latest value per operation: Wave 5 table for the
+12 rows it lists, the buy-order table for `createBuyOrder_t2` / `fillBuyOrder_t2` / `fillSellOrder_*` /
+`createSellOrder_t2`, the K2(B) table for the rest). Deployed runtime bytecode sizes match the Wave 5 table:
+`ArafEscrow` 22,585, `ArafSettlementLib` 2,394, `ArafRevenueVault` 6,838, `ArafRewards` 7,230, `ArafReputationLib`
+4,732 bytes.
+
+`gas:baseline` `071817b` üzerinde yeniden çalıştırıldı (Dalga 5'ten beri `contracts/src` değişmedi); 26 satırın
+tamamı yukarıdaki son "After" değerleriyle birebir aynı, bytecode boyutları Dalga 5 tablosuyla aynıdır.

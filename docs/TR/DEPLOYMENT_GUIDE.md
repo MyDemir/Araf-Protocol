@@ -1,6 +1,6 @@
 # Araf Protocol — Deployment Guide
 
-> **Versiyon:** 2.1 | **Son Güncelleme:** Ekim 2026
+> **Versiyon:** 2.1 | **Son Güncelleme:** Ekim 2026 (son doğrulama: 2026-10-22)
 >
 > Bu rehber üç ortamı kapsar: Yerel Geliştirme · Public Testnet (Base Sepolia) · Mainnet (Base)
 >
@@ -373,6 +373,8 @@ fly logs --app araf-protocol-backend
 
 > **Worker başlangıç bloğu:** production'da worker'ın ya mevcut bir Redis checkpoint'ine ya da `ARAF_DEPLOYMENT_BLOCK`'a (veya `WORKER_START_BLOCK`) ihtiyacı vardır; aksi halde `/ready` `ARAF_DEPLOYMENT_BLOCK_OR_WORKER_START_BLOCK_OR_CHECKPOINT` eksiği raporlar. Checkpoint varsa env değeri yok sayılır. İlk kurulumda `ARAF_DEPLOYMENT_BLOCK` vermek yeterlidir; `worker:last_block`'u elle tohumlamak gerekmez.
 
+> **Registry (elle yol):** production'da `ESCROW_REGISTRY_GUARD_MODE` varsayılanı `enforce`'tur; `escrow_registry` kaydı yoksa backend `registry_missing` ile engelli açılır. Workflow kullanmıyorsanız kaydı bir kez elle yazın (kök dizinden; `npm ci --omit=dev --prefix backend` sonrası): `MONGODB_URI=... ARAF_ESCROW_ADDRESS=0x... ARAF_DEPLOYMENT_BLOCK=<blok> EXPECTED_CHAIN_ID=84532 node .github/scripts/escrow-registry.js --adopt` (dry-run) ve aynı komut `--apply` ile. Bkz. 6.6a.
+
 > **Not:** `fly.toml` dosyasındaki `auto_stop_machines = false` ayarı event listener'ın sürekli çalışması için zorunludur. Değiştirmeyin.
 
 ### Adım 4 — Frontend: Vercel'e Deploy Et
@@ -385,7 +387,7 @@ npm install -g vercel
 cd frontend
 
 # vercel.json'daki proxy URL'sini güncelle
-# "destination" → "https://araf-protocol-backend.fly.dev/api/$1"
+# routes[src=/api/(.*)].dest → "https://araf-protocol-backend.fly.dev/api/$1"
 
 # Production env dosyası oluştur (tüm VITE_* değerleri public'tir; bkz. 6. bölüm)
 cat > .env.production << 'EOF'
@@ -403,6 +405,16 @@ vercel --prod
 ```
 
 Vercel'de Environment Variables de ayarlanmalıdır (Dashboard → Settings → Environment Variables).
+
+**Gerçek istemci IP'si (rate limit):** `frontend/vercel.json` içinde `/api/(.*)` için bir `routes` girdisi (`dest` → Fly) vardır; `request.headers` transform'u `x-araf-origin-secret` başlığını `$ORIGIN_SHARED_SECRET` değerine `set` eder ve değeri istek anında Vercel proje env'inden okur (sır repoda yoktur). Aynı rastgele değeri iki yere de girin:
+
+```bash
+openssl rand -hex 32                      # bir kez üret
+fly secrets set ORIGIN_SHARED_SECRET="<değer>" -a <FLY_APP_NAME>
+# Vercel → Settings → Environment Variables → ORIGIN_SHARED_SECRET = <değer> (Production), sonra yeniden deploy
+```
+
+İkisinden biri yoksa davranış öncekiyle aynı kalır: başlık eşleşmez ve rate limit IP'si altyapı adresi olur. [kaynak: https://vercel.com/docs/routing/rewrites "Restricting your origin to Vercel traffic"]
 
 > **Zincir politikası:** frontend production build'lerde (`import.meta.env.PROD`) varsayılan olarak yalnız Base Mainnet'i açar; `VITE_TARGET_CHAIN=base-sepolia` verilirse production build yalnız Base Sepolia'yı açar (`frontend/src/app/chainPolicy.js`). Hardhat zinciri yalnız production olmayan build'lere bağlanır. `main.jsx` üzerinde yapılacak bir düzenleme yoktur; barındırılan Sepolia frontend'i için aşağıdaki `VITE_TARGET_CHAIN` notuna ve [DEPLOY_BASE_SEPOLIA.md](./DEPLOY_BASE_SEPOLIA.md)'ye bakın.
 
@@ -430,7 +442,7 @@ fly secrets set SIWE_DOMAIN="araf-protocol.vercel.app" SIWE_URI="https://araf-pr
 
 - [ ] `https://sepolia.basescan.org/address/<ESCROW_ADDRESS>` — kontrat ve library'ler doğrulandı ✅
 - [ ] `https://araf-protocol-backend.fly.dev/health` → yalnız liveness (`{"status":"ok", ...}`)
-- [ ] `https://araf-protocol-backend.fly.dev/ready` → readiness kapısı (`200` hazır / `503` hazır değil)
+- [ ] `https://araf-protocol-backend.fly.dev/ready` → readiness kapısı (`200` hazır / `503` hazır değil); gövdede `escrowRegistry.mode` = `enforce` ve `escrowRegistry.ok` = `true`
 - [ ] `https://araf-protocol.vercel.app` — site açılıyor
 - [ ] MetaMask Base Sepolia'ya bağlı
 - [ ] SIWE login başarılı
@@ -628,8 +640,15 @@ CONFIRM_PUBLIC_DEPLOY=yes NODE_ENV=production npx hardhat run scripts/deploy.js 
 npm run migrate:identity:dry
 node scripts/migrations/backfillTerminalTradeStats.js            # dry-run
 node scripts/migrations/dedupeRevenueEvents.js                   # dry-run
+node scripts/migrations/dropRedundantIndexes.js                  # dry-run; --apply ile düşürür
 # --apply öncesi yedek önerilir: dedupeRevenueEvents.js --apply --backup=<dosya>
 # (yedek dosyası cüzdan adresi ve işlem verisi içerir; güvenli saklayın, repoya koymayın)
+
+# GitHub Actions workflow'ları (Base Sepolia; ayrıntı: DEPLOY_BASE_SEPOLIA.md)
+gh workflow run escrow-registry-adopt.yml                        # dry-run; -f dry_run=false yazar
+gh workflow run deploy-base-sepolia.yml -f deploy_frontend=true  # kontrat + backend (+ frontend)
+gh workflow run deploy-runtime-base-sepolia.yml                  # yalnız backend/frontend
+gh workflow run rotate-escrow.yml -f mode=precheck               # salt okur rotasyon ön kontrolü
 
 # Fly.io backend logları
 fly logs --app araf-protocol-backend
@@ -667,7 +686,7 @@ Koddaki her `process.env` / `import.meta.env` kullanımından çıkarılmıştı
 | `NODE_ENV` | prod: `production` | — | Production aşağıdaki fail-closed korumaları açar (KMS, CORS, SIWE, Redis TLS, chain id). `fly.toml` set eder. |
 | `PORT` | hayır | `4000` | `fly.toml` `4000` verir. |
 | `LOG_DIR` | hayır | `backend/logs` | Log dosyası `araf.log` (25 MB × 5 rotasyon). |
-| `MONGODB_URI` | **evet** | — | Migration script'leri `MONGO_URI`'yi de kabul eder. |
+| `MONGODB_URI` | **evet** | — | Migration script'leri `MONGO_URI`'yi de kabul eder (kullanımdan kalktı; uyarı basar). |
 | `REDIS_URL` | prod: **evet** | `redis://127.0.0.1:6379` (yalnız prod dışı) | Production TLS ister. |
 | `REDIS_TLS` | hayır | `false` | `true` ya da `rediss://` URL'si TLS açar; production'da zorunlu. |
 | `REDIS_TLS_SKIP_VERIFY` | hayır | `false` | Yalnız self-signed geliştirme Redis'i için; production'da `true` açılışı durdurur. |
@@ -738,7 +757,9 @@ Production açılışta KMS self-test çalıştırır (`runProductionKmsStartupS
 | `WORKER_START_BLOCK` | yukarıdakine alternatif | — | |
 | `WORKER_DISABLED` | hayır | `false` | `true` = worker hiç başlamaz (yalnız API). |
 | `WORKER_FINALITY_DEPTH` | hayır | prod `6` / diğer `1` | Safe-checkpoint derinliği. |
-| `WORKER_BLOCK_BATCH_SIZE` | hayır | `1000` | Replay batch boyutu. |
+| `WORKER_BLOCK_BATCH_SIZE` | hayır | `1000` | Replay batch boyutu (aralık 1–2000; Alchemy ücretsiz planda 10). |
+| `WORKER_REPLAY_BATCH_DELAY_MS` | hayır | `250` | Replay/canlı parçaları arası bekleme (aralık 0–10000). |
+| `LIVE_POLL_INTERVAL_MS` | hayır | `15000` | Canlı izleme turu aralığı (workflow değişkeni için izinli aralık 5000–300000). |
 | `WORKER_CHECKPOINT_INTERVAL_BLOCKS` | hayır | `50` | |
 | `WORKER_REPLAY_BACKOFF_BASE_MS` | hayır | `5000` | Replay yeniden deneme backoff tabanı. |
 | `WORKER_REPLAY_BACKOFF_MAX_MS` | hayır | `300000` | Replay yeniden deneme backoff tavanı. |
@@ -759,7 +780,7 @@ Production açılışta KMS self-test çalıştırır (`runProductionKmsStartupS
 
 ### 6.6a Backend — escrow kayıt bekçisi
 
-`escrow_registry` Mongo koleksiyonu tek belge tutar, `_id: "active"`: `escrow_address` (küçük harf), `chain_id`, `deploy_block`, `state` (`ACTIVE` | `ROTATING`), `since`, `updated_by` (GitHub run id). **Yalnız deploy workflow'u yazar** (`.github/scripts/escrow-registry.js`); backend sadece okur, hiçbir admin route'u ya da paneli değiştiremez. Bekçi bu belgeyi açılışta ve her 60 sn'de (tek Mongo okuması) `ARAF_ESCROW_ADDRESS` ve `EXPECTED_CHAIN_ID` ile karşılaştırır; uyumsuzluk nedeni: `registry_missing`, `escrow_mismatch`, `chain_mismatch`, `rotating` (okuma başarısızsa `registry_unreadable`).
+`escrow_registry` Mongo koleksiyonunda aktif kayıt `_id: "active"` belgesidir: `escrow_address` (küçük harf), `chain_id`, `deploy_block`, `state` (`ACTIVE` | `ROTATING`), `since`, `updated_by` (`github-run-<run id>`, workflow dışında `manual`). Aynı koleksiyon rotasyon manifestlerini de taşır (`_id: "<chainId>:<eskiEscrow>"`, bkz. 6.6b). **Yalnız deploy workflow'u yazar** (`.github/scripts/escrow-registry.js`); backend sadece okur, hiçbir admin route'u ya da paneli değiştiremez. Bekçi bu belgeyi açılışta ve her 60 sn'de (tek Mongo okuması) `ARAF_ESCROW_ADDRESS` ve `EXPECTED_CHAIN_ID` ile karşılaştırır; uyumsuzluk nedeni: `registry_missing`, `escrow_mismatch`, `chain_mismatch`, `rotating` (okuma başarısızsa `registry_unreadable`).
 
 | Değişken | Zorunlu | Varsayılan | Not |
 |---|---|---|---|
@@ -780,7 +801,7 @@ Tam kontrat deploy'u (`deploy-base-sepolia.yml`) registry'yi iki yoldan yazar: r
 
 ### 6.6b Escrow rotasyonu (Faz 2b)
 
-Yeni kontrat deploy'unda eski escrow'a bağlı Mongo koleksiyonları aynı veritabanında `archive_<eskiEscrow>_*` adlarına taşınır, User aynası arşive yazılır, Redis DLQ ve `last_known` anahtarları yeniden adlandırılır, worker checkpoint'leri (`worker:last_block`, `worker:last_safe_block`) manifeste yazılıp silinir. Registry `ROTATING` → `ACTIVE` geçişi **commit noktasıdır**; o yazılana kadar bekçi worker'ı kapalı tutar. Çekirdek `.github/scripts/rotate-escrow.js`, makine durdurma sarmalayıcısı `rotate-escrow-state.sh`'tır. Workflow kontratı **pause etmez** (owner anahtarı workflow'da yoktur); yalnız pause durumunu okur.
+Yeni kontrat deploy'unda eski escrow'a bağlı Mongo koleksiyonları aynı veritabanında `archive_<chainId>_<eskiEscrow>_<koleksiyon>` adlarına taşınır, User aynası arşive yazılır, Redis DLQ ve `last_known` anahtarları yeniden adlandırılır, worker checkpoint'leri (`worker:last_block`, `worker:last_safe_block`) manifeste yazılıp silinir. Registry `ROTATING` → `ACTIVE` geçişi **commit noktasıdır**; o yazılana kadar bekçi worker'ı kapalı tutar. Çekirdek `.github/scripts/rotate-escrow.js`, makine durdurma sarmalayıcısı `rotate-escrow-state.sh`'tır. Workflow kontratı **pause etmez** (owner anahtarı workflow'da yoktur); yalnız pause durumunu okur.
 
 **Öncesi (`GOVERNANCE_READINESS.md` §2 adımları)**
 1. **Ön duyuru:** amaç (yeni escrow), tarih/saat, beklenen etki (kısa kesinti, açık işlemler için P4 yedek görünümü).
@@ -793,7 +814,7 @@ Yeni kontrat deploy'unda eski escrow'a bağlı Mongo koleksiyonları aynı verit
 - Önce `dry_run=true` (varsayılan) ile okuyun.
 
 **Sonrası**
-1. `/ready` → `escrowRegistry.ok: true`; registry `ACTIVE` ve yeni adres; `archive_<eski>_*` sayıları manifestle eşleşiyor.
+1. `/ready` → `escrowRegistry.ok: true`; registry `ACTIVE` ve yeni adres; `archive_<chainId>_<eski>_*` sayıları manifestle eşleşiyor.
 2. Smoke: yeni escrow'da order oluştur/doldur; worker `ARAF_DEPLOYMENT_BLOCK`'tan başladı mı.
 3. **Kayıt:** run id, aktör, eski/yeni escrow, archive_id, kalan açık işlem id'leri, onaylayanlar.
 
@@ -916,11 +937,11 @@ Güvenlik: bu adımların env'inde `JWT_SECRET`/`MASTER_ENCRYPTION_KEY` yoktur (
 
 ## 8. Migration'lar ve MongoDB Notları
 
-Script'leri `backend/` dizininden çalıştırın (`node scripts/migrations/<ad>.js`). `MONGODB_URI` (ya da `MONGO_URI`) değerini ortamdan/`.env`'den okurlar. Fly'da: `fly ssh console -C "node scripts/migrations/<ad>.js"`.
+Script'leri `backend/` dizininden çalıştırın (`node scripts/migrations/<ad>.js`). `MONGODB_URI` değerini ortamdan/`.env`'den okurlar (`MONGO_URI` yalnız geriye uyum için okunur ve uyarı basar). Fly'da: `fly ssh console -C "node scripts/migrations/<ad>.js"`.
 
 | Script | Varsayılan mod | Anahtar | Amaç |
 |---|---|---|---|
-| `normalizeIdentityFields.js` (`npm run migrate:identity`) | **yazar** | varsayılan dry-run; yazmak için `--apply` (`npm run migrate:identity:dry` = dry-run, `npm run migrate:identity` = `--apply`; `--dry-run` geriye dönük kabul, uyarı verir) | Legacy numeric `Order.onchain_order_id`, `Trade.onchain_escrow_id`, `Trade.parent_order_id` değerlerini kanonik string'e çevirir. |
+| `normalizeIdentityFields.js` (`npm run migrate:identity`) | dry-run (npm kısayolu `migrate:identity` ise `--apply` ile **yazar**) | yazmak için `--apply` (`npm run migrate:identity:dry` = dry-run, `npm run migrate:identity` = `--apply`; `--dry-run` geriye dönük kabul, uyarı verir) | Legacy numeric `Order.onchain_order_id`, `Trade.onchain_escrow_id`, `Trade.parent_order_id` değerlerini kanonik string'e çevirir. |
 | `backfillTerminalTradeStats.js` | dry-run | `--apply` | Kalıcı `TerminalTradeStat` sayaçlarını mevcut terminal trade'lerden doldurur. Idempotent (`trade_key` üzerinde `$setOnInsert`). |
 | `backfillLastBanEndsAt.js` (`npm run migrate:last-ban-ends-at`; `:dry` = dry-run) | dry-run | `--apply` | `banned_until`'i daha önce null'lanmış kullanıcılar için `User.last_ban_ends_at` alanını zincirden (`getReputation().bannedUntil`) doldurur; ban affı işi bu kullanıcıları aday görsün diye. Idempotent, salt-okunur RPC (`BASE_RPC_URL`, `ARAF_ESCROW_ADDRESS`). |
 | `dedupeRevenueEvents.js` | dry-run | `--apply` (öneri: `--apply --backup=<dosya>`; silinecek belgeler önce JSON'a yazılır) | Eski worker'ın yazdığı mükerrer `RevenueEvent` satırlarını siler (aynı tx/token/amount/kind/trade için vault satırını tekrarlayan escrow satırı). Idempotent. |
@@ -948,9 +969,11 @@ HKDF değişikliği sonrası PII'ın yeniden şifrelenmesi için repoda bir ara�
 `backend/fly.toml` (uygulama `araf-protocol-backend`, bölge `ams`):
 - `[env]`: `PORT=4000`, `NODE_ENV=production`; geri kalan her şey secret'tır (`fly secrets set`).
 - `auto_stop_machines = false`, `min_machines_running = 1`: event listener sürekli çalışmalıdır.
+- `[deploy] strategy = "rolling"`: eski makine durdurulup yenisi başlatılır, iki worker aynı anda çalışmaz; `bluegreen` makine sayısı 1'den fazlaysa worker lider kilidi doğrulanana kadar seçilmemelidir. `kill_signal = "SIGTERM"`, `kill_timeout = "15s"` (app.js düzgün kapanış için 8 sn sonra çıkışı zorlar).
 - Concurrency `connections`, soft 80 / hard 100; VM `shared` 1 CPU, 512 MB.
 - Health check: `GET /health`, 30 sn'de bir, 15 sn grace period, 5 sn timeout; konteyner içinde HTTP (dışarıda `force_https = true`).
-- `/health`, worker'a bağlı **liveness** sinyalidir: `WORKER_LIVENESS_STALE_MS` boyunca blok görülmediyse `503 "stale"` döner; bağımsız olarak worker watchdog'u `WORKER_BLOCK_STALE_MS` sonra reconnect dener, bloklar hâlâ gelmiyorsa süreçten çıkar (platform yeniden başlatır). `/ready` (readiness) `fly.toml`'a bağlı değildir; deploy kapıları ve izleme için kullanın (tam ayrıntı `x-internal-token: $READY_INTERNAL_TOKEN` ile).
+- `/health`, worker'a bağlı **liveness** sinyalidir: `WORKER_LIVENESS_STALE_MS` boyunca blok görülmediyse `503 "stale"` döner; bağımsız olarak worker watchdog'u `WORKER_BLOCK_STALE_MS` sonra reconnect dener, bloklar hâlâ gelmiyorsa süreçten çıkar (platform yeniden başlatır). `/ready` (readiness) `fly.toml`'a bağlı değildir; deploy kapıları ve izleme için kullanın (tam ayrıntı `x-internal-token: $READY_INTERNAL_TOKEN` ile). Kimliksiz görünümde `ok`, `checks`, `worker` özeti, `escrowRegistry` (`mode`, `checked`, `ok`, `reason`), `configIssueCount`, `degraded`, `degradedReasons` ve `relayer` (`configured` | `disabled`) bulunur. Deploy workflow'ları `/health` 200'ü zorunlu tutar, `/ready` 503 `degraded:true` için yalnız uyarı verir ve ayrıca `escrowRegistry.mode == enforce` doğrular (bkz. 6.6a).
+- Fly CLI sürümü workflow'larda sabittir (`flyctl 0.4.120`); Vercel CLI `vercel@62.7.0`.
 - İmaj (`backend/Dockerfile`) `node:22-alpine`'dir (index digest ile sabitlenmiştir; güncellemek için Docker Hub `library/node` `22-alpine` etiketinin yeni index digest'ini `FROM` satırına yazın), `npm ci --omit=dev` ile kurar, root olmayan `nodeapp` kullanıcısıyla çalışır ve `node scripts/app.js` başlatır.
 
 ---
@@ -980,10 +1003,12 @@ Frontend hosting için önerilen asgari response header'ları (Nginx/Cloudflare/
 - Mobil cüzdan: `connect-src` yalnız iki soket ekler: `wss://www.walletlink.org` (Coinbase WalletLink) ve `wss://relay.walletconnect.org` (WalletConnect relay). `frame-src`/`child-src` eklenmez. WalletConnect yalnız `VITE_WALLETCONNECT_PROJECT_ID` (32 hex, public değer; GitHub repo variable) tanımlıysa ve tembel yüklenir; boşsa seçenek görünmez. Reown panelinde Allowed Domains listesine üretim alan adı eklenmelidir. Mobil tarayıcıda injected cüzdan yoksa bağlama modali, siteyi cüzdan uygulamasının tarayıcısında açan deeplink'ler de sunar (`frontend/src/app/mobileWallet.js`; biçimler resmi dokümanlarla doğrulanmalı).
 - `Strict-Transport-Security: max-age=31536000; includeSubDomains; preload`
 - `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: DENY` (CSP `frame-ancestors 'none'` ile birlikte; iframe gömme kapalıdır)
 - `Referrer-Policy: strict-origin-when-cross-origin`
 - `Permissions-Policy: geolocation=(), microphone=(), camera=()` (yalnız gerekirse genişletin)
 
 ### Cache policy
+`frontend/vercel.json` içinde `Cache-Control` yalnız `/.well-known/farcaster.json` için tanımlıdır (`public, max-age=300`, ayrıca `Content-Type: application/json; charset=utf-8`); diğer yollar için `Cache-Control` ayarlı değildir (tüm yollara güvenlik başlıkları ayrıca uygulanır); aşağıdaki `index.html` ve `/assets/*` `Cache-Control` değerleri önerilen politikadır, `vercel.json` içinde ayarlı değildir.
 - `index.html`: `Cache-Control: no-cache, no-store, must-revalidate`
 - versiyonlu statik asset'ler (`/assets/*`): `Cache-Control: public, max-age=31536000, immutable`
 - `/health` (liveness) ve `/ready` (readiness) önbelleklenmeyen health endpoint'leri olarak kalmalıdır.

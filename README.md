@@ -44,8 +44,9 @@ cheapest move for each of them is to finish honestly.
 If something goes wrong, time decides, not a person:
 
 - **Taker never reports payment:** after 48 hours either party can call `expirePaymentWindow`; the maker is refunded
-  and the taker loses 2% of their bond.
-- **Maker goes silent after payment:** the taker pings (`pingMaker`) and, 24 hours later, calls `autoRelease`.
+  and the taker loses 2% of their bond, which goes to the maker (compensation for the locked inventory).
+- **Maker goes silent after payment:** the taker pings (`pingMaker`) and, 24 hours later, calls `autoRelease`;
+  both sides then lose 2% of their bond (at least their release fee) to the treasury.
 - **Maker says the money never arrived:** the maker pings first (`pingTakerForChallenge`), then opens a
   challenge with `challengeTrade`. This starts the **bleeding escrow**: after a 48-hour grace period both bonds
   shrink every hour, and later the locked tokens too. The parties can still release, cancel together, or agree
@@ -58,7 +59,7 @@ interprets receipts or intent; it only enforces deadlines and payouts.
 ### Child-trade lifecycle
 
 States and transitions below are the `TradeState` enum and the functions in
-[`contracts/src/ArafEscrow.sol`](contracts/src/ArafEscrow.sol#L54-L62). A child trade starts in `LOCKED` when an
+[`contracts/src/ArafEscrow.sol`](contracts/src/ArafEscrow.sol#L54-L64). A child trade starts in `LOCKED` when an
 order is filled (`fillSellOrder` / `fillBuyOrder`). `TradeState.OPEN` exists in the enum, but trades start
 directly in `LOCKED`; `OPEN` is used only on the order side (`OrderState`).
 
@@ -99,26 +100,26 @@ Every value below is read from the contract source. "Constant" means it cannot b
 
 | Parameter | Value | Kind | Source |
 |---|---|---|---|
-| Protocol fee, taker | 15 bps (0.15%) of the trade amount | default | [`ArafEscrow.sol#L261`](contracts/src/ArafEscrow.sol#L261) |
-| Protocol fee, maker | 15 bps (0.15%); 0 on Tier 0 orders | default | [`#L262`](contracts/src/ArafEscrow.sol#L262), [`#L722`](contracts/src/ArafEscrow.sol#L722) |
-| Fee ceiling | 2,000 bps per side | constant | [`#L307`](contracts/src/ArafEscrow.sol#L307) |
-| Payment window | 48 hours after lock | constant | [`#L269`](contracts/src/ArafEscrow.sol#L269) |
-| Grace period | 48 hours (before bleeding; also the earliest `pingMaker` after payment) | constant | [`#L266`](contracts/src/ArafEscrow.sol#L266) |
-| Maker challenge ping | earliest 24h after payment; challenge allowed in `[ping+24h, ping+48h)` | constant | [`#L969`](contracts/src/ArafEscrow.sol#L969), [`#L279`](contracts/src/ArafEscrow.sol#L279) |
-| Auto-release wait | 24 hours after `pingMaker` | constant | [`#L1137`](contracts/src/ArafEscrow.sol#L1137) |
-| Liveness penalty | 2% of bond (`autoRelease`: both bonds; `expirePaymentWindow`: taker bond) | constant | [`#L264`](contracts/src/ArafEscrow.sol#L264) |
-| Taker bond decay | 42 bps per hour, from hour 48 | constant | [`#L289`](contracts/src/ArafEscrow.sol#L289) |
-| Maker bond decay | 26 bps per hour, from hour 48 | constant | [`#L290`](contracts/src/ArafEscrow.sol#L290) |
-| Token (principal) decay | 34 bps x 2 = 68 bps per hour, from 96h after grace (hour 144) | constant | [`#L291`](contracts/src/ArafEscrow.sol#L291), [`#L270`](contracts/src/ArafEscrow.sol#L270), [`#L1378`](contracts/src/ArafEscrow.sol#L1378) |
-| Maximum bleeding | 240 hours after challenge, then `burnExpired` | constant | [`#L271`](contracts/src/ArafEscrow.sol#L271) |
+| Protocol fee, taker | 15 bps (0.15%) of the trade amount | default | [`ArafEscrow.sol#L263`](contracts/src/ArafEscrow.sol#L263) |
+| Protocol fee, maker | 15 bps (0.15%); 0 on Tier 0 orders | default | [`#L264`](contracts/src/ArafEscrow.sol#L264), [`#L736`](contracts/src/ArafEscrow.sol#L736) |
+| Fee ceiling | 2,000 bps per side | constant | [`#L310`](contracts/src/ArafEscrow.sol#L310) |
+| Payment window | 48 hours after lock | constant | [`#L271`](contracts/src/ArafEscrow.sol#L271) |
+| Grace period | 48 hours (before bleeding; also the earliest `pingMaker` after payment) | constant | [`#L268`](contracts/src/ArafEscrow.sol#L268) |
+| Maker challenge ping | earliest 24h after payment; challenge allowed in `[ping+24h, ping+48h)` | constant | [`#L992`](contracts/src/ArafEscrow.sol#L992), [`#L281`](contracts/src/ArafEscrow.sol#L281) |
+| Auto-release wait | 24 hours after `pingMaker` | constant | [`#L1161`](contracts/src/ArafEscrow.sol#L1161) |
+| Liveness penalty | 2% of bond (`autoRelease`: both bonds, each cut at least that side's release fee; `expirePaymentWindow`: taker bond, paid to the maker) | constant | [`#L266`](contracts/src/ArafEscrow.sol#L266), [`#L1167-L1177`](contracts/src/ArafEscrow.sol#L1167-L1177), [`#L909`](contracts/src/ArafEscrow.sol#L909) |
+| Taker bond decay | 42 bps per hour, from hour 48 | constant | [`#L292`](contracts/src/ArafEscrow.sol#L292) |
+| Maker bond decay | 26 bps per hour, from hour 48 | constant | [`#L293`](contracts/src/ArafEscrow.sol#L293) |
+| Token (principal) decay | 34 bps x 2 = 68 bps per hour, from 96h after grace (hour 144) | constant | [`#L294`](contracts/src/ArafEscrow.sol#L294), [`#L272`](contracts/src/ArafEscrow.sol#L272), [`#L1415`](contracts/src/ArafEscrow.sol#L1415) |
+| Maximum bleeding | 240 hours after challenge, then `burnExpired` | constant | [`#L273`](contracts/src/ArafEscrow.sol#L273) |
 | Settlement proposal deadline | 10 minutes to 7 days | constant | [`ArafSettlementLib.sol#L35-L36`](contracts/src/ArafSettlementLib.sol#L35-L36) |
-| Minimum wallet age (taker) | 2 days after `registerWallet` | constant | [`#L280`](contracts/src/ArafEscrow.sol#L280) |
-| Minimum native balance (taker) | 0.001 ETH | constant | [`#L293`](contracts/src/ArafEscrow.sol#L293) |
-| Trade cooldown, Tier 0 and 1 | 4 hours (max 30 days); Tier 0 and 1 orders; not applied to Tier 2+ | default | [`#L281-L282`](contracts/src/ArafEscrow.sol#L281-L282), [`#L296`](contracts/src/ArafEscrow.sol#L296), [`#L597`](contracts/src/ArafEscrow.sol#L597) |
+| Minimum wallet age (taker) | 2 days after `registerWallet` | constant | [`#L282`](contracts/src/ArafEscrow.sol#L282) |
+| Minimum native balance (taker) | 0.001 ETH | constant | [`#L296`](contracts/src/ArafEscrow.sol#L296) |
+| Trade cooldown, Tier 0 and 1 | 4 hours (max 30 days); Tier 0 and 1 orders; not applied to Tier 2+ | default | [`#L283-L284`](contracts/src/ArafEscrow.sol#L283-L284), [`#L299`](contracts/src/ArafEscrow.sol#L299), [`#L2008`](contracts/src/ArafEscrow.sol#L2008) |
 
 **Tiers.** A wallet's tier comes from its on-chain reputation. Higher tiers post smaller bonds. A clean history
 lowers the bond by 1 percentage point; open risk points raise it by 3
-([`#L254-L255`](contracts/src/ArafEscrow.sol#L254-L255)).
+([`#L256-L257`](contracts/src/ArafEscrow.sol#L256-L257)).
 
 | Tier | Maker bond | Taker bond | Min. successful trades | Max. risk points |
 |---|---|---|---|---|
@@ -128,11 +129,11 @@ lowers the bond by 1 percentage point; open risk points raise it by 3
 | 3 | 5% | 5% | 100 | 30 |
 | 4 | 2% | 2% | 200 | 15 |
 
-Sources: bonds [`#L242-L252`](contracts/src/ArafEscrow.sol#L242-L252) (constant); thresholds
-[`#L511-L512`](contracts/src/ArafEscrow.sol#L511-L512) (defaults, owner-adjustable). Tiers above 0 also require
+Sources: bonds [`#L244-L254`](contracts/src/ArafEscrow.sol#L244-L254) (constant); thresholds
+[`#L521-L522`](contracts/src/ArafEscrow.sol#L521-L522) (defaults, owner-adjustable). Tiers above 0 also require
 15 days since the first successful trade ([`ArafReputationLib.sol#L77`](contracts/src/ArafReputationLib.sol#L77)),
 and the owner sets per-token amount caps for Tiers 0-3 (`setTokenConfig`). Only trades of at least 20 USD count
-toward reputation ([`#L287`](contracts/src/ArafEscrow.sol#L287)).
+toward reputation ([`#L290`](contracts/src/ArafEscrow.sol#L290)).
 
 ## Architecture
 
@@ -158,10 +159,12 @@ change a trade's outcome.
 **Backend** (`backend/`, Node 22, Express ^4.19, Mongoose ^8.4, Redis ^4.6, ethers ^6). Sign-In with Ethereum
 sessions, AES-256-GCM encrypted storage of bank details and receipts (key from env or AWS KMS), an event worker
 that mirrors contract events into MongoDB (with checkpoints, replay and a dead-letter queue), and REST routes for
-orders, trades, stats and rewards.
+orders, trades, stats, rewards and an admin surface (read models plus operational settings such as payment rails;
+it cannot move funds).
 
 **Frontend** (`frontend/`, React ^18.3, Vite ^5.3, wagmi ^2.12, viem ^2.21, Tailwind). Screens: Home,
-Marketplace, Trade Room, Operations Center, Profile Center and an owner-only Admin view. All fund-moving
+Marketplace, Trade Room, Operations Center, Profile Center and an Admin view that only wallets in the
+backend `ADMIN_WALLETS` list can open. All fund-moving
 actions are signed by the user's wallet directly against the contract.
 
 ### Trust boundaries
@@ -175,6 +178,8 @@ actions are signed by the user's wallet directly against the contract.
 - **The owner cannot** take escrowed funds or decide a trade. There is no withdraw or rescue function, and
   `pause` blocks only new orders and fills; open trades can always be closed. Fees are snapshotted per order, so
   a fee change does not affect trades already open.
+- `setTreasury` accepts only an `ArafRevenueVault` wired to this same escrow
+  ([`ArafEscrow.sol#L1790`](contracts/src/ArafEscrow.sol#L1790)); other addresses revert with `TreasuryEscrowMismatch`.
 - The owner is a single address today. Moving it to a multisig is part of the mainnet checklist
   ([GOVERNANCE_READINESS](docs/EN/GOVERNANCE_READINESS.md)).
 
@@ -184,13 +189,13 @@ actions are signed by the user's wallet directly against the contract.
   or app URL is published yet. No mainnet deployment.
   <!-- TODO: after the Base Sepolia deploy, add the BaseScan contract link and the live frontend URL here. -->
 - **Audit:** no external security audit has been done.
-- **Tests** (measured 7 October 2026 on commit `aaea9bb`):
+- **Tests** (measured 22 October 2026 on commit `071817b`):
 
   | Package | Runner | Result |
   |---|---|---|
-  | contracts | Hardhat + Chai | 267 passing |
-  | backend | Jest | 463 passing (93 suites) |
-  | frontend | Vitest | 634 passing (82 files) |
+  | contracts | Hardhat + Chai | 539 passing |
+  | backend | Jest | 1120 passing (169 suites) |
+  | frontend | Vitest | 1312 passing (182 files) |
 
 - **Mainnet readiness:** tracked in [docs/TR/MAINNET_READINESS_CHECKLIST.md](docs/TR/MAINNET_READINESS_CHECKLIST.md).
 - **Known limits:** open design questions are listed in [docs/EN/BACKLOG.md](docs/EN/BACKLOG.md). Examples: Tier 0
@@ -240,10 +245,12 @@ npm --prefix contracts run gas:baseline
 Contracts deploy in a fixed order (`ArafReputationLib`, then `ArafSettlementLib`, then `ArafEscrow`) with
 `npm --prefix contracts run deploy:base-sepolia`, which reads `BASE_SEPOLIA_RPC_URL` and `DEPLOYER_PRIVATE_KEY` from
 `contracts/.env` and refuses a public deploy without explicit confirmation (`CONFIRM_PUBLIC_DEPLOY=yes`). The rewards stack (`ArafRevenueVault`, `ArafRewards`) is deployed separately with
-`deploy:rewards:base-sepolia`. The full step-by-step runbook, including verification on BaseScan and the testnet
-frontend build, is in [docs/EN/DEPLOY_BASE_SEPOLIA.md](docs/EN/DEPLOY_BASE_SEPOLIA.md)
-(Türkçe: [docs/TR/DEPLOY_BASE_SEPOLIA.md](docs/TR/DEPLOY_BASE_SEPOLIA.md)). Local deployment against a Hardhat
-node is covered in [docs/EN/DEPLOYMENT_GUIDE.md](docs/EN/DEPLOYMENT_GUIDE.md).
+`deploy:rewards:base-sepolia`. The Actions runbook (full deploy and runtime-only backend/frontend deploy) is in
+[docs/EN/DEPLOY_BASE_SEPOLIA.md](docs/EN/DEPLOY_BASE_SEPOLIA.md)
+(Türkçe: [docs/TR/DEPLOY_BASE_SEPOLIA.md](docs/TR/DEPLOY_BASE_SEPOLIA.md)). The deploy, escrow registry adoption and
+escrow rotation workflows run in the `base-sepolia` environment (approval gate and CODEOWNERS setup:
+[docs/EN/DEPLOYMENT_GUIDE.md](docs/EN/DEPLOYMENT_GUIDE.md) section 3). The manual testnet steps, verification on
+BaseScan and the local Hardhat deployment are in the same guide.
 
 ## Documentation
 
@@ -269,7 +276,8 @@ Start at the documentation index: [docs/README.md](docs/README.md). The most imp
 ├── backend/     Express API, event worker, jobs, Mongo models (scripts/)
 ├── frontend/    React + Vite app (src/), static assets (public/)
 ├── test/        Tests per package: contracts/, backend/, frontend/, ui-lab/
-├── docs/        EN/ and TR/ documentation
+├── docs/        EN/ and TR/ documentation, releases/ (release notes), Plan/ (planned work)
+├── .github/     Workflows (CI, deploy, escrow rotation, release), CODEOWNERS, CI helper scripts
 ├── scripts/     init-env.js (creates local .env files)
 └── package.json Root scripts: setup, test:all, lint, dev, build
 ```

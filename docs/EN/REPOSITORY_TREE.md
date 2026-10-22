@@ -6,59 +6,71 @@
 
 ```text
 Araf-Protocol/
-├── .github/workflows/
-│   ├── ci.yml
-│   ├── deploy-base-sepolia.yml           # contracts + Fly + optional Vercel (workflow_dispatch)
-│   └── deploy-runtime-base-sepolia.yml   # backend/frontend deploy without redeploying contracts
+├── .github/
+│   ├── workflows/
+│   │   ├── ci.yml
+│   │   ├── deploy-base-sepolia.yml                 # contracts + Fly + optional Vercel (workflow_dispatch)
+│   │   ├── deploy-runtime-base-sepolia.yml         # backend/frontend deploy without redeploying contracts
+│   │   ├── escrow-registry-adopt.yml               # writes the current escrow to the Mongo escrow_registry (dry-run by default)
+│   │   ├── rotate-escrow.yml                       # escrow rotation / archive restore (precheck, rotate, restore)
+│   │   └── release.yml                             # GitHub release from a v* tag (docs/releases/<tag>.md)
+│   ├── scripts/                                    # workflow helpers (stage-runtime-env, rotate-escrow, escrow-registry, ...)
+│   └── CODEOWNERS                                  # required review for .github, contracts/src and encryption.js
 ├── backend/
 │   ├── scripts/
-│   │   ├── app.js                        # Express app entry
-│   │   ├── config/                       # db, redis, terms, paymentRailRiskConfig
-│   │   ├── jobs/                         # scheduled jobs (reputation decay, reward outcome recorder, stats, cleanup)
-│   │   ├── middleware/                   # auth, errorHandler, rateLimiter
-│   │   ├── migrations/                   # manual one-off migrations
-│   │   ├── models/                       # Mongoose models
-│   │   ├── routes/                       # REST routes
-│   │   ├── services/                     # eventListener, dlqProcessor, encryption, siwe, ...
+│   │   ├── app.js                                  # Express app entry
+│   │   ├── config/                                 # db, redis, terms, paymentRailRiskConfig, runtimeSettingDefs
+│   │   ├── jobs/                                   # scheduled jobs (reputation decay, reward outcome recorder, stats, cleanup, archive retention)
+│   │   ├── middleware/                             # auth, errorHandler, rateLimiter, requireFullService
+│   │   ├── migrations/                             # manual one-off migrations
+│   │   ├── models/                                 # Mongoose models
+│   │   ├── routes/                                 # REST routes
+│   │   ├── services/                               # eventListener, dlqProcessor, encryption, siwe, escrowRegistryGuard, health, rpcProvider, ...
 │   │   └── utils/
 │   ├── Dockerfile
+│   ├── .dockerignore
 │   ├── fly.toml
+│   ├── eslint.config.js
 │   ├── jest.config.cjs
 │   └── .env.example
 ├── contracts/
 │   ├── src/
-│   │   ├── ArafEscrow.sol                # core escrow, linked against the two libraries
+│   │   ├── ArafEscrow.sol                          # core escrow, linked against the two libraries
 │   │   ├── ArafReputationLib.sol
 │   │   ├── ArafSettlementLib.sol
 │   │   ├── ArafErrors.sol
 │   │   ├── ArafRevenueVault.sol
 │   │   ├── ArafRewards.sol
-│   │   └── Mock*.sol                     # test-only mocks
-│   ├── scripts/                          # deploy, deployRewards, rewardsOps, smokeRewards, gasBaseline, checkAbiDrift
+│   │   └── Mock*.sol                               # test-only mocks
+│   ├── scripts/                                    # deploy, deployRewards, deployTestToken, verify, rewardsOps, smokeRewards, gasBaseline, checkAbiDrift, lib/
 │   ├── hardhat.config.js
 │   └── .env.example
 ├── frontend/
 │   ├── src/
 │   │   ├── main.jsx, App.jsx, AdminPanel.jsx
-│   │   ├── app/                          # actions, contexts, copy, providers, shell, config modules
+│   │   ├── app/                                    # actions, contexts, copy, providers, shell, config modules
 │   │   ├── components/
-│   │   └── hooks/                        # useArafContract, usePII, useRewardsContract
+│   │   └── hooks/                                  # useArafContract, usePII, useRewardsContract, useTokenBalances, useOwnerWalletAge
+│   ├── scripts/run-vitest.js
+│   ├── build/                                      # Vite plugin (miniappMeta.js)
 │   ├── vite.config.js
 │   ├── vercel.json
 │   └── .env.example
 ├── test/
-│   ├── backend/                          # jest
-│   ├── contracts/                        # hardhat
-│   ├── frontend/                         # vitest
-│   └── ui-lab/                           # UI Lab fixtures/mocks (dev / VITE_ENABLE_UI_LAB only)
-├── scripts/init-env.js                   # generates local .env files
+│   ├── backend/                                    # jest
+│   ├── contracts/                                  # hardhat
+│   ├── frontend/                                   # vitest
+│   └── ui-lab/                                     # UI Lab fixtures/mocks (dev / VITE_ENABLE_UI_LAB only)
+├── scripts/init-env.js                             # generates local .env files
 ├── docs/
-│   ├── README.md                         # documentation index
-│   ├── EN/                               # English docs (API, ARCHITECTURE, DEPLOYMENT_GUIDE, ENV, DEPLOY_BASE_SEPOLIA, BACKLOG, ...)
-│   ├── TR/                               # Turkish docs (same set + MAINNET_READINESS_CHECKLIST)
-│   ├── Plan/                             # planned work (Spot tier, UI scenario lab)
+│   ├── README.md                                   # documentation index
+│   ├── EN/                                         # English docs (API, ARCHITECTURE, DEPLOYMENT_GUIDE, ENV, DEPLOY_BASE_SEPOLIA, BACKLOG, ...)
+│   ├── TR/                                         # Turkish docs (same set + MAINNET_READINESS_CHECKLIST)
+│   ├── releases/                                   # release notes (v3.0.0.md) and the release procedure
+│   ├── Plan/                                       # planned work (Spot tier, UI scenario lab)
 │   └── GAS_BASELINE.md
 ├── CLAUDE.md
+├── .nvmrc                                          # Node 22
 ├── package.json
 └── README.md
 ```

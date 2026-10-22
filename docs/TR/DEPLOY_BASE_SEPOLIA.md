@@ -1,7 +1,6 @@
 # Base Sepolia Deploy (GitHub Actions)
 
-İki workflow: `deploy-base-sepolia.yml` (kontrat + Fly backend + opsiyonel Vercel frontend) ve
-`deploy-runtime-base-sepolia.yml` (kontrat deploy etmeden backend/frontend yeniden deploy).
+Dört workflow (hepsi `workflow_dispatch`, `environment: base-sepolia`, aynı `deploy-base-sepolia` concurrency grubu: aynı anda ikisi çalışmaz): `deploy-base-sepolia.yml` (kontrat + Fly backend + opsiyonel Vercel frontend; escrow registry'yi okur/yazar, ACTIVE ise eski escrow'u arşivler), `deploy-runtime-base-sepolia.yml` (kontrat deploy etmeden backend/frontend yeniden deploy), `escrow-registry-adopt.yml` (mevcut canlı escrow'u registry'ye bir kez kaydeder) ve `rotate-escrow.yml` (rotasyon ön kontrolü / yarım kalan rotasyonu tamamlama / arşivi geri yükleme). `ci.yml` ve `release.yml` canlıya dokunmaz. Deploy sırası: kontratlar -> registry (adopt ya da rotasyon) -> backend (Fly) -> frontend (Vercel).
 Tam deploy, `deploy_rewards=true` ile revenue vault + rewards'ı da deploy edebilir (varsayılan kapalı; aşağıda güvenlik kilidi). Elle yol hâlâ geçerli: `npm --prefix contracts run deploy:rewards:base-sepolia`.
 
 ## Hangi workflow ne zaman?
@@ -12,8 +11,9 @@ Tam deploy, `deploy_rewards=true` ile revenue vault + rewards'ı da deploy edebi
 | Kontrat | Library'ler + `ArafEscrow` (+ opsiyonel tUSDT, + opsiyonel vault/rewards) deploy eder | Deploy ETMEZ |
 | Adres kaynağı | Bu çalıştırmanın manifest'leri (`deployments/base-sepolia*.json`); `deploy_rewards=false` iken vault/rewards için variable yedeği | Repo variable'ları (`ARAF_ESCROW_ADDRESS`, `ARAF_DEPLOYMENT_BLOCK`, `BASE_SEPOLIA_USDT/USDC_ADDRESS`, `ARAF_REVENUE_VAULT_ADDRESS`, `ARAF_REWARDS_ADDRESS`); dolu input override'ı önceliklidir |
 | Fly secret / Vercel env | Ortak betik `.github/scripts/stage-runtime-env.sh` (aynı liste) | Aynı betik |
-| Health | `/health` 200 zorunlu; `/ready` 503 `degraded:true` ise yalnız uyarı | Aynı |
+| Health | `/health` 200 zorunlu; `/ready` 503 `degraded:true` ise yalnız uyarı; ardından canlı `/ready` `escrowRegistry.mode == enforce` doğrulanır (değilse job düşer) | Aynı (yalnız `deploy_backend=true` iken) |
 | Geri alınamaz adım | Yeni escrow (eski adres terk edilir); `deploy_rewards=true` ise `vault.setRewards` (tek sefer) | Yok |
+| Escrow registry | Kontrat deploy'undan önce durumu okur (`none` / `ACTIVE` / `ROTATING`): `none` + `ARAF_ESCROW_ADDRESS` variable'ı boş = ilk kurulum (checkpoint sıfırlama + registry'ye ilk yazım); `none` + variable dolu = hata (önce `escrow-registry-adopt.yml`); `ACTIVE` = ön kontrol + rotasyon (aşağıda); `ROTATING` = kontrat deploy edilmeden durur (`rotate-escrow.yml`, `mode=rotate`) | Registry'ye yazmaz; `araf_escrow_address` override'ı registry'den farklıysa backend bekçisi `escrow_mismatch` bildirir |
 
 ## Secrets (`gh secret set`)
 
@@ -23,10 +23,10 @@ Tam deploy, `deploy_rewards=true` ile revenue vault + rewards'ı da deploy edebi
 | `BASE_SEPOLIA_RPC_URL` | Alchemy HTTP RPC | Alchemy > Base Sepolia | `https://base-sepolia.g.alchemy.com/v2/KEY` |
 | `BASE_SEPOLIA_WS_RPC_URL` | Alchemy WebSocket RPC (event worker) | Aynı Alchemy app | `wss://base-sepolia.g.alchemy.com/v2/KEY` |
 | `ETHERSCAN_API_KEY` | Opsiyonel; yalnız tam deploy'da `verify_contracts=true` iken kullanılır (deneysel). `BASESCAN_API_KEY` yerine geçer (yedek olarak hâlâ okunur). etherscan.io hesabından alınan tek anahtar tüm zincirlerde geçerlidir | etherscan.io > API Keys | rastgele string |
-| `GH_VARIABLES_TOKEN` | Opsiyonel; tam deploy sonrası `ARAF_ESCROW_ADDRESS`/`ARAF_DEPLOYMENT_BLOCK` variable'larını otomatik yazar. Fine-grained PAT, yalnız bu repo, izin: Variables: read and write. Yoksa workflow uyarı verir, özetteki komutlar elle çalıştırılır | GitHub > Settings > Developer settings > Fine-grained tokens | `github_pat_...` |
+| `GH_VARIABLES_TOKEN` | Opsiyonel; tam deploy sonrası (registry yeni escrow'a geçince) `ARAF_ESCROW_ADDRESS`/`ARAF_DEPLOYMENT_BLOCK` variable'larını, `rotate-escrow.yml` `mode=restore` uygulanınca da bu ikisini geri yazar. Fine-grained PAT, yalnız bu repo, izin: Variables: read and write. Yoksa workflow uyarı verir, özetteki komutlar elle çalıştırılır | GitHub > Settings > Developer settings > Fine-grained tokens | `github_pat_...` |
 | `FLY_API_TOKEN` | Fly token. Org/kişisel token (dashboard > Tokens) eksik app'i workflow'un oluşturmasını sağlar; app-scoped deploy token yalnız app zaten varsa çalışır | `fly tokens create org` / `fly tokens create deploy -a <app>` | `FlyV1 ...` |
-| `MONGODB_URI` | MongoDB Atlas bağlantısı | Atlas > Connect (IP allowlist: Fly çıkışı veya 0.0.0.0/0) | `mongodb+srv://u:p@cluster.mongodb.net/araf_protocol` |
-| `REDIS_URL` | Redis, TLS ZORUNLU (`rediss://`) | Upstash > TLS endpoint | `rediss://default:PASS@host.upstash.io:6379` |
+| `MONGODB_URI` | MongoDB Atlas bağlantısı (backend'e ek olarak registry/rotasyon adımları da kullanır) | Atlas > Connect (IP allowlist: Fly çıkışı veya 0.0.0.0/0) | `mongodb+srv://u:p@cluster.mongodb.net/araf_protocol` |
+| `REDIS_URL` | Redis, TLS ZORUNLU (`rediss://`); rotasyon adımları DLQ/checkpoint anahtarları için de kullanır | Upstash > TLS endpoint | `rediss://default:PASS@host.upstash.io:6379` |
 | `JWT_SECRET` | >= 64 karakter | `node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"` | 128 hex |
 | `MASTER_ENCRYPTION_KEY` | PII şifreleme anahtarı, tam 64 hex (testnet KMS istisnası) | `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` | 64 hex |
 | `BASE_SEPOLIA_RPC_URL_FALLBACKS` | Opsiyonel; virgüllü yedek HTTPS RPC'ler (API anahtarı içerebilir, bu yüzden secret). Fly'a `BASE_RPC_URL_FALLBACKS` olarak yazılır; boşsa Fly'daki değer korunur | 2. sağlayıcı | `https://sepolia.base.org` |
@@ -50,13 +50,15 @@ Tam deploy, `deploy_rewards=true` ile revenue vault + rewards'ı da deploy edebi
 | `FLY_ORG` | Opsiyonel; workflow app'i oluşturmak zorunda kalırsa kullanılan Fly org'u; varsayılan `personal` | `personal` |
 | `ADMIN_WALLETS` | Opsiyonel; admin paneli cüzdanları (virgüllü, her biri adres olarak doğrulanır). Boşsa Fly'daki değer korunur | `0xabc...,0xdef...` |
 | `FINAL_TREASURY_ADDRESS` | Yalnız `deploy_rewards=true`: vault'un final treasury'si | `0x...` |
-| `LIVE_POLL_INTERVAL_MS` | Opsiyonel backend ayarı [2000-300000]; boşsa Fly'daki değer korunur | `15000` |
+| `LIVE_POLL_INTERVAL_MS` | Opsiyonel backend ayarı [5000-300000]; boşsa Fly'daki değer korunur | `15000` |
 | `WORKER_BLOCK_BATCH_SIZE` | Opsiyonel [1-2000] (Alchemy ücretsiz: 10) | `10` |
 | `WORKER_REPLAY_BATCH_DELAY_MS` | Opsiyonel [0-10000] | `250` |
 | `EXPECTED_CHAIN_ID` | Opsiyonel; boş ya da `84532` olmalı (workflow her zaman 84532 yazar) | `84532` |
 | `VITE_RPC_URL` | Opsiyonel; frontend birincil RPC (PUBLIC olur, kısıtlı/ayrı key kullanın) | `https://...` |
-| `ARAF_ESCROW_ADDRESS` | Deploy SONRASI yazılır (runtime workflow için); `GH_VARIABLES_TOKEN` varsa tam deploy kendisi yazar | `0x...` |
-| `ARAF_DEPLOYMENT_BLOCK` | Deploy SONRASI yazılır (aynı şekilde) | `12345678` |
+| `VITE_WALLETCONNECT_PROJECT_ID` | Opsiyonel; WalletConnect/Reown proje kimliği (PUBLIC; secret değil, variable). Boşsa workflow uyarı verir ve WalletConnect kapalı olur | 32 hex |
+| `VITE_BASE_APP_ID`, `FARCASTER_ACCOUNT_ASSOCIATION_HEADER/_PAYLOAD/_SIGNATURE` | Opsiyonel; bkz. Farcaster bölümü | |
+| `ARAF_ESCROW_ADDRESS` | Deploy SONRASI yazılır (runtime workflow, `escrow-registry-adopt.yml` ve `rotate-escrow.yml` bunu okur); `GH_VARIABLES_TOKEN` varsa tam deploy YALNIZ registry yeni escrow'a geçtikten sonra (rotasyon ya da ilk kurulum registry yazımı başarılı) kendisi yazar. İlk kurulumda BOŞ olmalı; dolu ve registry yoksa tam deploy hata verir. Rotasyonda `ACTIVE` registry bu değişkenle birebir aynı olmak zorundadır | `0x...` |
+| `ARAF_DEPLOYMENT_BLOCK` | Deploy SONRASI yazılır (aynı şekilde); `rotate-escrow.yml` pozitif tamsayı bekler | `12345678` |
 | `ARAF_REVENUE_VAULT_ADDRESS` | `deploy_rewards=true` sonrası (`GH_VARIABLES_TOKEN` varsa) otomatik yazılır; elle de girilebilir. İki workflow da Fly secret (`ARAF_REVENUE_VAULT_ADDRESS`) ve Vercel build-env (`VITE_REVENUE_VAULT_ADDRESS`) olarak geçirir. Doğrulama: 0x+40 hex, sıfır değil, karışık harfliyse EIP-55 checksum; `ARAF_REWARDS_ADDRESS` ile birlikte verilmeli. Tanımsızsa hiçbir şey yazılmaz | `0x...` |
 | `ARAF_REWARDS_ADDRESS` | Opsiyonel; yukarıdakiyle aynı (`ARAF_REWARDS_ADDRESS` / `VITE_REWARDS_ADDRESS`) | `0x...` |
 
@@ -91,7 +93,7 @@ Bilgisayar ya da yerel CLI gerekmez; her şey tarayıcıdan yapılır.
 
 ## Komutlar
 
-Tam deploy girdileri: `deploy_frontend` (Vercel), `deploy_test_usdt` (variable boşsa otomatik test USDT; varsayılan false), `deploy_rewards` (vault + rewards; varsayılan false), `confirm_redeploy_rewards` (`YES` = mevcut rewards kurulumunu bilerek değiştir), `verify_contracts` (deneysel; rewards deploy edildiyse vault ve rewards'ı da doğrular).
+Tam deploy girdileri: `deploy_frontend` (Vercel), `deploy_test_usdt` (variable boşsa otomatik test USDT; varsayılan false), `deploy_rewards` (vault + rewards; varsayılan false), `confirm_redeploy_rewards` (`YES` = mevcut rewards kurulumunu bilerek değiştir), `confirm_archive_active_trades` (`YES` = escrow rotasyonunda eski escrow'da hâlâ açık trade/order varken devam et; boş ya da tam `YES` olmalı), `verify_contracts` (deneysel; rewards deploy edildiyse vault ve rewards'ı da doğrular).
 
 ```bash
 gh secret set DEPLOYER_PRIVATE_KEY < key.txt        # veya --body "..."
@@ -121,9 +123,22 @@ gh run watch
 
 `GH_VARIABLES_TOKEN` (opsiyonel): `gh secret set GH_VARIABLES_TOKEN` (fine-grained PAT, yalnız bu repo, Variables: read and write).
 
+Registry ve rotasyon workflow'ları:
+
+```bash
+# Mevcut (adopt edilmemiş) canlı escrow'u registry'ye bir kez kaydet. Varsayılan dry_run=true; yazmak için dry_run=false
+gh workflow run escrow-registry-adopt.yml                      # dry-run
+gh workflow run escrow-registry-adopt.yml -f dry_run=false     # yazar
+
+# Rotasyon ön kontrolü (salt okur) ve yarım kalan rotasyonu tamamlama (dry_run varsayılan true)
+gh workflow run rotate-escrow.yml -f mode=precheck
+gh workflow run rotate-escrow.yml -f mode=rotate -f old_escrow_address=0x<eski> -f dry_run=false
+gh workflow run rotate-escrow.yml -f mode=restore -f archive_id=84532:0x<eski> -f confirm="RESTORE 0x<eski>" -f dry_run=false
+```
+
 ## Deploy sonrası
 
-`GH_VARIABLES_TOKEN` tanımlıysa tam deploy workflow'u aşağıdaki iki variable'ı kendisi yazar (token log'a basılmaz). Tanımlı değilse workflow "token tanımlı değil" uyarısı verir; run summary'deki adresleri elle yaz. Sonraki backend/frontend güncellemeleri kontratı yeniden deploy etmez:
+`GH_VARIABLES_TOKEN` tanımlıysa tam deploy workflow'u aşağıdaki iki variable'ı, registry yeni escrow'a geçtikten sonra kendisi yazar (sonraki health/Vercel adımları başarısız olsa da; token log'a basılmaz). Tanımlı değilse workflow "token tanımlı değil" uyarısı verir; run summary'deki adresleri elle yaz. Sonraki backend/frontend güncellemeleri kontratı yeniden deploy etmez:
 
 ```bash
 gh variable set ARAF_ESCROW_ADDRESS --body "0x..."
@@ -134,7 +149,18 @@ gh run watch
 
 Girdi override'ları: `araf_escrow_address`, `usdt_address`, `usdc_address`, `deployment_block`, `revenue_vault_address` + `rewards_address` (ikisi birlikte).
 
-Health: `/health` 200 dönmezse deploy başarısızdır. Backend RPC'ye ulaşamadan açıldıysa `/ready` 503 `degraded:true` döner; bu durumda iş başarılı sayılır ama `::warning::` yazar (RPC secret'larını ve Fly loglarını kontrol edin).
+Health: `/health` 200 dönmezse deploy başarısızdır. Backend RPC'ye ulaşamadan açıldıysa `/ready` 503 `degraded:true` döner; bu durumda iş başarılı sayılır ama `::warning::` yazar (RPC secret'larını ve Fly loglarını kontrol edin). `/health` adımından sonra `stage-runtime-env.sh guard-mode` canlı `/ready` gövdesindeki `escrowRegistry.mode` değerini okur; `enforce` değilse (ya da okunamazsa) job düşer. `fly-secrets` her çalışmada `ESCROW_REGISTRY_GUARD_MODE=enforce` yazdığı için elle ayar gerekmez.
+
+## Escrow registry ve rotasyon
+
+Backend, Mongo `escrow_registry` içindeki `_id:"active"` belgesini `ARAF_ESCROW_ADDRESS`/`EXPECTED_CHAIN_ID` ile karşılaştırır; `enforce` modunda uyumsuzlukta worker kapalı kalır ve escrow route'ları `503 ESCROW_MISMATCH` döner. Belgeyi yalnız workflow'lar yazar (`.github/scripts/escrow-registry.js`). Ayrıntı ve kod referansı: `DEPLOYMENT_GUIDE.md` §6.6a ve §6.6b.
+
+- **Zaten çalışan kurulum (registry yok)**: önce `escrow-registry-adopt.yml` (`dry_run=true`, çıktıyı okuyun, sonra `dry_run=false`). Aksi halde tam deploy `ARAF_ESCROW_ADDRESS` dolu olduğu için hata verir ve `deploy-runtime` sonrası backend `registry_missing` ile engelli açılır.
+- **İlk kurulum (registry ve `ARAF_ESCROW_ADDRESS` boş)**: tam deploy Fly deploy'undan sonra worker checkpoint'ini sıfırlar ve registry'ye yeni escrow'u yazar.
+- **Yeni escrow (registry `ACTIVE`)**: önce eski escrow'u owner/multisig ile `pause()` edin (workflow pause ETMEZ; owner anahtarı yoktur). İstersen `rotate-escrow.yml` `mode=precheck`. Tam deploy kontrat deploy'undan ÖNCE aynı ön kontrolü çalıştırır (registry == `ARAF_ESCROW_ADDRESS`, chain 84532, eski escrow paused, açık trade/order yok ya da `confirm_archive_active_trades=YES`); başarısızsa kontrat yayınlanmaz. Fly deploy'undan sonra "Rotate escrow state" makineleri durdurur, Mongo koleksiyonlarını `archive_<chainId>_<eskiEscrow>_*` adlarına taşır, Redis DLQ/checkpoint anahtarlarını işler ve registry'yi `ROTATING` -> `ACTIVE` (commit noktası) yapar.
+- **Yarım kalmış rotasyon (`ROTATING`)**: tam deploy kontrat yayınlamadan durur. `rotate-escrow.yml` `mode=rotate`, `old_escrow_address=<eski>`, `dry_run=false` ile kaldığı yerden devam eder.
+- **Geri alma**: `mode=restore`, `archive_id=<chainId>:<0x eski>`, `confirm=RESTORE <0x eski>`, `dry_run=false`.
+- `rotate-escrow.yml` ve rotasyon adımlarının env'inde `JWT_SECRET`/`MASTER_ENCRYPTION_KEY` yoktur (PII çözülmez). `dry_run` varsayılan `true`: hiçbir şey yazılmaz, makineler durdurulmaz.
 
 ## Revenue vault + rewards (`deploy_rewards`)
 
@@ -171,7 +197,7 @@ Varsayılan `false`: rewards bir go-live kararıdır (bkz. `REWARDS_ROLLOUT.md`)
 - Frontend `VITE_TARGET_CHAIN=base-sepolia` bayrağını gerektirir (ana dalda mevcut: `frontend/src/app/chainPolicy.js`; workflow bunu Vercel build-env olarak verir); onsuz prod build yalnız Base Mainnet'e bağlıdır.
 - Deployment bloğu `deploy.js` çıktısında yoktur; workflow `deployTxHash` receipt'inden okur.
 - Secret değerlerinde boşluk/tırnak/`#` olmasın (`flyctl secrets import` dotenv biçimi).
-- Contract verify (Basescan) **deneysel**: tam deploy'da `verify_contracts=true` (varsayılan false) + `ETHERSCAN_API_KEY` ile `contracts/scripts/verify.js` çalışır (Etherscan V2 + Sourcify yedek); library'leri (`ArafReputationLib`, `ArafSettlementLib`) ve linkli `ArafEscrow`'u doğrular, constructor argümanları deploy manifestinden okunur. Adım `continue-on-error: true`'dur, başarısız olursa deploy etkilenmez; o durumda elle doğrula: `npm --prefix contracts run verify:base-sepolia` (`contracts/.env`'de `BASE_SEPOLIA_RPC_URL` ve `ETHERSCAN_API_KEY` gerekir).
+- Contract verify (Basescan) **deneysel**: tam deploy'da `verify_contracts=true` (varsayılan false) + `ETHERSCAN_API_KEY` ile `contracts/scripts/verify.js` çalışır (Etherscan V2 + Sourcify yedek); library'leri (`ArafReputationLib`, `ArafSettlementLib`) ve linkli `ArafEscrow`'u doğrular, constructor argümanları deploy manifestinden okunur. Adım Fly deploy, rotasyon ve health'ten SONRA koşar, `continue-on-error: true`'dur ve 12 dakikalık kendi zaman sınırı vardır; başarısız olursa deploy etkilenmez; o durumda elle doğrula: `npm --prefix contracts run verify:base-sepolia` (`contracts/.env`'de `BASE_SEPOLIA_RPC_URL` ve `ETHERSCAN_API_KEY` gerekir).
 - Rewards: tam deploy'da `deploy_rewards=true` (yukarı bakın) ya da elle deploy edip `ARAF_REVENUE_VAULT_ADDRESS`/`ARAF_REWARDS_ADDRESS` variable'larını girin; workflow'lar backend ve frontend'e geçirir. `deploy_rewards=false` iken tam deploy yeni escrow üretir ama variable'daki vault eski escrow'a bağlıdır (`vault.escrow` değişmez); bağlılık kontrolü bunu yakalar ve runtime değerlerini boşaltır (yukarıya bakın).
 - `ETHERSCAN_API_KEY` yalnız verify adımında kullanılır, backend'e gönderilmez.
-- Worker checkpoint sıfırlama: backend olay checkpoint'ini Redis'te escrow adresine bağlı olmayan sabit anahtarlarda (`worker:last_block`, `worker:last_safe_block`) tutar ve mevcut checkpoint `ARAF_DEPLOYMENT_BLOCK`'u geçersiz kılar. Bu yüzden tam deploy, `flyctl deploy` sonrası tüm Fly makinelerini durdurur, `stopped` olduklarını doğrular, YALNIZ bu iki anahtarı siler (`.github/scripts/reset-worker-checkpoint.sh`, TLS üzerinden `REDIS_URL`; log'a yalnız silinen anahtar sayısı yazılır) ve makineleri tekrar başlatır (hata olsa da). Yeni süreç `ARAF_DEPLOYMENT_BLOCK`'tan başlar. Yalnız runtime workflow'u bunu yapmaz.
+- Worker checkpoint sıfırlama: backend olay checkpoint'ini Redis'te escrow adresine bağlı olmayan sabit anahtarlarda (`worker:last_block`, `worker:last_safe_block`) tutar ve mevcut checkpoint `ARAF_DEPLOYMENT_BLOCK`'u geçersiz kılar. Bu yüzden tam deploy, `flyctl deploy` sonrası tüm Fly makinelerini durdurur, `stopped` olduklarını doğrular (en çok 3 deneme), YALNIZ bu iki anahtarı siler ve makineleri tekrar başlatır (hata olsa da; yalnız başlangıçta açık olanlar). İlk kurulumda bunu `.github/scripts/reset-worker-checkpoint.sh` yapar (TLS üzerinden `REDIS_URL`; log'a yalnız silinen anahtar sayısı yazılır); registry `ACTIVE` iken aynı iki anahtar rotasyon adımında (`rotate-escrow-state.sh`) manifeste yazılıp silinir. Yeni süreç `ARAF_DEPLOYMENT_BLOCK`'tan başlar. Runtime workflow'u bunu yapmaz.

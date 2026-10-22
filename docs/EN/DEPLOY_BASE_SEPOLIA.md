@@ -2,8 +2,7 @@ Türkçe: [../TR/DEPLOY_BASE_SEPOLIA.md](../TR/DEPLOY_BASE_SEPOLIA.md)
 
 # Base Sepolia Deploy (GitHub Actions)
 
-Two workflows: `deploy-base-sepolia.yml` (contract + Fly backend + optional Vercel frontend) and
-`deploy-runtime-base-sepolia.yml` (redeploys backend/frontend without deploying the contract).
+Four workflows (all `workflow_dispatch`, `environment: base-sepolia`, same `deploy-base-sepolia` concurrency group, so no two run at once): `deploy-base-sepolia.yml` (contract + Fly backend + optional Vercel frontend; reads/writes the escrow registry and archives the old escrow when it is ACTIVE), `deploy-runtime-base-sepolia.yml` (redeploys backend/frontend without deploying the contract), `escrow-registry-adopt.yml` (records the existing live escrow in the registry once) and `rotate-escrow.yml` (rotation precheck / completing an interrupted rotation / restoring an archive). `ci.yml` and `release.yml` do not touch the live system. Deploy order: contracts -> registry (adopt or rotation) -> backend (Fly) -> frontend (Vercel).
 The full deploy can also deploy the revenue vault + rewards with `deploy_rewards=true` (off by default; safety lock below). The manual path still works: `npm --prefix contracts run deploy:rewards:base-sepolia`.
 
 ## Which workflow when?
@@ -14,8 +13,9 @@ The full deploy can also deploy the revenue vault + rewards with `deploy_rewards
 | Contracts | Deploys the libraries + `ArafEscrow` (+ optional tUSDT, + optional vault/rewards) | Deploys NOTHING |
 | Address source | This run's manifests (`deployments/base-sepolia*.json`); with `deploy_rewards=false` the vault/rewards variables are the fallback | Repository variables (`ARAF_ESCROW_ADDRESS`, `ARAF_DEPLOYMENT_BLOCK`, `BASE_SEPOLIA_USDT/USDC_ADDRESS`, `ARAF_REVENUE_VAULT_ADDRESS`, `ARAF_REWARDS_ADDRESS`); a non-empty input override wins |
 | Fly secrets / Vercel env | Shared script `.github/scripts/stage-runtime-env.sh` (same list) | Same script |
-| Health | `/health` must be 200; `/ready` 503 `degraded:true` is only a warning | Same |
+| Health | `/health` must be 200; `/ready` 503 `degraded:true` is only a warning; then the live `/ready` `escrowRegistry.mode == enforce` is verified (the job fails otherwise) | Same (only when `deploy_backend=true`) |
 | Irreversible step | New escrow (the old address is abandoned); with `deploy_rewards=true`, `vault.setRewards` (one-shot) | None |
+| Escrow registry | Reads the state before the contract deploy (`none` / `ACTIVE` / `ROTATING`): `none` + empty `ARAF_ESCROW_ADDRESS` variable = first install (checkpoint reset + first registry write); `none` + variable set = error (run `escrow-registry-adopt.yml` first); `ACTIVE` = precheck + rotation (below); `ROTATING` = stops without deploying a contract (`rotate-escrow.yml`, `mode=rotate`) | Does not write the registry; if an `araf_escrow_address` override differs from the registry the backend guard reports `escrow_mismatch` |
 
 ## Secrets (`gh secret set`)
 
@@ -25,10 +25,10 @@ The full deploy can also deploy the revenue vault + rewards with `deploy_rewards
 | `BASE_SEPOLIA_RPC_URL` | Alchemy HTTP RPC | Alchemy > Base Sepolia | `https://base-sepolia.g.alchemy.com/v2/KEY` |
 | `BASE_SEPOLIA_WS_RPC_URL` | Alchemy WebSocket RPC (event worker) | Same Alchemy app | `wss://base-sepolia.g.alchemy.com/v2/KEY` |
 | `ETHERSCAN_API_KEY` | Optional; used only in a full deploy with `verify_contracts=true` (experimental). Replaces `BASESCAN_API_KEY` (still read as a fallback). One key from an etherscan.io account works for all chains | etherscan.io > API Keys | random string |
-| `GH_VARIABLES_TOKEN` | Optional; after a full deploy, automatically writes the `ARAF_ESCROW_ADDRESS`/`ARAF_DEPLOYMENT_BLOCK` variables. Fine-grained PAT, this repo only, permission: Variables: read and write. If missing, the workflow warns and the commands in the summary are run manually | GitHub > Settings > Developer settings > Fine-grained tokens | `github_pat_...` |
+| `GH_VARIABLES_TOKEN` | Optional; after a full deploy (once the registry has switched to the new escrow), automatically writes the `ARAF_ESCROW_ADDRESS`/`ARAF_DEPLOYMENT_BLOCK` variables, and writes the same two back when `rotate-escrow.yml` applies `mode=restore`. Fine-grained PAT, this repo only, permission: Variables: read and write. If missing, the workflow warns and the commands in the summary are run manually | GitHub > Settings > Developer settings > Fine-grained tokens | `github_pat_...` |
 | `FLY_API_TOKEN` | Fly token. Org/personal token (dashboard > Tokens) lets the workflow create a missing app; an app-scoped deploy token only works if the app already exists | `fly tokens create org` / `fly tokens create deploy -a <app>` | `FlyV1 ...` |
-| `MONGODB_URI` | MongoDB Atlas connection | Atlas > Connect (IP allowlist: Fly egress or 0.0.0.0/0) | `mongodb+srv://u:p@cluster.mongodb.net/araf_protocol` |
-| `REDIS_URL` | Redis, TLS REQUIRED (`rediss://`) | Upstash > TLS endpoint | `rediss://default:PASS@host.upstash.io:6379` |
+| `MONGODB_URI` | MongoDB Atlas connection (besides the backend, the registry/rotation steps use it too) | Atlas > Connect (IP allowlist: Fly egress or 0.0.0.0/0) | `mongodb+srv://u:p@cluster.mongodb.net/araf_protocol` |
+| `REDIS_URL` | Redis, TLS REQUIRED (`rediss://`); the rotation steps also use it for DLQ/checkpoint keys | Upstash > TLS endpoint | `rediss://default:PASS@host.upstash.io:6379` |
 | `JWT_SECRET` | >= 64 characters | `node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"` | 128 hex |
 | `MASTER_ENCRYPTION_KEY` | PII encryption key, exactly 64 hex (testnet KMS exception) | `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` | 64 hex |
 | `BASE_SEPOLIA_RPC_URL_FALLBACKS` | Optional; comma-separated backup HTTPS RPCs (may contain API keys, hence a secret). Written to Fly as `BASE_RPC_URL_FALLBACKS`; when empty the Fly value is kept | 2nd provider | `https://sepolia.base.org` |
@@ -52,13 +52,15 @@ Important: `MASTER_ENCRYPTION_KEY` must be generated once and NEVER CHANGED (exi
 | `FLY_ORG` | Optional; Fly org used when the workflow has to create the app; default `personal` | `personal` |
 | `ADMIN_WALLETS` | Optional; admin panel wallets (comma-separated, each validated as an address). When empty the Fly value is kept | `0xabc...,0xdef...` |
 | `FINAL_TREASURY_ADDRESS` | Only with `deploy_rewards=true`: the vault's final treasury | `0x...` |
-| `LIVE_POLL_INTERVAL_MS` | Optional backend setting [2000-300000]; when empty the Fly value is kept | `15000` |
+| `LIVE_POLL_INTERVAL_MS` | Optional backend setting [5000-300000]; when empty the Fly value is kept | `15000` |
 | `WORKER_BLOCK_BATCH_SIZE` | Optional [1-2000] (Alchemy free: 10) | `10` |
 | `WORKER_REPLAY_BATCH_DELAY_MS` | Optional [0-10000] | `250` |
 | `EXPECTED_CHAIN_ID` | Optional; must be empty or `84532` (the workflow always writes 84532) | `84532` |
 | `VITE_RPC_URL` | Optional; frontend primary RPC (becomes PUBLIC, use a restricted/separate key) | `https://...` |
-| `ARAF_ESCROW_ADDRESS` | Written AFTER deploy (for the runtime workflow); if `GH_VARIABLES_TOKEN` exists, the full deploy writes it itself | `0x...` |
-| `ARAF_DEPLOYMENT_BLOCK` | Written AFTER deploy (same way) | `12345678` |
+| `VITE_WALLETCONNECT_PROJECT_ID` | Optional; WalletConnect/Reown project id (PUBLIC; a variable, not a secret). When empty the workflow warns and WalletConnect stays off | 32 hex |
+| `VITE_BASE_APP_ID`, `FARCASTER_ACCOUNT_ASSOCIATION_HEADER/_PAYLOAD/_SIGNATURE` | Optional; see the Farcaster section | |
+| `ARAF_ESCROW_ADDRESS` | Written AFTER deploy (read by the runtime workflow, `escrow-registry-adopt.yml` and `rotate-escrow.yml`); if `GH_VARIABLES_TOKEN` exists, the full deploy writes it itself ONLY after the registry has switched to the new escrow (rotation, or the first-install registry write, succeeded). Must be EMPTY on a first install; if it is set and no registry exists the full deploy fails. During a rotation the `ACTIVE` registry must equal this variable exactly | `0x...` |
+| `ARAF_DEPLOYMENT_BLOCK` | Written AFTER deploy (same way); `rotate-escrow.yml` expects a positive integer | `12345678` |
 | `ARAF_REVENUE_VAULT_ADDRESS` | Written automatically after `deploy_rewards=true` (with `GH_VARIABLES_TOKEN`); can also be set manually. Both workflows pass it as a Fly secret (`ARAF_REVENUE_VAULT_ADDRESS`) and a Vercel build-env (`VITE_REVENUE_VAULT_ADDRESS`). Validation: 0x+40 hex, non-zero, valid EIP-55 checksum if mixed case; must be set together with `ARAF_REWARDS_ADDRESS`. If undefined nothing is written | `0x...` |
 | `ARAF_REWARDS_ADDRESS` | Optional; same as above (`ARAF_REWARDS_ADDRESS` / `VITE_REWARDS_ADDRESS`) | `0x...` |
 
@@ -93,7 +95,7 @@ No computer or local CLI needed; everything is done from the browser.
 
 ## Commands
 
-Full-deploy inputs: `deploy_frontend` (Vercel), `deploy_test_usdt` (auto test USDT when the variable is empty; default false), `deploy_rewards` (vault + rewards; default false), `confirm_redeploy_rewards` (`YES` = deliberately replace an existing rewards setup), `verify_contracts` (experimental; also verifies vault and rewards when deployed).
+Full-deploy inputs: `deploy_frontend` (Vercel), `deploy_test_usdt` (auto test USDT when the variable is empty; default false), `deploy_rewards` (vault + rewards; default false), `confirm_redeploy_rewards` (`YES` = deliberately replace an existing rewards setup), `confirm_archive_active_trades` (`YES` = continue the escrow rotation although the old escrow still has open trades/orders; must be empty or exactly `YES`), `verify_contracts` (experimental; also verifies vault and rewards when deployed).
 
 ```bash
 gh secret set DEPLOYER_PRIVATE_KEY < key.txt        # or --body "..."
@@ -123,9 +125,22 @@ gh run watch
 
 `GH_VARIABLES_TOKEN` (optional): `gh secret set GH_VARIABLES_TOKEN` (fine-grained PAT, this repo only, Variables: read and write).
 
+Registry and rotation workflows:
+
+```bash
+# Record the existing (not yet adopted) live escrow in the registry once. dry_run defaults to true; set dry_run=false to write
+gh workflow run escrow-registry-adopt.yml                      # dry-run
+gh workflow run escrow-registry-adopt.yml -f dry_run=false     # writes
+
+# Rotation precheck (read-only) and completing an interrupted rotation (dry_run defaults to true)
+gh workflow run rotate-escrow.yml -f mode=precheck
+gh workflow run rotate-escrow.yml -f mode=rotate -f old_escrow_address=0x<old> -f dry_run=false
+gh workflow run rotate-escrow.yml -f mode=restore -f archive_id=84532:0x<old> -f confirm="RESTORE 0x<old>" -f dry_run=false
+```
+
 ## After deploy
 
-If `GH_VARIABLES_TOKEN` is defined, the full-deploy workflow writes the two variables below itself (the token is not printed to the log). If it is not defined, the workflow warns "token is not defined"; enter the addresses from the run summary manually. Later backend/frontend updates do not redeploy the contract:
+If `GH_VARIABLES_TOKEN` is defined, the full-deploy workflow writes the two variables below itself once the registry has switched to the new escrow (even if later health/Vercel steps fail; the token is not printed to the log). If it is not defined, the workflow warns "token is not defined"; enter the addresses from the run summary manually. Later backend/frontend updates do not redeploy the contract:
 
 ```bash
 gh variable set ARAF_ESCROW_ADDRESS --body "0x..."
@@ -136,7 +151,18 @@ gh run watch
 
 Input overrides: `araf_escrow_address`, `usdt_address`, `usdc_address`, `deployment_block`, `revenue_vault_address` + `rewards_address` (together).
 
-Health: the deploy fails if `/health` is not 200. If the backend started without reaching the RPC, `/ready` returns 503 `degraded:true`; the job still succeeds but emits a `::warning::` (check the RPC secrets and Fly logs).
+Health: the deploy fails if `/health` is not 200. If the backend started without reaching the RPC, `/ready` returns 503 `degraded:true`; the job still succeeds but emits a `::warning::` (check the RPC secrets and Fly logs). After the health step, `stage-runtime-env.sh guard-mode` reads `escrowRegistry.mode` from the live `/ready` body; the job fails if it is not `enforce` (or cannot be read). `fly-secrets` writes `ESCROW_REGISTRY_GUARD_MODE=enforce` on every run, so no manual setting is needed.
+
+## Escrow registry and rotation
+
+The backend compares the Mongo `escrow_registry` `_id:"active"` document with `ARAF_ESCROW_ADDRESS`/`EXPECTED_CHAIN_ID`; in `enforce` mode a mismatch keeps the worker closed and escrow routes return `503 ESCROW_MISMATCH`. Only the workflows write the document (`.github/scripts/escrow-registry.js`). Details and code references: `DEPLOYMENT_GUIDE.md` §6.6a and §6.6b.
+
+- **Already-running install (no registry)**: run `escrow-registry-adopt.yml` first (`dry_run=true`, read the output, then `dry_run=false`). Otherwise the full deploy fails because `ARAF_ESCROW_ADDRESS` is set, and after `deploy-runtime` the backend starts blocked with `registry_missing`.
+- **First install (registry and `ARAF_ESCROW_ADDRESS` empty)**: after the Fly deploy the full deploy resets the worker checkpoint and writes the new escrow to the registry.
+- **New escrow (registry `ACTIVE`)**: first `pause()` the old escrow with the owner/multisig (the workflow does NOT pause; it has no owner key). Optionally run `rotate-escrow.yml` `mode=precheck`. The full deploy runs the same precheck BEFORE the contract deploy (registry == `ARAF_ESCROW_ADDRESS`, chain 84532, old escrow paused, no open trades/orders or `confirm_archive_active_trades=YES`); if it fails no contract is deployed. After the Fly deploy, "Rotate escrow state" stops the machines, moves the Mongo collections to `archive_<chainId>_<oldEscrow>_*` names, handles the Redis DLQ/checkpoint keys and switches the registry `ROTATING` -> `ACTIVE` (the commit point).
+- **Interrupted rotation (`ROTATING`)**: the full deploy stops without deploying a contract. Resume with `rotate-escrow.yml` `mode=rotate`, `old_escrow_address=<old>`, `dry_run=false`.
+- **Rollback**: `mode=restore`, `archive_id=<chainId>:<0x old>`, `confirm=RESTORE <0x old>`, `dry_run=false`.
+- `JWT_SECRET`/`MASTER_ENCRYPTION_KEY` are not in the environment of `rotate-escrow.yml` or the rotation steps (PII is not decrypted). `dry_run` defaults to `true`: nothing is written and no machine is stopped.
 
 ## Revenue vault + rewards (`deploy_rewards`)
 
@@ -173,7 +199,7 @@ Default `false`: rewards is a go-live decision (see `REWARDS_ROLLOUT.md`) and `v
 - The frontend requires the `VITE_TARGET_CHAIN=base-sepolia` flag (exists on the main branch: `frontend/src/app/chainPolicy.js`; the workflow supplies it as a Vercel build-env); without it, a prod build connects only to Base Mainnet.
 - The deployment block is not in the `deploy.js` output; the workflow reads it from the `deployTxHash` receipt.
 - Secret values must not contain spaces/quotes/`#` (`flyctl secrets import` dotenv format).
-- Contract verify (Basescan) is **experimental**: in a full deploy, `contracts/scripts/verify.js` runs with `verify_contracts=true` (default false) + `ETHERSCAN_API_KEY` (Etherscan V2, plus Sourcify fallback); it verifies the libraries (`ArafReputationLib`, `ArafSettlementLib`) and the linked `ArafEscrow`, with constructor arguments read from the deploy manifest. The step is `continue-on-error: true`, so if it fails the deploy is unaffected; in that case verify manually: `npm --prefix contracts run verify:base-sepolia` (needs `BASE_SEPOLIA_RPC_URL` and `ETHERSCAN_API_KEY` in `contracts/.env`).
+- Contract verify (Basescan) is **experimental**: in a full deploy, `contracts/scripts/verify.js` runs with `verify_contracts=true` (default false) + `ETHERSCAN_API_KEY` (Etherscan V2, plus Sourcify fallback); it verifies the libraries (`ArafReputationLib`, `ArafSettlementLib`) and the linked `ArafEscrow`, with constructor arguments read from the deploy manifest. The step runs AFTER the Fly deploy, rotation and health, is `continue-on-error: true` and has its own 12-minute timeout, so if it fails the deploy is unaffected; in that case verify manually: `npm --prefix contracts run verify:base-sepolia` (needs `BASE_SEPOLIA_RPC_URL` and `ETHERSCAN_API_KEY` in `contracts/.env`).
 - Rewards: use `deploy_rewards=true` in the full deploy (see above) or deploy manually and set the `ARAF_REVENUE_VAULT_ADDRESS`/`ARAF_REWARDS_ADDRESS` variables; the workflows pass them to the backend and frontend. With `deploy_rewards=false` the full deploy creates a new escrow while the variable's vault stays bound to the old escrow (`vault.escrow` is immutable); the binding check catches this and clears the runtime values (see above).
 - `ETHERSCAN_API_KEY` is only used by the verify step and never sent to the backend.
-- Worker checkpoint reset: the backend keeps its event checkpoint in Redis under fixed keys (`worker:last_block`, `worker:last_safe_block`) that do not depend on the escrow address, and a stored checkpoint overrides `ARAF_DEPLOYMENT_BLOCK`. After `flyctl deploy`, the full deploy therefore stops all Fly machines, verifies they are `stopped`, deletes ONLY those two keys (via `.github/scripts/reset-worker-checkpoint.sh`, using `REDIS_URL` over TLS; only the deleted-key count is logged), and starts the machines again (also on failure). The new process then starts from `ARAF_DEPLOYMENT_BLOCK`. The runtime-only workflow does not do this.
+- Worker checkpoint reset: the backend keeps its event checkpoint in Redis under fixed keys (`worker:last_block`, `worker:last_safe_block`) that do not depend on the escrow address, and a stored checkpoint overrides `ARAF_DEPLOYMENT_BLOCK`. After `flyctl deploy`, the full deploy therefore stops all Fly machines, verifies they are `stopped` (up to 3 attempts), deletes ONLY those two keys and starts the machines again (also on failure; only those that were running at the start). On a first install `.github/scripts/reset-worker-checkpoint.sh` does this (`REDIS_URL` over TLS; only the deleted-key count is logged); when the registry is `ACTIVE` the same two keys are written to the manifest and deleted in the rotation step (`rotate-escrow-state.sh`). The new process then starts from `ARAF_DEPLOYMENT_BLOCK`. The runtime workflow does not do this.

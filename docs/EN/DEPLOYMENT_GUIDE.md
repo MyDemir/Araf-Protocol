@@ -1,6 +1,6 @@
 # Araf Protocol — Deployment Guide
 
-> **Version:** 2.1 | **Last Updated:** October 2026
+> **Version:** 2.1 | **Last Updated:** October 2026 (last verified: 2026-10-22)
 >
 > This guide covers three environments: Local Development · Public Testnet (Base Sepolia) · Mainnet (Base)
 >
@@ -373,6 +373,8 @@ fly logs --app araf-protocol-backend
 
 > **Worker start block:** in production the worker needs either an existing Redis checkpoint or `ARAF_DEPLOYMENT_BLOCK` (or `WORKER_START_BLOCK`); otherwise `/ready` reports `ARAF_DEPLOYMENT_BLOCK_OR_WORKER_START_BLOCK_OR_CHECKPOINT` missing. When a checkpoint exists the env value is ignored. Setting `ARAF_DEPLOYMENT_BLOCK` is enough; manually seeding `worker:last_block` is not needed on a first install.
 
+> **Registry (manual path):** in production `ESCROW_REGISTRY_GUARD_MODE` defaults to `enforce`; without an `escrow_registry` record the backend starts blocked with `registry_missing`. If you do not use the workflows, write the record once by hand (from the repo root, after `npm ci --omit=dev --prefix backend`): `MONGODB_URI=... ARAF_ESCROW_ADDRESS=0x... ARAF_DEPLOYMENT_BLOCK=<block> EXPECTED_CHAIN_ID=84532 node .github/scripts/escrow-registry.js --adopt` (dry-run), then the same command with `--apply`. See 6.6a.
+
 > **Note:** The `auto_stop_machines = false` setting in the `fly.toml` file is mandatory for the event listener to run continuously. Do not change it.
 
 ### Step 4 — Frontend: Deploy to Vercel
@@ -385,7 +387,7 @@ npm install -g vercel
 cd frontend
 
 # Update the proxy URL in vercel.json
-# "destination" → "https://araf-protocol-backend.fly.dev/api/$1"
+# routes[src=/api/(.*)].dest → "https://araf-protocol-backend.fly.dev/api/$1"
 
 # Create Production env file (all VITE_* values are public; see section 6)
 cat > .env.production << 'EOF'
@@ -403,6 +405,16 @@ vercel --prod
 ```
 
 Environment Variables must also be set in Vercel (Dashboard → Settings → Environment Variables).
+
+**Real client IP (rate limit):** `frontend/vercel.json` has a `routes` entry for `/api/(.*)` (`dest` → Fly) whose `request.headers` transform sets `x-araf-origin-secret` to `$ORIGIN_SHARED_SECRET`, read from the Vercel project env at request time (the secret is never in the repo). Enter the same random value in both places:
+
+```bash
+openssl rand -hex 32                      # generate once
+fly secrets set ORIGIN_SHARED_SECRET="<value>" -a <FLY_APP_NAME>
+# Vercel → Settings → Environment Variables → ORIGIN_SHARED_SECRET = <value> (Production), then redeploy
+```
+
+If either side is missing the behavior stays as before: the header does not match and the rate-limit IP is the infrastructure address. [source: https://vercel.com/docs/routing/rewrites "Restricting your origin to Vercel traffic"]
 
 > **Chain policy:** production builds (`import.meta.env.PROD`) enable only Base Mainnet by default; with `VITE_TARGET_CHAIN=base-sepolia` a production build enables only Base Sepolia (`frontend/src/app/chainPolicy.js`). The Hardhat chain is wired only into non-production builds. There is no `main.jsx` edit to make; for a hosted Sepolia frontend see the `VITE_TARGET_CHAIN` note below and [DEPLOY_BASE_SEPOLIA.md](./DEPLOY_BASE_SEPOLIA.md).
 
@@ -430,7 +442,7 @@ The `deploy-base-sepolia`, `deploy-runtime-base-sepolia`, `escrow-registry-adopt
 
 - [ ] `https://sepolia.basescan.org/address/<ESCROW_ADDRESS>` — contract and libraries verified ✅
 - [ ] `https://araf-protocol-backend.fly.dev/health` → liveness only (`{"status":"ok", ...}`)
-- [ ] `https://araf-protocol-backend.fly.dev/ready` → readiness gate (`200` ready / `503` not ready)
+- [ ] `https://araf-protocol-backend.fly.dev/ready` → readiness gate (`200` ready / `503` not ready); the body shows `escrowRegistry.mode` = `enforce` and `escrowRegistry.ok` = `true`
 - [ ] `https://araf-protocol.vercel.app` — site opens
 - [ ] MetaMask connected to Base Sepolia
 - [ ] SIWE login successful
@@ -624,8 +636,15 @@ CONFIRM_PUBLIC_DEPLOY=yes NODE_ENV=production npx hardhat run scripts/deploy.js 
 npm run migrate:identity:dry
 node scripts/migrations/backfillTerminalTradeStats.js            # dry-run
 node scripts/migrations/dedupeRevenueEvents.js                   # dry-run
+node scripts/migrations/dropRedundantIndexes.js                  # dry-run; --apply drops the indexes
 # back up before --apply: dedupeRevenueEvents.js --apply --backup=<file>
 # (the backup file contains wallet addresses and transaction data; store it securely, keep it out of the repo)
+
+# GitHub Actions workflows (Base Sepolia; details: DEPLOY_BASE_SEPOLIA.md)
+gh workflow run escrow-registry-adopt.yml                        # dry-run; -f dry_run=false writes
+gh workflow run deploy-base-sepolia.yml -f deploy_frontend=true  # contracts + backend (+ frontend)
+gh workflow run deploy-runtime-base-sepolia.yml                  # backend/frontend only
+gh workflow run rotate-escrow.yml -f mode=precheck               # read-only rotation precheck
 
 # Fly.io backend logs
 fly logs --app araf-protocol-backend
@@ -663,7 +682,7 @@ Extracted from every `process.env` / `import.meta.env` use in the code. *Require
 | `NODE_ENV` | prod: `production` | — | Production turns on the fail-closed guards below (KMS, CORS, SIWE, Redis TLS, chain id). `fly.toml` sets it. |
 | `PORT` | no | `4000` | `fly.toml` sets `4000`. |
 | `LOG_DIR` | no | `backend/logs` | Log file `araf.log` (25 MB × 5 rotation). |
-| `MONGODB_URI` | **yes** | — | Migration scripts also accept `MONGO_URI`. |
+| `MONGODB_URI` | **yes** | — | Migration scripts also accept `MONGO_URI` (deprecated fallback; logs a warning). |
 | `REDIS_URL` | prod: **yes** | `redis://127.0.0.1:6379` (non-prod only) | Production requires TLS. |
 | `REDIS_TLS` | no | `false` | `true` or a `rediss://` URL enables TLS; mandatory in production. |
 | `REDIS_TLS_SKIP_VERIFY` | no | `false` | Self-signed dev Redis only; `true` in production aborts startup. |
@@ -734,7 +753,9 @@ Production runs a KMS self-test at startup (`runProductionKmsStartupSelfTest`). 
 | `WORKER_START_BLOCK` | alternative to the above | — | |
 | `WORKER_DISABLED` | no | `false` | `true` = the worker never starts (API-only). |
 | `WORKER_FINALITY_DEPTH` | no | `6` prod / `1` otherwise | Safe-checkpoint depth. |
-| `WORKER_BLOCK_BATCH_SIZE` | no | `1000` | Replay batch size. |
+| `WORKER_BLOCK_BATCH_SIZE` | no | `1000` | Replay batch size (range 1–2000; 10 on the Alchemy free plan). |
+| `WORKER_REPLAY_BATCH_DELAY_MS` | no | `250` | Delay between replay/live chunks (range 0–10000). |
+| `LIVE_POLL_INTERVAL_MS` | no | `15000` | Live polling interval (allowed range 5000–300000 for the workflow variable). |
 | `WORKER_CHECKPOINT_INTERVAL_BLOCKS` | no | `50` | |
 | `WORKER_REPLAY_BACKOFF_BASE_MS` | no | `5000` | Replay retry backoff base. |
 | `WORKER_REPLAY_BACKOFF_MAX_MS` | no | `300000` | Replay retry backoff cap. |
@@ -755,7 +776,7 @@ Production runs a KMS self-test at startup (`runProductionKmsStartupSelfTest`). 
 
 ### 6.6a Backend — escrow registry guard
 
-The `escrow_registry` Mongo collection holds one document, `_id: "active"`: `escrow_address` (lowercase), `chain_id`, `deploy_block`, `state` (`ACTIVE` | `ROTATING`), `since`, `updated_by` (GitHub run id). **Only the deploy workflow writes it** (`.github/scripts/escrow-registry.js`); the backend only reads it, and no admin route or panel can change it. The guard compares it with `ARAF_ESCROW_ADDRESS` and `EXPECTED_CHAIN_ID` at startup and every 60 s (one Mongo read) and reports a mismatch reason: `registry_missing`, `escrow_mismatch`, `chain_mismatch`, `rotating` (or `registry_unreadable` when the read fails).
+In the `escrow_registry` Mongo collection the active record is the `_id: "active"` document: `escrow_address` (lowercase), `chain_id`, `deploy_block`, `state` (`ACTIVE` | `ROTATING`), `since`, `updated_by` (`github-run-<run id>`, or `manual` outside a workflow). The same collection also holds the rotation manifests (`_id: "<chainId>:<oldEscrow>"`, see 6.6b). **Only the deploy workflow writes it** (`.github/scripts/escrow-registry.js`); the backend only reads it, and no admin route or panel can change it. The guard compares it with `ARAF_ESCROW_ADDRESS` and `EXPECTED_CHAIN_ID` at startup and every 60 s (one Mongo read) and reports a mismatch reason: `registry_missing`, `escrow_mismatch`, `chain_mismatch`, `rotating` (or `registry_unreadable` when the read fails).
 
 | Variable | Required | Default | Notes |
 |---|---|---|---|
@@ -776,7 +797,7 @@ A full contract deploy (`deploy-base-sepolia.yml`) writes the registry in one of
 
 ### 6.6b Escrow rotation (Phase 2b)
 
-On a new contract deploy the Mongo collections bound to the old escrow are renamed inside the same database to `archive_<oldEscrow>_*`, the User mirror is written to the archive, the Redis DLQ and `last_known` keys are renamed, and the worker checkpoints (`worker:last_block`, `worker:last_safe_block`) are written to the manifest and deleted. The registry `ROTATING` → `ACTIVE` switch is the **commit point**; until it is written the guard keeps the worker closed. The core is `.github/scripts/rotate-escrow.js`; the machine-stopping wrapper is `rotate-escrow-state.sh`. The workflow does **not** pause the contract (the owner key is not in the workflow); it only reads the pause state.
+On a new contract deploy the Mongo collections bound to the old escrow are renamed inside the same database to `archive_<chainId>_<oldEscrow>_<collection>`, the User mirror is written to the archive, the Redis DLQ and `last_known` keys are renamed, and the worker checkpoints (`worker:last_block`, `worker:last_safe_block`) are written to the manifest and deleted. The registry `ROTATING` → `ACTIVE` switch is the **commit point**; until it is written the guard keeps the worker closed. The core is `.github/scripts/rotate-escrow.js`; the machine-stopping wrapper is `rotate-escrow-state.sh`. The workflow does **not** pause the contract (the owner key is not in the workflow); it only reads the pause state.
 
 **Before (steps of `GOVERNANCE_READINESS.md` §2)**
 1. **Announcement:** purpose (new escrow), date/time, expected impact (short downtime, P4 fallback view for open trades).
@@ -789,7 +810,7 @@ On a new contract deploy the Mongo collections bound to the old escrow are renam
 - Read first with `dry_run=true` (the default).
 
 **After**
-1. `/ready` → `escrowRegistry.ok: true`; registry `ACTIVE` with the new address; `archive_<old>_*` counts match the manifest.
+1. `/ready` → `escrowRegistry.ok: true`; registry `ACTIVE` with the new address; `archive_<chainId>_<old>_*` counts match the manifest.
 2. Smoke: create/fill an order on the new escrow; the worker started from `ARAF_DEPLOYMENT_BLOCK`.
 3. **Log:** run id, actor, old/new escrow, archive_id, remaining open trade ids, approvers.
 
@@ -912,11 +933,11 @@ Security: these steps have no `JWT_SECRET`/`MASTER_ENCRYPTION_KEY` in their envi
 
 ## 8. Migrations and MongoDB Notes
 
-Run the scripts from `backend/` (`node scripts/migrations/<name>.js`). They read `MONGODB_URI` (or `MONGO_URI`) from the environment/`.env`. On Fly: `fly ssh console -C "node scripts/migrations/<name>.js"`.
+Run the scripts from `backend/` (`node scripts/migrations/<name>.js`). They read `MONGODB_URI` from the environment/`.env` (`MONGO_URI` is read only as a deprecated fallback and logs a warning). On Fly: `fly ssh console -C "node scripts/migrations/<name>.js"`.
 
 | Script | Default mode | Switch | Purpose |
 |---|---|---|---|
-| `normalizeIdentityFields.js` (`npm run migrate:identity`) | **writes** | dry-run by default; writes only with `--apply` (`npm run migrate:identity:dry` = dry-run, `npm run migrate:identity` = `--apply`; `--dry-run` still accepted with a warning) | Converts legacy numeric `Order.onchain_order_id`, `Trade.onchain_escrow_id`, `Trade.parent_order_id` to canonical strings. |
+| `normalizeIdentityFields.js` (`npm run migrate:identity`) | dry-run (the `migrate:identity` npm shortcut passes `--apply` and **writes**) | writes only with `--apply` (`npm run migrate:identity:dry` = dry-run, `npm run migrate:identity` = `--apply`; `--dry-run` still accepted with a warning) | Converts legacy numeric `Order.onchain_order_id`, `Trade.onchain_escrow_id`, `Trade.parent_order_id` to canonical strings. |
 | `backfillTerminalTradeStats.js` | dry-run | `--apply` | Fills the permanent `TerminalTradeStat` counters from existing terminal trades. Idempotent (`$setOnInsert` on `trade_key`). |
 | `backfillLastBanEndsAt.js` (`npm run migrate:last-ban-ends-at`; `:dry` = dry-run) | dry-run | `--apply` | Fills `User.last_ban_ends_at` from chain (`getReputation().bannedUntil`) for users whose `banned_until` was nulled earlier, so the reputation-decay job can pick them up. Idempotent, read-only RPC (`BASE_RPC_URL`, `ARAF_ESCROW_ADDRESS`). |
 | `dedupeRevenueEvents.js` | dry-run | `--apply` (recommended: `--apply --backup=<file>`; rows to delete are written to JSON first) | Removes duplicate `RevenueEvent` rows written by the old worker (escrow row duplicating the vault row for the same tx/token/amount/kind/trade). Idempotent. |
@@ -944,9 +965,11 @@ PII re-encryption after the HKDF change has no tool in the repository; see `PII_
 `backend/fly.toml` (app `araf-protocol-backend`, region `ams`):
 - `[env]`: `PORT=4000`, `NODE_ENV=production`; everything else is a secret (`fly secrets set`).
 - `auto_stop_machines = false`, `min_machines_running = 1`: the event listener must run continuously.
+- `[deploy] strategy = "rolling"`: the old machine is stopped before the new one starts, so two workers never run at once; do not pick `bluegreen` with more than one machine until the worker leader lock is verified. `kill_signal = "SIGTERM"`, `kill_timeout = "15s"` (app.js forces exit after 8 s of graceful shutdown).
 - Concurrency `connections`, soft 80 / hard 100; VM `shared` 1 CPU, 512 MB.
 - Health check: `GET /health` every 30 s, 15 s grace period, 5 s timeout, HTTP inside the container (`force_https = true` outside).
-- `/health` is the **liveness** signal tied to the worker: it returns `503 "stale"` when no block was seen for `WORKER_LIVENESS_STALE_MS`; independently the worker watchdog reconnects after `WORKER_BLOCK_STALE_MS` and exits the process if blocks still do not arrive (the platform then restarts it). `/ready` (readiness) is not wired into `fly.toml`; use it for deploy gates and monitoring (full detail with `x-internal-token: $READY_INTERNAL_TOKEN`).
+- `/health` is the **liveness** signal tied to the worker: it returns `503 "stale"` when no block was seen for `WORKER_LIVENESS_STALE_MS`; independently the worker watchdog reconnects after `WORKER_BLOCK_STALE_MS` and exits the process if blocks still do not arrive (the platform then restarts it). `/ready` (readiness) is not wired into `fly.toml`; use it for deploy gates and monitoring (full detail with `x-internal-token: $READY_INTERNAL_TOKEN`). The unauthenticated view carries `ok`, `checks`, a `worker` summary, `escrowRegistry` (`mode`, `checked`, `ok`, `reason`), `configIssueCount`, `degraded`, `degradedReasons` and `relayer` (`configured` | `disabled`). The deploy workflows require `/health` 200, only warn for `/ready` 503 `degraded:true`, and additionally verify `escrowRegistry.mode == enforce` (see 6.6a).
+- The Fly CLI version is pinned in the workflows (`flyctl 0.4.120`); Vercel CLI is `vercel@62.7.0`.
 - The image (`backend/Dockerfile`) is `node:22-alpine` pinned by index digest (to update, put the new index digest of the Docker Hub `library/node` `22-alpine` tag into the `FROM` line), installs with `npm ci --omit=dev`, runs as the non-root `nodeapp` user and starts `node scripts/app.js`.
 
 ---
@@ -976,10 +999,12 @@ Minimum recommended response headers for frontend hosting (Nginx/Cloudflare/Verc
 - Mobile wallets: `connect-src` adds only two sockets: `wss://www.walletlink.org` (Coinbase WalletLink) and `wss://relay.walletconnect.org` (WalletConnect relay). No `frame-src`/`child-src` is added. WalletConnect loads lazily and only when `VITE_WALLETCONNECT_PROJECT_ID` (32 hex, public value; GitHub repo variable) is set; when empty the option is hidden. The production domain must be listed under Allowed Domains in the Reown dashboard. On mobile without an injected wallet the connect modal also offers deeplinks that open the site in the wallet app browser (`frontend/src/app/mobileWallet.js`; link formats must be verified against official docs).
 - `Strict-Transport-Security: max-age=31536000; includeSubDomains; preload`
 - `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: DENY` (together with CSP `frame-ancestors 'none'`; iframe embedding is closed)
 - `Referrer-Policy: strict-origin-when-cross-origin`
 - `Permissions-Policy: geolocation=(), microphone=(), camera=()` (expand only if needed)
 
 ### Cache policy
+In `frontend/vercel.json`, `Cache-Control` is defined only for `/.well-known/farcaster.json` (`public, max-age=300`, plus `Content-Type: application/json; charset=utf-8`); no other path has `Cache-Control` configured (the security headers apply to all paths separately); the `index.html` and `/assets/*` `Cache-Control` values below are the recommended policy and are not configured in `vercel.json`.
 - `index.html`: `Cache-Control: no-cache, no-store, must-revalidate`
 - versioned static assets (`/assets/*`): `Cache-Control: public, max-age=31536000, immutable`
 - keep `/health` (liveness) and `/ready` (readiness) as non-cached health endpoints.
