@@ -181,7 +181,7 @@ Reward weight bilinçli olarak outcome-sensitive tasarlanmıştır:
 | Ödeme penceresi aşımı (`PAYMENT_WINDOW_EXPIRED`) | Zero weight | Bildirilmeyen ödeme başarılı trade sayılmaz |
 | Burned | Zero weight | Deadlock asla rewardable olmamalıdır |
 
-Ağırlık formülü (`ArafRewards`): `weight = stableNotional × outcomeÇarpanı × tierÇarpanı`; tier çarpanı Tier 1–4 için ×1,0 / ×1,1 / ×1,2 / ×1,3, Tier 0 için kayıt yoktur. Maker ve taker aynı ağırlığı alır. `stableNotional`, token tutarının 6 ondalığa normalize edilmiş halidir.
+Ağırlık formülü (`ArafRewards`): `weight = stableNotional × outcomeÇarpanı × tierÇarpanı`; tier çarpanı Tier 1–4 için ×1,0 / ×1,1 / ×1,2 / ×1,3, Tier 0 için kayıt yoktur. Maker ve taker aynı formülü kullanır; ancak terminal snapshot'ta ödediği ücret 0 olan taraf ağırlık almaz (K3-02), böylece sıfır ücretli wash-trade havuzu bedelsiz emmez. `stableNotional`, token tutarının 6 ondalığa normalize edilmiş halidir. Kayıt (`recordTradeOutcome` / `recordTradeOutcomes`) permissionless'tır ve epoch bitişi + 24 saatte (`claimDelay`) zamanla kapanır; ondan sonra `finalizeEpochToken` herkese açıktır.
 
 Basit teşvik merdiveni:
 

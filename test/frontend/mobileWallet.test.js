@@ -72,7 +72,7 @@ describe('vercel.json CSP', () => {
     expect(csp).not.toContain("'unsafe-eval'");
     expect(dir('script-src')).toEqual(["'self'"]);
     for (const d of csp.split(';').map((s) => s.trim())) expect(d.split(/\s+/).slice(1)).not.toContain('*');
-    expect(dir('frame-src')).toEqual([]);
+    expect(dir('frame-src')).toEqual(['https://player.vimeo.com']);
     expect(dir('frame-ancestors')).toEqual(["'none'"]);
     expect(dir('connect-src')).not.toContain('wss:');
   });
