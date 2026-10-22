@@ -11,7 +11,7 @@ if (typeof mongoose.Schema !== "function") {
 
 const revenueEventSchema = new mongoose.Schema(
   {
-    tx_hash: { type: String, required: true, index: true },
+    tx_hash: { type: String, required: true },
     block_number: { type: Number, required: true, index: true },
     log_index: { type: Number, required: true },
     token: { type: String, required: true, lowercase: true, index: true },

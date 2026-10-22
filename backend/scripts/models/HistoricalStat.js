@@ -44,5 +44,4 @@ const historicalStatSchema = new mongoose.Schema({
   collection: "historical_stats",
 });
 
-historicalStatSchema.index({ date: -1 });
 module.exports = mongoose.model("HistoricalStat", historicalStatSchema);

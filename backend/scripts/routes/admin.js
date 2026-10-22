@@ -39,16 +39,28 @@ const ADMIN_TRADES_ORIGIN_VALUES = ["ALL", "ORDER_CHILD", "DIRECT_ESCROW"];
 const ADMIN_TRADES_SNAPSHOT_VALUES = ["ALL", "true", "false"];
 const ADMIN_SETTLEMENT_STATE_VALUES = ["ALL", "PROPOSED", "EXPIRED", "FINALIZED", "REJECTED", "WITHDRAWN"];
 const ADMIN_TRADES_MAX_CANDIDATE_SCAN = 1000;
-const RESOLUTION_ANALYTICS_TYPES = [
-  "MANUAL_RELEASE",
-  "AUTO_RELEASE",
-  "PARTIAL_SETTLEMENT",
-  "MUTUAL_CANCEL",
-  "BURNED",
-  "DISPUTED_RESOLUTION",
-  "PAYMENT_WINDOW_EXPIRED",
-  "UNKNOWN",
-];
+// [TR] B3-09: /summary ve riskOnly için kısa ömürlü bellek önbelleği (yalnız başarılı sonuçlar; gözlem verisi en çok TTL kadar gecikir).
+// [EN] B3-09: short-TTL in-memory cache for /summary DB aggregates and riskOnly windows (successful results only).
+const ADMIN_READ_CACHE_TTL_MS = 10_000;
+const ADMIN_READ_CACHE_MAX_ENTRIES = 32;
+const _adminReadCache = new Map();
+
+function _adminCacheGet(key) {
+  const hit = _adminReadCache.get(key);
+  if (!hit) return undefined;
+  if (Date.now() - hit.at >= ADMIN_READ_CACHE_TTL_MS) {
+    _adminReadCache.delete(key);
+    return undefined;
+  }
+  return hit.value;
+}
+
+function _adminCacheSet(key, value) {
+  if (_adminReadCache.size >= ADMIN_READ_CACHE_MAX_ENTRIES) {
+    _adminReadCache.delete(_adminReadCache.keys().next().value);
+  }
+  _adminReadCache.set(key, { at: Date.now(), value });
+}
 
 const ADMIN_TRADE_PROJECTION = [
   "_id",
@@ -277,17 +289,23 @@ router.get("/summary", asyncHandler(async (req, res, next) => {
     const activeFilter = { status: { $nin: TERMINAL_TRADE_STATUSES } };
     let tradeCounts = [0, 0, 0, 0, 0];
     try {
-      const countResults = await Promise.allSettled([
-        Trade.countDocuments(activeFilter),
-        Trade.countDocuments({ status: "LOCKED" }),
-        Trade.countDocuments({ status: "PAID" }),
-        Trade.countDocuments({ status: "CHALLENGED" }),
-        Trade.countDocuments({ "payout_snapshot.is_complete": false }),
-      ]);
+      const cachedCounts = _adminCacheGet("summary:tradeCounts");
+      if (cachedCounts) {
+        tradeCounts = cachedCounts;
+      } else {
+        const countResults = await Promise.allSettled([
+          Trade.countDocuments(activeFilter),
+          Trade.countDocuments({ status: "LOCKED" }),
+          Trade.countDocuments({ status: "PAID" }),
+          Trade.countDocuments({ status: "CHALLENGED" }),
+          Trade.countDocuments({ "payout_snapshot.is_complete": false }),
+        ]);
 
-      const rejectedCount = countResults.find((result) => result.status === "rejected");
-      if (rejectedCount) throw rejectedCount.reason;
-      tradeCounts = countResults.map((result) => Number(result.value) || 0);
+        const rejectedCount = countResults.find((result) => result.status === "rejected");
+        if (rejectedCount) throw rejectedCount.reason;
+        tradeCounts = countResults.map((result) => Number(result.value) || 0);
+        _adminCacheSet("summary:tradeCounts", tradeCounts);
+      }
     } catch (err) {
       degraded.isDegraded = true;
       degraded.sources.tradeCountsFallbackUsed = true;
@@ -319,7 +337,12 @@ router.get("/summary", asyncHandler(async (req, res, next) => {
       avgSettlementSplitMakerBps: null,
       settlementFinalizationRate: null,
     };
+    let settlementSplitFailed = false;
     try {
+      const cachedSettlement = _adminCacheGet("summary:settlement");
+      if (cachedSettlement) {
+        settlementAnalytics = cachedSettlement;
+      } else {
       const now = new Date();
       const finalized24hStart = new Date(now.getTime() - 24 * 3600 * 1000);
       const proposalStateFilter = { "settlement_proposal.state": { $in: ADMIN_SETTLEMENT_STATE_VALUES.filter((v) => v !== "ALL") } };
@@ -337,6 +360,7 @@ router.get("/summary", asyncHandler(async (req, res, next) => {
         logger.warn(`[Admin] summary kaynağı başarısız: settlement_split_avg: ${splitErr.message}`);
         degraded.isDegraded = true;
         degraded.errors.push({ source: "settlement_split_avg", message: "settlement_split_avg_unavailable" });
+        settlementSplitFailed = true;
         return null;
       });
 
@@ -379,6 +403,8 @@ router.get("/summary", asyncHandler(async (req, res, next) => {
         avgSettlementSplitMakerBps,
         settlementFinalizationRate,
       };
+      if (!settlementSplitFailed) _adminCacheSet("summary:settlement", settlementAnalytics);
+      }
     } catch (err) {
       degraded.isDegraded = true;
       logger.warn(`[Admin] summary kaynağı başarısız: settlement_analytics: ${err.message}`);
@@ -399,36 +425,32 @@ router.get("/summary", asyncHandler(async (req, res, next) => {
       unknownResolvedCount: 0,
     };
     try {
-      const exactResolutionTypes = RESOLUTION_ANALYTICS_TYPES.filter((resolutionType) => resolutionType !== "UNKNOWN");
-      const exactResolutionCounts = await Promise.all(
-        exactResolutionTypes.map((resolutionType) =>
-          Trade.countDocuments({
-            resolution_type: resolutionType,
-            status: { $in: TERMINAL_TRADE_STATUSES },
-          })
-        )
-      );
-      const unknownResolvedCount = await Trade.countDocuments({
-        status: { $in: TERMINAL_TRADE_STATUSES },
-        $or: [
-          { resolution_type: "UNKNOWN" },
-          { resolution_type: null },
-          { resolution_type: { $exists: false } },
-        ],
-      });
+      const cachedResolution = _adminCacheGet("summary:resolution");
+      if (cachedResolution) {
+        resolutionAnalytics = cachedResolution;
+      } else {
+        // [TR] B3-09: 8 ayrı countDocuments yerine tek aggregate ($group). UNKNOWN = "UNKNOWN" + null + alan yok.
+        const rows = await Trade.aggregate([
+          { $match: { status: { $in: TERMINAL_TRADE_STATUSES } } },
+          { $group: { _id: { $ifNull: ["$resolution_type", "UNKNOWN"] }, n: { $sum: 1 } } },
+        ]);
+        const byType = new Map((Array.isArray(rows) ? rows : []).map((row) => [row?._id, Number(row?.n) || 0]));
+        const countOf = (type) => byType.get(type) || 0;
 
-      resolutionAnalytics = {
-        manualReleaseCount: Number(exactResolutionCounts[0]) || 0,
-        autoReleaseCount: Number(exactResolutionCounts[1]) || 0,
-        partialSettlementCount: Number(exactResolutionCounts[2]) || 0,
-        mutualCancelCount: Number(exactResolutionCounts[3]) || 0,
-        burnedCount: Number(exactResolutionCounts[4]) || 0,
-        disputedResolutionCount: Number(exactResolutionCounts[5]) || 0,
-        // [TR] Kontrat TerminalOutcome.PAYMENT_WINDOW_EXPIRED (48s içinde ödeme bildirilmedi). Sayılıyordu ama yanıta konmuyordu.
-        // [EN] Contract PAYMENT_WINDOW_EXPIRED outcome; it was counted but never returned.
-        paymentWindowExpiredCount: Number(exactResolutionCounts[6]) || 0,
-        unknownResolvedCount: Number(unknownResolvedCount) || 0,
-      };
+        resolutionAnalytics = {
+          manualReleaseCount: countOf("MANUAL_RELEASE"),
+          autoReleaseCount: countOf("AUTO_RELEASE"),
+          partialSettlementCount: countOf("PARTIAL_SETTLEMENT"),
+          mutualCancelCount: countOf("MUTUAL_CANCEL"),
+          burnedCount: countOf("BURNED"),
+          disputedResolutionCount: countOf("DISPUTED_RESOLUTION"),
+          // [TR] Kontrat TerminalOutcome.PAYMENT_WINDOW_EXPIRED (48s içinde ödeme bildirilmedi).
+          // [EN] Contract PAYMENT_WINDOW_EXPIRED outcome.
+          paymentWindowExpiredCount: countOf("PAYMENT_WINDOW_EXPIRED"),
+          unknownResolvedCount: countOf("UNKNOWN"),
+        };
+        _adminCacheSet("summary:resolution", resolutionAnalytics);
+      }
     } catch (err) {
       degraded.isDegraded = true;
       logger.warn(`[Admin] summary kaynağı başarısız: resolution_analytics: ${err.message}`);
@@ -580,15 +602,21 @@ router.get("/trades", asyncHandler(async (req, res, next) => {
 
     // [TR] riskOnly modu enrichment tabanlı olduğu için bounded pencereyi açıkça işaretleriz.
     // [EN] riskOnly mode is enrichment-driven; response explicitly signals bounded-window semantics.
-    const candidateTrades = await Trade.find(filter)
-      .select(ADMIN_TRADE_PROJECTION)
-      .sort({ created_at: -1, _id: -1 })
-      .limit(ADMIN_TRADES_MAX_CANDIDATE_SCAN)
-      .lean();
+    // [TR] B3-09: sıralı risk penceresi kısa süre önbelleğe alınır (her sayfa isteğinde 1000 trade + User taraması tekrarlanmaz).
+    const riskCacheKey = `trades:riskOnly:${JSON.stringify(filter)}`;
+    let sorted = _adminCacheGet(riskCacheKey);
+    if (!sorted) {
+      const candidateTrades = await Trade.find(filter)
+        .select(ADMIN_TRADE_PROJECTION)
+        .sort({ created_at: -1, _id: -1 })
+        .limit(ADMIN_TRADES_MAX_CANDIDATE_SCAN)
+        .lean();
 
-    const enriched = await _attachAdminTradeRisk(candidateTrades);
-    const highRiskOnly = enriched.filter((trade) => trade?.bank_profile_risk?.highRiskBankProfile === true);
-    const sorted = _sortAdminTradesDeterministic(highRiskOnly);
+      const enriched = await _attachAdminTradeRisk(candidateTrades);
+      const highRiskOnly = enriched.filter((trade) => trade?.bank_profile_risk?.highRiskBankProfile === true);
+      sorted = _sortAdminTradesDeterministic(highRiskOnly);
+      _adminCacheSet(riskCacheKey, sorted);
+    }
 
     return res.json({
       trades: sorted.slice(skip, skip + value.limit),

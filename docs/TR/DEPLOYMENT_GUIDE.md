@@ -912,6 +912,7 @@ Script'leri `backend/` dizininden çalıştırın (`node scripts/migrations/<ad>
 | `backfillTerminalTradeStats.js` | dry-run | `--apply` | Kalıcı `TerminalTradeStat` sayaçlarını mevcut terminal trade'lerden doldurur. Idempotent (`trade_key` üzerinde `$setOnInsert`). |
 | `backfillLastBanEndsAt.js` (`npm run migrate:last-ban-ends-at`; `:dry` = dry-run) | dry-run | `--apply` | `banned_until`'i daha önce null'lanmış kullanıcılar için `User.last_ban_ends_at` alanını zincirden (`getReputation().bannedUntil`) doldurur; ban affı işi bu kullanıcıları aday görsün diye. Idempotent, salt-okunur RPC (`BASE_RPC_URL`, `ARAF_ESCROW_ADDRESS`). |
 | `dedupeRevenueEvents.js` | dry-run | `--apply` (öneri: `--apply --backup=<dosya>`; silinecek belgeler önce JSON'a yazılır) | Eski worker'ın yazdığı mükerrer `RevenueEvent` satırlarını siler (aynı tx/token/amount/kind/trade için vault satırını tekrarlayan escrow satırı). Idempotent. |
+| `dropRedundantIndexes.js` | dry-run | `--apply` | B4-17: birleşik unique index'in öneki olan unique olmayan tekil index'leri (`tx_hash`, `epoch`, `date_-1`) canlı koleksiyonlardan düşürür. Unique index'i asla düşürmez; yalnız kapsayan unique index mevcutsa düşürür. Idempotent; backend deploy'undan sonra bir kez çalıştırılır. |
 
 Yükseltme için işlem sırası:
 1. Yeni backend'den **önce**: `npm run migrate:identity:dry`, numeric id raporlarsa ardından `npm run migrate:identity`. `IDENTITY_NORMALIZATION_GUARD` production'da varsayılan `enforce`'tur; legacy id varken backend başlamaz.

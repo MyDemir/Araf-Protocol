@@ -82,6 +82,16 @@ function _buildIdentityLookup(idString) {
   return { onchain_escrow_id: idString };
 }
 
+function _receiptRejection(existing, onchainId, wallet) {
+  if (!existing) return { status: 404, body: { error: `#${onchainId} numaralı trade bulunamadı.` } };
+  if (existing.taker_address !== wallet) return { status: 403, body: { error: "Yalnızca taker dekont yükleyebilir." } };
+  if (existing.evidence?.receipt_encrypted) return { status: 409, body: { error: "Bu işlem için dekont zaten yüklendi. Üzerine yazılamaz." } };
+  if (existing.status !== "LOCKED") {
+    return { status: 400, body: { error: `Dekont yalnızca LOCKED durumunda yüklenebilir (mevcut: ${existing.status}).` } };
+  }
+  return null;
+}
+
 async function validateFileMagicBytes(filePath, mimeType) {
   const validators = MAGIC_BYTES_BY_MIME[mimeType];
   if (!validators?.length) return false;
@@ -123,6 +133,14 @@ router.post("/upload", requireAuth, requireSessionWalletMatch, receiptUploadLimi
       return res.status(400).json({ error: "Geçersiz veya eksik onchainEscrowId." });
     }
 
+    // [TR] B3-02: yetki/durum kontrolü dosya işlenmeden (magic byte, base64, şifreleme) ÖNCE yapılır.
+    //      Atomik findOneAndUpdate yarış için aşağıda kalır; hata kodları/mesajları aynıdır.
+    const precheck = await Trade.findOne(_buildIdentityLookup(onchainId))
+      .select("taker_address status evidence.receipt_encrypted")
+      .lean();
+    const rejection = _receiptRejection(precheck, onchainId, req.wallet);
+    if (rejection) return res.status(rejection.status).json(rejection.body);
+
     const signatureOk = await validateFileMagicBytes(tempFilePath, req.file.mimetype);
     if (!signatureOk) return res.status(415).json({ error: "Dosya içeriği bildirilen MIME tipiyle eşleşmiyor." });
 
@@ -159,12 +177,8 @@ router.post("/upload", requireAuth, requireSessionWalletMatch, receiptUploadLimi
       const existing = await Trade.findOne(_buildIdentityLookup(onchainId))
         .select("taker_address status evidence.receipt_encrypted")
         .lean();
-      if (!existing) return res.status(404).json({ error: `#${onchainId} numaralı trade bulunamadı.` });
-      if (existing.taker_address !== req.wallet) return res.status(403).json({ error: "Yalnızca taker dekont yükleyebilir." });
-      if (existing.evidence?.receipt_encrypted) return res.status(409).json({ error: "Bu işlem için dekont zaten yüklendi. Üzerine yazılamaz." });
-      if (existing.status !== "LOCKED") {
-        return res.status(400).json({ error: `Dekont yalnızca LOCKED durumunda yüklenebilir (mevcut: ${existing.status}).` });
-      }
+      const rejection2 = _receiptRejection(existing, onchainId, req.wallet);
+      if (rejection2) return res.status(rejection2.status).json(rejection2.body);
       return res.status(500).json({ error: "Dekont kaydedilemedi. Lütfen tekrar deneyin." });
     }
 

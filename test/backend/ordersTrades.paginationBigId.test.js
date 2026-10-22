@@ -239,7 +239,12 @@ describe("orders/trades pagination + big on-chain id", () => {
 
     const Trade = {
       findOneAndUpdate: jest.fn().mockResolvedValue({ _id: "ok" }),
-      findOne: jest.fn(),
+      // [TR] B3-02: yetki/durum ön kontrolü artık dosya işlenmeden önce findOne().select().lean() ile yapılır.
+      findOne: jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          lean: jest.fn().mockResolvedValue({ taker_address: "0x1111111111111111111111111111111111111111", status: "LOCKED", evidence: {} }),
+        }),
+      }),
     };
 
     const roomReadLimiter = jest.fn((_req, _res, next) => next());
