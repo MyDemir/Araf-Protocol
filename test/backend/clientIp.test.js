@@ -80,13 +80,15 @@ describe("rate limiter: farklı x-real-ip ayrı kova", () => {
   });
 
   const h = (ip) => ({ headers: { "x-real-ip": ip, "x-araf-origin-secret": SECRET } });
+  // B2-02: cüzdanlı istek artık IP'den bağımsız tek kova; IP ayrımı yalnız cüzdansız (anon) istekte.
+  const hAnon = (ip) => ({ ...h(ip), wallet: undefined });
 
   test("secret ile iki ziyaretçi ayrı kovada", async () => {
     process.env.ORIGIN_SHARED_SECRET = SECRET;
     const l = load();
-    for (let i = 0; i < 10; i += 1) expect(await call(l.piiProfileLimiter, h("9.9.9.9"))).toBe(200);
-    expect(await call(l.piiProfileLimiter, h("9.9.9.9"))).toBe(429);
-    expect(await call(l.piiProfileLimiter, h("8.8.8.8"))).toBe(200);
+    for (let i = 0; i < 10; i += 1) expect(await call(l.piiProfileLimiter, hAnon("9.9.9.9"))).toBe(200);
+    expect(await call(l.piiProfileLimiter, hAnon("9.9.9.9"))).toBe(429);
+    expect(await call(l.piiProfileLimiter, hAnon("8.8.8.8"))).toBe(200);
   });
 
   test("secret yokken tek kova (bugünkü davranış)", async () => {
