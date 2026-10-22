@@ -414,6 +414,18 @@ SIWE domain/URI ve CORS origin'i **frontend** origin'i olmalıdır (kullanıcın
 fly secrets set SIWE_DOMAIN="araf-protocol.vercel.app" SIWE_URI="https://araf-protocol.vercel.app"
 ```
 
+### GitHub `base-sepolia` environment ve CODEOWNERS (deploy onay kapısı)
+
+`deploy-base-sepolia`, `deploy-runtime-base-sepolia`, `escrow-registry-adopt` ve `rotate-escrow` job'ları `environment: base-sepolia` kullanır. GitHub belgesine göre var olmayan bir environment'a başvuran workflow onu otomatik oluşturur ve "koruma kuralı ya da secret içermez" (yani kural koymazsanız bugünkü gibi onaysız çalışır). Kapıyı siz kurarsınız:
+
+1. Repo → **Settings → Environments → `base-sepolia`** (yoksa bir workflow çalışınca ya da **New environment** ile oluşur).
+2. **Required reviewers**: en az bir kişi ekleyin (en çok 6; biri onaylarsa yeter). Tek kişilik ekipte **Prevent self-review** kapalı kalmalı, yoksa kendi çalıştırmanızı onaylayamazsınız.
+3. **Deployment branches and tags** → *Selected branches and tags* → yalnız `main` ekleyin. Böylece başka dalda değiştirilmiş bir workflow bu environment'a erişemez.
+4. (İsteğe bağlı) Secret'ları **Environment secrets** altına taşıyın (DEPLOYER_PRIVATE_KEY, FLY_API_TOKEN, MONGODB_URI, REDIS_URL, JWT_SECRET, MASTER_ENCRYPTION_KEY, GH_VARIABLES_TOKEN, vb.). Belgeye göre environment secret'ları yalnız o environment'ı kullanan job'larda ve reviewer onayından sonra kullanılabilir. Repo seviyesindeki aynı adlı secret'ı silmediğiniz sürece dal kısıtı o secret'ı korumaz: taşıdıktan sonra repo seviyesindekini silin. (Repo secret'larının environment'lı job'da erişilebilir kalması ve aynı ad önceliği resmi belgede açıkça yazılı bulunamadı; ilk çalıştırmada doğrulayın.)
+5. **Settings → Branches → main için kural → Require a pull request before merging → Require review from Code Owners**. `.github/CODEOWNERS` `.github/`, `contracts/src/`, `encryption.js`, `siwe.js` ve `frontend/vercel.json` için `@MyDemir` ister; bu ayar açılmazsa CODEOWNERS zorlayıcı olmaz.
+
+`release.yml` secret kullanmadığı ve canlıya dokunmadığı için environment taşımaz; `ci.yml` de taşımaz.
+
 ### Testnet Kontrol Listesi
 
 - [ ] `https://sepolia.basescan.org/address/<ESCROW_ADDRESS>` — kontrat ve library'ler doğrulandı ✅
@@ -616,6 +628,8 @@ CONFIRM_PUBLIC_DEPLOY=yes NODE_ENV=production npx hardhat run scripts/deploy.js 
 npm run migrate:identity:dry
 node scripts/migrations/backfillTerminalTradeStats.js            # dry-run
 node scripts/migrations/dedupeRevenueEvents.js                   # dry-run
+# --apply öncesi yedek önerilir: dedupeRevenueEvents.js --apply --backup=<dosya>
+# (yedek dosyası cüzdan adresi ve işlem verisi içerir; güvenli saklayın, repoya koymayın)
 
 # Fly.io backend logları
 fly logs --app araf-protocol-backend
@@ -658,6 +672,9 @@ Koddaki her `process.env` / `import.meta.env` kullanımından çıkarılmıştı
 | `REDIS_TLS` | hayır | `false` | `true` ya da `rediss://` URL'si TLS açar; production'da zorunlu. |
 | `REDIS_TLS_SKIP_VERIFY` | hayır | `false` | Yalnız self-signed geliştirme Redis'i için; production'da `true` açılışı durdurur. |
 | `REDIS_READY_WAIT_MS` | hayır | `5000` | Redis'in hazır olmasını bekleme süresi. |
+| `REDIS_CONNECT_TIMEOUT_MS` | hayır | `10000` | Redis bağlantı (connect) zaman aşımı, ms. |
+| `JOB_LOCK_TTL_MS` | hayır | `120000` | Dağıtık iş kilidi ömrü (ms); ttl/3 aralıkla yenilenir. |
+| `JOB_LOCK_COMMAND_TIMEOUT_MS` | hayır | `5000` | Tek bir kilit komutunun (Redis) zaman aşımı, ms. |
 
 ### 6.2 Backend — auth, oturum, CORS
 
@@ -746,13 +763,18 @@ Production açılışta KMS self-test çalıştırır (`runProductionKmsStartupS
 
 | Değişken | Zorunlu | Varsayılan | Not |
 |---|---|---|---|
-| `ESCROW_REGISTRY_GUARD_MODE` | hayır | `warn` | `off` · `warn` · `enforce`. Geçersiz değer = `warn` + uyarı logu. `warn`: yalnız log (tek seferlik ve değişince) ve `/ready` içinde `escrowRegistry` bilgi alanı; hiçbir şey kapanmaz, HTTP kodu değişmez. `enforce`: uyumsuzlukta (ya da kayıt okunamazsa, fail-closed) worker başlatılmaz (çalışıyorsa durdurulur), zincire bağlı zamanlanmış işler atlanır, escrow'a bağlı route'lar (orders, trades, pii, receipts, stats, rewards, admin) nedenle birlikte `503 ESCROW_MISMATCH` döner. Auth, istemci logu, sosyal bağlantılar, referans ticker, feedback ve `/health` açık kalır; `/ready` nedenle birlikte 503 döner. Çıkışlar engellenmez: kullanıcılar çıkış işlemlerini doğrudan kontrata gönderir. |
+| `ESCROW_REGISTRY_GUARD_MODE` | hayır | `warn` (production'da `enforce`) | `off` · `warn` · `enforce`. Production'da ESCROW_REGISTRY_GUARD_MODE tanımsızsa enforce. Geçersiz değer = varsayılan (`warn`, production'da `enforce`) + uyarı logu. `warn`: yalnız log (tek seferlik ve değişince) ve `/ready` içinde `escrowRegistry` bilgi alanı; hiçbir şey kapanmaz, HTTP kodu değişmez. `enforce`: uyumsuzlukta (ya da kayıt okunamazsa, fail-closed) worker başlatılmaz (çalışıyorsa durdurulur), zincire bağlı zamanlanmış işler atlanır, escrow'a bağlı route'lar (orders, trades, pii, receipts, stats, rewards, admin) nedenle birlikte `503 ESCROW_MISMATCH` döner. Auth, istemci logu, sosyal bağlantılar, referans ticker, feedback ve `/health` açık kalır; `/ready` nedenle birlikte 503 döner. Çıkışlar engellenmez: kullanıcılar çıkış işlemlerini doğrudan kontrata gönderir. |
 | `ESCROW_REGISTRY_GUARD_INTERVAL_MS` | hayır | `60000` | Yeniden kontrol aralığı. |
 
 **İlk kurulum sırası**
-1. Bekçi kodunu mod hâlâ `warn` (varsayılan) iken `deploy-runtime` ile yayınlayın. Hiçbir şey kapanmaz.
+1. Bekçi kodunu yayınlayın. Production'da varsayılan `enforce`'tur; registry belgesi önce adopt edilmeli (`escrow-registry-adopt.yml`, adım 2), yoksa backend `registry_missing` ile bloklu başlar. Geçici olarak engelsiz yayın için modu açıkça `warn` yazın.
 2. **Escrow Registry Adopt** workflow'unu (`escrow-registry-adopt.yml`) önce `dry_run=true` ile çalıştırıp çıktıyı okuyun, sonra `dry_run=false` ile tekrar çalıştırın. Canlı escrow'u (`ARAF_ESCROW_ADDRESS` / `ARAF_DEPLOYMENT_BLOCK` repo variable'ları, zincir 84532) `active` olarak yazar.
 3. Backend logunda `[EscrowRegistryGuard] UYUMSUZ` satırı yoksa ve `/ready` `escrowRegistry.ok: true` diyorsa zorlamayı açın: `flyctl secrets set ESCROW_REGISTRY_GUARD_MODE=enforce -a <app>`.
+
+**Durum: Base Sepolia'da enforce açık.** Kod varsayılanı production'da `enforce`, diğer ortamlarda `warn`'dır (yerel geliştirme etkilenmez); Base Sepolia workflow'ları modu kendileri ayarlar ve doğrular:
+- `stage-runtime-env.sh fly-secrets` (hem `deploy-base-sepolia.yml` hem `deploy-runtime-base-sepolia.yml` kullanır) her çalışmada `ESCROW_REGISTRY_GUARD_MODE=enforce` yazar; elle `flyctl secrets set` gerekmez.
+- `stage-runtime-env.sh guard-mode` canlı `/ready` içindeki `escrowRegistry.mode` değerini okur; `enforce` değilse (ya da okunamazsa) `::error::` ile job düşer. Çalıştığı yerler: Fly deploy sonrası health adımının ardından (iki deploy workflow'u), tam deploy'da rotasyondan (makineleri durdurma ve arşivleme) önce (registry ACTIVE yolu), `rotate-escrow.yml`'de uygulanan rotate/restore sonrası (kurtarma yolları önceden bloke edilmez). Mod, enforce görülene kadar yeniden denenir (rolling deploy'da eski makine geçici `warn` dönebilir).
+- Beklenen yan etki: enforce'ta registry ile uyumsuz her backend (`registry_missing`, `escrow_mismatch`, `chain_mismatch`, `rotating`, `registry_unreadable`) worker'sız ve escrow route'ları 503 ile açılır; süreç çıkmaz, `/health` 200 kalır, bekçi 60 sn'de bir yeniden bakar. İlk kurulumda registry Fly deploy'undan sonra yazılır (checkpoint sıfırlama ve `--adopt --apply`), bu yüzden backend bu arada engelli açılır ve registry yazıldıktan sonra en geç ~60 sn içinde kendiliğinden açılır. Registry'si hiç yazılmamış mevcut bir kurulumda `deploy-runtime` çalıştırmadan önce Escrow Registry Adopt çalıştırın; aksi halde backend engelli kalır.
 
 Tam kontrat deploy'u (`deploy-base-sepolia.yml`) registry'yi iki yoldan yazar: registry **hiç yoksa** (ilk kurulum) eski davranış sürer ("first install" adımları: checkpoint sıfırlama + `--adopt --apply`, ezilecek kayıt olmadığından `--force-switch` yok); registry **ACTIVE** ise escrow rotasyonu çalışır (bkz. 6.6b). Registry **ROTATING** ise deploy kontrat yayınlamadan durur; `--force-switch` ROTATING kaydını hiçbir koşulda ezmez. Runtime deploy escrow'u değiştirmez ve registry'ye yazmaz; `araf_escrow_address` override'ı registry'den farklıysa bekçi `escrow_mismatch` bildirir.
 
@@ -901,7 +923,8 @@ Script'leri `backend/` dizininden çalıştırın (`node scripts/migrations/<ad>
 | `normalizeIdentityFields.js` (`npm run migrate:identity`) | **yazar** | varsayılan dry-run; yazmak için `--apply` (`npm run migrate:identity:dry` = dry-run, `npm run migrate:identity` = `--apply`; `--dry-run` geriye dönük kabul, uyarı verir) | Legacy numeric `Order.onchain_order_id`, `Trade.onchain_escrow_id`, `Trade.parent_order_id` değerlerini kanonik string'e çevirir. |
 | `backfillTerminalTradeStats.js` | dry-run | `--apply` | Kalıcı `TerminalTradeStat` sayaçlarını mevcut terminal trade'lerden doldurur. Idempotent (`trade_key` üzerinde `$setOnInsert`). |
 | `backfillLastBanEndsAt.js` (`npm run migrate:last-ban-ends-at`; `:dry` = dry-run) | dry-run | `--apply` | `banned_until`'i daha önce null'lanmış kullanıcılar için `User.last_ban_ends_at` alanını zincirden (`getReputation().bannedUntil`) doldurur; ban affı işi bu kullanıcıları aday görsün diye. Idempotent, salt-okunur RPC (`BASE_RPC_URL`, `ARAF_ESCROW_ADDRESS`). |
-| `dedupeRevenueEvents.js` | dry-run | `--apply` | Eski worker'ın yazdığı mükerrer `RevenueEvent` satırlarını siler (aynı tx/token/amount/kind/trade için vault satırını tekrarlayan escrow satırı). Idempotent. |
+| `dedupeRevenueEvents.js` | dry-run | `--apply` (öneri: `--apply --backup=<dosya>`; silinecek belgeler önce JSON'a yazılır) | Eski worker'ın yazdığı mükerrer `RevenueEvent` satırlarını siler (aynı tx/token/amount/kind/trade için vault satırını tekrarlayan escrow satırı). Idempotent. |
+| `dropRedundantIndexes.js` | dry-run | `--apply` | B4-17: birleşik unique index'in öneki olan unique olmayan tekil index'leri (`tx_hash`, `epoch`, `date_-1`) canlı koleksiyonlardan düşürür. Unique index'i asla düşürmez; yalnız kapsayan unique index mevcutsa düşürür. Idempotent; backend deploy'undan sonra bir kez çalıştırılır. |
 
 Yükseltme için işlem sırası:
 1. Yeni backend'den **önce**: `npm run migrate:identity:dry`, numeric id raporlarsa ardından `npm run migrate:identity`. `IDENTITY_NORMALIZATION_GUARD` production'da varsayılan `enforce`'tur; legacy id varken backend başlamaz.
@@ -928,7 +951,7 @@ HKDF değişikliği sonrası PII'ın yeniden şifrelenmesi için repoda bir ara�
 - Concurrency `connections`, soft 80 / hard 100; VM `shared` 1 CPU, 512 MB.
 - Health check: `GET /health`, 30 sn'de bir, 15 sn grace period, 5 sn timeout; konteyner içinde HTTP (dışarıda `force_https = true`).
 - `/health`, worker'a bağlı **liveness** sinyalidir: `WORKER_LIVENESS_STALE_MS` boyunca blok görülmediyse `503 "stale"` döner; bağımsız olarak worker watchdog'u `WORKER_BLOCK_STALE_MS` sonra reconnect dener, bloklar hâlâ gelmiyorsa süreçten çıkar (platform yeniden başlatır). `/ready` (readiness) `fly.toml`'a bağlı değildir; deploy kapıları ve izleme için kullanın (tam ayrıntı `x-internal-token: $READY_INTERNAL_TOKEN` ile).
-- İmaj (`backend/Dockerfile`) `node:22-alpine`'dir, `npm ci --omit=dev` ile kurar, root olmayan `nodeapp` kullanıcısıyla çalışır ve `node scripts/app.js` başlatır.
+- İmaj (`backend/Dockerfile`) `node:22-alpine`'dir (index digest ile sabitlenmiştir; güncellemek için Docker Hub `library/node` `22-alpine` etiketinin yeni index digest'ini `FROM` satırına yazın), `npm ci --omit=dev` ile kurar, root olmayan `nodeapp` kullanıcısıyla çalışır ve `node scripts/app.js` başlatır.
 
 ---
 

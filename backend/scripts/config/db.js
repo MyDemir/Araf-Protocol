@@ -7,6 +7,13 @@ const logger = require("../utils/logger");
 let isConnected = false;
 let listenersAttached = false;
 let allowProcessExitOnDisconnect = true;
+let disconnectTimer = null;
+
+// [TR] B4-15: pozitif tamsayı env'i; geçersizse varsayılan.
+function _intEnv(name, def, min, max) {
+  const n = Number(process.env[name]);
+  return Number.isInteger(n) && n >= min && n <= max ? n : def;
+}
 
 /**
  * MongoDB bağlantısını kurar.
@@ -49,10 +56,12 @@ async function connectDB() {
   try {
     await mongoose.connect(uri, {
       // ALT-01: Worker + API trafiğini kaldıracak bağlantı havuzu
-      maxPoolSize: 100,
+      // B4-15: varsayılan 100 (değişmedi); makine sayısına göre MONGO_MAX_POOL_SIZE ile düşürülebilir.
+      maxPoolSize: _intEnv("MONGO_MAX_POOL_SIZE", 100, 1, 1000),
 
       // ALT-04: Proxy timeout altında socket timeout
-      socketTimeoutMS: 20_000,
+      // B4-15: varsayılan 20 sn (değişmedi); büyük aggregate'ler için MONGO_SOCKET_TIMEOUT_MS.
+      socketTimeoutMS: _intEnv("MONGO_SOCKET_TIMEOUT_MS", 20_000, 1_000, 600_000),
 
       // İlk MongoDB bağlantısı için maksimum bekleme
       serverSelectionTimeoutMS: 5_000,
@@ -77,25 +86,42 @@ async function connectDB() {
       });
 
       // ALT-05: Beklenmeyen bağlantı kopmasında Fail-Fast.
+      // B4-15: sürücü geçici kopmada kendiliğinden yeniden bağlanabilir; kısa bir süre tanınır,
+      // dolunca Fail-Fast aynen uygulanır (Fly süreci yeniden başlatır).
+      mongoose.connection.on("reconnected", () => {
+        if (disconnectTimer) {
+          clearTimeout(disconnectTimer);
+          disconnectTimer = null;
+          isConnected = true;
+          logger.info("[DB] MongoDB yeniden bağlandı; fail-fast iptal edildi.");
+        }
+      });
+
       mongoose.connection.on("disconnected", () => {
         isConnected = false;
 
-        if (allowProcessExitOnDisconnect) {
-          logger.error(
-            "[DB] MongoDB bağlantısı koptu — süreç sonlandırılıyor (Fail-Fast)."
-          );
-
-          logger.error(
-            "[DB] PM2 veya Docker/container orchestration süreci yeniden başlatmalı."
-          );
-
-          process.exit(1);
-        } else {
+        if (!allowProcessExitOnDisconnect) {
           logger.warn(
             "[DB] MongoDB disconnected during graceful shutdown; " +
             "fail-fast exit suppressed."
           );
+          return;
         }
+        if (disconnectTimer) return;
+
+        const graceMs = _intEnv("MONGO_DISCONNECT_GRACE_MS", 10_000, 0, 120_000);
+        logger.error(
+          `[DB] MongoDB bağlantısı koptu — ${graceMs} ms içinde dönmezse süreç sonlandırılacak (Fail-Fast).`
+        );
+        disconnectTimer = setTimeout(() => {
+          disconnectTimer = null;
+          if (!allowProcessExitOnDisconnect) return;
+          logger.error("[DB] MongoDB yeniden bağlanamadı — süreç sonlandırılıyor (Fail-Fast).");
+          logger.error(
+            "[DB] PM2 veya Docker/container orchestration süreci yeniden başlatmalı."
+          );
+          process.exit(1);
+        }, graceMs);
       });
 
       listenersAttached = true;

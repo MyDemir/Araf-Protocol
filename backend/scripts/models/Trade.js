@@ -366,6 +366,9 @@ tradeSchema.index({ maker_address: 1, created_at: -1 });
 tradeSchema.index({ taker_address: 1, status: 1 });
 // [TR] Alıcı-sahibi (BUY_CRYPTO) emirlerinde pazar güven özeti: taker başına en son trade.
 tradeSchema.index({ taker_address: 1, created_at: -1 });
+// [TR] B3-15: /history sıralaması (timers.resolved_at) için kullanıcı bazlı bileşik indeksler.
+tradeSchema.index({ maker_address: 1, "timers.resolved_at": -1 });
+tradeSchema.index({ taker_address: 1, "timers.resolved_at": -1 });
 tradeSchema.index({ trade_origin: 1, status: 1 });
 tradeSchema.index({ parent_order_side: 1, status: 1 });
 tradeSchema.index({ token_address: 1, status: 1 });

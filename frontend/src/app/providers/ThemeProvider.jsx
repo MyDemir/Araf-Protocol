@@ -1,3 +1,4 @@
+import { safeStorage } from '../safeStorage';
 import React from 'react';
 import { APP_THEME_STORAGE_KEY, getInitialThemeMode } from '../bootstrapState';
 
@@ -14,7 +15,7 @@ export const ThemeProvider = ({ children }) => {
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
-    window.localStorage.setItem(APP_THEME_STORAGE_KEY, themeMode);
+    safeStorage.set(APP_THEME_STORAGE_KEY, themeMode);
   }, [themeMode]);
 
   React.useEffect(() => {

@@ -81,6 +81,14 @@ export const buildGasIncludedMessage = (chainId, lang = readLang()) => {
     : `Your wallet tried to pay the network fee with a token (gas station); this network does not support it. Add ${eth} to your wallet and try again.`;
 };
 
+export const isWalletRequestPending = (error, rpcCode) =>
+  rpcCode === -32002 ||
+  causeChain(error).some((e) => /already pending|request already|resource unavailable/i.test(`${e.shortMessage || ''} ${e.message || ''} ${e.details || ''}`));
+
+export const buildWalletPendingMessage = (lang = readLang()) => (lang === 'TR'
+  ? 'Cüzdanınızda bekleyen bir istek var. Cüzdanı açıp önce onu onaylayın ya da reddedin, sonra tekrar deneyin.'
+  : 'Your wallet already has a pending request. Open the wallet, approve or reject it first, then try again.');
+
 export const extractRpcCode = (error) => {
   for (const e of causeChain(error)) {
     if (typeof e.code === 'number' && e.code !== 4001) return e.code;
@@ -124,6 +132,10 @@ export async function diagnoseWriteError({
   }
   if (isRpcLimit(error, base.rpcCode)) {
     return { ...base, kind: 'wallet-rpc-limit', message: buildWalletRpcMessage(chainId, lang) };
+  }
+  // [TR] F2-10: -32002 = cüzdanda zaten bekleyen istek var; RPC sorunu değil. Simülasyondan önce ayrı sınıf.
+  if (isWalletRequestPending(error, base.rpcCode)) {
+    return { ...base, kind: 'wallet-request-pending', message: buildWalletPendingMessage(lang) };
   }
   if (!publicClient?.simulateContract || !account) return base;
 

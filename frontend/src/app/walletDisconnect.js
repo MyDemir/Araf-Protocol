@@ -1,6 +1,10 @@
 // [TR] Cüzdan eklentisinin arka plan bağlantısı koptuğunda (OKX vb.) sayfa yenilemeden düzelmez.
 // [EN] When a wallet extension loses its background connection, only a page reload recovers it.
-const DISCONNECT_PATTERN = /page reload required|disconnected from .{0,60}background|extension context invalidated|connection closed/i;
+// [TR] F2-17: düz "connection closed" RPC/WS gibi ilgisiz hataları da yakalıyordu. Yalnız cüzdan eklentisi ifadeleri ve
+//      WalletConnect'in gerçek WS kopma mesajı ("WebSocket connection closed abnormally with code: ...",
+//      @walletconnect/jsonrpc-provider onClose) eşleşir.
+// [EN] F2-17: plain "connection closed" matched unrelated RPC/WS errors; only wallet-specific phrasings remain.
+const DISCONNECT_PATTERN = /page reload required|disconnected from .{0,60}background|extension context invalidated|websocket connection closed abnormally|walletconnect.{0,80}connection closed|connection closed.{0,80}walletconnect/i;
 
 export const WALLET_DISCONNECTED_KEY = 'wallet-provider-disconnected';
 

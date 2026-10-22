@@ -6,16 +6,26 @@ on:
     branches:
       - main
 
+# K4-08: test işleri yazma yetkisi gerektirmez.
+permissions:
+  contents: read
+
+# K4-18: aynı ref'te eski koşu iptal edilir.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backend:
     name: Backend tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -30,12 +40,13 @@ jobs:
   frontend:
     name: Frontend tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -52,12 +63,13 @@ jobs:
   contracts-abi-drift:
     name: Contracts ABI drift gate
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: contracts
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -68,5 +80,6 @@ jobs:
         run: npm run test:abi-drift
       - name: Lint contracts
         run: npm run lint
+      # K4-18: ABI drift kapısı yukarıda compile etti ve "ABI drift" testini koştu; burada yeniden compile edilmez.
       - name: Run contract tests
-        run: npm test
+        run: npx hardhat test --no-compile

@@ -3,12 +3,14 @@
 const express = require("express");
 const Joi = require("joi");
 
-const { requireAuth, requireSessionWalletMatch } = require("../middleware/auth");
+const { requireAuth: _requireAuth, requireSessionWalletMatch: _requireSessionWalletMatch } = require("../middleware/auth");
 const { adminReadLimiter, adminWriteLimiter } = require("../middleware/rateLimiter");
 const { getRedisClient } = require("../config/redis");
 const { getReadiness } = require("../services/health");
 const { getDlqMetrics } = require("../services/dlqProcessor");
 const worker = require("../services/eventListener");
+const { resolveClientIp } = require("../utils/clientIp");
+const logger = require("../utils/logger");
 const Trade = require("../models/Trade");
 const User = require("../models/User");
 const Feedback = require("../models/Feedback");
@@ -24,7 +26,11 @@ const runtimeSettings = require("../services/runtimeSettings");
 const socialLinks = require("../services/socialLinks");
 const { hmacDigest } = require("../services/encryption");
 
+const { asyncHandler } = require("../utils/asyncHandler");
 const router = express.Router();
+// [TR] B2-17: async auth middleware'leri de reddi next(err)'e iletecek şekilde sarılır.
+const requireAuth = asyncHandler(_requireAuth);
+const requireSessionWalletMatch = asyncHandler(_requireSessionWalletMatch);
 
 const TERMINAL_TRADE_STATUSES = ["RESOLVED", "CANCELED", "BURNED"];
 const DLQ_KEY = "worker:dlq";
@@ -33,16 +39,28 @@ const ADMIN_TRADES_ORIGIN_VALUES = ["ALL", "ORDER_CHILD", "DIRECT_ESCROW"];
 const ADMIN_TRADES_SNAPSHOT_VALUES = ["ALL", "true", "false"];
 const ADMIN_SETTLEMENT_STATE_VALUES = ["ALL", "PROPOSED", "EXPIRED", "FINALIZED", "REJECTED", "WITHDRAWN"];
 const ADMIN_TRADES_MAX_CANDIDATE_SCAN = 1000;
-const RESOLUTION_ANALYTICS_TYPES = [
-  "MANUAL_RELEASE",
-  "AUTO_RELEASE",
-  "PARTIAL_SETTLEMENT",
-  "MUTUAL_CANCEL",
-  "BURNED",
-  "DISPUTED_RESOLUTION",
-  "PAYMENT_WINDOW_EXPIRED",
-  "UNKNOWN",
-];
+// [TR] B3-09: /summary ve riskOnly için kısa ömürlü bellek önbelleği (yalnız başarılı sonuçlar; gözlem verisi en çok TTL kadar gecikir).
+// [EN] B3-09: short-TTL in-memory cache for /summary DB aggregates and riskOnly windows (successful results only).
+const ADMIN_READ_CACHE_TTL_MS = 10_000;
+const ADMIN_READ_CACHE_MAX_ENTRIES = 32;
+const _adminReadCache = new Map();
+
+function _adminCacheGet(key) {
+  const hit = _adminReadCache.get(key);
+  if (!hit) return undefined;
+  if (Date.now() - hit.at >= ADMIN_READ_CACHE_TTL_MS) {
+    _adminReadCache.delete(key);
+    return undefined;
+  }
+  return hit.value;
+}
+
+function _adminCacheSet(key, value) {
+  if (_adminReadCache.size >= ADMIN_READ_CACHE_MAX_ENTRIES) {
+    _adminReadCache.delete(_adminReadCache.keys().next().value);
+  }
+  _adminReadCache.set(key, { at: Date.now(), value });
+}
 
 const ADMIN_TRADE_PROJECTION = [
   "_id",
@@ -207,14 +225,14 @@ function _toProposalAgeSeconds(proposedAt, now = new Date()) {
 router.use(requireAuth, requireSessionWalletMatch, requireAdminWallet);
 router.use(adminReadLimiter);
 
-router.get("/revenue", async (_req, res, next) => {
+router.get("/revenue", asyncHandler(async (_req, res, next) => {
   try {
     const rows = await RevenueEvent.find().sort({ block_number: -1, log_index: -1 }).limit(500).lean();
     return res.json({ rows });
   } catch (err) { return next(err); }
-});
+}));
 
-router.get("/rewards/health", async (_req, res, next) => {
+router.get("/rewards/health", asyncHandler(async (_req, res, next) => {
   try {
     const [epochs, funding, claims] = await Promise.all([
       RewardEpoch.countDocuments(),
@@ -223,9 +241,9 @@ router.get("/rewards/health", async (_req, res, next) => {
     ]);
     return res.json({ mirror_only: true, counts: { epochs, funding, claims } });
   } catch (err) { return next(err); }
-});
+}));
 
-router.get("/summary", async (req, res, next) => {
+router.get("/summary", asyncHandler(async (req, res, next) => {
   try {
     const degraded = {
       isDegraded: false,
@@ -242,9 +260,10 @@ router.get("/summary", async (req, res, next) => {
       readiness = await getReadiness({ worker, provider: worker.provider });
     } catch (err) {
       degraded.isDegraded = true;
+      logger.warn(`[Admin] summary kaynağı başarısız: readiness: ${err.message}`);
       degraded.errors.push({
         source: "readiness",
-        message: err.message,
+        message: "readiness_unavailable",
       });
       readiness = {
         ok: false,
@@ -259,9 +278,10 @@ router.get("/summary", async (req, res, next) => {
     } catch (err) {
       degraded.isDegraded = true;
       degraded.sources.latestStatFallbackUsed = true;
+      logger.warn(`[Admin] summary kaynağı başarısız: latest_stat: ${err.message}`);
       degraded.errors.push({
         source: "latest_stat",
-        message: err.message,
+        message: "latest_stat_unavailable",
       });
       latestStat = null;
     }
@@ -269,23 +289,30 @@ router.get("/summary", async (req, res, next) => {
     const activeFilter = { status: { $nin: TERMINAL_TRADE_STATUSES } };
     let tradeCounts = [0, 0, 0, 0, 0];
     try {
-      const countResults = await Promise.allSettled([
-        Trade.countDocuments(activeFilter),
-        Trade.countDocuments({ status: "LOCKED" }),
-        Trade.countDocuments({ status: "PAID" }),
-        Trade.countDocuments({ status: "CHALLENGED" }),
-        Trade.countDocuments({ "payout_snapshot.is_complete": false }),
-      ]);
+      const cachedCounts = _adminCacheGet("summary:tradeCounts");
+      if (cachedCounts) {
+        tradeCounts = cachedCounts;
+      } else {
+        const countResults = await Promise.allSettled([
+          Trade.countDocuments(activeFilter),
+          Trade.countDocuments({ status: "LOCKED" }),
+          Trade.countDocuments({ status: "PAID" }),
+          Trade.countDocuments({ status: "CHALLENGED" }),
+          Trade.countDocuments({ "payout_snapshot.is_complete": false }),
+        ]);
 
-      const rejectedCount = countResults.find((result) => result.status === "rejected");
-      if (rejectedCount) throw rejectedCount.reason;
-      tradeCounts = countResults.map((result) => Number(result.value) || 0);
+        const rejectedCount = countResults.find((result) => result.status === "rejected");
+        if (rejectedCount) throw rejectedCount.reason;
+        tradeCounts = countResults.map((result) => Number(result.value) || 0);
+        _adminCacheSet("summary:tradeCounts", tradeCounts);
+      }
     } catch (err) {
       degraded.isDegraded = true;
       degraded.sources.tradeCountsFallbackUsed = true;
+      logger.warn(`[Admin] summary kaynağı başarısız: trade_counts: ${err.message}`);
       degraded.errors.push({
         source: "trade_counts",
-        message: err.message,
+        message: "trade_counts_unavailable",
       });
     }
 
@@ -295,9 +322,10 @@ router.get("/summary", async (req, res, next) => {
     } catch (err) {
       degraded.isDegraded = true;
       degraded.sources.dlqDepthFallbackUsed = true;
+      logger.warn(`[Admin] summary kaynağı başarısız: dlq_depth: ${err.message}`);
       degraded.errors.push({
         source: "dlq_depth",
-        message: err.message,
+        message: "dlq_depth_unavailable",
       });
     }
 
@@ -309,19 +337,32 @@ router.get("/summary", async (req, res, next) => {
       avgSettlementSplitMakerBps: null,
       settlementFinalizationRate: null,
     };
+    let settlementSplitFailed = false;
     try {
+      const cachedSettlement = _adminCacheGet("summary:settlement");
+      if (cachedSettlement) {
+        settlementAnalytics = cachedSettlement;
+      } else {
       const now = new Date();
       const finalized24hStart = new Date(now.getTime() - 24 * 3600 * 1000);
       const proposalStateFilter = { "settlement_proposal.state": { $in: ADMIN_SETTLEMENT_STATE_VALUES.filter((v) => v !== "ALL") } };
       const settlementSplitRowsPromise = Promise.resolve().then(() =>
-        Trade.find({
-          "settlement_proposal.state": "FINALIZED",
-          "settlement_proposal.maker_share_bps": { $gte: 0, $lte: 10_000 },
-        })
-          .select("settlement_proposal.maker_share_bps")
-          .limit(5000)
-          .lean()
-      );
+        // [TR] B3-08: ortalama sunucuda, tüm FINALIZED kayıtlar üzerinden hesaplanır (eski: sırasız ilk 5000).
+        Trade.aggregate([
+          { $match: {
+            "settlement_proposal.state": "FINALIZED",
+            "settlement_proposal.maker_share_bps": { $gte: 0, $lte: 10_000 },
+          } },
+          { $group: { _id: null, avg: { $avg: "$settlement_proposal.maker_share_bps" }, n: { $sum: 1 } } },
+        ])
+      ).catch((splitErr) => {
+        // [TR] Ortalama başarısız olsa bile diğer yerleşim sayaçları korunur; yalnız bu kaynak degraded işaretlenir.
+        logger.warn(`[Admin] summary kaynağı başarısız: settlement_split_avg: ${splitErr.message}`);
+        degraded.isDegraded = true;
+        degraded.errors.push({ source: "settlement_split_avg", message: "settlement_split_avg_unavailable" });
+        settlementSplitFailed = true;
+        return null;
+      });
 
       const settlementResults = await Promise.allSettled([
         Trade.countDocuments({
@@ -345,16 +386,11 @@ router.get("/summary", async (req, res, next) => {
       const expiredSettlementProposals = Number(settlementResults[1].value) || 0;
       const finalizedSettlementProposals24h = Number(settlementResults[2].value) || 0;
       const finalizedSettlementProposalsTotal = Number(settlementResults[3].value) || 0;
-      const settlementSplitRows = Array.isArray(settlementResults[4].value) ? settlementResults[4].value : [];
+      const splitAgg = Array.isArray(settlementResults[4].value) ? settlementResults[4].value[0] : null;
       const settlementProposalTotal = Number(settlementResults[5].value) || 0;
 
-      const safeMakerSplitValues = settlementSplitRows
-        .map((row) => Number(row?.settlement_proposal?.maker_share_bps))
-        .filter((n) => Number.isInteger(n) && n >= 0 && n <= 10_000);
-      const avgSettlementSplitMakerBps = safeMakerSplitValues.length > 0
-        ? Number(
-            (safeMakerSplitValues.reduce((acc, n) => acc + n, 0) / safeMakerSplitValues.length).toFixed(2)
-          )
+      const avgSettlementSplitMakerBps = splitAgg && Number(splitAgg.n) > 0 && Number.isFinite(Number(splitAgg.avg))
+        ? Number(Number(splitAgg.avg).toFixed(2))
         : null;
       const settlementFinalizationRate = settlementProposalTotal > 0
         ? Number((finalizedSettlementProposalsTotal / settlementProposalTotal).toFixed(4))
@@ -367,11 +403,14 @@ router.get("/summary", async (req, res, next) => {
         avgSettlementSplitMakerBps,
         settlementFinalizationRate,
       };
+      if (!settlementSplitFailed) _adminCacheSet("summary:settlement", settlementAnalytics);
+      }
     } catch (err) {
       degraded.isDegraded = true;
+      logger.warn(`[Admin] summary kaynağı başarısız: settlement_analytics: ${err.message}`);
       degraded.errors.push({
         source: "settlement_analytics",
-        message: err.message,
+        message: "settlement_analytics_unavailable",
       });
     }
 
@@ -386,41 +425,38 @@ router.get("/summary", async (req, res, next) => {
       unknownResolvedCount: 0,
     };
     try {
-      const exactResolutionTypes = RESOLUTION_ANALYTICS_TYPES.filter((resolutionType) => resolutionType !== "UNKNOWN");
-      const exactResolutionCounts = await Promise.all(
-        exactResolutionTypes.map((resolutionType) =>
-          Trade.countDocuments({
-            resolution_type: resolutionType,
-            status: { $in: TERMINAL_TRADE_STATUSES },
-          })
-        )
-      );
-      const unknownResolvedCount = await Trade.countDocuments({
-        status: { $in: TERMINAL_TRADE_STATUSES },
-        $or: [
-          { resolution_type: "UNKNOWN" },
-          { resolution_type: null },
-          { resolution_type: { $exists: false } },
-        ],
-      });
+      const cachedResolution = _adminCacheGet("summary:resolution");
+      if (cachedResolution) {
+        resolutionAnalytics = cachedResolution;
+      } else {
+        // [TR] B3-09: 8 ayrı countDocuments yerine tek aggregate ($group). UNKNOWN = "UNKNOWN" + null + alan yok.
+        const rows = await Trade.aggregate([
+          { $match: { status: { $in: TERMINAL_TRADE_STATUSES } } },
+          { $group: { _id: { $ifNull: ["$resolution_type", "UNKNOWN"] }, n: { $sum: 1 } } },
+        ]);
+        const byType = new Map((Array.isArray(rows) ? rows : []).map((row) => [row?._id, Number(row?.n) || 0]));
+        const countOf = (type) => byType.get(type) || 0;
 
-      resolutionAnalytics = {
-        manualReleaseCount: Number(exactResolutionCounts[0]) || 0,
-        autoReleaseCount: Number(exactResolutionCounts[1]) || 0,
-        partialSettlementCount: Number(exactResolutionCounts[2]) || 0,
-        mutualCancelCount: Number(exactResolutionCounts[3]) || 0,
-        burnedCount: Number(exactResolutionCounts[4]) || 0,
-        disputedResolutionCount: Number(exactResolutionCounts[5]) || 0,
-        // [TR] Kontrat TerminalOutcome.PAYMENT_WINDOW_EXPIRED (48s içinde ödeme bildirilmedi). Sayılıyordu ama yanıta konmuyordu.
-        // [EN] Contract PAYMENT_WINDOW_EXPIRED outcome; it was counted but never returned.
-        paymentWindowExpiredCount: Number(exactResolutionCounts[6]) || 0,
-        unknownResolvedCount: Number(unknownResolvedCount) || 0,
-      };
+        resolutionAnalytics = {
+          manualReleaseCount: countOf("MANUAL_RELEASE"),
+          autoReleaseCount: countOf("AUTO_RELEASE"),
+          partialSettlementCount: countOf("PARTIAL_SETTLEMENT"),
+          mutualCancelCount: countOf("MUTUAL_CANCEL"),
+          burnedCount: countOf("BURNED"),
+          disputedResolutionCount: countOf("DISPUTED_RESOLUTION"),
+          // [TR] Kontrat TerminalOutcome.PAYMENT_WINDOW_EXPIRED (48s içinde ödeme bildirilmedi).
+          // [EN] Contract PAYMENT_WINDOW_EXPIRED outcome.
+          paymentWindowExpiredCount: countOf("PAYMENT_WINDOW_EXPIRED"),
+          unknownResolvedCount: countOf("UNKNOWN"),
+        };
+        _adminCacheSet("summary:resolution", resolutionAnalytics);
+      }
     } catch (err) {
       degraded.isDegraded = true;
+      logger.warn(`[Admin] summary kaynağı başarısız: resolution_analytics: ${err.message}`);
       degraded.errors.push({
         source: "resolution_analytics",
-        message: err.message,
+        message: "resolution_analytics_unavailable",
       });
     }
 
@@ -472,9 +508,9 @@ router.get("/summary", async (req, res, next) => {
   } catch (err) {
     return next(err);
   }
-});
+}));
 
-router.get("/feedback", async (req, res, next) => {
+router.get("/feedback", asyncHandler(async (req, res, next) => {
   try {
     const schema = Joi.object({
       category: Joi.string().valid("bug", "suggestion", "ui/ux", "other").optional(),
@@ -510,9 +546,9 @@ router.get("/feedback", async (req, res, next) => {
   } catch (err) {
     return next(err);
   }
-});
+}));
 
-router.get("/trades", async (req, res, next) => {
+router.get("/trades", asyncHandler(async (req, res, next) => {
   try {
     const schema = Joi.object({
       status: Joi.string().valid(...ADMIN_TRADES_STATUS_VALUES).default("CHALLENGED"),
@@ -566,15 +602,21 @@ router.get("/trades", async (req, res, next) => {
 
     // [TR] riskOnly modu enrichment tabanlı olduğu için bounded pencereyi açıkça işaretleriz.
     // [EN] riskOnly mode is enrichment-driven; response explicitly signals bounded-window semantics.
-    const candidateTrades = await Trade.find(filter)
-      .select(ADMIN_TRADE_PROJECTION)
-      .sort({ created_at: -1, _id: -1 })
-      .limit(ADMIN_TRADES_MAX_CANDIDATE_SCAN)
-      .lean();
+    // [TR] B3-09: sıralı risk penceresi kısa süre önbelleğe alınır (her sayfa isteğinde 1000 trade + User taraması tekrarlanmaz).
+    const riskCacheKey = `trades:riskOnly:${JSON.stringify(filter)}`;
+    let sorted = _adminCacheGet(riskCacheKey);
+    if (!sorted) {
+      const candidateTrades = await Trade.find(filter)
+        .select(ADMIN_TRADE_PROJECTION)
+        .sort({ created_at: -1, _id: -1 })
+        .limit(ADMIN_TRADES_MAX_CANDIDATE_SCAN)
+        .lean();
 
-    const enriched = await _attachAdminTradeRisk(candidateTrades);
-    const highRiskOnly = enriched.filter((trade) => trade?.bank_profile_risk?.highRiskBankProfile === true);
-    const sorted = _sortAdminTradesDeterministic(highRiskOnly);
+      const enriched = await _attachAdminTradeRisk(candidateTrades);
+      const highRiskOnly = enriched.filter((trade) => trade?.bank_profile_risk?.highRiskBankProfile === true);
+      sorted = _sortAdminTradesDeterministic(highRiskOnly);
+      _adminCacheSet(riskCacheKey, sorted);
+    }
 
     return res.json({
       trades: sorted.slice(skip, skip + value.limit),
@@ -592,9 +634,9 @@ router.get("/trades", async (req, res, next) => {
   } catch (err) {
     return next(err);
   }
-});
+}));
 
-router.get("/settlement-proposals", async (req, res, next) => {
+router.get("/settlement-proposals", asyncHandler(async (req, res, next) => {
   try {
     // [TR] Bu endpoint settlement authority üretmez; yalnız mirror/read-model gözlem verisi döner.
     // [EN] This endpoint never determines settlement outcomes; it returns mirror/read-model observability only.
@@ -692,7 +734,7 @@ router.get("/settlement-proposals", async (req, res, next) => {
   } catch (err) {
     return next(err);
   }
-});
+}));
 
 // ─── Ödeme yöntemleri (rail) yönetimi ────────────────────────────────────────
 // [TR] Admin yazma yolu. Zincir (router.use): requireAuth (cookie JWT, SameSite=Lax) →
@@ -709,15 +751,15 @@ const AUDIT_QUERY_SCHEMA = Joi.object({
   limit: Joi.number().integer().min(1).max(100).default(20),
 });
 
-router.get("/payment-rails", async (_req, res, next) => {
+router.get("/payment-rails", asyncHandler(async (_req, res, next) => {
   try {
     return res.json({ rails: await paymentRails.listRails() });
   } catch (err) {
     return next(err);
   }
-});
+}));
 
-router.get("/payment-rails/audit", async (req, res, next) => {
+router.get("/payment-rails/audit", asyncHandler(async (req, res, next) => {
   try {
     const { error, value } = AUDIT_QUERY_SCHEMA.validate(req.query || {});
     if (error) return res.status(400).json({ error: error.message });
@@ -725,9 +767,9 @@ router.get("/payment-rails/audit", async (req, res, next) => {
   } catch (err) {
     return next(err);
   }
-});
+}));
 
-router.put("/payment-rails/:rail", adminWriteLimiter, async (req, res, next) => {
+router.put("/payment-rails/:rail", adminWriteLimiter, asyncHandler(async (req, res, next) => {
   try {
     const rail = String(req.params.rail || "").toUpperCase();
     if (!paymentRails.isKnownRail(rail)) {
@@ -736,7 +778,7 @@ router.put("/payment-rails/:rail", adminWriteLimiter, async (req, res, next) => 
     const { error, value } = RAIL_PUT_SCHEMA.validate(req.body);
     if (error) return res.status(400).json({ error: error.message });
 
-    const ipHash = await hmacDigest("admin-audit-ip", req.ip || "");
+    const ipHash = await hmacDigest("admin-audit-ip", resolveClientIp(req) || "");
     const result = await paymentRails.setRailEnabled(rail, value.enabled, {
       wallet: req.wallet,
       reason: value.reason || "",
@@ -758,7 +800,7 @@ router.put("/payment-rails/:rail", adminWriteLimiter, async (req, res, next) => 
     }
     return next(err);
   }
-});
+}));
 
 // ─── Çalışma ayarları (runtime settings) ─────────────────────────────────────
 // [TR] Aynı yetki zinciri (router.use) + adminWriteLimiter. Yalnız performans/operasyon ayarları; RPC URL'leri,
@@ -771,16 +813,16 @@ const SETTING_PUT_SCHEMA = Joi.object({
   expectedVersion: Joi.number().integer().min(0).strict().optional(),
 }).xor("value", "reset").required();
 
-router.get("/runtime-settings", async (_req, res, next) => {
+router.get("/runtime-settings", asyncHandler(async (_req, res, next) => {
   try {
     const { settings, version, degraded } = await runtimeSettings.getEffectiveSettings();
     return res.json({ settings: runtimeSettings.SETTING_KEYS.map((k) => settings[k]), version, degraded });
   } catch (err) {
     return next(err);
   }
-});
+}));
 
-router.get("/runtime-settings/audit", async (req, res, next) => {
+router.get("/runtime-settings/audit", asyncHandler(async (req, res, next) => {
   try {
     const { error, value } = AUDIT_QUERY_SCHEMA.validate(req.query || {});
     if (error) return res.status(400).json({ error: error.message });
@@ -788,9 +830,9 @@ router.get("/runtime-settings/audit", async (req, res, next) => {
   } catch (err) {
     return next(err);
   }
-});
+}));
 
-router.put("/runtime-settings/:key", adminWriteLimiter, async (req, res, next) => {
+router.put("/runtime-settings/:key", adminWriteLimiter, asyncHandler(async (req, res, next) => {
   try {
     const key = String(req.params.key || "");
     if (!runtimeSettings.isKnownSetting(key)) {
@@ -804,7 +846,7 @@ router.put("/runtime-settings/:key", adminWriteLimiter, async (req, res, next) =
       return res.status(400).json({ error: `Değer ${d.min}-${d.max} aralığında olmalı.`, code: "RUNTIME_SETTING_OUT_OF_RANGE" });
     }
 
-    const ipHash = await hmacDigest("admin-audit-ip", req.ip || "");
+    const ipHash = await hmacDigest("admin-audit-ip", resolveClientIp(req) || "");
     const result = await runtimeSettings.setSetting(key, nextValue, {
       wallet: req.wallet,
       reason: value.reason || "",
@@ -830,7 +872,7 @@ router.put("/runtime-settings/:key", adminWriteLimiter, async (req, res, next) =
     }
     return next(err);
   }
-});
+}));
 
 // ─── Footer sosyal linkleri ──────────────────────────────────────────────────
 // [TR] Aynı yetki zinciri (router.use) + adminWriteLimiter. Doğrulama sunucuda tek kaynak (utils/socialLinks.js):
@@ -842,16 +884,16 @@ const SOCIAL_LINKS_PUT_SCHEMA = Joi.object({
   reason: Joi.string().trim().max(300).allow("").optional(),
 }).required();
 
-router.get("/social-links", async (_req, res, next) => {
+router.get("/social-links", asyncHandler(async (_req, res, next) => {
   try {
     return res.json(await socialLinks.getAdminState());
   } catch (err) {
     if (err.code === "DB_UNAVAILABLE") return res.status(503).json({ error: err.message, code: "DB_UNAVAILABLE" });
     return next(err);
   }
-});
+}));
 
-router.get("/social-links/audit", async (req, res, next) => {
+router.get("/social-links/audit", asyncHandler(async (req, res, next) => {
   try {
     const { error, value } = AUDIT_QUERY_SCHEMA.validate(req.query || {});
     if (error) return res.status(400).json({ error: error.message });
@@ -859,13 +901,13 @@ router.get("/social-links/audit", async (req, res, next) => {
   } catch (err) {
     return next(err);
   }
-});
+}));
 
-router.put("/social-links", adminWriteLimiter, async (req, res, next) => {
+router.put("/social-links", adminWriteLimiter, asyncHandler(async (req, res, next) => {
   try {
     const { error, value } = SOCIAL_LINKS_PUT_SCHEMA.validate(req.body);
     if (error) return res.status(400).json({ error: error.message, code: "SOCIAL_LINKS_INVALID" });
-    const ipHash = await hmacDigest("admin-audit-ip", req.ip || "");
+    const ipHash = await hmacDigest("admin-audit-ip", resolveClientIp(req) || "");
     const result = await socialLinks.replaceLinks(value.links, {
       wallet: req.wallet,
       reason: value.reason || "",
@@ -880,6 +922,6 @@ router.put("/social-links", adminWriteLimiter, async (req, res, next) => {
     if (err.code === "SOCIAL_LINKS_AUDIT_FAILED") return res.status(500).json({ error: err.message, code: "SOCIAL_LINKS_AUDIT_FAILED" });
     return next(err);
   }
-});
+}));
 
 module.exports = router;

@@ -7,7 +7,9 @@ describe('isWalletProviderDisconnectedError', () => {
   });
   it('matches other extension phrasings', () => {
     expect(isWalletProviderDisconnectedError(new Error('Extension context invalidated.'))).toBe(true);
-    expect(isWalletProviderDisconnectedError(new Error('Connection closed'))).toBe(true);
+    expect(isWalletProviderDisconnectedError(new Error('WebSocket connection closed abnormally with code: 3000'))).toBe(true);
+    // F2-17: duz "Connection closed" artik eslesmez (ilgisiz RPC/WS hatalari)
+    expect(isWalletProviderDisconnectedError(new Error('Connection closed'))).toBe(false);
   });
   it('finds the message in cause and nested errors', () => {
     expect(isWalletProviderDisconnectedError(new Error('x', { cause: new Error('Page reload required') }))).toBe(true);

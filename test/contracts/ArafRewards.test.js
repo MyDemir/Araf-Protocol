@@ -70,8 +70,10 @@ describe("ArafRewards global epoch weight accounting", function () {
       taker,
       token: "0x0000000000000000000000000000000000000001",
       stableNotional,
-      takerFeePaid: 0,
-      makerFeePaid: 0,
+      // [TR] K3-02: ücret ödeyen taraf ağırlık alır; fixture iki tarafı da ücretli kabul eder.
+      // [EN] K3-02: only a fee-paying side is weighted; the fixture treats both sides as fee-paying.
+      takerFeePaid: 1,
+      makerFeePaid: 1,
       tier,
       outcome,
       lockedAt: paidAt > 0 ? shift(paidAt) - 60 : 0,
