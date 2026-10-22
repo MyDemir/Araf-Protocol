@@ -1,9 +1,20 @@
 {
-  "rewrites": [
+  "routes": [
     {
-      "source": "/api/(.*)",
-      "destination": "https://araf-protocol-backend.fly.dev/api/$1"
-    },
+      "src": "/api/(.*)",
+      "dest": "https://araf-protocol-backend.fly.dev/api/$1",
+      "transforms": [
+        {
+          "type": "request.headers",
+          "op": "set",
+          "target": { "key": "x-araf-origin-secret" },
+          "args": "$ORIGIN_SHARED_SECRET",
+          "env": ["ORIGIN_SHARED_SECRET"]
+        }
+      ]
+    }
+  ],
+  "rewrites": [
     {
       "source": "/((?!\\.well-known/farcaster\\.json).*)",
       "destination": "/index.html"
