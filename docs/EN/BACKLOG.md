@@ -15,12 +15,12 @@ These were deliberately deferred after the K2(B) "ping lapses" rule. Each item: 
    Abuse closed: Inflating reputation with tiny trades, then blackmailing large amounts with a low bond.
 
 3. **Partial settlement raises the success count; risk score resets cheaply.**
-   Problem: A few cheap clean trades zero out the risk score, and a dispute outcome earns reputation.
+   Problem: A few cheap clean releases cut the risk score (8 points each); a partial settlement gives no points but still adds +1 to the success count for a qualifying trade (at least 20 USD). The `decayReputation` forgiveness now also waits the clean period (default 90 days) after the last negative event, not only after the ban ends; the clean-release path is not subject to that wait.
    Proposal: A dispute outcome must not earn reputation; the risk score must not drop until 30 days after the last negative event.
    Abuse closed: Farming reputation through disputes and quickly washing a bad history.
 
 4. **A lapsed ping is free; penalties go to the treasury, not the victim.**
-   Problem: A lapsed ping gives the maker a free +48h brake. An honest taker pays 2% of their own bond on autoRelease.
+   Problem: A lapsed ping gives the maker a free +48h brake. An honest taker pays 2% of their own bond (at least the release fee) on autoRelease, and that cut goes to the treasury. Exception: the payment-window penalty now goes to the maker whose inventory was locked (K1-03, user decision).
    Proposal: A release after a lapsed ping must not count as clean; pay penalties to the victim; do not charge the honest taker the autoRelease penalty.
    Abuse closed: Pinging then going silent to stall the counterparty; penalizing the honest side.
 
@@ -35,7 +35,7 @@ These were deliberately deferred after the K2(B) "ping lapses" rule. Each item: 
    Abuse closed: Taking the fiat, then challenging to extort a settlement.
 
 7. **Decision note: burned/decayed amounts go to the treasury.**
-   Problem: The protocol earns revenue from disputes; whether this is intentional needs an explicit decision.
+   Problem: The protocol earns revenue from disputes; whether this is intentional needs an explicit decision. Today burnExpired and the autoRelease cut go to the treasury; only the payment-window penalty goes to the maker (K1-03).
    Proposal: The product owner decides and documents it (alternative: pay the victim, see item 4).
    Abuse closed: The perception of a conflict of interest (a protocol that profits from disputes).
 
@@ -45,6 +45,6 @@ These were deliberately deferred after the K2(B) "ping lapses" rule. Each item: 
    Abuse closed: Triggering the burn right before an acceptance to break a settlement.
 
 9. **Profile lock reads the Trade mirror.**
-   Problem: In the short window between the on-chain lock and the mirror write, the profile can still be written (the snapshot is fixed at first capture; low risk).
+   Problem: In the short window between the on-chain lock and the mirror write, the profile can still be written. The worker now takes the snapshot only when both profiles are provably unchanged since before the lock (with a safety margin); otherwise it skips the snapshot and marks it missing (B1-01). Remaining risk is low.
    Proposal: Also check the on-chain trade state in the lock check, or close the mirroring delay.
    Abuse closed: Changing the payment profile at lock time to influence the snapshot.

@@ -12,6 +12,8 @@
 6. A tag containing `-` (for example `v3.1.0-rc1`) is published as a pre-release.
 7. If the tag cannot be pushed, run `gh workflow run release.yml -f tag=vX.Y.Z` on `main`: it creates the tag and the
    release together at the dispatched commit.
+8. The workflow first checks that the `CI` workflow (`ci.yml`) has a successful run for the same commit and refuses to
+   publish otherwise (K4-08). The tag must look like `vX.Y.Z` or `vX.Y.Z-suffix`.
 
 ## Sürüm nasıl çıkarılır (TR)
 
@@ -25,3 +27,5 @@
 6. İçinde `-` olan etiketler (örn. `v3.1.0-rc1`) pre-release olur.
 7. Etiket push edilemiyorsa `main`'de `gh workflow run release.yml -f tag=vX.Y.Z` çalıştır: etiketi ve release'i
    dispatch edilen commit'te birlikte oluşturur.
+8. Workflow önce aynı commit için `CI` workflow'unun (`ci.yml`) başarılı bir koşusu olup olmadığına bakar; yoksa
+   yayın yapmaz (K4-08). Etiket `vX.Y.Z` ya da `vX.Y.Z-ek` biçiminde olmalıdır.

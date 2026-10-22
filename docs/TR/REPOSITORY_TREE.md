@@ -6,59 +6,71 @@
 
 ```text
 Araf-Protocol/
-├── .github/workflows/
-│   ├── ci.yml
-│   ├── deploy-base-sepolia.yml           # kontrat + Fly + opsiyonel Vercel (workflow_dispatch)
-│   └── deploy-runtime-base-sepolia.yml   # kontratı yeniden deploy etmeden backend/frontend deploy
+├── .github/
+│   ├── workflows/
+│   │   ├── ci.yml
+│   │   ├── deploy-base-sepolia.yml                 # kontrat + Fly + opsiyonel Vercel (workflow_dispatch)
+│   │   ├── deploy-runtime-base-sepolia.yml         # kontratı yeniden deploy etmeden backend/frontend deploy
+│   │   ├── escrow-registry-adopt.yml               # mevcut escrow'u Mongo escrow_registry'ye yazar (varsayılan dry-run)
+│   │   ├── rotate-escrow.yml                       # escrow rotasyonu/arşiv geri yükleme (precheck, rotate, restore)
+│   │   └── release.yml                             # v* etiketinden GitHub release (docs/releases/<etiket>.md)
+│   ├── scripts/                                    # workflow yardımcıları (stage-runtime-env, rotate-escrow, escrow-registry, ...)
+│   └── CODEOWNERS                                  # .github, contracts/src ve encryption.js için zorunlu inceleme
 ├── backend/
 │   ├── scripts/
-│   │   ├── app.js                        # Express uygulama girişi
-│   │   ├── config/                       # db, redis, terms, paymentRailRiskConfig
-│   │   ├── jobs/                         # zamanlanmış işler (itibar çürümesi, ödül sonucu kaydı, istatistik, temizlik)
-│   │   ├── middleware/                   # auth, errorHandler, rateLimiter
-│   │   ├── migrations/                   # elle çalıştırılan tek seferlik migration'lar
-│   │   ├── models/                       # Mongoose modelleri
-│   │   ├── routes/                       # REST route'ları
-│   │   ├── services/                     # eventListener, dlqProcessor, encryption, siwe, ...
+│   │   ├── app.js                                  # Express uygulama girişi
+│   │   ├── config/                                 # db, redis, terms, paymentRailRiskConfig, runtimeSettingDefs
+│   │   ├── jobs/                                   # zamanlanmış işler (itibar çürümesi, ödül sonucu kaydı, istatistik, temizlik, arşiv saklama)
+│   │   ├── middleware/                             # auth, errorHandler, rateLimiter, requireFullService
+│   │   ├── migrations/                             # elle çalıştırılan tek seferlik migration'lar
+│   │   ├── models/                                 # Mongoose modelleri
+│   │   ├── routes/                                 # REST route'ları
+│   │   ├── services/                               # eventListener, dlqProcessor, encryption, siwe, escrowRegistryGuard, health, rpcProvider, ...
 │   │   └── utils/
 │   ├── Dockerfile
+│   ├── .dockerignore
 │   ├── fly.toml
+│   ├── eslint.config.js
 │   ├── jest.config.cjs
 │   └── .env.example
 ├── contracts/
 │   ├── src/
-│   │   ├── ArafEscrow.sol                # çekirdek escrow, iki library'ye linklenir
+│   │   ├── ArafEscrow.sol                          # çekirdek escrow, iki library'ye linklenir
 │   │   ├── ArafReputationLib.sol
 │   │   ├── ArafSettlementLib.sol
 │   │   ├── ArafErrors.sol
 │   │   ├── ArafRevenueVault.sol
 │   │   ├── ArafRewards.sol
-│   │   └── Mock*.sol                     # yalnız test mock'ları
-│   ├── scripts/                          # deploy, deployRewards, rewardsOps, smokeRewards, gasBaseline, checkAbiDrift
+│   │   └── Mock*.sol                               # yalnız test mock'ları
+│   ├── scripts/                                    # deploy, deployRewards, deployTestToken, verify, rewardsOps, smokeRewards, gasBaseline, checkAbiDrift, lib/
 │   ├── hardhat.config.js
 │   └── .env.example
 ├── frontend/
 │   ├── src/
 │   │   ├── main.jsx, App.jsx, AdminPanel.jsx
-│   │   ├── app/                          # actions, contexts, copy, providers, shell, config modülleri
+│   │   ├── app/                                    # actions, contexts, copy, providers, shell, config modülleri
 │   │   ├── components/
-│   │   └── hooks/                        # useArafContract, usePII, useRewardsContract
+│   │   └── hooks/                                  # useArafContract, usePII, useRewardsContract, useTokenBalances, useOwnerWalletAge
+│   ├── scripts/run-vitest.js
+│   ├── build/                                      # Vite eklentisi (miniappMeta.js)
 │   ├── vite.config.js
 │   ├── vercel.json
 │   └── .env.example
 ├── test/
-│   ├── backend/                          # jest
-│   ├── contracts/                        # hardhat
-│   ├── frontend/                         # vitest
-│   └── ui-lab/                           # UI Lab fixture/mock'ları (yalnız dev / VITE_ENABLE_UI_LAB)
-├── scripts/init-env.js                   # yerel .env dosyalarını üretir
+│   ├── backend/                                    # jest
+│   ├── contracts/                                  # hardhat
+│   ├── frontend/                                   # vitest
+│   └── ui-lab/                                     # UI Lab fixture/mock'ları (yalnız dev / VITE_ENABLE_UI_LAB)
+├── scripts/init-env.js                             # yerel .env dosyalarını üretir
 ├── docs/
-│   ├── README.md                         # belge indeksi
-│   ├── EN/                               # İngilizce belgeler (API, ARCHITECTURE, DEPLOYMENT_GUIDE, ENV, DEPLOY_BASE_SEPOLIA, BACKLOG, ...)
-│   ├── TR/                               # Türkçe belgeler (aynı set + MAINNET_READINESS_CHECKLIST)
-│   ├── Plan/                             # planlanan işler (Spot tier, UI scenario lab)
+│   ├── README.md                                   # belge indeksi
+│   ├── EN/                                         # İngilizce belgeler (API, ARCHITECTURE, DEPLOYMENT_GUIDE, ENV, DEPLOY_BASE_SEPOLIA, BACKLOG, ...)
+│   ├── TR/                                         # Türkçe belgeler (aynı set + MAINNET_READINESS_CHECKLIST)
+│   ├── releases/                                   # sürüm notları (v3.0.0.md) ve sürüm çıkarma adımları
+│   ├── Plan/                                       # planlanan işler (Spot tier, UI scenario lab)
 │   └── GAS_BASELINE.md
 ├── CLAUDE.md
+├── .nvmrc                                          # Node 22
 ├── package.json
 └── README.md
 ```

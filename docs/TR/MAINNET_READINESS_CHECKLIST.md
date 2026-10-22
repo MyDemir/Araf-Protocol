@@ -29,7 +29,8 @@ Kritik not:
 ### Opsiyonel backend env
 - `RELAYER_PRIVATE_KEY` — yalnız permissionless bakım çağrıları için (`decayReputation`, `ArafRewards.recordTradeOutcomes`); tanımsızsa reputation decay ve reward outcome recorder job'ları çalışmaz. Fon taşıyan bir anahtar olmamalıdır.
 - `READY_INTERNAL_TOKEN` — `/ready` ayrıntılı görünümü için; yoksa kimliksiz çağrı redakte görünüm alır.
-- `ADMIN_WALLETS` — salt-okunur `/api/admin` paneline erişebilecek cüzdanlar.
+- `ADMIN_WALLETS` — `/api/admin` paneline erişebilecek cüzdanlar. Panel okuma yanında yalnız operasyonel ayar yazar (ödeme rayı anahtarları, runtime ayarlar, sosyal bağlantılar; yazmalar sıkı limitli ve denetim kayıtlıdır); fon taşıyamaz, kontrat yetkisi yoktur.
+- `ESCROW_REGISTRY_GUARD_MODE` (`off` | `warn` | `enforce`) — Mongo `escrow_registry` kaydı ile env'deki escrow/chain uyuşmazsa (ya da kayıt okunamazsa) `enforce`'ta worker/işler/escrow route'ları kapanır. `NODE_ENV=production`'da varsayılan `enforce`, diğerlerinde `warn`. Kayıt ilk kez `escrow-registry-adopt` workflow'u ile yazılır; bkz. [`docs/TR/DEPLOYMENT_GUIDE.md`](./DEPLOYMENT_GUIDE.md).
 
 ### Rewards rollout env (backend/frontend + contracts uyumu)
 - `ARAF_REVENUE_VAULT_ADDRESS`
@@ -79,7 +80,7 @@ Aşağıdaki sıra **bozulmamalıdır**:
    - Ayrı change window
    - `EXPECTED_CURRENT_TREASURY_ADDRESS` ile guard zorunlu
 
-> Kritik: Treasury switch deployment ile aynı adımda yapılmamalıdır.
+> Kritik: Treasury switch deployment ile aynı adımda yapılmamalıdır. `setTreasury` yalnız bu escrow'a bağlı bir `ArafRevenueVault` kabul eder (`vault.escrow() == escrow`); aksi hâlde `TreasuryEscrowMismatch` ile geri döner.
 
 ---
 
@@ -93,6 +94,7 @@ Aşağıdaki sıra **bozulmamalıdır**:
 - `paymentRiskLevel` reward multiplier değildir.
 - MVP'de auto-release / burn / mutual cancel / disputed release / ödeme penceresi aşımı zero-weight'tir.
 - MVP'de Tier 0 reward eligibility dışıdır.
+- Protokol ücreti ödemeyen tarafın (snapshot ücreti 0) ağırlığı 0'dır; sıfır ücretli wash-trade havuzu bedelsiz emmemelidir (K3-02).
 - `rewardBps` yalnız 4000–7000 aralığındadır (başlangıç 4000).
 
 ### 3.1 Oyun teorisi doğrulama maddeleri
@@ -131,7 +133,7 @@ Aşağıdaki sıra **bozulmamalıdır**:
 - `cd contracts && npm test -- --grep "ArafRewards|Proof of Peace|partial settlement"`
 - `cd frontend && npm test`
 - `cd frontend && npm run build`
-- `curl -s http://localhost:4000/health`
+- `curl -s http://localhost:4000/health`  (varsayılan `PORT=4000`)
 - `curl -s -o /dev/null -w "%{http_code}\n" http://localhost:4000/ready`
 
 ---
