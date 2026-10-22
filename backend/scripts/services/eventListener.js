@@ -45,11 +45,33 @@ const {
 const { assertProviderExpectedChainOrThrow } = require("./expectedChain");
 const { getSharedProvider, classifyRpcError } = require("./rpcProvider");
 const { redactRpcSecrets } = require("../utils/logRedaction");
+
+// [TR] B1-08: DLQ girdisine yazılan hata metni Redis'e ve dlqProcessor üzerinden geri taşınır; ethers hata
+//      mesajları RPC URL'si (anahtar dahil) içerebilir. URL'ler maskelenir, uzunluk sınırlanır.
+// [EN] B1-08: the error text stored in a DLQ entry is persisted to Redis and carried back by dlqProcessor;
+//      ethers error messages can embed the RPC URL (key included). URLs are masked and length is capped.
+const DLQ_ERROR_MAX_LENGTH = 500;
+function _safeDlqError(message) {
+  return redactRpcSecrets(message).slice(0, DLQ_ERROR_MAX_LENGTH);
+}
 const { inferCryptoAssetFromTokenAddress } = require("./tokenEnv");
 const { readPendingMarketMeta } = require("./orderMarketMeta");
 
 const CHECKPOINT_KEY = "worker:last_block";
 const LAST_SAFE_BLOCK_KEY = "worker:last_safe_block";
+// [TR] KEYS[1]=last_safe, KEYS[2]=last_block; ARGV[1]=yeni blok. Mevcut = last_safe, yoksa last_block, yoksa 0.
+const CHECKPOINT_ADVANCE_LUA = `
+local cur = tonumber(redis.call('get', KEYS[1]))
+if cur == nil then cur = tonumber(redis.call('get', KEYS[2])) end
+if cur == nil then cur = 0 end
+local nxt = tonumber(ARGV[1])
+if nxt > cur then
+  redis.call('set', KEYS[1], ARGV[1])
+  redis.call('set', KEYS[2], ARGV[1])
+  return 1
+end
+return 0
+`;
 const DLQ_KEY = "worker:dlq";
 const APPLIED_ORDER_KEY_PREFIX = "worker:applied_order:";
 // [TR] DLQ idempotencyKey indeksleri (Redis SET): canlı DLQ, arşiv (7 gün TTL) ve kalıcı karantina.
@@ -124,7 +146,7 @@ const ESCROW_EVENT_NAMES = [
   "BleedingDecayed", "EscrowBurned",
   "SettlementProposed", "SettlementRejected", "SettlementWithdrawn", "SettlementExpired", "SettlementFinalized",
   "OrderCreated", "OrderFilled", "OrderCanceled",
-  "FeeConfigUpdated", "CooldownConfigUpdated", "TokenConfigUpdated",
+  "FeeConfigUpdated", "CooldownConfigUpdated", "TokenConfigUpdated", "TokenLimitsUpdated",
   "ReputationPolicyUpdated", "ReputationTierThresholdsUpdated",
   "ProtocolRevenueSent",
 ];
@@ -141,6 +163,7 @@ const PROFILE_PROOF_SAFETY_MARGIN_MS = 60 * 1000;
 // [TR] Mirror, zincirdeki kilit anından bu süreden sonra oluşturuluyorsa (geç/backfill) kanıt şartı devreye girer.
 // [EN] If the mirror is created later than this after the on-chain lock (late/backfill), the proof requirement applies.
 const LATE_MIRROR_THRESHOLD_MS = 60 * 1000;
+const REPLAY_STALL_ALARM_THRESHOLD = 5;
 const REWARDS_EVENT_NAMES = ["EpochRewardAllocated", "TradeOutcomeRecorded", "RewardClaimed", "EpochTokenFinalizedEvent", "EpochDustRolledOver"];
 const EVENT_NAMES = [...ESCROW_EVENT_NAMES, ...VAULT_EVENT_NAMES, ...REWARDS_EVENT_NAMES];
 const EVENT_NAME_SET = new Set(EVENT_NAMES);
@@ -186,6 +209,9 @@ const ARAF_ABI = [
   "event FeeConfigUpdated(uint256 takerFeeBps, uint256 makerFeeBps)",
   "event CooldownConfigUpdated(uint256 tier0TradeCooldown, uint256 tier1TradeCooldown)",
   "event TokenConfigUpdated(address indexed token, bool supported, bool allowSellOrders, bool allowBuyOrders)",
+  // [TR] K2-08: setTokenConfig'in decimals + tier limitleri ayrı event'te (TokenConfigUpdated imzası değişmedi).
+  // [EN] K2-08: decimals + tier limits of setTokenConfig in a separate event (TokenConfigUpdated is unchanged).
+  "event TokenLimitsUpdated(address indexed token, uint8 decimals, uint256[4] tierMaxAmountsBaseUnit)",
   "event ReputationPolicyUpdated(uint256 cleanPeriod, uint256 manualReleaseRewardPts, uint256 autoReleasePenaltyPts, uint256 disputeWinRewardPts, uint256 disputeLossPenaltyPts, uint256 burnPenaltyPts, uint256 mutualCancelPenaltyPts, uint256 baseBanDuration, uint256 banRiskPointsThreshold)",
   "event ReputationTierThresholdsUpdated(uint32[5] minSuccessfulTrades, uint32[5] maxRiskPoints)",
   "event ProtocolRevenueSent(address indexed token, uint256 amount, uint8 indexed kind, uint256 indexed tradeId, address treasury)",
@@ -274,6 +300,7 @@ const EVENT_ARG_KEYS = {
   FeeConfigUpdated: ["takerFeeBps", "makerFeeBps"],
   CooldownConfigUpdated: ["tier0TradeCooldown", "tier1TradeCooldown"],
   TokenConfigUpdated: ["token", "supported", "allowSellOrders", "allowBuyOrders"],
+  TokenLimitsUpdated: ["token", "decimals", "tierMaxAmountsBaseUnit"],
   ReputationPolicyUpdated: ["cleanPeriod", "manualReleaseRewardPts", "autoReleasePenaltyPts", "disputeWinRewardPts", "disputeLossPenaltyPts", "burnPenaltyPts", "mutualCancelPenaltyPts", "baseBanDuration", "banRiskPointsThreshold"],
   ReputationTierThresholdsUpdated: ["minSuccessfulTrades", "maxRiskPoints"],
   ProtocolRevenueSent: ["token", "amount", "kind", "tradeId", "treasury"],
@@ -519,10 +546,12 @@ class EventWorker {
     this._retrySuccessCount = 0;
     this._retryFailureCount = 0;
     this._blockAcks = new Map();
+    this._ackCoverage = null;
     this._lastSeenBlock = 0;
     this._lastBlockSeenAt = 0;
     this._stopRequested = false;
     this._quarantinedCount = 0;
+    this._archivedRequeueCount = 0;
     this._watchdogTimer = null;
     this._staleReconnects = 0;
     this._exitProcess = (code) => process.exit(code);
@@ -765,6 +794,12 @@ class EventWorker {
 
     const fromBlock = this._resolveReplayStartBlock(savedBlock, currentHead);
 
+    // [TR] B1-05: checkpoint yokken ilk getLogs hata verirse canlı poll 0'dan (genesis) başlamasın diye bellekteki
+    //      checkpoint, Redis'e YAZILMADAN, max(mevcut, başlangıç-1) olur. Kayıtlı checkpoint varsa değişmez.
+    // [EN] B1-05: with no checkpoint, a failing first getLogs must not leave the live poll starting at genesis;
+    //      the in-memory checkpoint becomes max(current, start-1) WITHOUT writing Redis. Unchanged when saved.
+    this._lastSafeCheckpointBlock = Math.max(this._lastSafeCheckpointBlock, fromBlock - 1);
+
     if (fromBlock > finalizedToBlock) {
       // [TR] B3: başlangıç bloğu finalized head'in üstündeyse replay ertelenir, ama bellekteki checkpoint
       //      max(başlangıç-1, mevcut) olur. Aksi halde start() canlı poll'u checkpoint 0'dan başlatır ve
@@ -809,8 +844,8 @@ class EventWorker {
           try {
             await this._processEvent(event);
           } catch (err) {
-            logger.error(`[Worker] Replay event işleme hatası: ${event.eventName} - ${err.message}`);
-            await this._addToDLQ(event, err.message);
+            logger.error(`[Worker] Replay event işleme hatası: ${event.eventName} - ${redactRpcSecrets(err.message)}`);
+            await this._addToDLQOrRequeueArchived(event, err.message);
             failedEvents += 1;
           }
         }
@@ -853,6 +888,14 @@ class EventWorker {
   //      range every block (~2s) and hammer the DLQ/RPC.
   _noteReplayFailure() {
     this._replayFailureCount += 1;
+    // [TR] B1-03: ardışık replay başarısızlığı sessiz kalmasın; eşikten sonra her başarısızlıkta alarm.
+    // [EN] B1-03: consecutive replay failures must not be silent; alarm on every failure past the threshold.
+    if (this._replayFailureCount >= REPLAY_STALL_ALARM_THRESHOLD) {
+      logger.error(
+        `[Worker][ALARM] Replay ${this._replayFailureCount} kez üst üste başarısız; checkpoint takılı ` +
+        `(safe=${this._lastSafeCheckpointBlock}). DLQ ve RPC durumunu kontrol edin.`
+      );
+    }
     const delay = Math.min(
       this._cfg("WORKER_REPLAY_BACKOFF_BASE_MS") * 2 ** Math.min(this._replayFailureCount - 1, 30),
       this._cfg("WORKER_REPLAY_BACKOFF_MAX_MS")
@@ -972,15 +1015,22 @@ class EventWorker {
       this._staleReconnects = 0;
       await this._updateSeenBlockIfHigher(head);
 
+      // [TR] B1-02: canlı tur finalize edilmemiş head'e değil head - WORKER_FINALITY_DEPTH'e kadar okur; sığ reorg'da
+      //      taşınan/düşen blok event'i imleç ve checkpoint üzerinden atlanmaz (ek gecikme ≈ derinlik × blok süresi).
+      //      head < derinlik ise sınır ≤ 0 olur ve tur boş geçer.
+      // [EN] B1-02: the live tick reads up to head - WORKER_FINALITY_DEPTH, not the unfinalized head, so a shallow
+      //      reorg cannot make the cursor/checkpoint skip a moved or dropped block's events. When head < depth
+      //      the bound is <= 0 and the tick is empty.
+      const pollUpTo = this._computeFinalizedUpTo(head);
       let from = this._lastLivePolledBlock + 1;
-      while (from <= head) {
+      while (from <= pollUpTo) {
         if (this._stopRequested || stale()) return;
-        const to = Math.min(from + this._cfg("WORKER_BLOCK_BATCH_SIZE") - 1, head);
+        const to = Math.min(from + this._cfg("WORKER_BLOCK_BATCH_SIZE") - 1, pollUpTo);
         await this._pollLiveRange(from, to);
         if (stale()) return; // yeniden bağlanma sırasında: imleç ilerletilmez
         this._lastLivePolledBlock = to;
         from = to + 1;
-        if (from <= head && this._cfg("WORKER_REPLAY_BATCH_DELAY_MS") > 0) await _sleep(this._cfg("WORKER_REPLAY_BATCH_DELAY_MS"));
+        if (from <= pollUpTo && this._cfg("WORKER_REPLAY_BATCH_DELAY_MS") > 0) await _sleep(this._cfg("WORKER_REPLAY_BATCH_DELAY_MS"));
       }
 
       if (stale()) return;
@@ -1197,10 +1247,10 @@ class EventWorker {
     for (const log of logs || []) {
       const source = sources.get(String(log.address || "").toLowerCase());
       if (!source || !log.topics?.length) continue;
-      let fragment = null;
+      let fragment;
       try {
         fragment = source.interface.getEvent(log.topics[0]);
-      } catch (_) {
+      } catch {
         fragment = null;
       }
       if (!fragment || !EVENT_NAME_SET.has(fragment.name)) continue;
@@ -1215,23 +1265,36 @@ class EventWorker {
     if (!this.contract || fromBlock > toBlock) return;
 
     const batchSize = this._cfg("WORKER_BLOCK_BATCH_SIZE");
+    const epoch = this._liveEpoch;
     for (let from = fromBlock; from <= toBlock; from += batchSize) {
       const to = Math.min(from + batchSize - 1, toBlock);
 
       try {
         const allEvents = await this._fetchRangeEvents(from, to);
-        this._seedAckStateForRange(from, to);
 
         for (const event of allEvents) {
+          // [TR] B1-06: yeniden bağlanma sonrası eski epoch'taki döngü yeni event işlemeye devam etmez.
+          // [EN] B1-06: after a reconnect a loop from an older epoch must not keep processing events.
+          if (epoch !== this._liveEpoch || this._stopRequested) return;
           this._trackLiveEventSeen(event);
           // [TR] Karantinadaki event işlenmez, ack'lenmiş (acked-poison) sayılır.
           // [EN] A quarantined event is not processed and counts as acked (acked-poison).
           const success = (await this._isQuarantined(event)) || (await this._processEventWithRetry(event));
           if (success) this._trackLiveEventAck(event);
           else this._markBlockUnsafe(event.blockNumber, this._getEventId(event));
+          // [TR] B1-06: İlerleme sinyali YALNIZ bir event gerçekten sonuçlandığında (işlendi ya da DLQ'ya yazıldı)
+          //      verilir; olay başına ~20 sn retry beklemesi watchdog'u yanlış tetiklemesin. Askıda kalan bir
+          //      çağrı sonuçlanmadığı için sinyal vermez, gerçek takılma maskelenmez.
+          // [EN] B1-06: the progress signal is given ONLY when an event actually completes (processed or written
+          //      to the DLQ), so ~20s of retry waiting per event does not trip the watchdog. A hung call never
+          //      completes and gives no signal, so a real stall is not masked.
+          if (epoch === this._liveEpoch) this._lastBlockSeenAt = Date.now();
         }
+        // [TR] B1-11: boş bloklar için kayıt tutulmaz; aralığın tamamı okunup işlendiyse yalnız kapsama işaretlenir.
+        // [EN] B1-11: no per-block record for empty blocks; once the whole range was read and processed only the
+        //      coverage interval is noted.
+        this._noteAckCoverage(from, to);
       } catch (err) {
-        this._seedAckStateForRange(from, to);
         this._markRangeUnsafe(from, to);
         throw err;
       }
@@ -1249,6 +1312,29 @@ class EventWorker {
     return state;
   }
 
+  // [TR] B1-11: tamamen okunup işlenmiş blok aralığı (tek bitişik aralık). Bu aralıkta kaydı olmayan blok
+  //      "event yok" demektir (seen=0) ve checkpoint ilerletilirken güvenli sayılır; kayıt yalnız event/unsafe
+  //      bloklarda tutulur. Bitişik/örtüşen aralıklar birleşir, ayrık gelen eskisinin yerini alır
+  //      (kapsam dışı blok güvenli sayılmaz).
+  // [EN] B1-11: the block interval that was fully read and processed (one contiguous interval). A block without a
+  //      record inside it means "no events" (seen=0) and is safe when advancing the checkpoint; records are kept
+  //      only for blocks with events or an unsafe flag. Adjacent/overlapping intervals merge, a disjoint one
+  //      replaces the old one (a block outside the coverage is never treated as safe).
+  _noteAckCoverage(fromBlock, toBlock) {
+    const cover = this._ackCoverage;
+    if (cover && fromBlock <= cover.to + 1 && toBlock >= cover.from - 1) {
+      cover.from = Math.min(cover.from, fromBlock);
+      cover.to = Math.max(cover.to, toBlock);
+    } else {
+      this._ackCoverage = { from: fromBlock, to: toBlock };
+    }
+  }
+
+  _isBlockCoveredEmpty(blockNumber) {
+    const cover = this._ackCoverage;
+    return Boolean(cover) && blockNumber >= cover.from && blockNumber <= cover.to;
+  }
+
   _seedAckStateForRange(fromBlock, toBlock) {
     for (let b = fromBlock; b <= toBlock; b += 1) {
       this._ensureBlockAckState(b);
@@ -1263,11 +1349,27 @@ class EventWorker {
 
   async _updateSafeCheckpointIfHigher(blockNumber) {
     const redis = getRedisClient();
-    const current = parseInt(await redis.get(LAST_SAFE_BLOCK_KEY) || await redis.get(CHECKPOINT_KEY) || "0");
+    let advanced;
+    if (typeof redis.eval === "function") {
+      // [TR] B1-10: karşılaştır + iki anahtarı yaz TEK Lua'da (atomik); çoklu yazarda checkpoint geriye gitmez ve
+      //      iki anahtar ayrışmaz. Dönüş 1: ilerletildi, 0: mevcut değer >= blockNumber.
+      // [EN] B1-10: compare + write both keys in ONE Lua script (atomic); a checkpoint never moves backwards and
+      //      the two keys cannot diverge.
+      advanced = Number(await redis.eval(CHECKPOINT_ADVANCE_LUA, {
+        keys: [LAST_SAFE_BLOCK_KEY, CHECKPOINT_KEY],
+        arguments: [blockNumber.toString()],
+      })) === 1;
+    } else {
+      // [TR] Yalnız eval'i olmayan istemci (birim test taklitleri) için eski get-compare-set yolu.
+      const current = parseInt(await redis.get(LAST_SAFE_BLOCK_KEY) || await redis.get(CHECKPOINT_KEY) || "0");
+      advanced = blockNumber > current;
+      if (advanced) {
+        await redis.set(LAST_SAFE_BLOCK_KEY, blockNumber.toString());
+        await redis.set(CHECKPOINT_KEY, blockNumber.toString());
+      }
+    }
 
-    if (blockNumber > current) {
-      await redis.set(LAST_SAFE_BLOCK_KEY, blockNumber.toString());
-      await redis.set(CHECKPOINT_KEY, blockNumber.toString());
+    if (advanced) {
       this._lastSafeCheckpointBlock = blockNumber;
       // [TR] Checkpoint geçilen bloklar artık kalıcı; bellekteki ack/unsafe kayıtları da temizlenir.
       // [EN] Blocks behind the checkpoint are durable now; drop their in-memory ack/unsafe records too.
@@ -1419,7 +1521,13 @@ class EventWorker {
 
     for (let block = this._lastSafeCheckpointBlock + 1; block <= finalizedUpTo; block += 1) {
       const state = this._blockAcks.get(block);
-      if (!state) break;
+      if (!state) {
+        if (this._isBlockCoveredEmpty(block)) {
+          nextSafe = block;
+          continue;
+        }
+        break;
+      }
       if (state.unsafe || state.acked.size < state.seen.size) break;
       nextSafe = block;
     }
@@ -1446,7 +1554,7 @@ class EventWorker {
         try {
           oldProvider.removeAllListeners();
           if (oldProvider.destroy) await oldProvider.destroy();
-        } catch (_) {}
+        } catch { /* best-effort: eski provider temizliği */ }
         this.contract = null;
         this.vaultContract = null;
         this.rewardsContract = null;
@@ -1481,14 +1589,14 @@ class EventWorker {
       this._retrySuccessCount += 1;
       return true;
     } catch (err) {
-      logger.error(`[Worker] ${event.eventName} başarısız (deneme ${attempt}): ${err.message}`);
+      logger.error(`[Worker] ${event.eventName} başarısız (deneme ${attempt}): ${redactRpcSecrets(err.message)}`);
       if (attempt < MAX_RETRIES) {
         await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * attempt));
         return this._processEventWithRetry(event, attempt + 1);
       }
 
       this._retryFailureCount += 1;
-      await this._addToDLQ(event, err.message);
+      await this._addToDLQOrRequeueArchived(event, err.message);
       return false;
     }
   }
@@ -1502,7 +1610,7 @@ class EventWorker {
         await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * attempt));
         return this._processEventWithRetryNoDLQ(event, attempt + 1);
       }
-      return { success: false, error: err.message };
+      return { success: false, error: _safeDlqError(err.message) };
     }
   }
 
@@ -1541,12 +1649,52 @@ class EventWorker {
       attempt: 0,
       next_retry_at: nowIso,
       first_seen_at: nowIso,
-      last_error: errorMsg,
+      last_error: _safeDlqError(errorMsg),
     });
 
+    // [TR] B1-09: sıra rPush -> sAdd. Hangi komut ya da süreç çökmesi olursa olsun olay kaybolmaz ve anahtar
+    //      kuyruksuz set'te kalmaz (kalsa sonraki her çağrı sIsMember ile atlanır, blok sonsuza dek unsafe kalırdı).
+    //      En kötü durum yinelenen girdi: re-drive idempotent (dlqProcessor B4-05), ilk başarıda sRem anahtarı siler.
+    // [EN] B1-09: order is rPush -> sAdd. Whatever command or process fails, the event is never lost and a key is
+    //      never left in the set without a queue entry (that would make every later call skip via sIsMember and
+    //      freeze the block as unsafe forever). Worst case is a duplicate entry: re-drive is idempotent
+    //      (dlqProcessor B4-05) and the first success removes the key.
     await redis.rPush(DLQ_KEY, entry);
     await redis.sAdd(DLQ_LIVE_KEYS_SET, idempotencyKey);
     return true;
+  }
+
+  /**
+   * [TR] B1-03: Event arşiv indeksinde ise (DLQ taşmasında arşive atılmış, artık re-drive edilmiyor) ve yeniden
+   *      başarısız olduysa sessizce atlanmaz: arşiv anahtarı indeksten çıkarılıp event DLQ'ya geri alınır ve alarm
+   *      üretilir. Böylece MAX_REDRIVE_ATTEMPTS sonunda karantinaya (acked-poison) gidebilir; checkpoint sonsuza
+   *      dek takılı kalmaz. DLQ üst sınırı dlqProcessor.archiveOverflow ile korunur. Canlı DLQ ya da karantinada
+   *      olan event için davranış değişmez (zaten kuyrukta / ack'li).
+   * [EN] B1-03: if the failed event sits in the archive index (pushed out on DLQ overflow, no longer re-driven)
+   *      it is not silently dropped: the archive key is removed from the index, the event goes back to the DLQ
+   *      and an alarm is logged, so it can reach quarantine after MAX_REDRIVE_ATTEMPTS and the checkpoint is not
+   *      frozen forever. The DLQ cap stays enforced by dlqProcessor.archiveOverflow.
+   */
+  async _addToDLQOrRequeueArchived(event, errorMsg) {
+    const added = await this._addToDLQ(event, errorMsg);
+    if (added) return true;
+
+    const redis = getRedisClient();
+    const idempotencyKey = this._getEventId(event);
+    const archived = await redis.sIsMember(DLQ_ARCHIVE_KEYS_SET, idempotencyKey);
+    if (!archived) return false;
+    if ((await redis.sIsMember(DLQ_LIVE_KEYS_SET, idempotencyKey)) || (await redis.sIsMember(DLQ_QUARANTINE_KEYS_SET, idempotencyKey))) {
+      return false;
+    }
+
+    await redis.sRem(DLQ_ARCHIVE_KEYS_SET, idempotencyKey);
+    const requeued = await this._addToDLQ(event, errorMsg);
+    this._archivedRequeueCount += 1;
+    logger.error(
+      `[Worker][ALARM] Arşivlenmiş event yeniden başarısız; DLQ'ya geri alındı: ${event.eventName} ` +
+      `key=${idempotencyKey} block=${event.blockNumber} toplam_geri_alinan=${this._archivedRequeueCount}`
+    );
+    return requeued;
   }
 
   async _isQuarantined(event) {
@@ -1689,7 +1837,7 @@ class EventWorker {
     if (!orderDoc?.refs?.order_ref || Number(currentMarket?.exchange_rate) > 0) return currentMarket;
 
     const owner = String(orderDoc.owner_address || "").toLowerCase();
-    let intent = null;
+    let intent;
     try {
       intent = await readPendingMarketMeta(orderDoc.refs.order_ref, owner);
     } catch (err) {
@@ -1927,6 +2075,7 @@ class EventWorker {
       ReputationPolicyUpdated: this._onReputationPolicyUpdated.bind(this),
       ReputationTierThresholdsUpdated: this._onReputationTierThresholdsUpdated.bind(this),
       TokenConfigUpdated: this._onTokenConfigUpdated.bind(this),
+      TokenLimitsUpdated: this._onTokenLimitsUpdated.bind(this),
       ProtocolRevenueSent: this._onProtocolRevenueSent.bind(this),
       EscrowRevenueReceived: this._onEscrowRevenueReceived.bind(this),
       ExternalRewardFunded: this._onExternalRewardFunded.bind(this),
@@ -1964,7 +2113,7 @@ class EventWorker {
     let missingTerminalCount = missingTerminalTimestamp.length;
     try {
       missingTerminalCount = Math.max(missingTerminalCount, Number(await Trade.countDocuments(missingFilter)) || 0);
-    } catch (_) {
+    } catch {
       // [TR] Sayım başarısızsa örneklem uzunluğu kullanılır.
       // [EN] If counting fails the sample length is used.
     }
@@ -1990,7 +2139,7 @@ class EventWorker {
       .filter(([, state]) => Boolean(state?.unsafe))
       .map(([block]) => Number(block));
 
-    let dlqPending = null;
+    let dlqPending;
     try {
       const redis = getRedisClient();
       dlqPending = Number(await redis.lLen(DLQ_KEY));
@@ -2004,14 +2153,14 @@ class EventWorker {
 
     // [TR] Backfill'de kanıtlanamadığı için snapshot'sız kalan PAID/CHALLENGED trade'ler.
     // [EN] PAID/CHALLENGED trades left without a snapshot because the backfill could not prove the profile unchanged.
-    let snapshotMissingCount = 0;
+    let snapshotMissingCount;
     try {
       snapshotMissingCount = Number(await Trade.countDocuments({
         status: { $in: ["PAID", "CHALLENGED"] },
         "payout_snapshot.captured_at": null,
         "payout_snapshot.is_complete": false,
       })) || 0;
-    } catch (_) {
+    } catch {
       snapshotMissingCount = 0;
     }
 
@@ -2189,35 +2338,43 @@ class EventWorker {
     const makerProfile = makerUser?.payout_profile || null;
     const takerProfile = takerUser?.payout_profile || null;
 
+    // [TR] B1-01: kontrol canlı yolda da HER ZAMAN çalışır (advancedStatus null olsa bile).
     // [TR] İLKE: işlem sırasında değişmiş bilgi ASLA snapshot'a girmez. Kilit anı geçmişse (PAID/CHALLENGED)
     //      snapshot ancak iki tarafın profili de kilit anından ÖNCE son değiştiyse (sıkı <) alınır. Zaman
     //      damgası yoksa ya da kilitten sonra/aynı anda ise kanıt yoktur: snapshot alınmaz, eksik işaretlenir
     //      ve reconciliation raporuna düşer.
     // [EN] PRINCIPLE: info changed during the trade NEVER enters the snapshot. Past the lock (PAID/CHALLENGED),
     //      capture only if both profiles last changed strictly before the lock; otherwise leave it missing.
-    if (advancedStatus) {
+    {
       const unchangedSinceLock = (user) => {
         const profile = user?.payout_profile;
-        if (!user || !profile) return false;
+        // [TR] Profil yoksa snapshot'a girecek bilgi de yoktur (canlı yolda eksik snapshot olarak yazılır).
+        if (!user || !profile) return !advancedStatus;
         const stamps = [profile.updated_at, profile.fingerprint?.last_changed_at, user.lastBankChangeAt]
           .filter(Boolean)
           .map((d) => new Date(d).getTime());
         const hasData = Boolean(profile.payout_details_enc || profile.fingerprint?.hash || profile.rail);
-        if (hasData && !profile.updated_at) return false;
+        // [TR] Backfill'de damgasız dolu profil kanıtsızdır. Canlı yolda damga yoksa (eski profil) değişiklik
+        //      kanıtı da yoktur: PATCH her zaman updated_at yazar; damga varsa aşağıda sıkı < ile denetlenir.
+        if (advancedStatus && hasData && !profile.updated_at) return false;
+        // [TR] Güvenlik payı canlı yolda da uygulanır: updated_at sunucu saati, lockedAt zincir blok zamanıdır;
+        //      saat sapmasında kilitten sonraki değişim "önce" görünmesin. Damga < lockedAt - PAY olmalı.
         const limit = lockedAt.getTime() - PROFILE_PROOF_SAFETY_MARGIN_MS;
         return stamps.every((t) => t < limit);
       };
       const makerOk = !normalizedMaker || unchangedSinceLock(makerUser);
       const takerOk = !normalizedTaker || unchangedSinceLock(takerUser);
       if (!makerOk || !takerOk) {
-        const reason = "backfill_profile_change_after_lock_unprovable";
+        const reason = advancedStatus
+          ? "backfill_profile_change_after_lock_unprovable"
+          : "live_profile_change_after_lock_unprovable";
         logger.error(
-          `[Worker] LOCKED snapshot SKIPPED (backfill, status=${advancedStatus}): trade=${tradeIdNum} reason=${reason}`
+          `[Worker] LOCKED snapshot SKIPPED (${advancedStatus ? "backfill" : "live"}, status=${advancedStatus || "LOCKED"}): trade=${tradeIdNum} reason=${reason}`
         );
         await Trade.findOneAndUpdate(
           {
             ..._buildIdentityLookup("onchain_escrow_id", tradeIdNum),
-            status: { $in: [advancedStatus] },
+            status: { $in: advancedStatus ? [advancedStatus] : ["OPEN", "LOCKED"] },
             "payout_snapshot.captured_at": null,
           },
           { $set: { "payout_snapshot.is_complete": false, "payout_snapshot.incomplete_reason": reason } },
@@ -2387,7 +2544,7 @@ class EventWorker {
     const { tradeId } = event.args;
     const resolvedAt = await this._getEventDate(event);
     const tradeIdNum = _toIdentityString(tradeId);
-    let releaseResolutionType = "UNKNOWN";
+    let releaseResolutionType;
 
     const session = await mongoose.startSession();
     session.startTransaction();
@@ -2413,15 +2570,14 @@ class EventWorker {
       //      gelmesi DISPUTED_RESOLUTION sınıflandırmasını deterministik yapar, backend otoritesi oluşturmaz.
       // [EN] CHALLENGED is an on-chain mirrored lifecycle state, so mapping EscrowReleased from CHALLENGED
       //      to DISPUTED_RESOLUTION is deterministic read-model classification, not backend authority.
-      if (existingTrade.status === "CHALLENGED") {
-        releaseResolutionType = "DISPUTED_RESOLUTION";
-      } else {
-        // [TR] Manuel/otomatik ayrımı heuristikle değil, kontratın terminal snapshot'ından okunur.
-        //      Okuma hatası throw eder (B13): kalıcı "UNKNOWN" yazılmaz, event retry/DLQ'ya gider.
-        // [EN] Manual vs auto is read from the contract's terminal snapshot, never inferred. A read error
-        //      throws (B13): no permanent "UNKNOWN" is written, the event goes to retry/DLQ.
-        releaseResolutionType = await this._fetchTerminalResolutionType(tradeIdNum) || "UNKNOWN";
-      }
+      // [TR] B1-14: sınıf her durumda kontratın terminal snapshot'ından okunur (karar mercii kontrat); mirror
+      //      CHALLENGED ise yalnız zincir görünümü yoksa (null) DISPUTED_RESOLUTION'a düşülür.
+      //      Okuma hatası throw eder (B13): kalıcı "UNKNOWN" yazılmaz, event retry/DLQ'ya gider.
+      // [EN] B1-14: the class is always read from the contract's terminal snapshot (the contract decides); a
+      //      CHALLENGED mirror only falls back to DISPUTED_RESOLUTION when no chain view is available (null).
+      //      A read error throws (B13): no permanent "UNKNOWN" is written, the event goes to retry/DLQ.
+      releaseResolutionType = await this._fetchTerminalResolutionType(tradeIdNum)
+        || (existingTrade.status === "CHALLENGED" ? "DISPUTED_RESOLUTION" : "UNKNOWN");
 
       const trade = await this._applyTerminalTransition({
         tradeIdNum,
@@ -2711,6 +2867,11 @@ class EventWorker {
     const expiresAtDate = _toDateOrNull(expiresAt);
     const tradeLookup = _buildIdentityLookup("onchain_escrow_id", tradeId);
 
+    // [TR] B1-07: sıralama koruması; DLQ re-drive / replay ile gelen eski bir settlement event'i yeni teklifi ezmez.
+    // [EN] B1-07: ordering guard; an older settlement event arriving via DLQ re-drive / replay cannot overwrite a newer proposal.
+    const orderScope = this._settlementOrderScope(tradeId);
+    if (await this._isStaleOrderedEvent(orderScope, event)) return;
+
     const mirrored = await Trade.findOneAndUpdate(
       {
         ...tradeLookup,
@@ -2744,11 +2905,28 @@ class EventWorker {
       if (existingTrade?.settlement_proposal?.state === "FINALIZED") return;
       throw new Error("SettlementProposed mirror güncellemesi başarısız.");
     }
+    await this._markSettlementOrderApplied(orderScope, event);
+  }
+
+  _settlementOrderScope(tradeId) {
+    return `Settlement:${_toIdentityString(tradeId)}`;
+  }
+
+  // [TR] İşaret yazımı en iyi çabadır: yazılamazsa mirror yazımı zaten bitmiştir, event DLQ'ya düşürülmez.
+  // [EN] Marking is best-effort: if it fails the mirror write already succeeded, so the event must not go to the DLQ.
+  async _markSettlementOrderApplied(scope, event) {
+    try {
+      await this._markOrderedEventApplied(scope, event);
+    } catch (err) {
+      logger.warn(`[Worker] Settlement sıralama işareti yazılamadı: scope=${scope} ${redactRpcSecrets(err?.message)}`);
+    }
   }
 
   // [TR] B15: FINALIZED'a takılan filtre "zaten işlenmiş"tir (idempotent); trade mirror hiç yoksa throw edilir.
   // [EN] B15: being filtered out by FINALIZED means "already processed" (idempotent); a missing trade mirror throws.
-  async _updateSettlementProposalMirror(eventName, tradeId, set) {
+  async _updateSettlementProposalMirror(eventName, tradeId, set, event = null) {
+    const orderScope = this._settlementOrderScope(tradeId);
+    if (event && await this._isStaleOrderedEvent(orderScope, event)) return;
     const updated = await Trade.findOneAndUpdate(
       {
         ..._buildIdentityLookup("onchain_escrow_id", tradeId),
@@ -2759,12 +2937,12 @@ class EventWorker {
     if (!updated) {
       await this._requireTradeMirror(tradeId, eventName);
     }
+    if (event) await this._markSettlementOrderApplied(orderScope, event);
   }
 
   async _onSettlementRejected(event) {
     const { tradeId, proposalId, rejecter } = event.args;
     void rejecter;
-    await this._getEventDate(event);
     const txHash = event?.transactionHash || null;
 
     await this._updateSettlementProposalMirror("SettlementRejected", tradeId, {
@@ -2773,13 +2951,12 @@ class EventWorker {
       "settlement_proposal.tx_hash": txHash,
       "settlement_proposal.last_event_name": "SettlementRejected",
       "settlement_proposal.finalized_at": null,
-    });
+    }, event);
   }
 
   async _onSettlementWithdrawn(event) {
     const { tradeId, proposalId, proposer } = event.args;
     void proposer;
-    await this._getEventDate(event);
     const txHash = event?.transactionHash || null;
 
     await this._updateSettlementProposalMirror("SettlementWithdrawn", tradeId, {
@@ -2788,7 +2965,7 @@ class EventWorker {
       "settlement_proposal.tx_hash": txHash,
       "settlement_proposal.last_event_name": "SettlementWithdrawn",
       "settlement_proposal.finalized_at": null,
-    });
+    }, event);
   }
 
   async _onSettlementExpired(event) {
@@ -2805,7 +2982,7 @@ class EventWorker {
       "settlement_proposal.finalized_at": null,
       "settlement_proposal.tx_hash": txHash,
       "settlement_proposal.last_event_name": "SettlementExpired",
-    });
+    }, event);
   }
 
   async _onSettlementFinalized(event) {
@@ -2964,35 +3141,56 @@ class EventWorker {
     const { epoch, token, amount } = event.args;
     const tx_hash = event.transactionHash;
     const log_index = Number(_logIndexOf(event) || 0);
-    const insertResult = await RewardEpochAllocationEvent.findOneAndUpdate(
-      { tx_hash, log_index },
-      { $setOnInsert: { tx_hash, log_index, epoch: _toStr(epoch), token: token?.toLowerCase?.() || null, amount: _toStr(amount) } },
-      // [TR] Mongoose 8'de rawResult kaldırıldı; includeResultMetadata olmadan replay'de
-      //      updatedExisting okunamaz ve epoch havuzu iki kez sayılırdı.
-      // [EN] rawResult was removed in Mongoose 8; without includeResultMetadata the replay
-      //      guard never fires and the epoch pool is double counted.
-      { upsert: true, new: false, includeResultMetadata: true }
-    );
-    if (insertResult?.lastErrorObject?.updatedExisting) return;
+    // [TR] B1-04: RPC çağrısı (getBlock) transaction ve allocation kaydından ÖNCE yapılır; hata olursa
+    //      hiçbir şey yazılmamış olur ve tekrar denemede havuz eksik kalmaz.
+    // [EN] B1-04: the RPC call runs before the transaction/allocation insert, so a failure writes nothing.
+    const indexedAt = await this._getEventDate(event);
 
-    const key = { epoch: _toStr(epoch), token: token?.toLowerCase?.() || null };
-    const existing = await RewardEpoch.findOne(key).lean();
-    const prev = BigInt(existing?.epoch_pool || "0");
-    const next = (prev + BigInt(_toStr(amount))).toString();
-    await RewardEpoch.findOneAndUpdate(
-      key,
-      {
-        $set: {
-          epoch_pool: next,
-          indexed_at: await this._getEventDate(event),
+    // [TR] Allocation kaydı + epoch_pool artışı TEK transaction'da: arada hata olursa ikisi de geri alınır,
+    //      retry/DLQ tekrarında kayıt "zaten var" görünmez.
+    // [EN] Allocation insert + epoch_pool increment in ONE transaction; any failure rolls back both.
+    const session = await mongoose.startSession();
+    session.startTransaction();
+    try {
+      const insertResult = await RewardEpochAllocationEvent.findOneAndUpdate(
+        { tx_hash, log_index },
+        { $setOnInsert: { tx_hash, log_index, epoch: _toStr(epoch), token: token?.toLowerCase?.() || null, amount: _toStr(amount) } },
+        // [TR] Mongoose 8'de rawResult kaldırıldı; includeResultMetadata olmadan replay'de
+        //      updatedExisting okunamaz ve epoch havuzu iki kez sayılırdı.
+        // [EN] rawResult was removed in Mongoose 8; without includeResultMetadata the replay
+        //      guard never fires and the epoch pool is double counted.
+        { upsert: true, new: false, includeResultMetadata: true, session }
+      );
+      if (insertResult?.lastErrorObject?.updatedExisting) {
+        await session.commitTransaction();
+        return;
+      }
+
+      const key = { epoch: _toStr(epoch), token: token?.toLowerCase?.() || null };
+      const existing = await RewardEpoch.findOne(key).session(session).lean();
+      const prev = BigInt(existing?.epoch_pool || "0");
+      const next = (prev + BigInt(_toStr(amount))).toString();
+      await RewardEpoch.findOneAndUpdate(
+        key,
+        {
+          $set: {
+            epoch_pool: next,
+            indexed_at: indexedAt,
+          },
+          $setOnInsert: {
+            status: "OPEN",
+            total_weight: null,
+          },
         },
-        $setOnInsert: {
-          status: "OPEN",
-          total_weight: null,
-        },
-      },
-      { upsert: true }
-    );
+        { upsert: true, session }
+      );
+      await session.commitTransaction();
+    } catch (err) {
+      await session.abortTransaction();
+      throw err;
+    } finally {
+      await session.endSession();
+    }
   }
 
   async _onTradeOutcomeRecorded(event) {
@@ -3000,10 +3198,17 @@ class EventWorker {
     //      tekrar göndermemesi için kayıt anı işaretlenir.
     // [EN] Weights are not persisted as authority; only the record time is marked so the recorder skips it.
     const { tradeId } = event.args;
-    await Trade.updateOne(
+    const result = await Trade.updateOne(
       { ..._buildIdentityLookup("onchain_escrow_id", tradeId), "timers.reward_recorded_at": null },
       { $set: { "timers.reward_recorded_at": await this._getEventDate(event) } }
     );
+    // [TR] B1-13: eşleşme yoksa "mirror yok" ile "zaten işaretli" ayrılır; mirror yoksa throw (retry/DLQ),
+    //      böylece reward_recorded_at sessizce kaybolmaz.
+    // [EN] B1-13: with no match, "mirror missing" is told apart from "already marked"; a missing mirror throws
+    //      (retry/DLQ) so reward_recorded_at is not silently lost.
+    if (result && result.matchedCount === 0) {
+      await this._requireTradeMirror(tradeId, "TradeOutcomeRecorded");
+    }
   }
 
   async _onRewardClaimed(event) {
@@ -3251,6 +3456,25 @@ class EventWorker {
       await updateCachedTokenConfig(token, { supported, allowSellOrders, allowBuyOrders });
     }
   }
+
+  // [TR] K2-08: TokenLimitsUpdated decimals + tier limitlerini taşır; cache RPC'siz yamalanır. Eksik/bozuk alan
+  //      throw eder (retry/DLQ). Token başına sıralama koruması: daha eski bir event yeni limitleri ezmez.
+  // [EN] K2-08: TokenLimitsUpdated carries decimals + tier limits; the cache is patched without an RPC. A missing or
+  //      malformed field throws (retry/DLQ). Per-token ordering guard: an older event cannot overwrite newer limits.
+  async _onTokenLimitsUpdated(event) {
+    const { token } = event.args;
+    if (typeof token !== "string" || !token) throw new Error("TokenLimitsUpdated: token eksik.");
+    const decimals = _requireFiniteNumber(event.args?.decimals, "decimals", "TokenLimitsUpdated");
+    const rawLimits = event.args?.tierMaxAmountsBaseUnit;
+    const limits = rawLimits == null ? [] : Array.from(rawLimits, (v) => String(v));
+    if (limits.length !== 4 || limits.some((v) => !/^\d+$/.test(v))) {
+      throw new Error("TokenLimitsUpdated: tierMaxAmountsBaseUnit 4 elemanlı tam sayı dizisi olmalı.");
+    }
+    const scope = `TokenLimitsUpdated:${token.toLowerCase()}`;
+    if (await this._isStaleOrderedEvent(scope, event)) return;
+    await updateCachedTokenConfig(token, { decimals, tierMaxAmountsBaseUnit: limits });
+    await this._markOrderedEventApplied(scope, event);
+  }
 }
 
 const worker = new EventWorker();
@@ -3289,7 +3513,7 @@ worker.reprocessDLQEntry = async function reprocessDLQEntry(entry) {
     await worker._processEvent(syntheticEvent);
     return true;
   } catch (err) {
-    logger.error(`[Worker] DLQ re-drive başarısız: ${entry.eventName} tx=${entry.txHash} err=${err.message}`);
+    logger.error(`[Worker] DLQ re-drive başarısız: ${entry.eventName} tx=${entry.txHash} err=${redactRpcSecrets(err.message)}`);
     return false;
   }
 };
@@ -3318,5 +3542,6 @@ worker.getDiagnostics = function getDiagnostics() {
 };
 
 worker._ARAF_ABI_FOR_TESTS = ARAF_ABI;
+worker._CHECKPOINT_ADVANCE_LUA_FOR_TESTS = CHECKPOINT_ADVANCE_LUA;
 
 module.exports = worker;

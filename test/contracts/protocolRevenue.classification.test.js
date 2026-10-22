@@ -308,8 +308,14 @@ describe("ArafEscrow protocol revenue classification", function () {
     await time.increase(24 * 3600 + 1);
 
     const trade = await escrow.getTrade(tradeId);
-    const makerPenalty = (trade.makerBond * (await escrow.AUTO_RELEASE_PENALTY_BPS())) / BPS_DENOMINATOR;
-    const takerPenalty = (trade.takerBond * (await escrow.AUTO_RELEASE_PENALTY_BPS())) / BPS_DENOMINATOR;
+    // [TR] K2-01: kesinti taraf başına max(%2 bond cezası, releaseFunds ücreti). [EN] K2-01: max(2% bond penalty, release fee).
+    const bondPenaltyMaker = (trade.makerBond * (await escrow.AUTO_RELEASE_PENALTY_BPS())) / BPS_DENOMINATOR;
+    const bondPenaltyTaker = (trade.takerBond * (await escrow.AUTO_RELEASE_PENALTY_BPS())) / BPS_DENOMINATOR;
+    const quotedMakerFee = (trade.cryptoAmount * trade.makerFeeBpsSnapshot) / BPS_DENOMINATOR;
+    const releaseMakerFee = quotedMakerFee > trade.makerBond ? trade.makerBond : quotedMakerFee;
+    const releaseTakerFee = (trade.cryptoAmount * trade.takerFeeBpsSnapshot) / BPS_DENOMINATOR;
+    const makerPenalty = bondPenaltyMaker > releaseMakerFee ? bondPenaltyMaker : releaseMakerFee;
+    const takerPenalty = bondPenaltyTaker > releaseTakerFee ? bondPenaltyTaker : releaseTakerFee;
 
     const treasuryBefore = await token.balanceOf(treasury.address);
     const makerBefore = await token.balanceOf(maker.address);

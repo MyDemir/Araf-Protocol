@@ -6,7 +6,9 @@ import React from 'react';
 import { formatTokenAmount, mapOffchainHealthToUi } from '../../orderUiModel';
 import { deriveReputationView, MIN_REPUTATION_NOTIONAL_USD } from './reputationModel';
 import { WALLET_AGE_MIN_DAYS } from '../../walletAge';
+import { getChainNowMs } from '../../clock';
 import { fmtNum, localeOf, tx } from '../../copy';
+import TokenBalances from '../../../components/TokenBalances';
 
 export const profileTabs = [
   { key: 'account', icon: UserRound, label: { TR: 'Hesap', EN: 'Account' } },
@@ -25,7 +27,9 @@ const fmtDate = (sec, lang, withTime = false) => {
   const d = new Date(Number(sec) * 1000);
   return withTime ? d.toLocaleString(localeOf(lang)) : d.toLocaleDateString(localeOf(lang));
 };
-const daysUntil = (sec, now = Date.now() / 1000) => Math.max(0, Math.ceil((Number(sec) - now) / 86400));
+// [TR] F4-17: süre hesapları cihaz saati değil zincir saatiyle (clock.js; RewardsPanel ile tutarlı) yapılır.
+const chainNowSec = () => Math.floor(getChainNowMs() / 1000);
+const daysUntil = (sec, now = chainNowSec()) => Math.max(0, Math.ceil((Number(sec) - now) / 86400));
 
 // [TR] Mobilde 8 sekme sarılıp iki-üç satır kaplıyordu; tek satır yatay kaydırma + ikon.
 // [EN] On mobile the 8 tabs wrapped onto several rows; now a single scrollable row with icons.
@@ -83,13 +87,20 @@ const CheckRow = ({ ok, label, detail, pending, action }) => (
 
 export const AccountPanel = ({
   lang = 'EN', address, isConnected, isAuthenticated, userReputation, reputationPolicy,
-  sybilStatus, walletAgeRemainingDays, isWalletRegistered = null, onRetryWalletRegistration, isBanned, activeEscrows = [], myOrders = [], onNavigateTab,
+  sybilStatus, walletAgeRemainingDays, isWalletRegistered = null, onRetryWalletRegistration, isBanned, activeEscrows = [], myOrders = [], onNavigateTab, tokenDecimalsMap,
 }) => {
   const [copied, setCopied] = React.useState(false);
-  const rep = deriveReputationView({ reputation: userReputation, policy: reputationPolicy });
+  const [copyFailed, setCopyFailed] = React.useState(false);
+  const rep = deriveReputationView({ reputation: userReputation, policy: reputationPolicy, now: chainNowSec() });
   const openOrders = myOrders.filter((o) => o.status === 'OPEN' || o.status === 'PARTIALLY_FILLED').length;
   const copy = async () => {
-    try { await navigator.clipboard.writeText(address); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* clipboard unavailable */ }
+    try {
+      await navigator.clipboard.writeText(address);
+      setCopyFailed(false); setCopied(true); setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // [TR] F4-17: pano izni yoksa sessiz kalma; kullanıcı adresi elle kopyalayabilsin.
+      setCopied(false); setCopyFailed(true); setTimeout(() => setCopyFailed(false), 4000);
+    }
   };
   const sessionOk = isConnected && isAuthenticated;
   const tiles = [
@@ -128,6 +139,10 @@ export const AccountPanel = ({
             </button>
           )}
         </div>
+        <p role="status" className={copyFailed ? 'mt-1 text-xs text-warning' : 'sr-only'}>
+          {copyFailed ? tx(lang, 'Kopyalanamadı; adresi elle seçip kopyalayın.', 'Could not copy; select the address and copy it manually.') : ''}
+        </p>
+        {sessionOk && <TokenBalances lang={lang} address={address} tokenDecimalsMap={tokenDecimalsMap} />}
         <div className="grid grid-cols-2 gap-2 mt-3">
           {tiles.map((tile) => (
             <button key={tile.label} type="button" onClick={() => onNavigateTab?.(tile.key)} className="text-left bg-elevated border border-borderSubtle rounded-lg px-3 py-2 hover:border-borderStrong transition">
@@ -220,7 +235,7 @@ export const ReputationPanel = ({
   userReputation, reputationPolicy, lang = 'EN', address, activeEscrows = [],
   decayReputation, isContractLoading = false, setIsContractLoading, showToast,
 }) => {
-  const rep = deriveReputationView({ reputation: userReputation, policy: reputationPolicy });
+  const rep = deriveReputationView({ reputation: userReputation, policy: reputationPolicy, now: chainNowSec() });
   if (!rep) {
     return (
       <div className="grid gap-3 md:grid-cols-2 max-w-4xl" aria-busy="true">

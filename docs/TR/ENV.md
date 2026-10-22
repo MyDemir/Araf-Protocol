@@ -136,6 +136,9 @@ Ortak okuma: Y = Yerel, S = Base Sepolia (Fly'da yine `NODE_ENV=production` çal
 | Değişken | Ne işe yarar | Zorunlu mu? | Y | S | M | Nereye | Kullanıldığı yer |
 |---|---|---|---|---|---|---|---|
 | `MONGODB_URI` | MongoDB bağlantı adresi | Her zaman (yoksa `connectDB` hata verir) | `mongodb://127.0.0.1:27017/araf_protocol` | `mongodb+srv://…` | `mongodb+srv://…` | B/.env, Fly | `config/db.js:34`, `health.js:96` |
+| `MONGO_MAX_POOL_SIZE` | Mongo bağlantı havuzu üst sınırı (1-1000) | Opsiyonel | 100 | boş (100) | boş (100); makine sayısı × değer Atlas limitini aşmamalı | B/.env, Fly | `config/db.js` |
+| `MONGO_SOCKET_TIMEOUT_MS` | Mongo socket zaman aşımı ms (1000-600000) | Opsiyonel | 20000 | boş (20000) | boş (20000) | B/.env, Fly | `config/db.js` |
+| `MONGO_DISCONNECT_GRACE_MS` | Bağlantı kopunca süreç çıkmadan önce yeniden bağlanma süresi ms (0-120000); dolunca `exit(1)` | Opsiyonel | 10000 | boş (10000) | boş (10000) | B/.env, Fly | `config/db.js` |
 | 🔒 `REDIS_URL` | Redis bağlantı adresi (şifre içerebilir) | Prod'da; dev'de `redis://127.0.0.1:6379` | `redis://127.0.0.1:6379` | `rediss://…` | `rediss://…` | B/.env, Fly | `config/redis.js:89` |
 | `REDIS_TLS` | `true` ise `redis://` ile de TLS | Opsiyonel; prod'da TLS şart (`rediss://` ya da bu) | boş | `rediss://` yeter | `rediss://` yeter | B/.env, Fly | `config/redis.js:96` |
 | `REDIS_TLS_SKIP_VERIFY` | Self-signed dev Redis için sertifika doğrulamayı kapatır | Opsiyonel (`false`); prod'da `true` ise backend başlamaz | `false` | asla | asla | B/.env | `config/redis.js:97` |
@@ -480,10 +483,10 @@ RPC URL'leri (`BASE_RPC_URL`, `BASE_RPC_URL_FALLBACKS`) bilerek panelde yoktur v
 Öncelik: admin (DB) > env > varsayılan; sınırlar her kaynak için uygulanır; değişiklik yeniden başlatma gerektirmez (en fazla ~15 sn önbellek). Gruplar ve sınırlar `backend/scripts/config/runtimeSettingDefs.js` içindedir.
 
 - Worker: `LIVE_POLL_INTERVAL_MS`, `WORKER_BLOCK_BATCH_SIZE`, `WORKER_REPLAY_BATCH_DELAY_MS`, `WORKER_CHECKPOINT_INTERVAL_BLOCKS` (1-1000), `WORKER_REPLAY_BACKOFF_BASE_MS` (500-60000), `WORKER_REPLAY_BACKOFF_MAX_MS` (5000-1800000), `RPC_MAX_REQUESTS_PER_SEC` (1-50, varsayılan 4; RPC URL başına saniyelik istek sınırı, aşan istekler kuyruğa girer)
-- Watchdog/Sağlık: `WORKER_BLOCK_STALE_MS` (30000-900000), `WORKER_WATCHDOG_INTERVAL_MS` (5000-120000), `WORKER_LIVENESS_STALE_MS` (60000-1800000; varsayılan 2x blok bayatlık + 30 sn), `WORKER_MAX_LAG_BLOCKS` (1-1000)
+- Watchdog/Sağlık: `WORKER_BLOCK_STALE_MS` (30000-900000), `WORKER_WATCHDOG_INTERVAL_MS` (5000-120000), `WORKER_LIVENESS_STALE_MS` (60000-1800000; varsayılan 2x blok bayatlık + 30 sn), `WORKER_MAX_LAG_BLOCKS` (1-100)
 - Önbellekler: `READY_CACHE_TTL_MS` (5000-10000), `MARKET_CACHE_TTL_MS` (0-60000), `CONFIG_CACHE_TTL_SECONDS` (60-21600), `RATE_LIMIT_TIER_CACHE_TTL_SECONDS` (10-600; yalnız tier önbelleği, limit sayıları değil)
 - Kur referansı: `REFERENCE_TICKER_CRYPTO_TTL_SECONDS`, `..._FIAT_TTL_SECONDS`, `..._LAST_GOOD_TTL_SECONDS`, `..._MAX_STALE_SECONDS`
-- Arka plan işleri: `REPUTATION_DECAY_CANDIDATE_LIMIT`, `REPUTATION_DECAY_TX_LIMIT` (1-100, relayer gas'ı), `REWARD_RECORDER_CANDIDATE_LIMIT`, `REWARD_RECORDER_BATCH_LIMIT` (1-50, relayer gas'ı; id başına ~100k gas tahmini, revert olursa aynı id'ler yeniden denenir)
+- Arka plan işleri: `REPUTATION_DECAY_CANDIDATE_LIMIT`, `REPUTATION_DECAY_TX_LIMIT` (1-50, relayer gas'ı), `REWARD_RECORDER_CANDIDATE_LIMIT`, `REWARD_RECORDER_BATCH_LIMIT` (1-50, relayer gas'ı; id başına ~100k gas tahmini, revert olursa aynı id'ler yeniden denenir)
 
 Alanlar arası kısıtlar (etkin değerler üzerinden, ihlalde `400`): liveness >= 2 x blok bayatlık; replay backoff base <= max; blok bayatlık >= 3 x `LIVE_POLL_INTERVAL_MS`; kur last-good TTL >= max stale; kur fiat TTL <= max stale.
 

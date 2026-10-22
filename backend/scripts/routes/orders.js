@@ -12,9 +12,13 @@
 const express = require("express");
 const { parsePositiveOnchainId: _parsePositiveOnchainId } = require("../utils/onchain");
 const Joi = require("joi");
+const { asyncHandler } = require("../utils/asyncHandler");
 const router = express.Router();
 
-const { requireAuth, requireSessionWalletMatch } = require("../middleware/auth");
+const { requireAuth: _requireAuth, requireSessionWalletMatch: _requireSessionWalletMatch } = require("../middleware/auth");
+// [TR] B2-17: async auth middleware'leri de reddi next(err)'e iletecek şekilde sarılır.
+const requireAuth = asyncHandler(_requireAuth);
+const requireSessionWalletMatch = asyncHandler(_requireSessionWalletMatch);
 const { marketReadLimiter, ordersReadLimiter, ordersWriteLimiter } = require("../middleware/rateLimiter");
 const Order = require("../models/Order");
 const Trade = require("../models/Trade");
@@ -71,7 +75,7 @@ function _buildMinRemainingClauses(minAmount, tokenAddress) {
   let tokenMap;
   try {
     tokenMap = getConfig().tokenMap || {};
-  } catch (_) {
+  } catch {
     return null;
   }
   const byAddress = Object.fromEntries(Object.entries(tokenMap).map(([addr, cfg]) => [addr.toLowerCase(), cfg]));
@@ -270,7 +274,7 @@ function _buildIdentityLookup(field, idString) {
   return { [field]: idString };
 }
 
-router.get("/config", marketReadLimiter, async (_req, res, next) => {
+router.get("/config", marketReadLimiter, asyncHandler(async (_req, res, next) => {
   try {
     const config = getConfig();
     const paymentRiskConfig = await applyRailStatesToRiskConfig(config.paymentRiskConfig || {});
@@ -299,9 +303,9 @@ router.get("/config", marketReadLimiter, async (_req, res, next) => {
     if (err.code === "CONFIG_UNAVAILABLE") return res.status(503).json({ error: err.message });
     next(err);
   }
-});
+}));
 
-router.get("/payment-risk-config", marketReadLimiter, async (_req, res, next) => {
+router.get("/payment-risk-config", marketReadLimiter, asyncHandler(async (_req, res, next) => {
   try {
     const config = getConfig();
     return res.json({
@@ -317,7 +321,7 @@ router.get("/payment-risk-config", marketReadLimiter, async (_req, res, next) =>
     if (err.code === "CONFIG_UNAVAILABLE") return res.status(503).json({ error: err.message });
     next(err);
   }
-});
+}));
 
 // [TR] Pazar yanıtı herkese açık ve tüm ziyaretçilerde aynıdır; istemciler 30 sn'de bir yokladığı için
 //      aynı sorgu kısa süre bellekte tutulur (varsayılan 10 sn). Her istekte 4 Mongo sorgusu yerine
@@ -340,7 +344,15 @@ function _marketCacheGet(key) {
     marketCache.delete(key);
     return null;
   }
+  // [TR] B3-14: LRU — erişimde sona yeniden ekle; sık okunan varsayılan feed dışarı atılmaz.
+  marketCache.delete(key);
+  marketCache.set(key, hit);
   return hit.body;
+}
+
+// [TR] B3-14: Anahtar ham URL değil, doğrulanmış değerlerden (sıralı) üretilir; sorgu sırası/biçimi farklı aynı sorgu tek girdi olur.
+function _marketCacheKey(value) {
+  return JSON.stringify(Object.keys(value).sort().map((k) => [k, value[k]]));
 }
 
 function _marketCacheSet(key, body) {
@@ -350,14 +362,8 @@ function _marketCacheSet(key, body) {
   marketCache.set(key, { body, expiresAt: Date.now() + ttlMs });
 }
 
-router.get("/", marketReadLimiter, async (req, res, next) => {
+router.get("/", marketReadLimiter, asyncHandler(async (req, res, next) => {
   try {
-    const cacheKey = req.originalUrl;
-    const cached = _marketCacheGet(cacheKey);
-    if (cached) {
-      res.set("X-Cache", "HIT");
-      return res.json(cached);
-    }
     const schema = Joi.object({
       side: Joi.string().valid("SELL_CRYPTO", "BUY_CRYPTO").optional(),
       // [TR] ACTIVE = fill edilebilir (OPEN + PARTIALLY_FILLED). Pazar yeri bunu kullanır;
@@ -373,13 +379,22 @@ router.get("/", marketReadLimiter, async (req, res, next) => {
       //      İstemci yalnız ilk sayfayı çektiği için filtreler sunucuda uygulanmazsa sayfa dışı emirler kaybolur.
       // [EN] Server-side market search: fiat, minimum remaining amount (token units) and best-rate sort.
       fiat: Joi.string().valid("TRY", "USD", "EUR").optional(),
-      min_amount: Joi.number().positive().optional(),
+      // [TR] B3-13: aşırı büyük min_amount Infinity -> 503 yerine 400 olur.
+      min_amount: Joi.number().positive().max(1e12).optional(),
       sort: Joi.string().valid("default", "best_rate", "newest").default("default"),
-      page: Joi.number().integer().min(1).default(1),
+      // [TR] B3-12: derin skip taramasını sınırlar (istemci en çok 50x birkaç sayfa ister).
+      page: Joi.number().integer().min(1).max(200).default(1),
       limit: Joi.number().integer().min(1).max(50).default(20),
     });
     const { error, value } = schema.validate(req.query);
     if (error) return res.status(400).json({ error: error.message });
+
+    const cacheKey = _marketCacheKey(value);
+    const cached = _marketCacheGet(cacheKey);
+    if (cached) {
+      res.set("X-Cache", "HIT");
+      return res.json(cached);
+    }
 
     const filter = {};
     if (value.side) filter.side = value.side;
@@ -438,13 +453,13 @@ router.get("/", marketReadLimiter, async (req, res, next) => {
     _marketCacheSet(cacheKey, body);
     return res.json(body);
   } catch (err) { next(err); }
-});
+}));
 
 // [TR] Kullanıcının kendi order listesi write-surface değil, paginated read-surface'tür.
 //      Bu yüzden write limiter yerine read limiter uygulanır.
 // [EN] User's own order list is a paginated read surface, not a write surface.
 //      Apply read limiter instead of write limiter.
-router.get("/my", requireAuth, requireSessionWalletMatch, ordersReadLimiter, async (req, res, next) => {
+router.get("/my", requireAuth, requireSessionWalletMatch, ordersReadLimiter, asyncHandler(async (req, res, next) => {
   try {
     const schema = Joi.object({
       page: Joi.number().integer().min(1).default(1),
@@ -467,13 +482,13 @@ router.get("/my", requireAuth, requireSessionWalletMatch, ordersReadLimiter, asy
 
     return res.json({ orders, total, page: value.page, limit: value.limit });
   } catch (err) { next(err); }
-});
+}));
 
 // ─── POST /api/orders/market-meta ────────────────────────────────────────────
 // [TR] Maker'ın kur/fiat bilgisini (zincirde tutulmayan UI enrichment) set-once kaydeder.
 //      Protokol otoritesi değildir; yalnız pazar yerinde fiyat gösterimi içindir.
 // [EN] Stores the maker's off-chain fiat/rate (UI enrichment only) with set-once semantics.
-router.post("/market-meta", requireAuth, requireSessionWalletMatch, ordersWriteLimiter, async (req, res, next) => {
+router.post("/market-meta", requireAuth, requireSessionWalletMatch, ordersWriteLimiter, asyncHandler(async (req, res, next) => {
   try {
     const schema = Joi.object({
       orderRef: Joi.string().pattern(/^0x[a-fA-F0-9]{64}$/).required(),
@@ -516,10 +531,14 @@ router.post("/market-meta", requireAuth, requireSessionWalletMatch, ordersWriteL
       if (Number(existing.market?.exchange_rate) > 0) {
         return res.status(409).json({ error: "Kur bilgisi zaten kayıtlı.", code: "MARKET_META_ALREADY_SET" });
       }
-      await Order.updateOne(
+      const updateResult = await Order.updateOne(
         { "refs.order_ref": orderRef, owner_address: req.wallet, "market.exchange_rate": null },
         { $set: { "market.fiat_currency": meta.fiat_currency, "market.exchange_rate": meta.exchange_rate } }
       );
+      // [TR] B3-11: eşzamanlı istekte filtre tutmadıysa kayıt bu istekle yazılmadı; set-once semantiği 409 ile bildirilir.
+      if (updateResult && updateResult.matchedCount === 0) {
+        return res.status(409).json({ error: "Kur bilgisi zaten kayıtlı.", code: "MARKET_META_ALREADY_SET" });
+      }
       return res.status(201).json({ success: true, applied: true });
     }
 
@@ -532,11 +551,11 @@ router.post("/market-meta", requireAuth, requireSessionWalletMatch, ordersWriteL
     logger.info(`[Orders] market meta niyeti kaydedildi: ref=${orderRef.slice(0, 10)}...`);
     return res.status(202).json({ success: true, applied: false });
   } catch (err) { next(err); }
-});
+}));
 
 // [TR] Parent order'a bağlı child trade listesi state-changing değildir; read surface'tür.
 // [EN] Child trade list/read surface under a parent order is non-authoritative.
-router.get("/:id/trades", requireAuth, requireSessionWalletMatch, ordersReadLimiter, async (req, res, next) => {
+router.get("/:id/trades", requireAuth, requireSessionWalletMatch, ordersReadLimiter, asyncHandler(async (req, res, next) => {
   try {
     const onchainOrderId = _parsePositiveOnchainId(req.params.id);
     if (!onchainOrderId) {
@@ -568,9 +587,9 @@ router.get("/:id/trades", requireAuth, requireSessionWalletMatch, ordersReadLimi
     ]);
     return res.json({ trades, total, page: value.page, limit: value.limit });
   } catch (err) { next(err); }
-});
+}));
 
-router.get("/:id", marketReadLimiter, async (req, res, next) => {
+router.get("/:id", marketReadLimiter, asyncHandler(async (req, res, next) => {
   try {
     const onchainOrderId = _parsePositiveOnchainId(req.params.id);
     if (!onchainOrderId) {
@@ -582,6 +601,6 @@ router.get("/:id", marketReadLimiter, async (req, res, next) => {
     if (!order) return res.status(404).json({ error: "Order bulunamadı." });
     return res.json({ order });
   } catch (err) { next(err); }
-});
+}));
 
 module.exports = router;

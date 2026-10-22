@@ -8,6 +8,7 @@ const hre = require('hardhat');
 const { ethers, network } = hre;
 const fs = require('fs');
 const path = require('path');
+const { formatError } = require('./lib/redact');
 
 const ZERO = '0x0000000000000000000000000000000000000000';
 const addr = (v, n) => {
@@ -97,6 +98,10 @@ async function switchTreasury(env = process.env) {
 
   console.warn('WARNING: switching escrow treasury to revenue vault.');
   await (await escrow.setTreasury(vaultAddr)).wait();
+  // [TR] Geri-okuma (K4-20e): tx başarılı görünse de treasury gerçekten vault olmalı.
+  // [EN] Read-back: after setTreasury, escrow.treasury() must equal the vault.
+  const after = ethers.getAddress(await escrow.treasury());
+  if (after !== ethers.getAddress(vaultAddr)) throw new Error(`treasury read-back mismatch. expected=${vaultAddr} got=${after}`);
 }
 
 const OPS = { configure, verify, 'switch-treasury': switchTreasury };
@@ -109,7 +114,7 @@ if (require.main === module) {
     console.error(`Unknown rewards op "${op}". Use REWARDS_OP=${Object.keys(OPS).join('|')}`);
     process.exit(1);
   }
-  run().catch((e) => { console.error(e); process.exit(1); });
+  run().catch((e) => { console.error(formatError(e)); process.exit(1); });
 }
 
 module.exports = { loadManifest, resolveAddresses, configure, verify, switchTreasury };

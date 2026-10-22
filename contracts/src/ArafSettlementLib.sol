@@ -99,14 +99,18 @@ library ArafSettlementLib {
     ) private {
         // [TR] G4: treasury kod uzunluğu bir kez okunur. [EN] G4: treasury code length is read once.
         bool isContract = _to.code.length > 0;
+        bytes memory intentError;
 
         // [TR] Treasury vault destekliyorsa same-path exact-in doğrulaması için niyet kaydı bırakılır.
         // [EN] If treasury vault supports it, register intent for same-path exact-in verification.
         if (isContract) {
             try IArafRevenueReceiver(_to).noteEscrowRevenueIntent(_token, _amount, _kind, _tradeId) {
                 // no-op
-            } catch {
+            } catch (bytes memory reason) {
                 // Backward compatibility: legacy treasury receivers may not implement intent hook.
+                // [TR] K3-09: hata yutulmaz, hook da başarısız olursa kök neden olarak taşınır.
+                // [EN] K3-09: the error is kept and surfaced as the root cause if the hook fails too.
+                intentError = reason;
             }
         }
 
@@ -116,6 +120,12 @@ library ArafSettlementLib {
             try IArafRevenueReceiver(_to).onArafRevenue(_token, _amount, _kind, _tradeId) {
                 // no-op
             } catch {
+                // [TR] K3-09: intent nedenli revert ettiyse kök neden odur (ör. vault MissingRevenueIntent yalnız
+                //      sonuçtur). Nedensiz (boş veri: fonksiyonu olmayan eski alıcı, OOG) intent hatası eskisi gibi
+                //      RevenueHookFailed'dır. Her iki durumda da işlem revert eder; güvenlik davranışı aynıdır.
+                // [EN] K3-09: if the intent reverted with data, that is the root cause. An empty intent error (legacy
+                //      receiver without the function, OOG) keeps RevenueHookFailed. The exit reverts either way.
+                if (intentError.length > 0) revert IArafEscrowErrors.RevenueIntentFailed(intentError);
                 revert IArafEscrowErrors.RevenueHookFailed();
             }
         }
@@ -145,9 +155,13 @@ library ArafSettlementLib {
         if (msg.sender != t.maker && msg.sender != t.taker) revert IArafEscrowErrors.NotTradeParty();
 
         // [TR] Süresi dolmuş teklif yenisiyle doğrudan üzerine yazılır (FINALIZED burada ulaşılamaz: trade RESOLVED olur).
+        //      K3-07: hâlâ PROPOSED görünen süresi dolmuş teklif için önce SettlementExpired yayınlanır; event izleyen
+        //      mirror eski teklifi kapatır (expireSettlement çağrılmış gibi).
         // [EN] An expired proposal is simply overwritten (FINALIZED is unreachable here: the trade is RESOLVED).
-        if (sp.state == ArafEscrow.SettlementProposalState.PROPOSED && block.timestamp <= sp.expiresAt) {
-            revert IArafEscrowErrors.ActiveSettlementProposalExists();
+        //      K3-07: an expired proposal still in PROPOSED first gets SettlementExpired so event mirrors close it.
+        if (sp.state == ArafEscrow.SettlementProposalState.PROPOSED) {
+            if (block.timestamp <= sp.expiresAt) revert IArafEscrowErrors.ActiveSettlementProposalExists();
+            emit SettlementExpired(_tradeId, sp.id);
         }
 
         if (_makerShareBps > BPS_DENOMINATOR) revert IArafEscrowErrors.InvalidSettlementSplit();

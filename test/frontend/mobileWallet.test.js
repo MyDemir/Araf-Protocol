@@ -70,7 +70,7 @@ describe('vercel.json CSP', () => {
   });
   it('has no forbidden loosening', () => {
     expect(csp).not.toContain("'unsafe-eval'");
-    expect(dir('script-src')).toEqual(["'self'", "'unsafe-inline'"]);
+    expect(dir('script-src')).toEqual(["'self'"]);
     for (const d of csp.split(';').map((s) => s.trim())) expect(d.split(/\s+/).slice(1)).not.toContain('*');
     expect(dir('frame-src')).toEqual([]);
     expect(dir('frame-ancestors')).toEqual(["'none'"]);

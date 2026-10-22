@@ -207,19 +207,15 @@ describe('order creation actions', () => {
   });
 });
 
-describe('wallet age pre-check for buy orders (contract WalletTooYoung)', () => {
+describe('wallet age is NOT a create-time check for buy orders (contract createBuyOrder, ArafEscrow.sol:626-633)', () => {
   const form = { makerTier: 0, makerAmount: '100', makerRate: '34', makerMinLimit: '', makerFiat: 'TRY' };
 
-  it('BUY + walletAged=false: TR error with remaining days; no approve, no createBuyOrder', async () => {
-    expect(getMakerOrderValidationError({ ...form, makerSide: 'BUY_CRYPTO', walletAged: false, walletAgeRemainingDays: 1, lang: 'TR' }))
-      .toBe('Alış emri için cüzdan yaşı dolmadı (kayıttan sonra 2 gün). Kalan: ~1 gün. Satış emri açabilirsiniz.');
-    expect(getMakerOrderValidationError({ ...form, makerSide: 'BUY_CRYPTO', walletAged: false }))
-      .toBe('Wallet age requirement not met for buy orders (2 days after registration). Remaining: ~? day(s). You can still open sell orders.');
+  it('BUY + walletAged=false: no error; approve and createBuyOrder are called', async () => {
+    expect(getMakerOrderValidationError({ ...form, makerSide: 'BUY_CRYPTO', walletAged: false, walletAgeRemainingDays: 1, lang: 'TR' })).toBeNull();
     const deps = makeDeps({ state: { makerTier: 0, makerSide: 'BUY_CRYPTO' }, walletAged: false, walletAgeRemainingDays: 1, lang: 'TR' });
     await runAction(deps);
-    expect(deps.showToast).toHaveBeenCalledWith(expect.stringMatching(/cüzdan yaşı dolmadı/), 'error');
-    expect(deps.approveToken).not.toHaveBeenCalled();
-    expect(deps.createBuyOrder).not.toHaveBeenCalled();
+    expect(deps.showToast).not.toHaveBeenCalledWith(expect.stringMatching(/cüzdan yaşı dolmadı/), 'error');
+    expect(deps.createBuyOrder).toHaveBeenCalled();
   });
 
   it('SELL + walletAged=false: no age error', () => {

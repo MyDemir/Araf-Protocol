@@ -1,9 +1,10 @@
+import { safeStorage } from './safeStorage';
 import React, { useEffect, useMemo, useState } from 'react';
 import { deriveTradeTimeline } from './contexts/trade-room/tradeTimeline';
 import { shortAddress } from './copy';
 import { getChainNowMs, setClockOffset } from './clock';
 import { toUnixSeconds } from './contexts/settlement/settlementActionModel';
-import { buildMarketOrdersQuery, MARKET_FILTER_DEFAULTS, matchesMarketFilters } from './contexts/marketplace/marketFilters';
+import { buildMarketOrdersQuery, hasMoreMarketOrders, MARKET_FILTER_DEFAULTS, MARKET_POLL_MAX_PAGES, matchesMarketFilters, mergeOrdersById } from './contexts/marketplace/marketFilters';
 import { mapApiOrderToUi, formatTokenAmount as formatTokenAmountFromRaw, tokenToNumber as rawTokenToDisplayNumber } from './orderUiModel';
 import { buildApiUrl } from './apiConfig';
 import { fetchWithTimeout, isTimeoutError, DEFAULT_FETCH_TIMEOUT_MS, WRITE_FETCH_TIMEOUT_MS } from './fetchWithTimeout';
@@ -65,6 +66,12 @@ const fetchAllMyPages = async ({ authenticatedFetch, endpoint, collectionKey, en
   while (requestedPage <= MAX_MY_ITEMS_PAGE_FETCHES) {
     const res = await authenticatedFetch(buildApiUrl(`${endpoint}?page=${requestedPage}&limit=${MY_ITEMS_PAGE_LIMIT}`), signal ? { signal } : undefined);
     if (signal?.aborted) return allItems;
+    // [TR] F1-12: HTTP hatası şema uyumsuzluğu gibi görünmesin; durum kodu hataya eklenir.
+    if (res.ok === false) {
+      const httpErr = new Error(`${endpointLabel} HTTP ${res.status}`);
+      httpErr.httpStatus = res.status;
+      throw httpErr;
+    }
     const data = await res.json();
     const { items, total, page, limit } = assertPaginatedPayload(data, collectionKey, endpointLabel);
 
@@ -202,6 +209,21 @@ export function mapResolutionTypeLabel(resolutionType, lang = "EN") {
   return labels[key][lang === "TR" ? "TR" : "EN"];
 }
 
+const makeEmptyPayoutDraft = () => ({
+  rail: 'TR_IBAN',
+  country: 'TR',
+  contact: { channel: null, value: null },
+  fields: {
+    account_holder_name: '',
+    iban: null,
+    routing_number: null,
+    account_number: null,
+    account_type: null,
+    bic: null,
+    bank_name: null,
+  },
+});
+
 export function useAppSessionData({
   address,
   isConnected,
@@ -227,6 +249,9 @@ export function useAppSessionData({
   SUPPORTED_TOKEN_ADDRESSES,
   marketFilters = MARKET_FILTER_DEFAULTS,
   devScenarioActive = false,
+  // [TR] F1-01: wagmi sayfa yenilemede 'reconnecting' iken isConnected=false döner; bu 'bağlantı yok' değildir.
+  // [EN] F1-01: wagmi reports isConnected=false while reconnecting; that is not a real disconnect.
+  isWalletResolving = false,
 }) {
   const [tradeState, setTradeState] = useState('LOCKED');
   const [userRole, setUserRole] = useState('taker');
@@ -252,28 +277,43 @@ export function useAppSessionData({
   // [TR] Zincirde walletRegisteredAt sıfırlanamaz. Kilit state'ten türetilmez; yalnız (a) okuma regAt>0n döndüğünde
   //      ya da (b) kayıt başarılı olup dışarıdan true set edildiğinde açılır; yalnız adres değişince kapanır.
   const walletRegLockedRef = React.useRef(false);
+  // [TR] Kayıt tx'i beklenirken hesap değişirse sonuç eski hesaba aittir: tx başlarken adres yakalanır, true yazımı
+  //      güncel adresle eşleşmezse yapılmaz (yeni hesap "kayıtlı" görünmez; yalnız kayıt durumu yeniden okunur).
+  // [EN] Address captured when the registration tx starts; a late true for a switched account is dropped and the
+  //      registration state is re-read instead.
+  const currentAddressRef = React.useRef(null);
+  currentAddressRef.current = address ? String(address).toLowerCase() : null;
+  const registeringAddressRef = React.useRef(null);
+  const walletRegRefreshRef = React.useRef(() => {});
   const setIsWalletRegistered = React.useCallback((v) => {
-    if (v === true) walletRegLockedRef.current = true;
+    if (v === true) {
+      const startedFor = registeringAddressRef.current;
+      if (startedFor && startedFor !== currentAddressRef.current) {
+        walletRegRefreshRef.current();
+        return;
+      }
+      walletRegLockedRef.current = true;
+    }
     setIsWalletRegisteredRaw(v);
   }, []);
-  const [isRegisteringWallet, setIsRegisteringWallet] = useState(false);
+  const [isRegisteringWallet, setIsRegisteringWalletRaw] = useState(false);
+  // [TR] true: adres yakalanır. false: deneme bitti (başarı/hata/zaman aşımı); durum zincirden yeniden okunur
+  //      (zaman aşımında tx geçmiş olabilir).
+  const setIsRegisteringWallet = React.useCallback((v) => {
+    if (v === true) {
+      registeringAddressRef.current = currentAddressRef.current;
+    } else if (v === false) {
+      registeringAddressRef.current = null;
+      walletRegRefreshRef.current();
+    }
+    setIsRegisteringWalletRaw(v);
+  }, []);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   const [userReputation, setUserReputation] = useState(null);
-  const [payoutProfileDraft, setPayoutProfileDraft] = useState({
-    rail: 'TR_IBAN',
-    country: 'TR',
-    contact: { channel: null, value: null },
-    fields: {
-      account_holder_name: '',
-      iban: null,
-      routing_number: null,
-      account_number: null,
-      account_type: null,
-      bic: null,
-      bank_name: null,
-    },
-  });
+  const [payoutProfileDraft, setPayoutProfileDraft] = useState(makeEmptyPayoutDraft);
+  const draftSyncedWalletRef = React.useRef(null);
+  const draftTouchedRef = React.useRef(false);
 
   const [tradeHistory, setTradeHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(true);
@@ -325,6 +365,10 @@ export function useAppSessionData({
   // [TR] null = henüz okunmadı / okunamadı (bilinmiyor); eski varsayılan 15 gerçek ücretmiş gibi gösteriliyordu.
   // [TR] Zincir saati - cihaz saati farkı (ms); aşağıdaki zamana bağlı kararlar bunu kullanır.
   const [chainOffsetMs, setChainOffsetMs] = useState(0);
+  // [TR] Kayıt okuma effect'i ofseti ref'ten okur; yalnız dakikalık kova değişince yeniden çalışır (ms oynaması tetiklemez).
+  const chainOffsetRef = React.useRef(0);
+  chainOffsetRef.current = chainOffsetMs;
+  const chainOffsetBucket = Math.round(chainOffsetMs / 60000);
   const [takerFeeBps, setTakerFeeBps] = useState(null);
   // [TR] Kontrat getFeeConfig aynası (backend /orders/config): emir önizlemesinde ücret gösterimi için.
   const [protocolFeeConfig, setProtocolFeeConfig] = useState(null);
@@ -337,6 +381,11 @@ export function useAppSessionData({
   const [orders, setOrders] = useState([]);
   // [TR] Sunucudaki eşleşen emir sayısı (ilk sayfa 50 ile sınırlı olduğundan ayrı tutulur). [EN] Server-side match count.
   const [marketOrdersTotal, setMarketOrdersTotal] = useState(null);
+  // [TR] "Daha fazla yükle" durumu (F3-02): sonraki sayfa var mı, yükleniyor mu, hata var mı.
+  // [EN] "Load more" state (F3-02): is there a next page, loading, error.
+  const [marketHasMore, setMarketHasMore] = useState(false);
+  const [marketLoadingMore, setMarketLoadingMore] = useState(false);
+  const [marketLoadMoreError, setMarketLoadMoreError] = useState(false);
   // [TR] Pazar akışı alınamazsa sayaçlar "0" yerine "—" göstermeli; boş pazar ile ulaşılamayan sunucu ayırt edilir.
   // [EN] Distinguish an unreachable feed from an empty market.
   const [ordersFeedError, setOrdersFeedError] = useState(false);
@@ -362,6 +411,7 @@ export function useAppSessionData({
   const showToastRef = React.useRef(showToast);
   const langRef = React.useRef(lang);
   const sessionToastShownRef = React.useRef(false);
+  const refreshTransientToastShownRef = React.useRef(false);
   // [TR] Yarış koruması: oturum dönemi (logout/cüzdan değişimi) ve istek sıra numaraları (F10).
   const sessionEpochRef = React.useRef(0);
   const tradesSeqRef = React.useRef(0);
@@ -402,9 +452,13 @@ export function useAppSessionData({
     setTradesBackendUnavailable(false);
     pendingTxCheckedRef.current = false;
     autoTradeResumeRef.current = false;
+    // [TR] Çıkış/oturum temizliğinde ödeme taslağı boş varsayılana döner (önceki cüzdanın verisi kalmaz).
+    setPayoutProfileDraft(makeEmptyPayoutDraft());
+    draftSyncedWalletRef.current = null;
+    draftTouchedRef.current = false;
     setPaymentIpfsHashState((prev) => (prev.onchainId === null && prev.hash === '' ? prev : { onchainId: null, hash: '' }));
     if (clearPendingTx && typeof window !== 'undefined') {
-      localStorage.removeItem('araf_pending_tx');
+      safeStorage.remove('araf_pending_tx');
     }
   }, [setCurrentView, setShowMakerModal, setActiveTrade, setActiveEscrows]);
 
@@ -414,7 +468,11 @@ export function useAppSessionData({
         method: 'POST',
         credentials: 'include',
       });
-    } catch (_) {}
+      return true;
+    } catch (_) {
+      // [TR] F1-14: çağıran (gerçek çıkış) sunucu çıkışının yapılamadığını bilsin; diğer çağıranlar dönüşü yok sayar.
+      return false;
+    }
   }, []);
 
   const authenticatedFetch = React.useCallback(async (url, options = {}) => {
@@ -423,6 +481,8 @@ export function useAppSessionData({
       suppressAuthToast = false,
       ...requestOptions
     } = options || {};
+    // [TR] F1-05: istek başındaki oturum dönemi; hesap değişimi/çıkış sonrası gelen eski 401/409 yeni oturumu silmez.
+    const requestEpoch = sessionEpochRef.current;
     const walletHeader = connectedWallet ? { 'x-wallet-address': connectedWallet } : {};
     // [TR] FormData (dekont yükleme) için Content-Type tarayıcıya bırakılır; aksi halde multipart
     //      boundary kaybolur. JSON istekleri için varsayılan application/json korunur.
@@ -444,7 +504,7 @@ export function useAppSessionData({
       } catch (err) {
         if (isWrite && isTimeoutError(err)) {
           err.writeMayHaveCompleted = true;
-          showToast(
+          showToastRef.current(
             langRef.current === 'TR'
               ? 'İstek zaman aşımına uğradı; işlem sunucuda tamamlanmış olabilir. Sayfayı yenileyip kontrol edin.'
               : 'The request timed out; the action may have completed on the server. Refresh and check before retrying.',
@@ -461,6 +521,7 @@ export function useAppSessionData({
     });
 
     if (res.status === 409 && await isSessionWalletMismatch(res)) {
+      if (requestEpoch !== sessionEpochRef.current) return res;
       try {
         await fetch(buildApiUrl('auth/logout'), {
           method: 'POST',
@@ -471,8 +532,8 @@ export function useAppSessionData({
       clearLocalSessionState({ navigateHome: false, closeModals: true });
       if (!suppressAuthToast && !sessionToastShownRef.current) {
         sessionToastShownRef.current = true;
-        showToast(
-          lang === 'TR'
+        showToastRef.current(
+          langRef.current === 'TR'
             ? 'Oturum cüzdan uyuşmazlığı nedeniyle sonlandırıldı. Lütfen yeniden giriş yapın.'
             : 'Session ended due to wallet mismatch. Please sign in again.',
           'error'
@@ -483,6 +544,8 @@ export function useAppSessionData({
 
     if (res.status !== 401) return res;
     if (skipRefresh) return res;
+    // [TR] F1-05: eski dönemin 401'i için yenileme/temizlik yapılmaz; yeni oturum etkilenmez.
+    if (requestEpoch !== sessionEpochRef.current) return res;
 
     try {
       const refreshRes = await fetchWithTimeout(() => buildApiUrl('auth/refresh'), {
@@ -492,12 +555,29 @@ export function useAppSessionData({
         body: JSON.stringify({ wallet: address?.toLowerCase() }),
       });
 
+      // [TR] Yalnız 401 oturumun bittiği anlamına gelir. 503/diğer hatalar geçici altyapı sorunudur:
+      //      oturum korunur, tekrar deneme yapılmaz, orijinal 401 yanıtı çağırana döner.
+      // [EN] Only 401 ends the session; 503/other failures keep it, no retry, original response returned.
+      if (!refreshRes.ok && refreshRes.status !== 401) {
+        if (!suppressAuthToast && !refreshTransientToastShownRef.current) {
+          refreshTransientToastShownRef.current = true;
+          showToastRef.current(
+            langRef.current === 'TR'
+              ? 'Geçici bağlantı sorunu, tekrar deneyin.'
+              : 'Temporary connection problem, please try again.',
+            'error'
+          );
+        }
+        return res;
+      }
+
       if (!refreshRes.ok) {
+        if (requestEpoch !== sessionEpochRef.current) return res;
         clearLocalSessionState({ navigateHome: false, closeModals: true });
         if (!suppressAuthToast && !sessionToastShownRef.current) {
           sessionToastShownRef.current = true;
-          showToast(
-            lang === 'TR'
+          showToastRef.current(
+            langRef.current === 'TR'
               ? 'Oturumunuz sona erdi. Lütfen tekrar imzalayın.'
               : 'Session expired. Please sign in again.',
             'error'
@@ -509,6 +589,7 @@ export function useAppSessionData({
       // [TR] Oturum başarıyla yenilendiğinde auth-toast dalgası sıfırlanır.
       // [EN] Reset auth-toast wave only after successful session refresh.
       sessionToastShownRef.current = false;
+      refreshTransientToastShownRef.current = false;
 
       return timedFetch(url, {
         ...requestOptions,
@@ -518,7 +599,7 @@ export function useAppSessionData({
     } catch (_) {
       return res;
     }
-  }, [connectedWallet, address, clearLocalSessionState, lang, showToast]);
+  }, [connectedWallet, address, clearLocalSessionState]);
 
   useEffect(() => {
     // [TR] Dedupe bayrağını yalnız doğrulanmış auth geri geldiğinde sıfırlarız.
@@ -697,7 +778,8 @@ export function useAppSessionData({
     } catch (err) {
       console.error('Trades fetch error:', err);
       // [TR] P4: eski/başka oturuma ait istek bayrağı açmaz (oturum düşüşü backend arızası değildir).
-      if (!isStale()) setTradesBackendUnavailable(true);
+      //      F1-12: 429 (hız sınırı) backend arızası değildir; zincir yedek görünümü açılmaz.
+      if (!isStale() && err?.httpStatus !== 429) setTradesBackendUnavailable(true);
     }
   }, [devScenarioActive, isAuthenticated, isConnected, address, lang, authenticatedFetch, tokenDecimalsMap, showToast, setActiveEscrows, setActiveTrade, formatAddress]);
 
@@ -825,6 +907,8 @@ export function useAppSessionData({
 
   useEffect(() => {
     if (!isConnected || !connectedWallet) {
+      // [TR] F1-01: reconnect sürerken oturum silinmez, authChecked false kalır (derin bağlantı korunur).
+      if (isWalletResolving) return;
       authValidationKeyRef.current = null;
       clearLocalSessionState({ navigateHome: false, closeModals: true });
       setAuthChecked(true);
@@ -866,6 +950,10 @@ export function useAppSessionData({
           setTradesBackendUnavailable(true);
           return;
         }
+        // [TR] F1-02: /auth/me "oturum geçersiz" için 401/403 (requireAuth) ve 409 (genel çakışma; mevcut davranış korunur)
+        //      döndürür. 429 ve diğer 4xx geçicidir: yerel oturum silinmez, durum "bilinmiyor" kalır (5xx dalı gibi).
+        //      Backend /me 404 döndürmez [kanıt: backend/scripts/routes/auth.js:547-620 status kodları 409/503/401].
+        if (!res.ok && res.status !== 401 && res.status !== 403 && res.status !== 409) return;
         if (!res.ok) {
           clearLocalSessionState({ navigateHome: false, closeModals: true });
           setAuthChecked(true);
@@ -916,7 +1004,7 @@ export function useAppSessionData({
     return () => {
       cancelled = true;
     };
-  }, [isConnected, connectedWallet, clearLocalSessionState, bestEffortBackendLogout, infraEpoch]);
+  }, [isConnected, connectedWallet, isWalletResolving, clearLocalSessionState, bestEffortBackendLogout, infraEpoch]);
 
   // [TR] Giriş (imza) /auth/me doğrulamasından bağımsız yapılır; isAdmin bu durumda henüz bilinmez. Oturum açılınca
   //      yönetici bayrağı bir kez /auth/me'den okunur (doğrulama zaten okuduysa tekrar istenmez).
@@ -949,8 +1037,19 @@ export function useAppSessionData({
   const viewerTier = Number.isInteger(userReputation?.effectiveTier) ? userReputation.effectiveTier : null;
   const marketViewOpen = currentView === 'market';
   const ordersLoadedRef = React.useRef(false);
+  const ordersMapDepsRef = React.useRef(null);
   const ordersSeqRef = React.useRef(0);
   const myOrdersSeqRef = React.useRef(0);
+  // [TR] Sayfalama: yüklü sayfa no, 2+. sayfalardan gelen id'ler (yoklama 1. sayfayı yenilerken korunur), son sayfa adedi.
+  // [EN] Paging: loaded page no, ids that came from page 2+ (kept while polling refreshes page 1), last page size.
+  const marketPageRef = React.useRef(1);
+  const marketMoreIdsRef = React.useRef(new Set());
+  const marketLastCountRef = React.useRef(0);
+  const marketTotalRef = React.useRef(null);
+  const marketMoreSeqRef = React.useRef(0);
+  const marketMoreBusyRef = React.useRef(false);
+  const marketQueryRef = React.useRef('');
+  const mapMarketOrdersRef = React.useRef(null);
   const marketOrdersQuery = buildMarketOrdersQuery({
     filters: { ...marketFilters, amount: debouncedSearchAmount },
     tokenAddresses: SUPPORTED_TOKEN_ADDRESSES,
@@ -973,6 +1072,17 @@ export function useAppSessionData({
     let initialLoad = true;
     let cancelled = false;
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    mapMarketOrdersRef.current = mapOrders;
+    // [TR] Efekt yeniden çalışınca (sorgu, dil, config) sayfalama baştan başlar; eski eşlemeli sayfalar tutulmaz.
+    // [EN] A re-run (query, language, config) restarts paging; pages mapped with old inputs are dropped.
+    marketQueryRef.current = marketOrdersQuery;
+    marketPageRef.current = 1;
+    marketMoreIdsRef.current = new Set();
+    marketLastCountRef.current = 0;
+    marketMoreSeqRef.current += 1;
+    marketMoreBusyRef.current = false;
+    setMarketLoadingMore(false);
+    setMarketLoadMoreError(false);
     // [TR] Sorgu/dil değişince ya da bileşen kapanınca uçuştaki istek iptal edilir; sıra numarası üst üste binen
     //      yoklamalarda eski yanıtın yenisini ezmesini önler (F10).
     const fetchOrders = async () => {
@@ -985,8 +1095,43 @@ export function useAppSessionData({
         const data = await res.json();
         if (isStale()) return;
         if (!Array.isArray(data.orders)) throw new Error('Malformed orders payload');
-        setOrders(mapOrders(data.orders));
-        setMarketOrdersTotal(Number.isFinite(data.total) ? data.total : null);
+        // [TR] Yoklama yüklü sayfa sayısı kadar sayfayı (en çok MARKET_POLL_MAX_PAGES) yeniden çeker ve listeyi
+        //      id bazlı baştan kurar: artık dönmeyen (iptal/dolan) emirler 2+. sayfalardan da düşer.
+        // [EN] The poll re-fetches as many pages as are loaded (max MARKET_POLL_MAX_PAGES) and rebuilds the list
+        //      by id, so orders no longer returned (canceled/filled) drop from pages 2+ too.
+        const pagesAtStart = marketPageRef.current;
+        const pollPages = Math.min(pagesAtStart, MARKET_POLL_MAX_PAGES);
+        let rebuilt = mapOrders(data.orders);
+        let lastPageCount = data.orders.length;
+        let total = Number.isFinite(data.total) ? data.total : null;
+        const laterIds = new Set();
+        if (pollPages > 1) {
+          const extra = await Promise.all(Array.from({ length: pollPages - 1 }, async (_, i) => {
+            const pageRes = await fetchWithTimeout(() => buildApiUrl(`${marketOrdersQuery}&page=${i + 2}`), { credentials: 'include', signal: controller?.signal, infra: 'backend' });
+            if (!pageRes.ok) throw new Error(`HTTP ${pageRes.status}`);
+            const pageData = await pageRes.json();
+            if (!Array.isArray(pageData.orders)) throw new Error('Malformed orders payload');
+            return pageData;
+          }));
+          if (isStale()) return;
+          // [TR] Yoklama sürerken "daha fazla yükle" bir sayfa eklediyse bu tur atlanır; sonraki tur kurar.
+          //      Uçuşta "daha fazla yükle" varsa da atlanır: sayfa sayısını daraltıp 6-7. sayfaları boşlukta bırakmasın.
+          if (marketPageRef.current !== pagesAtStart || marketMoreBusyRef.current) return;
+          extra.forEach((pageData) => {
+            const mapped = mapOrders(pageData.orders);
+            mapped.forEach((o) => { if (o?.id !== undefined && o?.id !== null) laterIds.add(o.id); });
+            rebuilt = mergeOrdersById(rebuilt, mapped);
+            lastPageCount = pageData.orders.length;
+            if (Number.isFinite(pageData.total)) total = pageData.total;
+          });
+          marketPageRef.current = pollPages;
+        }
+        marketMoreIdsRef.current = laterIds;
+        setOrders(rebuilt);
+        setMarketOrdersTotal(total);
+        marketTotalRef.current = total;
+        marketLastCountRef.current = lastPageCount;
+        setMarketHasMore(hasMoreMarketOrders({ total, page: marketPageRef.current, lastPageCount }));
         setOrdersFeedError(false);
         ordersLoadedRef.current = true;
       } catch (err) {
@@ -1000,6 +1145,12 @@ export function useAppSessionData({
         }
       }
     };
+    // [TR] F1-07: eşlemeyi belirleyen girdiler (dil, bond/token/risk config, sorgu) Pazar dışındayken değişirse
+    //      önceki eşleme bayattır: bir kez yeniden çekilir. Yalnız Pazar görünümü değişimi yeniden çekmez.
+    const mapDeps = [lang, onchainBondMap, onchainTokenMap, paymentRiskConfig, marketOrdersQuery];
+    const prevMapDeps = ordersMapDepsRef.current;
+    if (prevMapDeps && mapDeps.some((d, i) => d !== prevMapDeps[i])) ordersLoadedRef.current = false;
+    ordersMapDepsRef.current = mapDeps;
     // [TR] Pazardan çıkarken tekrar çekilmez; yalnız ilk yüklemede ya da Pazar açıkken. [EN] No refetch on leaving Market.
     if (marketViewOpen || !ordersLoadedRef.current) fetchOrders();
     // [TR] Liste yalnız Pazar ekranı açıkken yenilenir; diğer ekranlarda ilk yükleme yeterlidir.
@@ -1010,6 +1161,44 @@ export function useAppSessionData({
     const interval = setInterval(whenVisible(fetchOrders), 30000);
     return () => { cancelled = true; controller?.abort(); clearInterval(interval); };
   }, [lang, onchainBondMap, onchainTokenMap, paymentRiskConfig, marketOrdersQuery, marketViewOpen, formatAddress, infraEpoch]);
+
+  // [TR] "Daha fazla yükle": aynı sorgunun sonraki sayfası. Kapsam değişirse (efekt yeniden çalışırsa) sonuç atılır.
+  // [EN] "Load more": next page of the same query. A result is discarded if the scope changed meanwhile.
+  const loadMoreMarketOrders = React.useCallback(async () => {
+    if (marketMoreBusyRef.current || typeof mapMarketOrdersRef.current !== 'function') return;
+    const query = marketQueryRef.current;
+    const nextPage = marketPageRef.current + 1;
+    const seq = marketMoreSeqRef.current;
+    marketMoreBusyRef.current = true;
+    setMarketLoadingMore(true);
+    setMarketLoadMoreError(false);
+    try {
+      const res = await fetchWithTimeout(() => buildApiUrl(`${query}&page=${nextPage}`), { credentials: 'include', infra: 'backend' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (seq !== marketMoreSeqRef.current) return;
+      if (!Array.isArray(data.orders)) throw new Error('Malformed orders payload');
+      // [TR] Yoklama yüklü sayfa sayısını değiştirdiyse (daralttıysa) bu sonuç atılır; aksi halde sayfalar arasında boşluk kalır.
+      if (marketPageRef.current !== nextPage - 1) return;
+      const incoming = mapMarketOrdersRef.current(data.orders);
+      incoming.forEach((o) => { if (o?.id !== undefined && o?.id !== null) marketMoreIdsRef.current.add(o.id); });
+      setOrders((prev) => mergeOrdersById(prev, incoming));
+      marketPageRef.current = nextPage;
+      marketLastCountRef.current = data.orders.length;
+      const total = Number.isFinite(data.total) ? data.total : marketTotalRef.current;
+      if (Number.isFinite(data.total)) { marketTotalRef.current = total; setMarketOrdersTotal(total); }
+      setMarketHasMore(hasMoreMarketOrders({ total, page: nextPage, lastPageCount: data.orders.length }));
+    } catch (err) {
+      if (seq !== marketMoreSeqRef.current) return;
+      console.error('Load more orders error:', err);
+      setMarketLoadMoreError(true);
+    } finally {
+      if (seq === marketMoreSeqRef.current) {
+        marketMoreBusyRef.current = false;
+        setMarketLoadingMore(false);
+      }
+    }
+  }, []);
 
   useEffect(() => {
     if (!isAuthenticated || !isConnected) {
@@ -1056,6 +1245,7 @@ export function useAppSessionData({
   //      (5/10/20/40/60 sn); okununca 60 sn; kayıtlı + yaşı dolmuşsa durur. Gizli sekmede istek yok.
   const [walletRegNonce, setWalletRegNonce] = useState(0);
   const refreshWalletRegistration = React.useCallback(() => setWalletRegNonce((n) => n + 1), []);
+  walletRegRefreshRef.current = refreshWalletRegistration;
   const walletRegKeyRef = React.useRef(null);
   useEffect(() => {
     if (!isConnected || !address || !getWalletRegisteredAt) {
@@ -1090,7 +1280,8 @@ export function useAppSessionData({
         if (regAt > 0n) walletRegLockedRef.current = true;
         setIsWalletRegisteredRaw(regAt > 0n);
         if (regAt > 0n) {
-          const nowSec = Math.floor(Date.now() / 1000);
+          // [TR] Zincir saati (cihaz saati ileriyse "0 gün" görünmesin); ofset ref'ten okunur, effect'i yeniden çalıştırmaz.
+          const nowSec = Math.floor((Date.now() + chainOffsetRef.current) / 1000);
           const remainingSec = Math.max(0, Number(regAt) + WALLET_AGE_MIN_SEC - nowSec);
           setWalletAgeRemainingDays(Math.ceil(remainingSec / (24 * 3600)));
           if (remainingSec === 0) return; // aged: no more refresh
@@ -1114,7 +1305,7 @@ export function useAppSessionData({
     };
     checkRegistration();
     return () => { cancelled = true; if (timer) clearTimeout(timer); };
-  }, [isConnected, address, getWalletRegisteredAt, walletRegNonce]);
+  }, [isConnected, address, getWalletRegisteredAt, walletRegNonce, chainOffsetBucket]);
 
   // [TR] Kayıt sonrası (true ama gün sayısı yok) bir okuma tetiklenir; gün sayısı hesaplanır.
   useEffect(() => {
@@ -1124,12 +1315,21 @@ export function useAppSessionData({
   // [TR] İtibar/ban/tier yalnız cüzdan değişiminde değil; trade bitince, decayReputation sonrası ve ban süresi
   //      dolunca da yeniden okunur (F9).
   const reputationReqRef = React.useRef(0);
+  const reputationAddressRef = React.useRef(null);
   const refreshReputation = React.useCallback(async () => {
     if (!isConnected || !address || !getReputation) {
+      // [TR] F1-04: uçuştaki eski istek bağlantı kesildikten sonra veri yazmasın.
+      reputationReqRef.current += 1;
+      reputationAddressRef.current = null;
       setUserReputation(null);
       return null;
     }
     const req = ++reputationReqRef.current;
+    // [TR] F1-04: hesap değiştiyse önceki hesabın itibarı hemen silinir (bilinmiyor); aynı hesapta yenileme değeri korur.
+    if (reputationAddressRef.current !== address) {
+      reputationAddressRef.current = address;
+      setUserReputation(null);
+    }
     try {
       const repData = await getReputation(address);
       if (req !== reputationReqRef.current) return null;
@@ -1170,11 +1370,24 @@ export function useAppSessionData({
     terminalSeenRef.current = terminal;
   }, [resolvedTradeState, refreshReputation]);
 
+  // [TR] F1-03: hesap değişince/bağlantı kesilince önceki hesabın sybil ipucu silinir (bilinmiyor) ve uçuştaki
+  //      eski yanıt yazılmaz. Aynı hesapta bağımlılık değişimi değeri sıfırlamaz (titreme yok).
+  const sybilKeyRef = React.useRef(null);
   useEffect(() => {
-    if (!isConnected || !address || !antiSybilCheck) return;
+    if (!isConnected || !address || !antiSybilCheck) {
+      sybilKeyRef.current = null;
+      setSybilStatus(null);
+      return undefined;
+    }
+    if (sybilKeyRef.current !== address) {
+      sybilKeyRef.current = address;
+      setSybilStatus(null);
+    }
+    let cancelled = false;
     const fetchSybil = async () => {
       let res;
       try { res = await antiSybilCheck(address); } catch { res = null; }
+      if (cancelled) return;
       if (res) {
         const cooldownOk = typeof res.cooldownOk !== 'undefined' ? res.cooldownOk : res[2];
         let remaining = 0n;
@@ -1183,6 +1396,7 @@ export function useAppSessionData({
           // [TR] Okunamazsa 0 (süre doldu) sanılmaz: bilinmiyor olarak işaretlenir (F20).
           try { remaining = await getCooldownRemaining(address); } catch { cooldownUnknown = true; }
         }
+        if (cancelled) return;
         setSybilStatus({
           cooldownUnknown,
           aged: typeof res.aged !== 'undefined' ? res.aged : res[0],
@@ -1194,7 +1408,7 @@ export function useAppSessionData({
     };
     fetchSybil();
     const interval = setInterval(whenVisible(fetchSybil), 60000);
-    return () => clearInterval(interval);
+    return () => { cancelled = true; clearInterval(interval); };
   }, [isConnected, address, antiSybilCheck, getCooldownRemaining]);
 
   useEffect(() => {
@@ -1259,6 +1473,11 @@ export function useAppSessionData({
     }
   }, [activeTrade?.onchainId, activeEscrows, address]);
 
+  const fetchMyTradesRef = React.useRef(fetchMyTrades);
+  fetchMyTradesRef.current = fetchMyTrades;
+  // [TR] F1-08: kurtarma toast'ı güncel oturum durumuna bakar (auth/me bitmeden fetchMyTrades hiçbir şey çekmez).
+  const isAuthenticatedRef = React.useRef(isAuthenticated);
+  isAuthenticatedRef.current = isAuthenticated;
   useEffect(() => { fetchMyTrades(); }, [fetchMyTrades]);
 
   useEffect(() => {
@@ -1283,16 +1502,34 @@ export function useAppSessionData({
   const wantsPayoutProfile = currentView === 'profile';
   const wantsTradeHistory = currentView === 'profile';
 
+  // [TR] Taslak, profil sayfası açılmasa da oturum başında kayıtlı profilden BİR KEZ doldurulur (F2-02); kullanıcı taslağı
+  //      elle değiştirdiyse ezilmez. Dışarı verilen setPayoutProfileDraft "dokunuldu" işaretini koyar.
+  // [EN] The draft is filled once per session from the saved profile even if the profile page never opens;
+  //      a hand-edited draft is never overwritten.
+  const setPayoutProfileDraftByUser = React.useCallback((value) => {
+    draftTouchedRef.current = true;
+    setPayoutProfileDraft(value);
+  }, []);
+  useEffect(() => { draftTouchedRef.current = false; }, [authenticatedWallet]);
+
   useEffect(() => {
-    if (!wantsPayoutProfile || !isAuthenticated) return;
+    const needsInitialSync = draftSyncedWalletRef.current !== authenticatedWallet;
+    if ((!wantsPayoutProfile && !needsInitialSync) || !isAuthenticated) return;
+    let cancelled = false;
+    const requestedWallet = authenticatedWallet;
+    // [TR] Uçuştaki yanıt, cüzdan değişmişse/oturum kapanmışsa atılır (A'nın profili B'nin taslağına yazılmaz).
+    const isStale = () => cancelled || authenticatedWalletRef.current !== requestedWallet;
     const fetchMyPII = async () => {
       try {
         const res = await authenticatedFetch(buildApiUrl('pii/my'));
-        if (!res.ok) return;
+        if (!res.ok || isStale()) return;
         const data = await res.json();
+        if (isStale()) return;
         // [TR] /pii/my kayıtlı profilin yetkili kaynağıdır: pii varsa true, yoksa false.
-        setHasPayoutProfile(Boolean(data.pii));
-        if (data.pii) {
+        // [TR] İlk eşzamanlama yalnız taslağı doldurur; hasPayoutProfile'ı /auth/me yönetir.
+        if (wantsPayoutProfile) setHasPayoutProfile(Boolean(data.pii));
+        draftSyncedWalletRef.current = authenticatedWallet;
+        if (data.pii && (wantsPayoutProfile || !draftTouchedRef.current)) {
           setPayoutProfileDraft({
             rail: data.pii.rail || 'TR_IBAN',
             country: data.pii.country || 'TR',
@@ -1316,7 +1553,8 @@ export function useAppSessionData({
       }
     };
     fetchMyPII();
-  }, [wantsPayoutProfile, isAuthenticated, authenticatedFetch]);
+    return () => { cancelled = true; };
+  }, [wantsPayoutProfile, isAuthenticated, authenticatedFetch, authenticatedWallet]);
 
   useEffect(() => {
     if (!wantsTradeHistory || !isAuthenticated) return;
@@ -1349,42 +1587,47 @@ export function useAppSessionData({
   }, [wantsTradeHistory, isAuthenticated, tradeHistoryPage, authenticatedFetch]);
 
   useEffect(() => {
-    if (!isConnected) clearLocalSessionState({ navigateHome: true, closeModals: true });
-  }, [isConnected, clearLocalSessionState]);
+    if (!isConnected && !isWalletResolving) clearLocalSessionState({ navigateHome: true, closeModals: true });
+  }, [isConnected, isWalletResolving, clearLocalSessionState]);
 
   useEffect(() => {
     if (!publicClient || !isConnected) return;
     if (pendingTxCheckedRef.current) return;
+    const raw = safeStorage.get('araf_pending_tx');
+    if (!raw) { pendingTxCheckedRef.current = true; return; }
+    // [TR] F1-08: bayrak zincir kontrolünden SONRA kalıcılaşır; yanlış zincirdeyken dönülürse doğru zincire
+    //      geçince kurtarma yeniden denenir. Geçersiz kayıtlar silindiği için bayrak onlarda hemen set edilir.
     pendingTxCheckedRef.current = true;
-    const raw = localStorage.getItem('araf_pending_tx');
-    if (!raw) return;
 
     let parsed;
     try {
       parsed = JSON.parse(raw);
     } catch {
-      localStorage.removeItem('araf_pending_tx');
+      safeStorage.remove('araf_pending_tx');
       return;
     }
 
     if (!parsed?.hash) {
-      localStorage.removeItem('araf_pending_tx');
+      safeStorage.remove('araf_pending_tx');
       return;
     }
     const isValidHash = /^0x[a-fA-F0-9]{64}$/.test(parsed.hash);
     if (!isValidHash) {
-      localStorage.removeItem('araf_pending_tx');
+      safeStorage.remove('araf_pending_tx');
       return;
     }
     if (parsed.createdAt && (Date.now() - Number(parsed.createdAt) > 24 * 3600 * 1000)) {
-      localStorage.removeItem('araf_pending_tx');
+      safeStorage.remove('araf_pending_tx');
       return;
     }
-    if (parsed.chainId && Number(parsed.chainId) !== Number(chainId)) return;
+    if (parsed.chainId && Number(parsed.chainId) !== Number(chainId)) {
+      pendingTxCheckedRef.current = false;
+      return;
+    }
 
     publicClient.getTransactionReceipt({ hash: parsed.hash })
       .then((receipt) => {
-        localStorage.removeItem('araf_pending_tx');
+        safeStorage.remove('araf_pending_tx');
         // [TR] Receipt'in status'u kontrol edilir: reverted işlem "onaylandı" diye gösterilmez (F7).
         if (receipt && receipt.status && receipt.status !== 'success') {
           showToast(
@@ -1395,11 +1638,18 @@ export function useAppSessionData({
           );
           return;
         }
-        fetchMyTrades();
+        // [TR] F1-08: en güncel closure ref'ten çağrılır (bayat closure erken dönüp hiçbir şey çekmezdi).
+        // [TR] "Veriler yenilendi" yalnız oturum doğrulanmışken söylenir; değilse oturum açılınca liste zaten çekilir.
+        const refreshed = isAuthenticatedRef.current === true;
+        fetchMyTradesRef.current();
         showToast(
-          lang === 'TR'
-            ? 'Bekleyen işlem bulundu ve onaylandı. Veriler yenilendi.'
-            : 'Recovered pending transaction and confirmed it. Data refreshed.',
+          refreshed
+            ? (lang === 'TR'
+              ? 'Bekleyen işlem bulundu ve onaylandı. Veriler yenilendi.'
+              : 'Recovered pending transaction and confirmed it. Data refreshed.')
+            : (lang === 'TR'
+              ? 'Bekleyen işlem bulundu ve onaylandı. Oturum doğrulanınca veriler yenilenecek.'
+              : 'Recovered pending transaction and confirmed it. Data will refresh once you are signed in.'),
           'success'
         );
       })
@@ -1479,7 +1729,11 @@ export function useAppSessionData({
     };
   }, [connector, connectedWallet, isAuthenticated, authenticatedWallet, lang, bestEffortBackendLogout, clearLocalSessionState, showToast]);
 
-  const filteredOrders = orders.filter((order) => matchesMarketFilters(order, marketFilters, { viewerAddress: connectedWallet, userTier: viewerTier }));
+  // [TR] F1-11: girdiler değişmedikçe aynı referans (gereksiz alt ağaç render'ı olmaz).
+  const filteredOrders = React.useMemo(
+    () => orders.filter((order) => matchesMarketFilters(order, marketFilters, { viewerAddress: connectedWallet, userTier: viewerTier })),
+    [orders, marketFilters, connectedWallet, viewerTier],
+  );
 
   const activeEscrowCounts = {
     LOCKED: activeEscrows.filter((e) => e.state === 'LOCKED').length,
@@ -1517,17 +1771,27 @@ export function useAppSessionData({
     }, Math.min(remainingMs + 500, 2 ** 31 - 1));
     return () => clearTimeout(timer);
   }, [bannedUntilSec, chainOffsetMs, banTick, refreshReputation]);
+  // [TR] Pazarda BUY emri varsa genç-sahip etiketi (useOwnerWalletAge) zincir saatine ihtiyaç duyar; açık işlem/ban
+  //      olmasa da ofset bir kez okunur ve 5 dk'da bir tazelenir. Hata olursa mevcut ofset korunur.
+  // [EN] With BUY orders listed, the young-owner label needs chain time: read the offset even without an open trade/ban,
+  //      refresh every 5 min; on failure the current offset is kept.
+  const hasBuyOrders = orders.some((o) => o?.side === 'BUY_CRYPTO');
+  const needsChainClock = tradeRoomOpen || bannedUntilSec > 0 || hasBuyOrders;
   useEffect(() => {
-    if (!(tradeRoomOpen || bannedUntilSec > 0) || !publicClient?.getBlock) return undefined;
+    if (!needsChainClock || !publicClient?.getBlock) return undefined;
     let alive = true;
-    publicClient.getBlock()
-      .then((block) => {
-        const blockMs = Number(block?.timestamp) * 1000;
-        if (alive && Number.isFinite(blockMs) && blockMs > 0) setChainOffsetMs(blockMs - Date.now());
-      })
-      .catch(() => {});
-    return () => { alive = false; };
-  }, [tradeRoomOpen, bannedUntilSec, publicClient]);
+    const readOffset = () => {
+      publicClient.getBlock()
+        .then((block) => {
+          const blockMs = Number(block?.timestamp) * 1000;
+          if (alive && Number.isFinite(blockMs) && blockMs > 0) setChainOffsetMs(blockMs - Date.now());
+        })
+        .catch(() => {});
+    };
+    readOffset();
+    const timer = setInterval(readOffset, 5 * 60 * 1000);
+    return () => { alive = false; clearInterval(timer); };
+  }, [needsChainClock, publicClient]);
   // [TR] P1: saniyelik saat App kökünde state DEĞİL; zincir farkı paylaşılan saat store'una yazılır ve yalnız saate
   //      ihtiyaç duyan yaprak bileşenler (NowBoundary/useNow) saniyede bir render olur.
   // [EN] P1: the per-second clock is not root state; the chain offset feeds the shared clock store and only leaf
@@ -1573,7 +1837,7 @@ export function useAppSessionData({
     setIsLoggingIn,
     userReputation,
     payoutProfileDraft,
-    setPayoutProfileDraft,
+    setPayoutProfileDraft: setPayoutProfileDraftByUser,
     tradeHistory,
     historyLoading,
     tradeHistoryPage,
@@ -1632,6 +1896,10 @@ export function useAppSessionData({
     formatAddress,
     filteredOrders,
     marketOrdersTotal,
+    marketHasMore,
+    marketLoadingMore,
+    marketLoadMoreError,
+    loadMoreMarketOrders,
     activeEscrowCounts,
     chainOffsetMs,
     canMakerStartChallengeFlow,

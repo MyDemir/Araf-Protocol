@@ -1,7 +1,7 @@
 import { Handshake } from 'lucide-react';
 import React from 'react';
 import { buildSettlementPreviewUrl } from '../app/apiConfig';
-import SettlementPreviewModal from './SettlementPreviewModal';
+import SettlementPreviewModal, { formatTokenUnits } from './SettlementPreviewModal';
 import { useSettlementActions } from '../app/contexts/settlement/useSettlementActions';
 import { normalizeSettlementState, toUnixSeconds } from '../app/contexts/settlement/settlementActionModel';
 import { fmtBps } from '../app/copy';
@@ -78,6 +78,13 @@ export default function SettlementProposalCard({
   const proposal = activeTrade?.settlementProposal || null;
   const proposalState = normalizeSettlementState(proposal?.state);
   const proposalIsRenderable = proposal && !['NONE', 'UNKNOWN', null].includes(proposalState);
+  // [TR] Sonuçlanan tutarlar backend'den ham taban birimi gelir; token birimi + sembolle gösterilir, okunamazsa '—'.
+  // [EN] Finalized payouts arrive as raw base units; show token units + symbol, '—' when unreadable.
+  const fmtPayout = (value) => {
+    if (value === null || value === undefined || !/^\d+$/.test(String(value).trim())) return '—';
+    const text = formatTokenUnits(String(value).trim(), activeTrade?.tokenDecimals ?? 6, lang === 'TR' ? 'TR' : 'EN');
+    return activeTrade?.crypto ? `${text} ${activeTrade.crypto}` : text;
+  };
   const roomState = activeTrade?.state || 'LOCKED';
   const isActionableRoom = ACTIVE_ROOM_STATES.includes(roomState);
   const isTerminalRoom = TERMINAL_ROOM_STATES.includes(roomState);
@@ -351,8 +358,8 @@ export default function SettlementProposalCard({
       {proposalIsRenderable && proposalState === 'FINALIZED' && (
         <div className="space-y-2 text-xs">
           <p className="text-success font-bold">{lang === 'TR' ? 'Uzlaşma tamamlandı' : 'Settlement finalized'}</p>
-          <p className="text-textSecondary">{lang === 'TR' ? 'Satıcıya' : 'Maker payout'}: <span className="font-mono">{proposal?.makerPayout ?? proposal?.maker_payout ?? '—'}</span></p>
-          <p className="text-textSecondary">{lang === 'TR' ? 'Alıcıya' : 'Taker payout'}: <span className="font-mono">{proposal?.takerPayout ?? proposal?.taker_payout ?? '—'}</span></p>
+          <p className="text-textSecondary">{lang === 'TR' ? 'Satıcıya' : 'Maker payout'}: <span className="font-mono">{fmtPayout(proposal?.makerPayout ?? proposal?.maker_payout)}</span></p>
+          <p className="text-textSecondary">{lang === 'TR' ? 'Alıcıya' : 'Taker payout'}: <span className="font-mono">{fmtPayout(proposal?.takerPayout ?? proposal?.taker_payout)}</span></p>
           <p className="text-textMuted">{lang === 'TR' ? 'Tarih' : 'Finalized at'}: {safeDate(proposal?.finalizedAt ?? proposal?.finalized_at, lang)}</p>
           <p className="text-textMuted">txHash: <span className="font-mono text-textPrimary">{shortHash(proposal?.txHash ?? proposal?.tx_hash)}</span></p>
         </div>

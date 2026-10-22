@@ -150,3 +150,95 @@ sütunuyla birebir aynı. Bytecode boyutları yukarıdaki gibidir.
 - `Math.mulDiv` in reward weight: the product cannot overflow (6-decimal notional × 25,000 × 13,000). Not needed.
 - Batch claim: with a 30-day epoch and a 7-day claim window at most one epoch is claimable at a time.
 - `uint128` amounts: would save a further ~22–44k per fill/order but exceeded the 24,576-byte EIP-170 limit.
+
+## Buy order wallet-age relaxation (2026-10-20) / Alış emri cüzdan yaşı gevşetmesi
+
+- `createBuyOrder` no longer checks the 2-day wallet age; it still checks ban, registration (`WalletTooYoung` when
+  never registered), DUST and cooldown, in that order. `fillBuyOrder` still runs the full `_enforceTakerEntry`,
+  so an under-age owner's order is rejected there with `WalletTooYoung`.
+- `createBuyOrder` artık 2 günlük cüzdan yaşına bakmaz; ban, kayıt (hiç kayıt yoksa `WalletTooYoung`), DUST ve
+  cooldown kontrolleri bu sırayla sürer. `fillBuyOrder` tam `_enforceTakerEntry` çağırmaya devam eder.
+
+Measured with `npm --prefix contracts run gas:baseline` (3 runs, identical output). Only rows that changed:
+
+| Operation | Before | After | Δ gas | Δ % |
+|---|---:|---:|---:|---:|
+| `createBuyOrder_t2` | 262,853 | 262,792 | -61 | -0.0% |
+| `fillBuyOrder_t2` | 276,564 | 276,635 | +71 | +0.0% |
+| `fillSellOrder_t0` | 203,737 | 203,809 | +72 | +0.0% |
+| `fillSellOrder_t2` | 273,327 | 273,398 | +71 | +0.0% |
+| `fillSellOrder_t2_partial` | 280,348 | 280,419 | +71 | +0.0% |
+| `createSellOrder_t2` | 277,796 | 277,795 | -1 | -0.0% |
+
+`createBuyOrder` loses the age comparison but gains the registration check, so the net is -61. The fill paths
+gain ~71 gas (extra internal call from splitting the DUST/cooldown part out of `_enforceTakerEntry`).
+`createBuyOrder`, yaş karşılaştırmasını kaybedip kayıt kontrolünü kazandığı için net -61 gas; fill yolları ~71
+gas artar (DUST/cooldown kısmının ayrı iç fonksiyona alınması).
+
+## Wave 2: setTreasury vault match + decay rule (2026-10-21) / Dalga 2: setTreasury vault eşleşmesi + af kuralı
+
+- K1-02: `setTreasury` now staticcalls `escrow()` on the new treasury and requires `address(this)`
+  (`TreasuryEscrowMismatch`). K3-01: `decayReputation` also requires `now > lastNegativeEventAt + cleanPeriod`.
+- K1-02: `setTreasury` yeni hazinede `escrow()` çağırıp `address(this)` ister (`TreasuryEscrowMismatch`).
+  K3-01: `decayReputation` ayrıca `now > lastNegativeEventAt + cleanPeriod` ister.
+
+`npm --prefix contracts run gas:baseline` before/after: all 26 measured operations are identical (neither function
+is on a measured path). / 26 ölçülen işlemin hepsi aynı (iki fonksiyon da ölçülen yolda değil).
+
+The two changed functions, measured separately (Hardhat network, same wiring as the baseline, one ban via five
+mutual cancels, decay called after `bannedUntil + cleanPeriod`):
+
+| Operation | Before | After | Δ gas | Δ % |
+|---|---:|---:|---:|---:|
+| `setTreasury` (vault) | 31,444 | 35,373 | +3,929 | +12.5% |
+| `decayReputation` | 58,009 | 58,215 | +206 | +0.4% |
+
+`setTreasury` pays for the external `staticcall` (cold account + the vault's immutable getter); it is a rare
+owner call. `lastNegativeEventAt` sits in a separate storage slot, but `ReputationUpdated` already read it in the
+same call, so the earlier read only moves the cold access forward (+206 net).
+`lastNegativeEventAt` ayrı slotta; `ReputationUpdated` aynı çağrıda zaten okuduğu için soğuk erişim yalnız öne
+kayar (net +206).
+
+| Bytecode (deployed) | Before | After | Δ | EIP-170 headroom |
+|---|---:|---:|---:|---:|
+| `ArafEscrow` | 22,137 | 22,273 | +136 | 2,303 |
+| `ArafReputationLib` | 4,705 | 4,732 | +27 | 19,844 |
+
+## Wave 5 contract package (2026-10-21) / Dalga 5 kontrat paketi
+
+Changes: K1-06 (terminal snapshot + reputation before payout), K2-01 (autoRelease cut ≥ release fee), K1-03
+(payment-window penalty to maker), K3-02 (fee-0 side gets weight 0), K3-04 (`setRewards` binding check), K3-06
+(`outstandingExternalFunding` counter + liability), K3-07 (`SettlementExpired` on overwrite), K3-09 (intent root
+cause), K2-07 (`ZeroAddress`), K2-08 (`TokenLimitsUpdated`), K1-07/K2-09 (dead constants removed).
+Değişiklikler yukarıdaki maddelerdir; ölçüm aynı betik ve bağlantıyla, değişiklikten önce ve sonra alındı.
+
+| Operation | Before | After | Δ gas | Δ % |
+|---|---:|---:|---:|---:|
+| `releaseFunds_t0` | 193,989 | 196,141 | +2,152 | +1.1% |
+| `releaseFunds_t2` | 222,016 | 224,167 | +2,151 | +1.0% |
+| `proposeSettlement` | 147,037 | 147,004 | -33 | -0.0% |
+| `acceptSettlement` | 276,946 | 279,135 | +2,189 | +0.8% |
+| `autoRelease` | 274,724 | 277,513 | +2,789 | +1.0% |
+| `proposeOrApproveCancel_final` | 219,239 | 219,144 | -95 | -0.0% |
+| `expirePaymentWindow` | 228,141 | 182,948 | -45,193 | -19.8% |
+| `burnExpired` | 229,675 | 231,821 | +2,146 | +0.9% |
+| `recordTradeOutcome_single` | 142,975 | 143,043 | +68 | +0.0% |
+| `recordTradeOutcomes_batch10` | 573,356 | 574,036 | +680 | +0.1% |
+| `recordTradeOutcomes_perTrade` | 57,336 | 57,404 | +68 | +0.1% |
+| `finalizeEpochToken` | 54,461 | 54,483 | +22 | +0.0% |
+
+The other 14 measured operations are unchanged (create/fill/report/ping/challenge/claim). Every path that sends
+revenue to the vault pays ≈+2.1k: `onArafRevenue` now reads the cold `outstandingExternalFunding[token]` slot
+(K3-06). `autoRelease` adds ≈+0.6k for the fee floor (K2-01). `expirePaymentWindow` no longer calls the treasury
+(intent + transfer + hook) because the penalty goes to the maker (K1-03). The CEI reorder (K1-06) moves work but
+adds no measurable gas. Rewards recording pays +68 per trade for the per-side weight.
+Vault'a gelir gönderen her yol ≈+2,1k öder (K3-06 soğuk slot okuması); `autoRelease` ücret tabanı için ≈+0,6k
+(K2-01); `expirePaymentWindow` hazineye çağrı yapmadığı için -45k (K1-03).
+
+| Bytecode (deployed) | Before | After | Δ | EIP-170 headroom |
+|---|---:|---:|---:|---:|
+| `ArafEscrow` | 22,273 | 22,585 | +312 | 1,991 |
+| `ArafSettlementLib` | 2,168 | 2,394 | +226 | 22,182 |
+| `ArafRevenueVault` | 6,547 | 6,838 | +291 | 17,738 |
+| `ArafRewards` | 7,215 | 7,230 | +15 | 17,346 |
+| `ArafReputationLib` | 4,732 | 4,732 | +0 | 19,844 |

@@ -58,6 +58,8 @@ function loadApp({ cookies = {}, siwe = {}, user = null, tradeExists = false } =
     }));
     jest.doMock("../../backend/scripts/models/User", () => ({
       findOne: jest.fn().mockReturnValue({ select: jest.fn().mockResolvedValue(user) }),
+      // Atomik profil yazımı (updateOne) eski save() davranışını taklit eder: aynı belgeye yazar.
+      updateOne: jest.fn(async () => { if (user && user.save) await user.save(); return { matchedCount: 1 }; }),
       findOneAndUpdate: jest.fn(async () => ({
         checkBanExpiry: async () => {},
         toPublicProfile: () => ({ wallet_address: WALLET }),
