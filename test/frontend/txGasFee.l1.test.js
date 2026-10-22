@@ -7,7 +7,8 @@ import { prepareTxParams } from '../../frontend/src/app/txGasFee';
 
 const GAS_RAW = 100_000n; // buffered -> 120_000
 const FEE = 2_000_000_000n;
-const L2_COST = 120_000n * FEE;
+// F2-19: maxFeePerGas = (FEE - 1) * 5/3 + 1 = 3_333_333_332
+const L2_COST = 120_000n * 3_333_333_332n;
 const L1_FEE = 50_000_000_000_000n;
 const client = (chainId, balance, over = {}) => ({
   chain: chainId == null ? undefined : { id: chainId },

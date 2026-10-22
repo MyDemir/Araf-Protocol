@@ -9,6 +9,18 @@
 export const GAS_BUFFER_NUMERATOR = 120n;
 export const GAS_BUFFER_DENOMINATOR = 100n;
 
+// [TR] F2-19: viem estimateFeesPerGas varsayılanı maxFeePerGas = baseFee*1.2 + priority
+//      (viem/_esm/actions/public/estimateFeesPerGas.js: baseFeeMultiplier ?? 1.2). Yaygın EIP-1559 tamponu baseFee*2 + priority;
+//      cüzdan penceresi uzun açık kalıp baz ücret artarsa tx beklemede kalmasın. Baz bileşen (maxFee - priority) 5/3 ile
+//      çarpılır (1.2x -> 2x). Fazla ücret iade edilir; bakiye ön kontrolü yeni üst sınırla yapılır.
+// [EN] Scales the base-fee component by 5/3 so viem's 1.2x default becomes the common 2x buffer (baseFee*2 + priority).
+export const MAX_FEE_BASE_COMPONENT_NUMERATOR = 5n;
+export const MAX_FEE_BASE_COMPONENT_DENOMINATOR = 3n;
+export const bufferMaxFee = (maxFee, priority) => {
+  const base = maxFee > priority ? maxFee - priority : 0n;
+  return (base * MAX_FEE_BASE_COMPONENT_NUMERATOR) / MAX_FEE_BASE_COMPONENT_DENOMINATOR + priority;
+};
+
 import { estimateContractL1Fee } from 'viem/op-stack';
 import { BASE_MAINNET_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID, getSupportedChainsMap } from './chainPolicy';
 
@@ -47,7 +59,7 @@ export async function estimateTxParams({ publicClient, account, address, abi, fu
       if (typeof publicClient.estimateFeesPerGas !== 'function') return;
       const fees = await publicClient.estimateFeesPerGas();
       if (typeof fees?.maxFeePerGas === 'bigint' && typeof fees?.maxPriorityFeePerGas === 'bigint') {
-        out.maxFeePerGas = fees.maxFeePerGas;
+        out.maxFeePerGas = bufferMaxFee(fees.maxFeePerGas, fees.maxPriorityFeePerGas);
         out.maxPriorityFeePerGas = fees.maxPriorityFeePerGas;
       }
     } catch { /* ücret yok -> cüzdana bırak */ }

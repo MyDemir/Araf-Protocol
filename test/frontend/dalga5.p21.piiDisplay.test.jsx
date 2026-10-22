@@ -4,6 +4,9 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import PIIDisplay, { maskContact } from '../../frontend/src/components/PIIDisplay';
 
+// F2-20: usePII artik authenticatedFetch ister; sahte sarmalayici global.fetch mock'una devreder (cagri sayisi/URL iddialari ayni).
+const authFetch = (...args) => global.fetch(...args);
+
 const mockFetch = (profile) => {
   global.fetch = vi.fn()
     .mockResolvedValueOnce({ ok: true, json: async () => ({ piiToken: 'tok' }) })
@@ -27,7 +30,7 @@ describe('F4-16: PII ekranı', () => {
     document.execCommand = vi.fn(() => true);
     mockFetch({ rail: 'TR_IBAN', fields: { account_holder_name: 'Ada', iban: 'TR00 1111' } });
     const user = userEvent.setup();
-    render(<PIIDisplay tradeId="t1" lang="EN" />);
+    render(<PIIDisplay tradeId="t1" lang="EN" authenticatedFetch={authFetch} />);
     await reveal(user);
     await waitFor(() => expect(screen.getByText('Ada')).toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: /Copy IBAN/i }));
@@ -39,7 +42,7 @@ describe('F4-16: PII ekranı', () => {
     Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true });
     mockFetch({ rail: 'TR_IBAN', fields: { account_holder_name: 'Ada', iban: 'TR00 1111' }, contact: { channel: 'email', value: 'alice@example.com' } });
     const user = userEvent.setup();
-    render(<PIIDisplay tradeId="t1" lang="EN" />);
+    render(<PIIDisplay tradeId="t1" lang="EN" authenticatedFetch={authFetch} />);
     await reveal(user);
     await waitFor(() => expect(screen.getByText('Ada')).toBeInTheDocument());
     expect(screen.getByTestId('pii-contact-masked')).toHaveTextContent('al***@example.com');

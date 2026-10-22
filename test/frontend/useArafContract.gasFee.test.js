@@ -50,7 +50,8 @@ describe.each(Object.keys(actions))('%s: gas/ucret ve ETH on kontrolu', (name) =
     await actions[name](c);
     const arg = writeContract.mock.calls[0][0];
     expect(arg.gas).toBe(120_000n);
-    expect(arg.maxFeePerGas).toBe(2_000_000_000n);
+    // F2-19: (2e9 - 1e6) * 5/3 + 1e6 (baz bilesen 1.2x -> 2x)
+    expect(arg.maxFeePerGas).toBe(3_332_666_666n);
     expect(arg.maxPriorityFeePerGas).toBe(1_000_000n);
   });
 
@@ -84,7 +85,7 @@ describe.each(Object.keys(actions))('%s: gas/ucret ve ETH on kontrolu', (name) =
   });
 
   it('bakiye tam maliyete esitse engellemez', async () => {
-    pc = okClient({ getBalance: vi.fn().mockResolvedValue(120_000n * 2_000_000_000n) });
+    pc = okClient({ getBalance: vi.fn().mockResolvedValue(120_000n * 3_332_666_666n) });
     const c = await load();
     await actions[name](c);
     expect(writeContract).toHaveBeenCalledTimes(1);

@@ -85,6 +85,19 @@ export function usePII(tradeId, authenticatedFetch) {
       return;
     }
 
+    // [TR] F2-20: authenticatedFetch zorunlu. Düz fetch yedeği x-wallet-address olmadan gidip sessiz 401 üretiyordu;
+    //      artık istek atılmaz, açık durum gösterilir ve bellekteki PII temizlenir.
+    // [EN] F2-20: authenticatedFetch is required; no plain-fetch fallback, no request, explicit error state.
+    if (typeof authenticatedFetch !== 'function') {
+      if (abortCtrlRef.current) abortCtrlRef.current.abort();
+      setPii(null);
+      setLoading(false);
+      setError(readLang() === 'TR'
+        ? 'Oturum doğrulanamadı, ödeme bilgisi şu an alınamıyor. Cüzdanı yeniden bağlayıp tekrar deneyin.'
+        : 'Session is not verified, payout info cannot be loaded right now. Reconnect your wallet and try again.');
+      return null;
+    }
+
     // YÜKS-07 Fix: Önceki istek varsa iptal et, yeni AbortController oluştur
     if (abortCtrlRef.current) {
       abortCtrlRef.current.abort();
@@ -97,11 +110,7 @@ export function usePII(tradeId, authenticatedFetch) {
 
     try {
       // ADIM 1: Kısa ömürlü PII erişim token'ı al
-      // F2-20 (DURDU, onay bekliyor): düz fetch yedeği KALDI; kaldırmak mevcut PIIDisplay testlerinin kurulumunu
-      //        (authenticatedFetch vermeden global fetch mock'u) bozar. Bkz. rapor.
-      const doFetch = authenticatedFetch || ((url, opts) =>
-        fetch(url, { ...opts, credentials: 'include' })
-      );
+      const doFetch = authenticatedFetch;
 
       const tokenRes = await doFetch(
         // [TR] API base çözümlemesi tek canonical helper üzerinden yapılır.
