@@ -36,7 +36,7 @@ Abbreviations: `C/.env` = `contracts/.env` · `B/.env` = `backend/.env` · `F/.e
 The "Where to set" column in the tables shows the **target location** for Base Sepolia/Mainnet; on Sepolia the workflow writes the `Fly`/`Vercel` values (see 7).
 
 > **The list you must enter manually for the Base Sepolia demo**
-> (source: the validation step at `deploy-base-sepolia.yml:43-76` and `docs/EN/DEPLOY_BASE_SEPOLIA.md:7-40`; deploy: `gh workflow run deploy-base-sepolia.yml -f deploy_frontend=true`)
+> (source: the 'Validate required config' step of `deploy-base-sepolia.yml` and `docs/EN/DEPLOY_BASE_SEPOLIA.md:7-40`; deploy: `gh workflow run deploy-base-sepolia.yml -f deploy_frontend=true`)
 >
 > **GitHub Secrets, required (8):** `DEPLOYER_PRIVATE_KEY`, `BASE_SEPOLIA_RPC_URL`, `BASE_SEPOLIA_WS_RPC_URL`, `FLY_API_TOKEN`,
 > `MONGODB_URI`, `REDIS_URL` (must be `rediss://`), `JWT_SECRET` (≥64 characters), `MASTER_ENCRYPTION_KEY` (exactly 64 hex).
@@ -59,7 +59,7 @@ The "Where to set" column in the tables shows the **target location** for Base S
 ## 2. Contracts (`contracts/.env`)
 
 Hardhat loads `contracts/.env`. The network is selected with `--network <hardhat|localhost|base-sepolia|base>`, not with env.
-Variables in this package do not go to Fly/Vercel; the workflow passes them only to the deploy step's environment without writing `contracts/.env` (`deploy-base-sepolia.yml:87-100`, see 7.3). **53 variables are read** (`NODE_PATH` included; + those that exist only in the example/docs: see 6).
+Variables in this package do not go to Fly/Vercel; the workflow passes them only to the deploy step's environment without writing `contracts/.env` (`deploy-base-sepolia.yml` 'Deploy contracts to Base Sepolia' step, see 7.3). **53 variables are read** (`NODE_PATH` included; + those that exist only in the example/docs: see 6).
 
 Columns: L = Local, S = Base Sepolia, M = Mainnet. "Required": always / for the relevant job / optional (default).
 
@@ -205,7 +205,7 @@ In prod `KMS_PROVIDER=env` is **rejected**; the only exception is a narrow testn
 | `KMS_PROVIDER` | `env` / `aws` / `vault` | In prod `aws`/`vault`; `env` under the testnet exception; default `env` | `env` | `env` (written by the workflow) | `aws` | B/.env; Sepolia: Fly (workflow) | `encryption.js:125`, `:375` |
 | 🔒 `MASTER_ENCRYPTION_KEY` | Master encryption key (64 hex; first 64 characters) | When `KMS_PROVIDER=env`: dev and the testnet exception | `randomBytes(32)` hex | GH secret → Fly (workflow) | **do not set** | B/.env; GH secret | `encryption.js:136-142` |
 | 🔒 `AWS_ENCRYPTED_DATA_KEY` | Data key encrypted with AWS KMS (base64 CiphertextBlob) | When `KMS_PROVIDER=aws` | not needed | not needed | base64 | Fly | `encryption.js:170`, `:391` |
-| `ALLOW_ENV_KMS_ON_TESTNET` | Flag (`yes`) that allows `KMS_PROVIDER=env` in prod on Base Sepolia only; has no effect on mainnet and causes an error | Optional; only with `NODE_ENV=production` + `EXPECTED_CHAIN_ID=84532` | not needed | `yes` (written by the workflow) | **never** | Fly (workflow `:164`) | `encryption.js:76-90`, `:307` |
+| `ALLOW_ENV_KMS_ON_TESTNET` | Flag (`yes`) that allows `KMS_PROVIDER=env` in prod on Base Sepolia only; has no effect on mainnet and causes an error | Optional; only with `NODE_ENV=production` + `EXPECTED_CHAIN_ID=84532` | not needed | `yes` (written by the workflow) | **never** | Fly (workflow: `.github/scripts/stage-runtime-env.sh`) | `encryption.js:76-90`, `:307` |
 | `AWS_REGION` | AWS region | Optional (`eu-west-1`) | empty | not written by the workflow | `eu-west-1` | Fly | `encryption.js:169` |
 | `VAULT_ADDR` | Vault address | When `KMS_PROVIDER=vault` | not needed | not needed | `https://vault…:8200` | Fly | `encryption.js:245`, `:396` |
 | 🔒 `VAULT_TOKEN` | Vault access token | When `KMS_PROVIDER=vault` | not needed | not needed | token | Fly | `encryption.js:246` |
@@ -398,7 +398,7 @@ There are two workflows: `deploy-base-sepolia.yml` (contract + Fly + optional Ve
 
 ### 7.1 Fly secrets: what the workflow writes (`flyctl secrets import --stage`, then `flyctl deploy`)
 
-Full deploy: `deploy-base-sepolia.yml:141-178` · runtime: `deploy-runtime-base-sepolia.yml:128-166`. Both have the same 19 fixed lines + 2 conditional lines.
+Full deploy: `deploy-base-sepolia.yml` 'Stage backend secrets on Fly' step · runtime: `deploy-runtime-base-sepolia.yml` 'Stage backend secrets on Fly' step; the list lives in the shared script: `.github/scripts/stage-runtime-env.sh`. Both have the same 19 fixed lines + 2 conditional lines.
 
 | Fly variable | Value source | Line (full / runtime) |
 |---|---|---|
@@ -419,14 +419,14 @@ Full deploy: `deploy-base-sepolia.yml:141-178` · runtime: `deploy-runtime-base-
 
 Conditional (both workflows, resolved by `.github/scripts/resolve-rewards-addresses.js`): `ARAF_REVENUE_VAULT_ADDRESS` / `ARAF_REWARDS_ADDRESS` (full deploy with `deploy_rewards=true`: the rewards manifest; otherwise the repo variables, with a non-empty runtime input first) are written to Fly under the same names. Validation: 0x+40 hex, non-zero, valid EIP-55 checksum if mixed case, both together; a manifest/variable conflict fails. If not defined, nothing is written and the reward mirror/recorder stay inactive.
 
-Conditional, not written when empty (the Fly value is kept): `BASE_RPC_URL_FALLBACKS` (GitHub secret `BASE_SEPOLIA_RPC_URL_FALLBACKS`; RPC URLs carry keys), `LIVE_POLL_INTERVAL_MS` [workflow validation 2000-300000; the backend clamps values below 5000 to 5000], `WORKER_BLOCK_BATCH_SIZE` [1-2000], `WORKER_REPLAY_BATCH_DELAY_MS` [0-10000] (GitHub variables). `EXPECTED_CHAIN_ID` is always written as 84532; if the variable is set it must be 84532. `ETHERSCAN_API_KEY` is never sent to the backend.
+Conditional, not written when empty (the Fly value is kept): `BASE_RPC_URL_FALLBACKS` (GitHub secret `BASE_SEPOLIA_RPC_URL_FALLBACKS`; RPC URLs carry keys), `LIVE_POLL_INTERVAL_MS` [workflow validation 5000-300000, same as the backend runtime-setting range; the earlier 2000 lower-bound mismatch is resolved], `WORKER_BLOCK_BATCH_SIZE` [1-2000], `WORKER_REPLAY_BATCH_DELAY_MS` [0-10000] (GitHub variables). `EXPECTED_CHAIN_ID` is always written as 84532; if the variable is set it must be 84532. `ETHERSCAN_API_KEY` is never sent to the backend.
 
 Backend variables the workflow does not write (all optional/with defaults):
 `ARAF_TRACKED_TOKENS`, `WORKER_*` other than the above, `JOB_*`, `READY_INTERNAL_TOKEN`, `AWS_*`, `VAULT_*` and other tuning variables.
 
 ### 7.2 Vercel build-env: what the workflow supplies (`vercel deploy --prod --build-env ...`)
 
-Full: `deploy-base-sepolia.yml:211-228` · runtime: `deploy-runtime-base-sepolia.yml:207-224` (only `deploy_frontend=true`).
+Full: `deploy-base-sepolia.yml` 'Deploy frontend to Vercel' step · runtime: `deploy-runtime-base-sepolia.yml` 'Deploy frontend to Vercel' step (only `deploy_frontend=true`).
 
 | Vercel variable | Value | Line (full / runtime) |
 |---|---|---|
@@ -441,14 +441,14 @@ Full: `deploy-base-sepolia.yml:211-228` · runtime: `deploy-runtime-base-sepolia
 
 ### 7.3 Contracts: what is passed as env to the deploy step (`contracts/.env` is not written)
 
-`deploy-base-sepolia.yml:87-100`: `CONFIRM_PUBLIC_DEPLOY=yes` (fixed), `DEPLOYER_PRIVATE_KEY`, `BASE_SEPOLIA_RPC_URL` (secrets), `TREASURY_ADDRESS`, `FINAL_OWNER_ADDRESS`,
+`deploy-base-sepolia.yml` 'Deploy contracts to Base Sepolia' step: `CONFIRM_PUBLIC_DEPLOY=yes` (fixed), `DEPLOYER_PRIVATE_KEY`, `BASE_SEPOLIA_RPC_URL` (secrets), `TREASURY_ADDRESS`, `FINAL_OWNER_ADDRESS`,
 `BASE_SEPOLIA_USDT_ADDRESS`, `BASE_SEPOLIA_USDC_ADDRESS` (variables). `ETHERSCAN_API_KEY` (falls back to the legacy `BASESCAN_API_KEY` secret) is passed in a separate step only when `verify_contracts=true` (experimental, `continue-on-error`, runs `npm run verify:base-sepolia`); it is not passed to the `deploy.js` step.
 
 ### 7.4 Names meaningful only in GitHub (not read by code)
 
 | Name | Type | What |
 |---|---|---|
-| `FLY_API_TOKEN` | secret | Fly deploy token (`deploy-base-sepolia.yml:145`, `:183`) |
+| `FLY_API_TOKEN` | secret | Fly deploy token (`deploy-base-sepolia.yml` 'Ensure Fly app exists', 'Stage backend secrets on Fly' and 'Deploy backend to Fly' steps) |
 | `FLY_ORG` | variable (optional) | Fly org used when the workflow creates a missing app; default `personal`. Needs an org/personal `FLY_API_TOKEN` |
 | `FLY_APP_NAME` | variable | Fly app name; default `araf-protocol-backend`. During the Vercel deploy, the `vercel.json` rewrite target is rewritten on the runner according to this name (does not stop on a mismatch) |
 | `FRONTEND_DOMAIN` | variable | `SIWE_DOMAIN`, `SIWE_URI`, `ALLOWED_ORIGINS` are derived from it (`:30`, `:173-175`) |

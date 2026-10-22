@@ -34,7 +34,7 @@ Kısaltmalar: `C/.env` = `contracts/.env` · `B/.env` = `backend/.env` · `F/.en
 Tablolardaki "Nereye girilir" sütunu Base Sepolia/Mainnet için **hedef yeri** gösterir; Sepolia'da `Fly`/`Vercel` değerlerini workflow yazar (bkz. 7).
 
 > **Base Sepolia demosu için senin elle girmen gereken liste**
-> (kaynak: `deploy-base-sepolia.yml:43-76` doğrulama adımı ve `docs/TR/DEPLOY_BASE_SEPOLIA.md:7-40`; deploy: `gh workflow run deploy-base-sepolia.yml -f deploy_frontend=true`)
+> (kaynak: `deploy-base-sepolia.yml` 'Validate required config' adımı ve `docs/TR/DEPLOY_BASE_SEPOLIA.md:7-40`; deploy: `gh workflow run deploy-base-sepolia.yml -f deploy_frontend=true`)
 >
 > **GitHub Secrets, zorunlu (8):** `DEPLOYER_PRIVATE_KEY`, `BASE_SEPOLIA_RPC_URL`, `BASE_SEPOLIA_WS_RPC_URL`, `FLY_API_TOKEN`,
 > `MONGODB_URI`, `REDIS_URL` (`rediss://` olmalı), `JWT_SECRET` (≥64 karakter), `MASTER_ENCRYPTION_KEY` (tam 64 hex).
@@ -57,7 +57,7 @@ Tablolardaki "Nereye girilir" sütunu Base Sepolia/Mainnet için **hedef yeri** 
 ## 2. Contracts (`contracts/.env`)
 
 Hardhat `contracts/.env` dosyasını yükler. Ağ, env ile değil `--network <hardhat|localhost|base-sepolia|base>` ile seçilir.
-Bu paketteki değişkenler Fly/Vercel'e girmez; workflow bunları `contracts/.env` yazmadan, yalnız deploy adımının ortamına verir (`deploy-base-sepolia.yml:87-100`, bkz. 7.3). **53 değişken okunuyor** (`NODE_PATH` dahil; + yalnız örnekte/belgede olanlar: bkz. 6).
+Bu paketteki değişkenler Fly/Vercel'e girmez; workflow bunları `contracts/.env` yazmadan, yalnız deploy adımının ortamına verir (`deploy-base-sepolia.yml` 'Deploy contracts to Base Sepolia' adımı, bkz. 7.3). **53 değişken okunuyor** (`NODE_PATH` dahil; + yalnız örnekte/belgede olanlar: bkz. 6).
 
 Sütunlar: Y = Yerel, S = Base Sepolia, M = Mainnet. "Zorunlu": her zaman / ilgili işte / opsiyonel (varsayılan).
 
@@ -203,7 +203,7 @@ Prod'da `KMS_PROVIDER=env` **reddedilir**; tek istisna dar testnet kuralıdır: 
 | `KMS_PROVIDER` | `env` / `aws` / `vault` | Prod'da `aws`/`vault`; testnet istisnasında `env`; varsayılan `env` | `env` | `env` (workflow yazar) | `aws` | B/.env; Sepolia: Fly (workflow) | `encryption.js:125`, `:375` |
 | 🔒 `MASTER_ENCRYPTION_KEY` | Ana şifreleme anahtarı (64 hex; ilk 64 karakter) | `KMS_PROVIDER=env` iken: dev ve testnet istisnası | `randomBytes(32)` hex | GH secret → Fly (workflow) | **konma** | B/.env; GH secret | `encryption.js:136-142` |
 | 🔒 `AWS_ENCRYPTED_DATA_KEY` | AWS KMS ile şifreli data key (base64 CiphertextBlob) | `KMS_PROVIDER=aws` iken | gerekmez | gerekmez | base64 | Fly | `encryption.js:170`, `:391` |
-| `ALLOW_ENV_KMS_ON_TESTNET` | Yalnız Base Sepolia'da prod'da `KMS_PROVIDER=env`'e izin veren bayrak (`yes`); mainnet'te etkisiz ve hata verir | Opsiyonel; yalnız `NODE_ENV=production` + `EXPECTED_CHAIN_ID=84532` ile | gerekmez | `yes` (workflow yazar) | **asla** | Fly (workflow `:164`) | `encryption.js:76-90`, `:307` |
+| `ALLOW_ENV_KMS_ON_TESTNET` | Yalnız Base Sepolia'da prod'da `KMS_PROVIDER=env`'e izin veren bayrak (`yes`); mainnet'te etkisiz ve hata verir | Opsiyonel; yalnız `NODE_ENV=production` + `EXPECTED_CHAIN_ID=84532` ile | gerekmez | `yes` (workflow yazar) | **asla** | Fly (workflow: `.github/scripts/stage-runtime-env.sh`) | `encryption.js:76-90`, `:307` |
 | `AWS_REGION` | AWS bölgesi | Opsiyonel (`eu-west-1`) | boş | workflow yazmaz | `eu-west-1` | Fly | `encryption.js:169` |
 | `VAULT_ADDR` | Vault adresi | `KMS_PROVIDER=vault` iken | gerekmez | gerekmez | `https://vault…:8200` | Fly | `encryption.js:245`, `:396` |
 | 🔒 `VAULT_TOKEN` | Vault erişim token'ı | `KMS_PROVIDER=vault` iken | gerekmez | gerekmez | token | Fly | `encryption.js:246` |
@@ -396,7 +396,7 @@ Adresler (`ARAF_ESCROW_ADDRESS`, token adresleri) sır değildir.
 
 ### 7.1 Fly secrets: workflow'un yazdıkları (`flyctl secrets import --stage`, sonra `flyctl deploy`)
 
-Tam deploy: `deploy-base-sepolia.yml:141-178` · runtime: `deploy-runtime-base-sepolia.yml:128-166`. İkisinde aynı 19 sabit satır + 2 koşullu satır.
+Tam deploy: `deploy-base-sepolia.yml` 'Stage backend secrets on Fly' adımı · runtime: `deploy-runtime-base-sepolia.yml` 'Stage backend secrets on Fly' adımı; liste ortak betikte: `.github/scripts/stage-runtime-env.sh`. İkisinde aynı 19 sabit satır + 2 koşullu satır.
 
 | Fly değişkeni | Değer nereden | Satır (tam / runtime) |
 |---|---|---|
@@ -417,14 +417,14 @@ Tam deploy: `deploy-base-sepolia.yml:141-178` · runtime: `deploy-runtime-base-s
 
 Koşullu (iki workflow'da da, `.github/scripts/resolve-rewards-addresses.js` ile çözülür): `ARAF_REVENUE_VAULT_ADDRESS` / `ARAF_REWARDS_ADDRESS` (tam deploy `deploy_rewards=true`: rewards manifest'i; aksi halde repo variable, runtime'da dolu input önce) aynı adlarla Fly secret'a yazılır. Doğrulama: 0x+40 hex, sıfır değil, karışık harfliyse EIP-55 checksum, ikisi birlikte; manifest ile variable çelişirse hata. Tanımlı değilse hiçbir şey yazılmaz ve reward mirror/recorder pasif kalır.
 
-Koşullu, boşsa yazılmaz (Fly'daki değer korunur): `BASE_RPC_URL_FALLBACKS` (GitHub secret `BASE_SEPOLIA_RPC_URL_FALLBACKS`; RPC URL'leri anahtar içerir), `LIVE_POLL_INTERVAL_MS` [workflow doğrulaması 2000-300000; backend 5000 altını 5000'e kırpar], `WORKER_BLOCK_BATCH_SIZE` [1-2000], `WORKER_REPLAY_BATCH_DELAY_MS` [0-10000] (GitHub variable). `EXPECTED_CHAIN_ID` her zaman 84532 yazılır; variable tanımlıysa 84532 olmalı. `ETHERSCAN_API_KEY` backend'e hiç gönderilmez.
+Koşullu, boşsa yazılmaz (Fly'daki değer korunur): `BASE_RPC_URL_FALLBACKS` (GitHub secret `BASE_SEPOLIA_RPC_URL_FALLBACKS`; RPC URL'leri anahtar içerir), `LIVE_POLL_INTERVAL_MS` [workflow doğrulaması 5000-300000, backend çalışma ayarı sınırıyla aynı; önceki 2000 alt sınır çelişkisi giderildi], `WORKER_BLOCK_BATCH_SIZE` [1-2000], `WORKER_REPLAY_BATCH_DELAY_MS` [0-10000] (GitHub variable). `EXPECTED_CHAIN_ID` her zaman 84532 yazılır; variable tanımlıysa 84532 olmalı. `ETHERSCAN_API_KEY` backend'e hiç gönderilmez.
 
 Workflow'un yazmadığı backend değişkenleri (hepsi opsiyonel/varsayılanlı):
 `ARAF_TRACKED_TOKENS`, yukarıdakiler dışındaki `WORKER_*`, `JOB_*`, `READY_INTERNAL_TOKEN`, `AWS_*`, `VAULT_*` ve diğer ayar değişkenleri.
 
 ### 7.2 Vercel build-env: workflow'un verdikleri (`vercel deploy --prod --build-env ...`)
 
-Tam: `deploy-base-sepolia.yml:211-228` · runtime: `deploy-runtime-base-sepolia.yml:207-224` (yalnız `deploy_frontend=true`).
+Tam: `deploy-base-sepolia.yml` 'Deploy frontend to Vercel' adımı · runtime: `deploy-runtime-base-sepolia.yml` 'Deploy frontend to Vercel' adımı (yalnız `deploy_frontend=true`).
 
 | Vercel değişkeni | Değer | Satır (tam / runtime) |
 |---|---|---|
@@ -439,14 +439,14 @@ Tam: `deploy-base-sepolia.yml:211-228` · runtime: `deploy-runtime-base-sepolia.
 
 ### 7.3 Contracts: deploy adımına env olarak verilenler (`contracts/.env` yazılmaz)
 
-`deploy-base-sepolia.yml:87-100`: `CONFIRM_PUBLIC_DEPLOY=yes` (sabit), `DEPLOYER_PRIVATE_KEY`, `BASE_SEPOLIA_RPC_URL` (secret), `TREASURY_ADDRESS`, `FINAL_OWNER_ADDRESS`,
+`deploy-base-sepolia.yml` 'Deploy contracts to Base Sepolia' adımı: `CONFIRM_PUBLIC_DEPLOY=yes` (sabit), `DEPLOYER_PRIVATE_KEY`, `BASE_SEPOLIA_RPC_URL` (secret), `TREASURY_ADDRESS`, `FINAL_OWNER_ADDRESS`,
 `BASE_SEPOLIA_USDT_ADDRESS`, `BASE_SEPOLIA_USDC_ADDRESS` (variable). `ETHERSCAN_API_KEY` (yoksa eski `BASESCAN_API_KEY` secret'ı) yalnız `verify_contracts=true` iken (deneysel, `continue-on-error`, `npm run verify:base-sepolia` çalıştırır) ayrı adımda verilir; `deploy.js` adımına verilmez.
 
 ### 7.4 Yalnız GitHub'da anlamı olan adlar (kodda okunmaz)
 
 | Ad | Tür | Ne |
 |---|---|---|
-| `FLY_API_TOKEN` | secret | Fly deploy token'ı (`deploy-base-sepolia.yml:145`, `:183`) |
+| `FLY_API_TOKEN` | secret | Fly deploy token'ı (`deploy-base-sepolia.yml` 'Ensure Fly app exists', 'Stage backend secrets on Fly' ve 'Deploy backend to Fly' adımları) |
 | `FLY_ORG` | variable (opsiyonel) | Workflow eksik app'i oluştururken kullanılan Fly org'u; varsayılan `personal`. Org/kişisel `FLY_API_TOKEN` gerekir |
 | `FLY_APP_NAME` | variable | Fly uygulama adı; varsayılan `araf-protocol-backend`. Vercel deploy'unda `vercel.json` rewrite hedefi runner üzerinde bu ada göre yeniden yazılır (uyuşmazlıkta durmaz) |
 | `FRONTEND_DOMAIN` | variable | `SIWE_DOMAIN`, `SIWE_URI`, `ALLOWED_ORIGINS` buradan türer (`:30`, `:173-175`) |

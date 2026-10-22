@@ -274,7 +274,7 @@ Tüm trade rotaları `requireAuth` + `requireSessionWalletMatch` kullanır; eri�
 - bilgilendirici split hesabı için preview yüzeyi (`POST /api/trades/:id/settlement-proposal/preview`)
 - kontrat log'larından event mirror
 - sorgu/UX için read model projection
-- operasyon için audit/observability (admin read-only analytics dahil)
+- operasyon için audit/observability (admin okuma analitiği ve ayar yazma dahil)
 
 ### Backend'in YAPAMAYACAKLARI
 - settlement sonucunu belirlemek
@@ -417,7 +417,7 @@ Middleware: `marketReadLimiter`. Public, kimliksiz: footer sosyal bağlantılar�
 
 ---
 
-## 10) Admin read-only gözlem (`/api/admin`)
+## 10) Admin gözlem ve operasyonel ayarlar (`/api/admin`; okuma + `PUT /payment-rails`, `/runtime-settings`, `/social-links`)
 
 Router'ın tamamı `requireAuth` → `requireSessionWalletMatch` → `requireAdminWallet` → `adminReadLimiter` (cüzdan başına 60 / dk) zincirini çalıştırır. Protokol sonucunu etkileyen hiçbir yazma/override aksiyonu sunulmaz; tek yazma yüzeyi aşağıdaki operasyonel ayarlardır (ödeme yöntemi, çalışma ayarları, sosyal linkler). Admin erişimi yalnız `ADMIN_WALLETS` ile belirlenir.
 

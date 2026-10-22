@@ -178,7 +178,7 @@ describe('workflow scripts: stage-runtime-env.sh', function () {
     // Hata mesajı RPC URL değerini göstermez.
     const r = runStage('validate', { ...BASE_ENV, BASE_SEPOLIA_RPC_URL_FALLBACKS: 'http://secret-key.invalid' });
     expect(r.stderr).to.not.include('secret-key');
-    expect(runStage('validate', { ...BASE_ENV, EXPECTED_CHAIN_ID: '84532', LIVE_POLL_INTERVAL_MS: '2000' }).status).to.equal(0);
+    expect(runStage('validate', { ...BASE_ENV, EXPECTED_CHAIN_ID: '84532', LIVE_POLL_INTERVAL_MS: '5000' }).status).to.equal(0);
   });
 
   describe('health', function () {

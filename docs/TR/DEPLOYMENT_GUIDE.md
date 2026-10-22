@@ -998,7 +998,7 @@ Frontend hosting için önerilen asgari response header'ları (Nginx/Cloudflare/
 - `Permissions-Policy: geolocation=(), microphone=(), camera=()` (yalnız gerekirse genişletin)
 
 ### Cache policy
-`frontend/vercel.json` yalnız `/.well-known/farcaster.json` için `Content-Type: application/json; charset=utf-8` ve `Cache-Control: public, max-age=300` tanımlar; aşağıdaki `index.html` ve `/assets/*` değerleri önerilen politikadır, `vercel.json` içinde ayarlı değildir.
+`frontend/vercel.json` içinde `Cache-Control` yalnız `/.well-known/farcaster.json` için tanımlıdır (`public, max-age=300`, ayrıca `Content-Type: application/json; charset=utf-8`); diğer yollar için `Cache-Control` ayarlı değildir (tüm yollara güvenlik başlıkları ayrıca uygulanır); aşağıdaki `index.html` ve `/assets/*` `Cache-Control` değerleri önerilen politikadır, `vercel.json` içinde ayarlı değildir.
 - `index.html`: `Cache-Control: no-cache, no-store, must-revalidate`
 - versiyonlu statik asset'ler (`/assets/*`): `Cache-Control: public, max-age=31536000, immutable`
 - `/health` (liveness) ve `/ready` (readiness) önbelleklenmeyen health endpoint'leri olarak kalmalıdır.

@@ -6,6 +6,8 @@ ArafRevenueVault, rewards connected, warm wallets, median of repeated runs). Val
 `npm --prefix contracts run gas:baseline` ile ölçüldü (üretim bağlantısı: escrow treasury = RevenueVault,
 rewards bağlı, ısınmış cüzdanlar, tekrarların medyanı). Değerler `gasUsed`'dır.
 
+> Güncel değerler / Current values: "Re-verification (2026-10-22)" bölümü / section (aşağıda / below).
+
 ## Storage packing (2026-09)
 
 - Trade: 18 → 9 slots. ids `uint64`, timestamps `uint64` packed with the snapshot/state slot; cancel and ping

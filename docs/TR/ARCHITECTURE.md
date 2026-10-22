@@ -181,8 +181,8 @@ Kontrat, V3’ün tek authoritative state machine yüzeyidir. Aşağıdaki fonks
 > settlement teklif yönetimi). Library'ler DELEGATECALL ile escrow storage'ında çalışır; event'ler escrow adresinden aynı
 > imzalarla yayınlanır, yetki kontrolleri escrow'da kalır, adresler deploy anında bytecode'a gömülür (upgrade yolu yok).
 > Deploy sırası: `ArafReputationLib` → `ArafSettlementLib` (ikisi bağımsız) → linkli `ArafEscrow` (`contracts/scripts/deploy.js`).
-> Runtime bytecode boyutları (solc 0.8.24, `viaIR`, optimizer 200 run, `cancun`): `ArafEscrow` 22.061 bayt (EIP-170 sınırı 24.576),
-> `ArafReputationLib` 4.705, `ArafSettlementLib` 2.168 bayt. Hardhat ağında `allowUnlimitedContractSize: false` ile sınır yerelde de zorlanır.
+> Runtime bytecode boyutları (solc 0.8.24, `viaIR`, optimizer 200 run, `cancun`): `ArafEscrow` 22.585 bayt (pay 1.991) (EIP-170 sınırı 24.576),
+> `ArafReputationLib` 4.732, `ArafSettlementLib` 2.394 bayt. Hardhat ağında `allowUnlimitedContractSize: false` ile sınır yerelde de zorlanır.
 
 ### 3.3 Liveness / yardımcı write surface
 - `registerWallet` — cüzdan yaşı sayacını başlatır (tek kez; `AlreadyRegistered`).
