@@ -1,7 +1,6 @@
 import PIIDisplay from '../components/PIIDisplay';
 import { getEscrowExplorerUrl, getExternalFaucetUrl, resolveTargetChain } from './chainPolicy';
 import { fmtBps, isKnownNumber, fmtNum, fmtPct, getStateLabel } from './copy';
-import { fmtCompact, fmtInt, fmtNumber } from './format';
 import ReferenceRateTicker from '../components/ReferenceRateTicker';
 import SettlementProposalCard from '../components/SettlementProposalCard';
 import { normalizeSettlementState } from './contexts/settlement/settlementActionModel';
@@ -26,20 +25,21 @@ import { isOwnerRailDisabled, ownerRailDisabledMessage, isOwnerPayoutProfileMiss
 import { deriveTradeTimeline } from './contexts/trade-room/tradeTimeline';
 import { isViewInNav, NAV_ORDER, VIEW_REGISTRY } from './viewRegistry';
 import {
-  Banknote, ChevronDown, CircleCheck, CirclePause, Clock, Droplets, ExternalLink, Flame, Handshake, History, Hourglass, Layers, ListPlus, LoaderCircle, Lock, Menu, Paperclip, Plus, Settings, Store, Swords,
+  Banknote, CircleCheck, CirclePause, Clock, Droplets, ExternalLink, Flame, Handshake, History, Hourglass, Layers, LoaderCircle, Lock, Menu, Paperclip, Plus, Settings, Swords,
   TriangleAlert, Undo2, Unplug, Wallet, X, Maximize2, Minimize2, Download, Share, MessageSquare,
 } from 'lucide-react';
+import { getHomeContent } from './homeContent';
+import HomeHero from '../components/home/HomeHero';
+import HomeStats from '../components/home/HomeStats';
+import HomeAbout from '../components/home/HomeAbout';
+import HomePhilosophy from '../components/home/HomePhilosophy';
+import HomeFeatures from '../components/home/HomeFeatures';
+import HomeHowItWorks from '../components/home/HomeHowItWorks';
+import HomeFaq from '../components/home/HomeFaq';
 import { buildTradeRoomPanelCallbacks, getBurnExpiredDeadlinePassed, getPaymentWindowExpired } from './contexts/trade-room/tradeRoomPanelActions';
 
 // [TR] App ana görünüm/render katmanı burada tutulur.
 // [EN] Main application view/render layer lives here.
-// [TR] Ana sayfa istatistik değişim rozeti (yalnız burada kullanılır). [EN] Home stat delta badge.
-const StatChange = ({ value, lang = 'EN' }) => {
-  if (value == null) return null;
-  const isPositive = value >= 0;
-  return <span className={`text-[10px] ml-2 font-bold ${isPositive ? 'text-success' : 'text-danger'}`}>{isPositive ? '▲' : '▼'}{lang === 'TR' ? `%${Math.abs(value).toFixed(1).replace('.', ',')}` : `${Math.abs(value).toFixed(1)}%`}</span>;
-};
-
 // [TR] P2 — Modül düzeyi bileşenler: render içinde tanımlanınca her render'da yeni tip oluşur, alt ağaç yeniden
 //      mount olur (odak/kaydırma kaybı). Burada kimlikleri sabit.
 // [EN] P2 — Module-level components: defining them inside render creates a new type per render and remounts the
@@ -437,120 +437,33 @@ export const buildAppViews = (ctx) => {
   //     Home, Marketplace, Trade Room views
   // ═══════════════════════════════════════════
 
-  // [TR] Ana sayfa — protokol açıklaması ve istatistik kartları
-  // [EN] Home page — protocol description and stats cards
-  // [TR] İstatistik gelmediyse "$0" yanıltıcıdır; veri yokken tire gösterilir.
-  // [EN] "$0" is misleading when stats failed to load; show a dash when there is no data.
-  const statValue = (value, format) => (protocolStats == null || value == null ? '—' : format(value));
+  // [TR] Ana sayfa — tanıtım: hero, (yedek mod paneli), istatistikler, proje + video, felsefe, özellikler,
+  //      nasıl çalışır + SSS. Metinler homeContent.js'te; davranış (düğmeler, newTxBlocked, istatistik, yedek panel)
+  //      eskisiyle aynı.
+  // [EN] Home — landing: hero, (fallback panel), stats, project + video, philosophy, features, how it works + FAQ.
+  const renderHome = () => {
+    const home = getHomeContent(lang);
+    return (
+      <div className="w-full max-w-[1200px] min-w-0 p-4 md:p-8">
+        <HomeHero content={home.hero} onOpenMarket={() => setCurrentView('market')} onCreateOrder={openCreateOrder} newTxBlocked={newTxBlocked} />
 
-  const renderHome = () => (
-    <div className="w-full max-w-[1200px] min-w-0 p-4 md:p-8">
-      <div className="mb-10">
-        <h1 className="text-3xl sm:text-4xl md:text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-textPrimary via-textSecondary to-textMuted tracking-tight mb-3">
-          {lang === 'TR' ? <>Sistem yargılamaz. <br/>Dürüstsüzlüğü pahalıya mal eder.</> : <>The system does not judge. <br/>It makes dishonesty expensive.</>}
-        </h1>
-        <p className="text-textMuted text-sm max-w-lg">{lang === 'TR' ? 'Emanet tutmayan, hakemsiz eşten eşe USDT/USDC takası. Kurallar kontratta.' : 'Non-custodial, arbitrator-free P2P USDT/USDC trading. The rules live in the contract.'}</p>
-        <div className="mt-5 flex flex-col sm:flex-row gap-3">
-          <button onClick={() => setCurrentView('market')} className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-brand text-black text-sm font-bold hover:opacity-90 transition">
-            <Store className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />{lang === 'TR' ? 'Pazara git' : 'Open market'}
-          </button>
-          <button onClick={openCreateOrder} disabled={newTxBlocked} className="px-6 py-3 rounded-xl bg-surface border border-borderStrong text-textPrimary text-sm font-bold hover:bg-elevated transition disabled:opacity-50 disabled:cursor-not-allowed">
-            {lang === 'TR' ? '+ Emir oluştur' : '+ Create order'}
-          </button>
+        {chainFallbackActive && <ChainFallbackTradesPanel lang={lang} chainFallback={chainFallback} compact />}
+
+        <HomeStats protocolStats={protocolStats} statsLoading={statsLoading} statsError={statsError} fetchStats={fetchStats} lang={lang} />
+
+        <HomeAbout about={home.about} video={home.video} />
+
+        <HomePhilosophy content={home.philosophy} />
+
+        <HomeFeatures content={home.features} />
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
+          <HomeHowItWorks content={home.how} />
+          <HomeFaq content={home.faq} items={buildFaqItems(lang, protocolFeeConfig)} />
         </div>
       </div>
-
-      {chainFallbackActive && <ChainFallbackTradesPanel lang={lang} chainFallback={chainFallback} compact />}
-
-      {(() => {
-        const tr = lang === 'TR';
-        const usd = (v) => `$${fmtCompact(v, lang, 1)}`;
-        const openOrders = protocolStats && (protocolStats.open_sell_orders != null || protocolStats.open_buy_orders != null)
-          ? Number(protocolStats.open_sell_orders || 0) + Number(protocolStats.open_buy_orders || 0)
-          : null;
-        const hours = protocolStats?.avg_trade_hours;
-        const tiles = [
-          { k: 'vol', label: tr ? 'Tamamlanan hacim' : 'Settled volume', value: statValue(protocolStats?.total_volume_usdt, usd), change: protocolStats?.changes_30d?.total_volume_usdt_pct },
-          { k: 'trades', label: tr ? 'Başarılı işlem' : 'Successful trades', value: statValue(protocolStats?.completed_trades, (v) => fmtInt(v, lang)), change: protocolStats?.changes_30d?.completed_trades_pct },
-          { k: 'open', label: tr ? 'Açık emir' : 'Open orders', value: openOrders == null ? '—' : fmtInt(openOrders, lang), sub: openOrders == null ? null : (tr ? `${protocolStats.open_sell_orders || 0} satış · ${protocolStats.open_buy_orders || 0} alış` : `${protocolStats.open_sell_orders || 0} sell · ${protocolStats.open_buy_orders || 0} buy`) },
-          { k: 'time', label: tr ? 'Ort. işlem süresi' : 'Avg. trade time', value: hours != null ? (hours < 1 ? `${Math.max(1, Math.round(hours * 60))} ${tr ? 'dk' : 'min'}` : `${fmtNumber(hours, lang, { maxFractionDigits: 1 })} ${tr ? 'sa' : 'h'}`) : '—' },
-          { k: 'burn', label: tr ? 'Eriyen ve yakılan' : 'Decayed & burned', value: statValue(protocolStats?.burned_bonds_usdt, (v) => `$${fmtInt(v, lang)}`), danger: true, sub: tr ? 'Uzlaşmayanların kaybı' : 'Lost by those who would not settle' },
-        ];
-        return (
-          <div className="mb-10">
-            <div className="grid min-w-0 grid-cols-2 md:grid-cols-5 gap-3" aria-busy={statsLoading ? 'true' : 'false'} data-testid="home-stats">
-              {tiles.map((tile) => (
-                <div key={tile.k} className={`min-w-0 overflow-hidden bg-surface border p-4 rounded-2xl relative ${tile.danger ? 'border-danger/30 col-span-2 md:col-span-1' : 'border-borderSubtle'}`}>
-                  {tile.danger && <Flame className="absolute -right-2 -bottom-2 w-14 h-14 text-danger/10" strokeWidth={1.8} aria-hidden="true" />}
-                  <p className={`text-[10px] font-bold tracking-widest uppercase mb-2 ${tile.danger ? 'text-danger' : 'text-textMuted'}`}>{tile.label}</p>
-                  {statsLoading && protocolStats == null ? (
-                    <div className="h-7 w-20 rounded-md bg-elevated animate-pulse" />
-                  ) : (
-                    <div className="flex min-w-0 flex-wrap items-baseline relative">
-                      <span className={`max-w-full truncate text-2xl font-bold tabular-nums ${tile.danger ? 'text-danger' : 'text-textPrimary'}`}>{tile.value}</span>
-                      {tile.change != null && <StatChange value={tile.change} lang={lang} />}
-                    </div>
-                  )}
-                  {tile.sub && <p className="text-[11px] text-textMuted mt-1 truncate relative">{tile.sub}</p>}
-                </div>
-              ))}
-            </div>
-            {statsError && (
-              <p className="text-center pt-3 text-textMuted text-xs">
-                {tr ? 'İstatistik verisi alınamadı.' : 'Failed to load stats.'}
-                <button type="button" onClick={fetchStats} className="ml-2 text-brand font-semibold hover:underline">{tr ? 'Tekrar dene' : 'Retry'}</button>
-              </p>
-            )}
-          </div>
-        );
-      })()}
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
-        <section className="bg-surface border border-borderSubtle rounded-2xl p-5 md:p-6" data-testid="home-how-it-works">
-          <p className="text-[11px] tracking-[0.2em] uppercase text-brand mb-2">{lang === 'TR' ? 'Nasıl çalışır' : 'How it works'}</p>
-          <h3 className="text-xl font-bold text-textPrimary mb-4">{lang === 'TR' ? 'Kararı kontrat verir, backend değil.' : 'The contract decides, not the backend.'}</h3>
-          <ol className="space-y-3">
-            {(lang === 'TR' ? [
-              { icon: ListPlus, title: 'Emir', text: 'Satıcı kriptoyu ve teminatını kilitler; alıcı kendi teminatıyla işleme girer.' },
-              { icon: Banknote, title: 'Ödeme', text: 'Alıcı 48 saat içinde banka ödemesini yapıp bildirir; yapmazsa teminatından kesinti olur.' },
-              { icon: CircleCheck, title: 'Onay', text: 'Satıcı onaylar. Sessiz kalırsa alıcı 48 saat sonra uyarır, 24 saat sonra kripto otomatik serbest kalır.' },
-              { icon: Flame, title: 'İtiraz', text: 'Hakem yok: teminatlar ve sonra ana para erir. Hızlı uzlaşmak her iki taraf için en ucuz yoldur.' },
-            ] : [
-              { icon: ListPlus, title: 'Order', text: 'The seller locks crypto plus a bond; the buyer joins with a bond of their own.' },
-              { icon: Banknote, title: 'Payment', text: 'The buyer pays by bank within 48 hours and reports it; otherwise part of their bond is lost.' },
-              { icon: CircleCheck, title: 'Release', text: 'The seller confirms. If silent, the buyer pings after 48 hours and funds auto-release 24 hours later.' },
-              { icon: Flame, title: 'Dispute', text: 'No arbitrator: bonds, then principal, decay. Settling fast is the cheapest path for both sides.' },
-            ]).map((step, i) => (
-              <li key={step.title} className="flex gap-3">
-                <span className="shrink-0 w-8 h-8 rounded-lg bg-elevated border border-borderSubtle flex items-center justify-center text-textSecondary">
-                  <step.icon className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />
-                </span>
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-textPrimary"><span className="text-textMuted tabular-nums mr-1">{i + 1}.</span>{step.title}</p>
-                  <p className="text-xs md:text-sm text-textSecondary leading-relaxed">{step.text}</p>
-                </div>
-              </li>
-            ))}
-          </ol>
-        </section>
-
-        <section className="bg-surface border border-borderSubtle rounded-2xl p-5 md:p-6" data-testid="home-faq">
-          <p className="text-[11px] tracking-[0.2em] uppercase text-textMuted mb-3">{lang === 'TR' ? 'Sık sorulanlar' : 'FAQ'}</p>
-          <div className="min-w-0 divide-y divide-borderSubtle">
-            {buildFaqItems(lang, protocolFeeConfig).map((item) => (
-              <details key={item.q} className="group py-3 first:pt-0">
-                <summary className="cursor-pointer list-none text-sm font-semibold text-textPrimary flex items-center justify-between gap-3">
-                  {item.q}
-                  <ChevronDown className="w-4 h-4 shrink-0 text-textMuted group-open:rotate-180 transition" strokeWidth={1.8} aria-hidden="true" />
-                </summary>
-                <p className="text-xs md:text-sm text-textSecondary mt-2 leading-relaxed">{item.a}</p>
-              </details>
-            ))}
-          </div>
-        </section>
-      </div>
-    </div>
-  );
+    );
+  };
 
   // [TR] Pazar — modern, az metinli P2P ekranı: başlık + kapalıysa neden rozeti, referans kur şeridi, tek satır chip
   //      filtreleri, emir kartları (büyük kur ve miktar, token işareti, yöntem/kademe rozetleri, itibar halkası, net
