@@ -3,7 +3,8 @@ import {
   ArrowDownUp, Banknote, Check, ChevronDown, CloudOff, Coins, EyeOff, Lock, Plus, RotateCcw, SearchX, ShieldCheck, Store, X,
 } from 'lucide-react';
 import BottomSheet from '../../../components/BottomSheet';
-import { MARKET_FIAT_OPTIONS, MARKET_FILTER_DEFAULTS } from './marketFilters';
+import { MARKET_FILTER_DEFAULTS, getMarketFiatOptions } from './marketFilters';
+import { useRailCatalogState } from '../../railCatalog';
 
 // [TR] Pazar filtreleri — tek satır chip çubuğu. Al/Sat segmenti + döviz, token, tutar, kademe, "emirlerimi gizle"
 //      ve sıralama chip'leri. Telefonda satır yatay kayar (sağ kenar soluklaşır), masaüstünde sarar. Varsayılan chip
@@ -48,7 +49,7 @@ export const amountUnit = (token) => (token === 'USDT' || token === 'USDC' ? tok
 
 const iconCls = 'h-4 w-4 shrink-0';
 
-const buildClauses = ({ tr, filters, sortOptions, sortValue, viewerTier }) => ({
+const buildClauses = ({ tr, filters, sortOptions, sortValue, viewerTier, supportedFiat }) => ({
   token: {
     title: tr ? 'Varlık' : 'Asset',
     idle: 'Token',
@@ -66,7 +67,7 @@ const buildClauses = ({ tr, filters, sortOptions, sortValue, viewerTier }) => ({
     icon: <Banknote className={iconCls} strokeWidth={2} aria-hidden="true" />,
     options: [
       { value: 'ALL', label: tr ? 'Her döviz' : 'Any currency' },
-      ...MARKET_FIAT_OPTIONS.map((c) => ({ value: c, label: c })),
+      ...getMarketFiatOptions(supportedFiat).map((c) => ({ value: c, label: c })),
     ],
     value: filters.fiat,
   },
@@ -292,7 +293,8 @@ export default function MarketFilters({
 }) {
   const tr = lang === 'TR';
   const filters = { ...MARKET_FILTER_DEFAULTS, ...rawFilters };
-  const c = buildClauses({ tr, filters, sortOptions, sortValue, viewerTier });
+  const { supportedFiat } = useRailCatalogState();
+  const c = buildClauses({ tr, filters, sortOptions, sortValue, viewerTier, supportedFiat });
   const resultText = marketResultText({ tr, ...result });
   const amountSet = String(filters.amount || '').trim() !== '';
   const chip = (key) => <ClauseChip clause={c[key]} filterKey={key} tr={tr} testId={`market-clause-${key}`} onPick={(v) => setFilter(key, v)} />;

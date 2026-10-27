@@ -3,6 +3,7 @@ import PaymentRiskBadge from '../../../components/PaymentRiskBadge';
 import { fmtNum, fmtPct } from '../../copy';
 import { getOrderSideCopy } from '../../orderUiModel';
 import { railLabel } from '../../railLabels';
+import { useRailCatalogState } from '../../railCatalog';
 
 // [TR] Pazar emir kartı — yalnız sunum. Doldurma kapıları (tier, profil, ban, txGate...) AppViews'te hesaplanır ve
 //      hazır "cta" olarak gelir; bu bileşen hiçbir kilidi değiştirmez. Yalnız emirde gerçekten olan veri gösterilir:
@@ -44,7 +45,8 @@ export default function MarketOrderCard({ order, lang = 'TR', cta, notes = null,
   const tr = lang === 'TR';
   const fmt = (n, digits = 2) => fmtNum(n, lang, digits);
   const sideLabel = order.sideLabel || getOrderSideCopy(order.side, 'order', lang) || order.side;
-  const railFull = railLabel(order.paymentRail, lang);
+  const { catalog: railCatalog } = useRailCatalogState();
+  const railFull = railLabel(order.paymentRail, lang, railCatalog);
   const rail = railShort(railFull);
   const tier = Number(order.tier);
   const bondKnown = order.bondLabel && order.bondLabel !== '—';

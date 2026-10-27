@@ -11,6 +11,7 @@ import { isWalletProviderDisconnectedError, walletDisconnectedToast } from './wa
 import { describeConnectError, shouldShowMobileWalletPicker } from './mobileWallet';
 import { fmtBps, isKnownNumber, fmtNum } from './copy';
 import { profileRequiredMessage } from './payoutProfileGate';
+import { getSupportedFiat, hasReferenceRate } from './railCatalog';
 
 // [TR] Cüzdan modalı: ortak BottomSheet kabuğu + güvenlik notu. [EN] Wallet modal: shared BottomSheet shell + safety note.
 function WalletSheet({ title, closeLabel, note, onClose, children }) {
@@ -195,6 +196,12 @@ export const buildAppModals = (ctx) => {
     address,
   
   } = ctx;
+
+  // [TR] Emir modalı fiat seçenekleri sunucudaki supportedFiat'tan (yoksa TRY/USD/EUR); seçili fiat listede yoksa da görünür kalır.
+  const fiatChoices = (() => {
+    const list = getSupportedFiat(ctx.supportedFiat ?? undefined);
+    return makerFiat && !list.includes(makerFiat) ? [...list, makerFiat] : list;
+  })();
 
   const closeBtn = (onClick, label) => (
     <button type="button" onClick={onClick} aria-label={label} className="p-1.5 -m-1.5 rounded-lg text-textMuted hover:text-textPrimary hover:bg-elevated transition">
@@ -408,12 +415,11 @@ export const buildAppModals = (ctx) => {
                 <div className="flex gap-1.5">
                   <input id="maker-rate" type="number" inputMode="decimal" min="0" placeholder="41.25" value={makerRate} onChange={e => setMakerRate(e.target.value)} className={`${makerFieldClass} min-w-0`} />
                   <select aria-label={tr ? 'İtibari para' : 'Fiat currency'} value={makerFiat} onChange={e => setMakerFiat(e.target.value)} className="bg-elevated text-textPrimary px-2 rounded-xl border border-borderStrong text-sm">
-                    <option value="TRY">TRY</option>
-                    <option value="USD">USD</option>
-                    <option value="EUR">EUR</option>
+                    {fiatChoices.map((code) => <option key={code} value={code}>{code}</option>)}
                   </select>
                 </div>
                 {totalFiat > 0 && <p className="mt-1 text-[11px] text-textMuted">≈ {fmt(totalFiat)} {makerFiat}</p>}
+                {!hasReferenceRate(makerFiat) && <p data-testid="maker-no-reference-rate" className="mt-1 text-[11px] text-textMuted">{tr ? `${makerFiat} için referans kur yok` : `No reference rate for ${makerFiat}`}</p>}
               </div>
             </div>
 

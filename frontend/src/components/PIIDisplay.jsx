@@ -22,6 +22,7 @@ import { Lock, LockOpen, MessageCircle, ShieldCheck, TriangleAlert } from 'lucid
 import { useEffect, useState } from 'react';
 import { usePII } from '../hooks/usePII';
 import { getPiiCopy } from '../app/copy';
+import { getCatalogRail, isLegacyRail, useRailCatalogState } from '../app/railCatalog';
 
 // [TR] F19.2 — İletişim değeri karşı tarafça girilir; doğrulanmadan href'e konmaz.
 // [EN] The contact value is counterparty-supplied; it is validated before it reaches an href.
@@ -85,6 +86,7 @@ export default function PIIDisplay({ tradeId, lang = 'tr', authenticatedFetch })
   const t = getPiiCopy(normalizedLang);
 
   const { pii, loading, error, fetchPII, clearPII } = usePII(tradeId, authenticatedFetch);
+  const { catalog } = useRailCatalogState();
   // [TR] F19.3 — Açık durum, hangi işlem için açıldığını tutar; tradeId değişince otomatik kapanır
   //      (önceki işlemin "açık" durumu yeni işlemin kilitli görünümünü atlamasın).
   // [EN] The revealed flag remembers which trade it was opened for, so a tradeId change re-locks the view.
@@ -176,7 +178,12 @@ export default function PIIDisplay({ tradeId, lang = 'tr', authenticatedFetch })
     if (channel === 'phone') return t.phoneBtn;
     return null;
   };
+  // [TR] Katalog alanı: etiket, kopyalanabilirlik ve tür buradan; katalogda olmayan anahtar mevcut davranışla (ham ad) kalır.
+  const catalogRail = getCatalogRail(pii?.payoutProfile?.rail, catalog);
+  const catalogField = (key) => (catalogRail?.fields || []).find((f) => f.key === key) || null;
   const getFieldLabel = (key) => {
+    const fromCatalog = catalogField(key)?.label?.[normalizedLang === 'tr' ? 'TR' : 'EN'];
+    if (fromCatalog) return fromCatalog;
     const map = {
       account_holder_name: lang === 'TR' ? 'Hesap Sahibi' : 'Account Holder',
       iban: 'IBAN',
@@ -188,6 +195,15 @@ export default function PIIDisplay({ tradeId, lang = 'tr', authenticatedFetch })
     };
     return map[key] || key;
   };
+  // [TR] kind:"iban" alanları 4'lü gruplarla gösterilir; kopyalanan değer boşluksuz kalır (handleCopyField).
+  const displayValue = (key, value) => {
+    const str = String(value);
+    return catalogField(key)?.kind === 'iban' ? str.replace(/\s+/g, '').replace(/(.{4})/g, '$1 ').trim() : str;
+  };
+  // [TR] Eski 3 rail'in kopyala düğmeleri aynen kalır; katalog rail'lerinde `copyable` alanlar için düğme çizilir.
+  const copyableCatalogFields = catalogRail && !isLegacyRail(catalogRail.code)
+    ? (catalogRail.fields || []).filter((f) => f.copyable && pii?.payoutProfile?.fields?.[f.key])
+    : [];
 
   const contactHref = buildContactHref(pii?.payoutProfile?.contact?.channel, pii?.payoutProfile?.contact?.value);
   const contactMasked = contactHref ? maskContact(pii?.payoutProfile?.contact?.channel, pii?.payoutProfile?.contact?.value) : null;
@@ -260,7 +276,7 @@ export default function PIIDisplay({ tradeId, lang = 'tr', authenticatedFetch })
             <>
               <p className="text-textMuted text-xs mb-1 uppercase tracking-wider">IBAN</p>
               <p className="font-mono text-success mb-3 break-all text-base tracking-wide">
-                {pii?.payoutProfile?.fields?.iban || '—'}
+                {pii?.payoutProfile?.fields?.iban ? displayValue('iban', pii.payoutProfile.fields.iban) : '—'}
               </p>
             </>
           )}
@@ -277,7 +293,7 @@ export default function PIIDisplay({ tradeId, lang = 'tr', authenticatedFetch })
                 if (value == null || value === '' || key === 'iban' || key === 'account_holder_name') return null;
                 return (
                   <p key={key} className="text-xs text-textSecondary break-all">
-                    <span className="text-textMuted">{getFieldLabel(key)}:</span> {String(value)}
+                    <span className="text-textMuted">{getFieldLabel(key)}:</span> {displayValue(key, value)}
                   </p>
                 );
               })}
@@ -293,6 +309,15 @@ export default function PIIDisplay({ tradeId, lang = 'tr', authenticatedFetch })
                 {copyButtonLabel('iban', t.copyIban)}
               </button>
             )}
+            {copyableCatalogFields.map((f) => (
+              <button
+                key={f.key}
+                onClick={() => handleCopyField(f.key, pii.payoutProfile.fields[f.key])}
+                className={`flex-1 text-xs font-medium py-2 rounded-lg transition border ${copyButtonTone(f.key)}`}
+              >
+                {copyButtonLabel(f.key, `${normalizedLang === 'tr' ? 'Kopyala' : 'Copy'}: ${getFieldLabel(f.key)}`)}
+              </button>
+            ))}
             {pii?.payoutProfile?.rail === 'US_ACH' && (
               <>
                 <button

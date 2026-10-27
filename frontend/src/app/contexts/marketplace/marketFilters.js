@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
+import { getSupportedFiat } from '../../railCatalog';
 
 // [TR] Pazar filtrelerinin tek kaynağı: varsayılanlar, state hook'u, sunucu sorgusu ve istemci eşleştiricisi.
 //      Sunucu asıl filtrelemeyi yapar; istemci eşleştiricisi aynı kuralı debounce arasında, UI Lab verisinde
@@ -7,7 +8,9 @@ import { useCallback, useMemo, useState } from 'react';
 //      The server does the real filtering; the client matcher mirrors it between debounces, for UI Lab data
 //      and for the client-only "hide my orders" option.
 
+// [TR] Yedek liste; katalog varsa fiat seçenekleri sunucudaki supportedFiat'tan gelir (railCatalog.js).
 export const MARKET_FIAT_OPTIONS = ['TRY', 'USD', 'EUR'];
+export const getMarketFiatOptions = (supportedFiat) => getSupportedFiat(supportedFiat);
 
 export const MARKET_FILTER_DEFAULTS = Object.freeze({
   side: 'ALL', // ALL | BUY | SELL (viewer's action)
@@ -68,7 +71,7 @@ export const buildMarketOrdersQuery = ({ filters = MARKET_FILTER_DEFAULTS, token
   if (tokenAddress) params.set('token_address', tokenAddress);
   const amount = parseAmount(f.amount);
   if (amount !== null) params.set('min_amount', String(amount));
-  if (MARKET_FIAT_OPTIONS.includes(f.fiat)) params.set('fiat', f.fiat);
+  if (getSupportedFiat().includes(f.fiat)) params.set('fiat', f.fiat);
   if (f.tier === 'NO_BOND') params.set('tier', '0');
   else if (f.tier === 'ELIGIBLE' && Number.isInteger(userTier) && userTier >= 0 && userTier <= 4) params.set('max_tier', String(userTier));
   if (f.sort === 'NEWEST') params.set('sort', 'newest');

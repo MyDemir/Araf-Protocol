@@ -6,6 +6,7 @@
 import { formatUnits } from 'viem';
 import { orderSide as orderSideCopy } from './copy';
 import { fmtNumber } from './format';
+import { getCatalogRail, getRailCatalogState, isLegacyRail, normalizeFieldValue } from './railCatalog';
 
 const DEFAULT_TOKEN_DECIMALS = 6;
 const VALID_ORDER_SIDES = new Set(['SELL_CRYPTO', 'BUY_CRYPTO']);
@@ -20,20 +21,42 @@ export const parseOwnerBannedUntil = (order) => {
   return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
 };
 
+// [TR] Yedek (katalog yokken) liste; katalog varsa ülkeler rail'in `countries` alanından gelir.
+// [EN] Fallback list used when no catalog is loaded; with a catalog the rail's `countries` apply.
 export const SEPA_COUNTRY_CODES = ['DE', 'FR', 'NL', 'BE', 'ES', 'IT', 'AT', 'PT', 'IE', 'LU', 'FI', 'GR'];
 
-const RAIL_DEFAULT_COUNTRY = { TR_IBAN: 'TR', US_ACH: 'US', SEPA_IBAN: 'DE' };
+const FALLBACK_RAIL_DEFAULT_COUNTRY = { TR_IBAN: 'TR', US_ACH: 'US', SEPA_IBAN: 'DE' };
+const FALLBACK_RAIL_COUNTRIES = { TR_IBAN: ['TR'], US_ACH: ['US'], SEPA_IBAN: SEPA_COUNTRY_CODES };
+
+// [TR] Rail'in izinli ülkeleri: katalog `countries` (["*"] = serbest ISO-2 → null) ya da yedek.
+export const getAllowedRailCountries = (rail, catalog = getRailCatalogState().catalog) => {
+  const code = String(rail || '').toUpperCase();
+  const row = getCatalogRail(code, catalog);
+  if (row && Array.isArray(row.countries) && row.countries.length) {
+    return row.countries.includes('*') ? null : row.countries.map((c) => String(c).toUpperCase());
+  }
+  return FALLBACK_RAIL_COUNTRIES[code] || ['TR'];
+};
+// [TR] Varsayılan ülke: eski 3 rail'in bilinen varsayılanı listedeyse o, yoksa listenin ilki.
+export const getRailDefaultCountry = (rail, catalog = getRailCatalogState().catalog) => {
+  const code = String(rail || '').toUpperCase();
+  const allowed = getAllowedRailCountries(code, catalog);
+  const legacyDefault = FALLBACK_RAIL_DEFAULT_COUNTRY[code];
+  if (allowed === null) return '';
+  if (legacyDefault && allowed.includes(legacyDefault)) return legacyDefault;
+  return allowed[0] || legacyDefault || 'TR';
+};
+
 // [TR] Frontend payload canonicalizer — backend authority korunur, kirli veri minimize edilir.
 // [EN] Frontend payload canonicalizer — backend stays authoritative, payload quality is improved.
 export const canonicalizePayoutProfileDraft = (draft = {}) => {
   const rail = String(draft.rail || 'TR_IBAN').toUpperCase();
-  const allowedCountries = rail === 'SEPA_IBAN'
-    ? SEPA_COUNTRY_CODES
-    : [RAIL_DEFAULT_COUNTRY[rail] || 'TR'];
+  const catalogRail = getCatalogRail(rail);
+  const allowedCountries = getAllowedRailCountries(rail);
   const requestedCountry = String(draft.country || '').toUpperCase();
-  const country = allowedCountries.includes(requestedCountry)
-    ? requestedCountry
-    : (RAIL_DEFAULT_COUNTRY[rail] || allowedCountries[0]);
+  const country = allowedCountries === null
+    ? (/^[A-Z]{2}$/.test(requestedCountry) ? requestedCountry : '')
+    : (allowedCountries.includes(requestedCountry) ? requestedCountry : getRailDefaultCountry(rail));
   const rawChannel = draft?.contact?.channel || null;
   const channel = rawChannel ? String(rawChannel).toLowerCase() : null;
   let value = draft?.contact?.value == null ? null : String(draft.contact.value).trim();
@@ -41,6 +64,19 @@ export const canonicalizePayoutProfileDraft = (draft = {}) => {
   if (channel === 'phone' && value) value = value.replace(/\s+/g, '');
   if (!channel) value = null;
   const fields = draft?.fields || {};
+  // [TR] Katalog rail'i (eski 3 hariç): kanonik = {account_holder_name, bank_name, ...katalog alanları}; boş alan gönderilmez.
+  //      Eski 3 rail'de aşağıdaki şekil BAYT BAYT aynı kalır (backend fingerprint kuralı).
+  if (catalogRail && !isLegacyRail(rail)) {
+    const out = {
+      account_holder_name: String(fields.account_holder_name || '').trim().replace(/\s+/g, ' '),
+      bank_name: fields.bank_name ? String(fields.bank_name).trim() : null,
+    };
+    (catalogRail.fields || []).forEach((f) => {
+      const v = normalizeFieldValue(f, fields[f.key]);
+      if (v) out[f.key] = v;
+    });
+    return { rail, country, contact: { channel, value }, fields: out };
+  }
   const base = {
     account_holder_name: String(fields.account_holder_name || '').trim().replace(/\s+/g, ' '),
     iban: null,
@@ -62,7 +98,6 @@ export const canonicalizePayoutProfileDraft = (draft = {}) => {
   }
   return { rail, country, contact: { channel, value }, fields: base };
 };
-const SEPA_COUNTRIES = new Set(SEPA_COUNTRY_CODES);
 
 export const getOrderSideCopy = (side, variant = 'display', lang = 'TR') => {
   const suffixByVariant = {
@@ -222,7 +257,9 @@ export const resolvePaymentRiskEntry = ({ paymentRiskConfig = {}, rail, country 
   if (!safeRail || !paymentRiskConfig || typeof paymentRiskConfig !== 'object') return null;
   const direct = paymentRiskConfig?.[safeCountry]?.[safeRail];
   if (direct) return direct;
-  if (safeRail === 'SEPA_IBAN' && SEPA_COUNTRIES.has(safeCountry)) {
+  // [TR] Çok ülkeli rail'ler katalogdaki `countries` ile çözülür (SEPA: EU kovası); kovası olmayanlar genel aramaya düşer.
+  const railCountries = getAllowedRailCountries(safeRail);
+  if (safeRail === 'SEPA_IBAN' && railCountries && railCountries.includes(safeCountry)) {
     return paymentRiskConfig?.EU?.SEPA_IBAN || null;
   }
   const genericEntry = Object.values(paymentRiskConfig)
