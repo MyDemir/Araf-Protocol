@@ -69,7 +69,7 @@ describe('legacy rail payload is unchanged (fingerprint rule)', () => {
 });
 
 // ── Katalogla profil formu ──────────────────────────────────────────────────
-function Harness({ initial, onSubmit = vi.fn(), paymentRiskConfig = null, lang = 'EN', savedRail = null }) {
+function Harness({ initial, onSubmit = vi.fn(), paymentRiskConfig = null, lang = 'EN' }) {
   const [draft, setDraft] = React.useState(initial);
   return (
     <PaymentProfilePanel
@@ -79,24 +79,23 @@ function Harness({ initial, onSubmit = vi.fn(), paymentRiskConfig = null, lang =
       handleUpdatePII={(e) => { e.preventDefault(); onSubmit(canonicalizePayoutProfileDraft(draft)); }}
       canonicalizePayoutProfileDraft={canonicalizePayoutProfileDraft}
       paymentRiskConfig={paymentRiskConfig}
-      savedRail={savedRail}
     />
   );
 }
 const draftOf = (rail, country, fields = {}) => ({ rail, country, contact: { channel: null, value: null }, fields: { account_holder_name: 'Jane Doe', ...fields } });
 
 describe('profile form with a catalog', () => {
-  it('lists only open rails plus the saved rail, grouped by region', () => {
+  it('lists only open rails (closed ones hidden; the saved-rail flow is in railCatalog.real.test.jsx), grouped by region', () => {
     loadCatalog();
-    render(<Harness initial={draftOf('TR_IBAN', 'TR')} savedRail="GB_FPS" />);
+    render(<Harness initial={draftOf('TR_IBAN', 'TR')} />);
     const select = screen.getByLabelText('Payment method');
     const codes = within(select).getAllByRole('option').map((o) => o.value);
-    // GB_FPS kapalı ama kayıtlı rail olarak listede; SWIFT_INTL kapalı ve kayıtlı değil: gizli.
-    expect(codes).toEqual(['TR_IBAN', 'SEPA_IBAN', 'GB_FPS', 'US_ACH', 'MX_SPEI', 'BR_PIX', 'IN_UPI']);
+    // GB_FPS ve SWIFT_INTL kapalı ve seçili değil: gizli.
+    expect(codes).toEqual(['TR_IBAN', 'SEPA_IBAN', 'US_ACH', 'MX_SPEI', 'BR_PIX', 'IN_UPI']);
     expect(codes).not.toContain('SWIFT_INTL');
+    expect(codes).not.toContain('GB_FPS');
     const groups = Array.from(select.querySelectorAll('optgroup')).map((g) => g.label);
     expect(groups).toEqual(['Europe', 'Americas', 'Asia-Pacific']);
-    expect(within(select).getByRole('option', { name: /Faster Payments.*currently closed/ })).toBeDisabled();
   });
 
   it('keeps the current closed rail selected and shows the closed alert', () => {

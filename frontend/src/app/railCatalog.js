@@ -133,8 +133,10 @@ export const validateCatalogField = (field, rawValue, { rail = null, values = {}
   if (field.pattern) { const re = safeRegExp(field.pattern); if (re && !re.test(value)) return 'pattern'; }
   // [TR] checksum:"mod97" + ibanCountryLengths: `bank_country` tabloda varsa IBAN olarak, yoksa düz hesap no olarak kontrol edilir.
   if (field.checksum === 'mod97' && field.ibanCountryLengths) {
-    const want = field.ibanCountryLengths[String(values?.bank_country || '').toUpperCase()];
-    if (want) return value.length === want && ibanMod97Ok(value) ? null : 'length';
+    const country = String(values?.bank_country || '').toUpperCase();
+    const want = field.ibanCountryLengths[country];
+    // [TR] IBAN ülkesiyse: önek bank_country ile eşleşmeli, uzunluk ve mod-97 tutmalı. Tabloda yoksa düz hesap no.
+    if (want) return value.startsWith(country) && value.length === want && ibanMod97Ok(value) ? null : 'length';
     return null;
   }
   if (field.kind === 'iban' && field.ibanCountryLengths) {
@@ -146,6 +148,8 @@ export const validateCatalogField = (field, rawValue, { rail = null, values = {}
 export const validateCatalogRail = (rail, values) => {
   const errors = {};
   (rail?.fields || []).forEach((f) => {
+    // [TR] bank_country yasaklı listedeyse (backend ile aynı) uyarı.
+    if (f.key === 'bank_country' && isBlockedFreeCountry(normalizeFieldValue(f, values?.[f.key]))) { errors[f.key] = 'blocked'; return; }
     const e = validateCatalogField(f, values?.[f.key], { rail, values });
     if (e) errors[f.key] = e;
   });

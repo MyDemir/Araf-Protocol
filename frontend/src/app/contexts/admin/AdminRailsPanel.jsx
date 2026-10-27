@@ -81,12 +81,16 @@ export default function AdminRailsPanel({ lang = 'EN', authenticatedFetch, showT
       } else {
         let code = '';
         try { code = (await readJsonWithTimeout(res))?.code || ''; } catch { /* yoksay */ }
+        const conflict = code === 'PAYMENT_RAIL_CONFLICT';
         const msg = code === 'LAST_ENABLED_RAIL'
           ? t(lang, 'En az bir ödeme yöntemi açık kalmalıdır.', 'At least one payment method must stay enabled.')
-          : t(lang, 'Güncelleme başarısız.', 'Update failed.');
+          : conflict
+            ? t(lang, 'Başka bir yönetici değiştirdi, liste yenilendi.', 'Another admin changed it; the list was refreshed.')
+            : t(lang, 'Güncelleme başarısız.', 'Update failed.');
         showToast(msg, 'error');
         setPending(null);
         setReason('');
+        if (conflict) await load();
       }
     } catch {
       showToast(t(lang, 'Güncelleme başarısız.', 'Update failed.'), 'error');

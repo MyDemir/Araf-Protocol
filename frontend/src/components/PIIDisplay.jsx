@@ -198,8 +198,13 @@ export default function PIIDisplay({ tradeId, lang = 'tr', authenticatedFetch })
   // [TR] kind:"iban" alanları 4'lü gruplarla gösterilir; kopyalanan değer boşluksuz kalır (handleCopyField).
   const displayValue = (key, value) => {
     const str = String(value);
-    return catalogField(key)?.kind === 'iban' ? str.replace(/\s+/g, '').replace(/(.{4})/g, '$1 ').trim() : str;
+    const f = catalogField(key);
+    // [TR] SWIFT_INTL hesap no: bank_country IBAN tablosundaysa IBAN gibi gruplanır.
+    const swiftIban = f?.checksum === 'mod97' && f.ibanCountryLengths?.[String(pii?.payoutProfile?.fields?.bank_country || '').toUpperCase()];
+    return f?.kind === 'iban' || swiftIban ? str.replace(/\s+/g, '').replace(/(.{4})/g, '$1 ').trim() : str;
   };
+  // [TR] IBAN bloğu: eski iki IBAN rail'i VEYA katalogda o rail'in kind:"iban" alanı (PL_IBAN, CH_IBAN, ...) varsa.
+  const showIbanBlock = ['TR_IBAN', 'SEPA_IBAN'].includes(pii?.payoutProfile?.rail) || catalogField('iban')?.kind === 'iban';
   // [TR] Eski 3 rail'in kopyala düğmeleri aynen kalır; katalog rail'lerinde `copyable` alanlar için düğme çizilir.
   const copyableCatalogFields = catalogRail && !isLegacyRail(catalogRail.code)
     ? (catalogRail.fields || []).filter((f) => f.copyable && pii?.payoutProfile?.fields?.[f.key])
@@ -272,9 +277,9 @@ export default function PIIDisplay({ tradeId, lang = 'tr', authenticatedFetch })
           <p className="text-textMuted text-xs mb-1 uppercase tracking-wider">{getFieldLabel('account_holder_name')}</p>
           <p className="font-bold text-textPrimary text-lg mb-3 leading-snug">{pii?.payoutProfile?.fields?.account_holder_name || '—'}</p>
 
-          {['TR_IBAN', 'SEPA_IBAN'].includes(pii?.payoutProfile?.rail) && (
+          {showIbanBlock && (
             <>
-              <p className="text-textMuted text-xs mb-1 uppercase tracking-wider">IBAN</p>
+              <p className="text-textMuted text-xs mb-1 uppercase tracking-wider">{getFieldLabel('iban')}</p>
               <p className="font-mono text-success mb-3 break-all text-base tracking-wide">
                 {pii?.payoutProfile?.fields?.iban ? displayValue('iban', pii.payoutProfile.fields.iban) : '—'}
               </p>
