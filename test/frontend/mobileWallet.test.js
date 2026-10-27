@@ -72,6 +72,14 @@ describe('android intent deeplinks', () => {
     expect(buildWalletDeepLinks(loc, { userAgent: DESKTOP })).toEqual(base);
     for (const l of base) expect(l.href).toMatch(/^https:\/\//);
   });
+  it('Android WebView ("; wv)") keeps plain https links', () => {
+    const WV = 'Mozilla/5.0 (Linux; Android 10; K; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/125.0.0.0 Mobile Safari/537.36';
+    const WV_OLD = 'Mozilla/5.0 (Linux; Android 9; SM-G960F Build/PPR1; wv) AppleWebKit/537.36 Version/4.0 Chrome/90.0 Mobile Safari/537.36';
+    const base = buildWalletDeepLinks(loc);
+    expect(buildWalletDeepLinks(loc, { userAgent: WV })).toEqual(base);
+    expect(buildWalletDeepLinks(loc, { userAgent: WV_OLD })).toEqual(base);
+    expect(buildWalletDeepLinks(loc, { userAgent: PIXEL })[0].href).toMatch(/^intent:\/\//);
+  });
   it('android hrefs keep the origin+pathname-only rule', () => {
     for (const href of Object.values(android)) {
       expect(href).not.toContain('evil');

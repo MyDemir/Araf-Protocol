@@ -28,7 +28,11 @@ export const buildCurrentSiteUrl = (loc = typeof window !== 'undefined' ? window
   return `${loc.origin}${path}`;
 };
 
+// [TR] Android WebView UA'sı "; wv)" işareti taşır; WebView'ler çoğunlukla intent: işlemez, bu yüzden hariç tutulur.
+//      [kaynak: https://android-developers.googleblog.com/2024/12/user-agent-reduction-on-android-webview.html]
+const ANDROID_WEBVIEW = /;\s*wv\)/i;
 export const isAndroidUserAgent = (ua = '') => /Android/i.test(String(ua || ''));
+export const isAndroidIntentCapable = (ua = '') => isAndroidUserAgent(ua) && !ANDROID_WEBVIEW.test(String(ua || ''));
 
 // [TR] Android'de https evrensel linki hem tarayıcıya hem cüzdana eşlenince "Etkinlik seçin" penceresi çıkar.
 //      Çözüm: Chrome intent URI'si. package= hedefi tek uygulamaya kilitler (seçici yok); yüklü değilse
@@ -66,7 +70,7 @@ export const buildWalletDeepLinks = (loc, nav) => {
     { id: 'trust', name: 'Trust Wallet', href: `https://link.trustwallet.com/open_url?coin_id=60&url=${enc}` },
     { id: 'coinbase', name: 'Coinbase Wallet', href: `https://go.cb-w.com/dapp?cb_url=${enc}` },
   ];
-  if (!isAndroidUserAgent(nav?.userAgent)) return links;
+  if (!isAndroidIntentCapable(nav?.userAgent)) return links;
   return links.map((l) => (ANDROID_WALLET_PACKAGES[l.id] ? { ...l, href: toAndroidIntentHref(l.href, ANDROID_WALLET_PACKAGES[l.id]) } : l));
 };
 
