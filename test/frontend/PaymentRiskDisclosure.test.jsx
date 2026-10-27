@@ -50,7 +50,7 @@ describe('PaymentRiskBadge technical disclosure', () => {
     expect(screen.getByText('50')).toBeInTheDocument();
     expect(screen.getByText(/feeSurchargeBps/i)).toBeInTheDocument();
     expect(screen.getByText('15')).toBeInTheDocument();
-    expect(screen.getByText(/warningKey/i)).toBeInTheDocument();
+    expect(screen.getByText(/Warning:/)).toBeInTheDocument();
     // Ham anahtar ('RESTRICTED') yerine risk açıklaması (description) gösterilir.
     expect(screen.queryByText('RESTRICTED')).not.toBeInTheDocument();
     expect(screen.getAllByText('High-friction rail.').length).toBeGreaterThan(1);
@@ -70,7 +70,7 @@ describe('PaymentRiskBadge technical disclosure', () => {
     expect(screen.getByRole('button', { name: /Hide technical disclosure/i })).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByText(/minBondSurchargeBps/i)).toBeInTheDocument();
     expect(screen.getByText(/feeSurchargeBps/i)).toBeInTheDocument();
-    expect(screen.getByText(/warningKey/i)).toBeInTheDocument();
+    expect(screen.getByText(/Warning:/)).toBeInTheDocument();
     expect(screen.getByText(/onchain_snapshot/i)).toBeInTheDocument();
   });
 

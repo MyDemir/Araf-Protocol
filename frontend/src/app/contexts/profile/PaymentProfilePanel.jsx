@@ -24,7 +24,6 @@ export const PaymentProfilePanel = ({
   isContractLoading = false,
   paymentRiskConfig = null,
   paymentRailCatalog = null,
-  savedRail = null,
 }) => {
   const draft = payoutProfileDraft || {};
   const fields = draft.fields || {};
@@ -50,7 +49,6 @@ export const PaymentProfilePanel = ({
   // [TR] Kullanıcının daha önce gördüğü (kayıtlı) rail kapansa bile listede kalır (karar 11); kapalı rail'ler yeni seçim için gizlenir.
   const seenRails = useRef(new Set());
   seenRails.current.add(rail);
-  if (savedRail) seenRails.current.add(String(savedRail).toUpperCase());
   const isRailOpen = (code) => (enabledRails ? enabledRails.includes(code) : true) && !disabledRails.has(code);
   const visibleCatalogRows = catalog ? catalog.filter((r) => isRailOpen(r.code) || seenRails.current.has(r.code)) : [];
   const railGroups = groupRailsByRegion(visibleCatalogRows);
@@ -69,7 +67,7 @@ export const PaymentProfilePanel = ({
   const countryError = freeCountry
     ? (!/^[A-Z]{2}$/.test(countryValue) ? 'required' : (isBlockedFreeCountry(countryValue) ? 'blocked' : null))
     : null;
-  const errorText = (code) => (code === 'required' ? (isTR ? 'Zorunlu alan' : 'Required') : (isTR ? 'Biçim geçersiz' : 'Invalid format'));
+  const errorText = (code) => (code === 'blocked' ? (isTR ? 'Bu ülke desteklenmiyor' : 'This country is not supported') : code === 'required' ? (isTR ? 'Zorunlu alan' : 'Required') : (isTR ? 'Biçim geçersiz' : 'Invalid format'));
   const handleSubmit = (e) => {
     if (dynamicRail && (Object.keys(fieldErrors).length > 0 || countryError)) {
       e?.preventDefault?.();
@@ -163,7 +161,7 @@ export const PaymentProfilePanel = ({
         <div>
           <label className={labelClass} htmlFor="payout-country">{isTR ? 'Ülke' : 'Country'}</label>
           {freeCountry ? (
-            <input id="payout-country" value={draft.country || ''} maxLength={2} placeholder="XX" onChange={(e) => update({ country: e.target.value.toUpperCase() })} aria-invalid={attempted && countryError ? 'true' : undefined} className={`${inputClass} font-mono uppercase`} />
+            <input id="payout-country" value={draft.country || ''} maxLength={2} placeholder="XX" onChange={(e) => setPayoutProfileDraft((prev) => ({ ...prev, country: e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2) }))} aria-invalid={attempted && countryError ? 'true' : undefined} className={`${inputClass} font-mono uppercase`} />
           ) : (
             <select id="payout-country" value={draft.country || countryOptions[0]} onChange={(e) => update({ country: e.target.value })} className={inputClass}>
               {countryOptions.map((code) => <option key={code} value={code}>{code}</option>)}
