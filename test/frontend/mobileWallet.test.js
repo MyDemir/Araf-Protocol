@@ -3,7 +3,7 @@ import path from 'path';
 import { describe, it, expect } from 'vitest';
 import {
   isMobileUserAgent, isMobileEnvironment, shouldShowMobileWalletPicker,
-  buildCurrentSiteUrl, buildWalletDeepLinks, describeConnectError,
+  buildCurrentSiteUrl, buildWalletDeepLinks, isAndroidUserAgent, describeConnectError,
 } from '../../frontend/src/app/mobileWallet';
 
 const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Version/17.0 Mobile/15E148 Safari/604.1';
@@ -50,6 +50,33 @@ describe('deeplinks', () => {
     expect(buildWalletDeepLinks({ origin: 'javascript:alert(1)', pathname: '/' })).toEqual([]);
     expect(buildWalletDeepLinks({ origin: 'https://a.com/evil', pathname: '/' })).toEqual([]);
     expect(buildWalletDeepLinks(null)).toEqual([]);
+  });
+});
+
+describe('android intent deeplinks', () => {
+  const site = 'https://araf.example/market';
+  const android = Object.fromEntries(buildWalletDeepLinks(loc, { userAgent: PIXEL }).map((l) => [l.id, l.href]));
+  const play = (pkg) => encodeURIComponent(`https://play.google.com/store/apps/details?id=${pkg}`);
+  it('uses package-locked intent URIs with Play Store fallback', () => {
+    expect(isAndroidUserAgent(PIXEL)).toBe(true);
+    expect(android.metamask).toBe(`intent://metamask.app.link/dapp/araf.example/market#Intent;scheme=https;package=io.metamask;S.browser_fallback_url=${play('io.metamask')};end`);
+    expect(android.trust).toBe(`intent://link.trustwallet.com/open_url?coin_id=60&url=${encodeURIComponent(site)}#Intent;scheme=https;package=com.wallet.crypto.trustapp;S.browser_fallback_url=${play('com.wallet.crypto.trustapp')};end`);
+    expect(android.coinbase).toBe(`intent://go.cb-w.com/dapp?cb_url=${encodeURIComponent(site)}#Intent;scheme=https;package=org.toshi;S.browser_fallback_url=${play('org.toshi')};end`);
+  });
+  it('keeps OKX (unverified) as https on Android', () => {
+    expect(android.okx).toMatch(/^https:\/\/www\.okx\.com\/download\?deeplink=/);
+  });
+  it('iOS, desktop and no-nav output is identical to the plain https links', () => {
+    const base = buildWalletDeepLinks(loc);
+    expect(buildWalletDeepLinks(loc, { userAgent: IPHONE })).toEqual(base);
+    expect(buildWalletDeepLinks(loc, { userAgent: DESKTOP })).toEqual(base);
+    for (const l of base) expect(l.href).toMatch(/^https:\/\//);
+  });
+  it('android hrefs keep the origin+pathname-only rule', () => {
+    for (const href of Object.values(android)) {
+      expect(href).not.toContain('evil');
+      expect(href).not.toContain('%23x');
+    }
   });
 });
 
