@@ -3,6 +3,7 @@ import { buildApiUrl } from '../../apiConfig';
 import { shortAddress as short, tx as t } from '../../copy';
 import { fmtDateTime } from '../../format';
 import { readJsonWithTimeout } from '../../fetchWithTimeout';
+import { groupRailsByRegion, regionLabel } from '../../railCatalog';
 
 // [TR] "Ödeme yöntemleri" sekmesi: rail açma/kapama (switch), onay penceresi, audit listesi.
 //      Kapatılan rail yalnız YENİ profil/emir açılışını engeller; aktif işlemler etkilenmez.
@@ -23,6 +24,11 @@ export default function AdminRailsPanel({ lang = 'EN', authenticatedFetch, showT
   const [pending, setPending] = React.useState(null); // { rail, nextEnabled }
   const [reason, setReason] = React.useState('');
   const [saving, setSaving] = React.useState(false);
+  // [TR] Liste kontrolleri: metin arama (kod/ad/ülke/para birimi), durum süzgeci, bölge grubu katlama.
+  //      Toplu aç/kapa YOK: her satır kendi PUT akışıyla (onay penceresi + audit) değişir.
+  const [query, setQuery] = React.useState('');
+  const [statusFilter, setStatusFilter] = React.useState('all'); // all | enabled | disabled
+  const [groupOpen, setGroupOpen] = React.useState({}); // region -> boolean (yoksa varsayılan)
 
   const loadAudit = React.useCallback(async (page = 1) => {
     try {
@@ -98,29 +104,35 @@ export default function AdminRailsPanel({ lang = 'EN', authenticatedFetch, showT
 
   const lastEnabled = state.rails.filter((r) => r.enabled).length <= 1;
 
-  return (
-    <section className="space-y-4" aria-label={t(lang, 'Ödeme yöntemleri', 'Payment methods')}>
-      <div className="bg-surface border border-borderSubtle rounded-xl p-4">
-        <h2 className="text-base font-semibold text-textPrimary">{t(lang, 'Ödeme yöntemleri', 'Payment methods')}</h2>
-        <p className="mt-1 text-xs text-textSecondary">
-          {t(lang,
-            'Kapatılan yöntem yeni profil ve emir açılışını engeller; aktif işlemler (LOCKED/PAID/CHALLENGED) etkilenmez. Kontrat bu ayarı bilmez.',
-            'A disabled method blocks new profiles and orders only; active trades (LOCKED/PAID/CHALLENGED) are unaffected. The contract is unaware of this setting.')}
-        </p>
-        {state.error && <p className="mt-2 text-sm text-danger" role="alert">{state.error}</p>}
-      </div>
+  // [TR] Süzgeç + arama: kod, iki dildeki ad, ülke ve para birimi üzerinden. Grup sayaçları süzgeçten bağımsız (tüm grup) hesaplanır.
+  const needle = query.trim().toLowerCase();
+  const matches = (r) => {
+    if (statusFilter === 'enabled' && !r.enabled) return false;
+    if (statusFilter === 'disabled' && r.enabled) return false;
+    if (!needle) return true;
+    const hay = [r.code, r.name?.TR, r.name?.EN, ...(r.countries || []), ...(r.currencies || [])]
+      .filter(Boolean).join(' ').toLowerCase();
+    return hay.includes(needle);
+  };
+  const allGroups = groupRailsByRegion(state.rails);
+  const filtering = needle !== '' || statusFilter !== 'all';
+  const groups = allGroups
+    .map((g) => ({ region: g.region, all: g.rows, rows: g.rows.filter(matches) }))
+    .filter((g) => g.rows.length > 0);
+  // [TR] Varsayılan: az satırda hepsi açık, çok satırda kapalı; arama/süzgeç etkinken eşleşen gruplar açılır. Elle katlama önceliklidir.
+  const isGroupOpen = (region) => (region in groupOpen ? groupOpen[region] : (filtering || state.rails.length <= 12));
 
-      <ul className="space-y-3">
-        {state.rails.map((rail) => {
+  const renderRail = (rail) => {
           const name = rail.name?.[lang === 'TR' ? 'TR' : 'EN'] || rail.code;
           const blocked = rail.enabled && lastEnabled;
           const labelId = `rail-label-${rail.code}`;
           return (
-            <li key={rail.code} className="bg-surface border border-borderSubtle rounded-xl p-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:justify-between">
+            <li key={rail.code} data-testid={`rail-row-${rail.code}`} className="bg-surface border border-borderSubtle rounded-xl p-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:justify-between">
               <div className="min-w-0">
                 <div id={labelId} className="text-sm font-semibold text-textPrimary">{name} <span className="text-xs text-textMuted font-mono">({rail.code})</span></div>
                 <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-textSecondary">
                   <span>{t(lang, 'Ülke', 'Country')}: {(rail.countries || []).join(', ') || '—'}</span>
+                  {Array.isArray(rail.currencies) && rail.currencies.length > 0 && <span>{t(lang, 'Para birimi', 'Currency')}: {rail.currencies.join(', ')}</span>}
                   <span className={`px-2 py-0.5 rounded-full ${RISK_CLASS[rail.riskLevel] || RISK_CLASS.MEDIUM}`}>{rail.riskLevel}</span>
                 </div>
                 <div className="mt-1 text-xs text-textMuted">
@@ -147,8 +159,79 @@ export default function AdminRailsPanel({ lang = 'EN', authenticatedFetch, showT
               </div>
             </li>
           );
-        })}
-      </ul>
+  };
+
+  return (
+    <section className="space-y-4" aria-label={t(lang, 'Ödeme yöntemleri', 'Payment methods')}>
+      <div className="bg-surface border border-borderSubtle rounded-xl p-4">
+        <h2 className="text-base font-semibold text-textPrimary">{t(lang, 'Ödeme yöntemleri', 'Payment methods')}</h2>
+        <p className="mt-1 text-xs text-textSecondary">
+          {t(lang,
+            'Kapatılan yöntem yeni profil ve emir açılışını engeller; aktif işlemler (LOCKED/PAID/CHALLENGED) etkilenmez. Kontrat bu ayarı bilmez.',
+            'A disabled method blocks new profiles and orders only; active trades (LOCKED/PAID/CHALLENGED) are unaffected. The contract is unaware of this setting.')}
+        </p>
+        {state.error && <p className="mt-2 text-sm text-danger" role="alert">{state.error}</p>}
+      </div>
+
+      <div className="bg-surface border border-borderSubtle rounded-xl p-3 flex flex-col sm:flex-row gap-2 sm:items-center">
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          aria-label={t(lang, 'Ödeme yöntemi ara', 'Search payment methods')}
+          placeholder={t(lang, 'Kod, ad, ülke ara…', 'Search code, name, country…')}
+          className="flex-1 min-h-[44px] rounded-lg bg-elevated border border-borderSubtle px-3 text-sm text-textPrimary placeholder:text-textMuted"
+        />
+        <div role="group" aria-label={t(lang, 'Durum süzgeci', 'Status filter')} className="flex gap-1">
+          {[['all', t(lang, 'Tümü', 'All')], ['enabled', t(lang, 'Açık', 'Enabled')], ['disabled', t(lang, 'Kapalı', 'Disabled')]].map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={statusFilter === value}
+              onClick={() => setStatusFilter(value)}
+              className={`min-h-[44px] px-3 rounded-lg border text-xs font-semibold ${statusFilter === value ? 'bg-brand/15 border-brand/50 text-textPrimary' : 'bg-elevated border-borderSubtle text-textSecondary'}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {groups.length === 0 && (
+        <p className="text-sm text-textMuted px-1" role="status">{t(lang, 'Eşleşen ödeme yöntemi yok.', 'No matching payment methods.')}</p>
+      )}
+
+      {groups.map((g) => {
+        const total = g.all.length;
+        const enabledCount = g.all.filter((r) => r.enabled).length;
+        const open = isGroupOpen(g.region);
+        const headId = `rail-group-${g.region}`;
+        return (
+          <div key={g.region} data-testid={headId}>
+            <h3 className="text-sm">
+              <button
+                type="button"
+                id={`${headId}-head`}
+                aria-expanded={open}
+                aria-controls={`${headId}-list`}
+                onClick={() => setGroupOpen((st) => ({ ...st, [g.region]: !open }))}
+                className="w-full min-h-[44px] flex items-center justify-between gap-2 px-3 rounded-lg bg-elevated border border-borderSubtle text-textPrimary font-semibold"
+              >
+                <span>{regionLabel(g.region, lang === 'TR' ? 'TR' : 'EN')}</span>
+                <span className="flex items-center gap-2 text-xs font-normal text-textSecondary">
+                  <span data-testid={`rail-group-count-${g.region}`}>{enabledCount}/{total} {t(lang, 'açık', 'enabled')}</span>
+                  <span aria-hidden="true">{open ? '▾' : '▸'}</span>
+                </span>
+              </button>
+            </h3>
+            {open && (
+              <ul id={`${headId}-list`} className="mt-2 space-y-3">
+                {g.rows.map(renderRail)}
+              </ul>
+            )}
+          </div>
+        );
+      })}
 
       <div className="bg-surface border border-borderSubtle rounded-xl p-4">
         <h3 className="text-sm font-semibold text-textPrimary mb-2">{t(lang, 'Denetim kaydı', 'Audit log')}</h3>

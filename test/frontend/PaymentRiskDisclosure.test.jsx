@@ -20,6 +20,13 @@ const technicalRiskEntry = {
   description: { EN: 'High-friction rail.', TR: 'Zor rail.' },
 };
 
+import { paymentRailCatalogFixture } from './fixtures/paymentRailCatalog.fixture';
+
+const highEntries = Object.fromEntries(['GB_FPS', 'BR_PIX'].map((code) => {
+  const r = paymentRailCatalogFixture.find((x) => x.code === code);
+  return [r.risk.warningKey, { riskLevel: r.risk.riskLevel, warningKey: r.risk.warningKey, description: r.risk.description }];
+}));
+
 describe('PaymentRiskBadge technical disclosure', () => {
   it('hides technical values until the disclosure is opened outside admin contexts', async () => {
     const user = userEvent.setup();
@@ -44,7 +51,9 @@ describe('PaymentRiskBadge technical disclosure', () => {
     expect(screen.getByText(/feeSurchargeBps/i)).toBeInTheDocument();
     expect(screen.getByText('15')).toBeInTheDocument();
     expect(screen.getByText(/warningKey/i)).toBeInTheDocument();
-    expect(screen.getByText('RESTRICTED')).toBeInTheDocument();
+    // Ham anahtar ('RESTRICTED') yerine risk açıklaması (description) gösterilir.
+    expect(screen.queryByText('RESTRICTED')).not.toBeInTheDocument();
+    expect(screen.getAllByText('High-friction rail.').length).toBeGreaterThan(1);
     expect(screen.getAllByText(/source/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/onchain_snapshot/i)).toBeInTheDocument();
     expect(screen.getAllByText(/config/i).length).toBeGreaterThan(0);
@@ -63,5 +72,18 @@ describe('PaymentRiskBadge technical disclosure', () => {
     expect(screen.getByText(/feeSurchargeBps/i)).toBeInTheDocument();
     expect(screen.getByText(/warningKey/i)).toBeInTheDocument();
     expect(screen.getByText(/onchain_snapshot/i)).toBeInTheDocument();
+  });
+
+  it('new HIGH rail keys (GB_FPS, BR_PIX) never show the raw warningKey; description is used, raw key only without a description', async () => {
+    const user = userEvent.setup();
+    for (const [key, entry] of Object.entries(highEntries)) {
+      const { unmount } = render(<PaymentRiskBadge lang="TR" riskEntry={entry} defaultTechnicalOpen />);
+      expect(screen.queryByText(key)).not.toBeInTheDocument();
+      expect(screen.getAllByText(entry.description.TR).length).toBeGreaterThan(1);
+      unmount();
+    }
+    render(<PaymentRiskBadge lang="EN" riskEntry={{ riskLevel: 'HIGH', warningKey: 'SOME_NEW_KEY' }} defaultTechnicalOpen />);
+    expect(screen.getByText('SOME_NEW_KEY')).toBeInTheDocument();
+    expect(user).toBeTruthy();
   });
 });
