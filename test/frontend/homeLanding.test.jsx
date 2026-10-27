@@ -274,6 +274,19 @@ describe('SSS (homeContent.faq.items)', () => {
     expect(sol).toMatch(/_tier == 0 \? 0 : uint16\(makerFeeBps\)/);
     expect(sol).toMatch(/DUST_LIMIT\s*=\s*0\.001 ether/);
     expect(sol).toMatch(/WALLET_AGE_MIN\s*=\s*2 days/);
+    // [TR] Düzeltme 1: owner cevabı onlyOwner fonksiyon listesiyle eşleşir; iptal "nötr" değil; yakım hazineye gider.
+    const ownerFns = [...sol.matchAll(/function (\w+)\([^)]*\)[^{;]*\bonlyOwner\b/gs)].map((m) => m[1]).sort();
+    expect(ownerFns).toEqual(['pause', 'setCooldownConfig', 'setFeeConfig', 'setReputationPolicy', 'setReputationTierThresholds', 'setTokenConfig', 'setTreasury', 'unpause']);
+    const ownerEn = en.find((i) => i.q === 'What can the contract owner do?').a;
+    const ownerTr = tr.find((i) => i.q.startsWith('Kontrat sahibi')).a;
+    for (const re of [/fees/, /cooldowns/, /supported tokens/, /reputation policy/, /tier thresholds/, /treasury/, /pause/]) expect(ownerEn).toMatch(re);
+    for (const re of [/Ücreti/, /bekleme/, /token/, /itibar politikasını/, /tier eşiklerini/, /hazine/, /duraklat/]) expect(ownerTr).toMatch(re);
+    expect(en.find((i) => i.q === 'How does mutual cancel work?').a).not.toMatch(/neutral/i);
+    expect(tr.find((i) => i.q.startsWith('Karşılıklı iptal')).a).not.toMatch(/nötr/i);
+    expect(sol).toMatch(/mutualCancelPenaltyPts\s*=\s*20/);
+    expect(en.find((i) => i.q === 'What is the bleeding escrow?').a).toMatch(/treasury/);
+    expect(tr.find((i) => i.q === 'Eriyen kasa nedir?').a).toMatch(/hazine/);
+    expect(`${en.map((i) => i.a).join(' ')} ${tr.map((i) => i.a).join(' ')}`).not.toMatch(/burned|yakılır/i);
     for (const item of [...tr, ...en]) {
       expect(`${item.q} ${item.a} ${item.aNoFee || ''}`).not.toMatch(/risksiz|risk[- ]free|always|every time|her zaman|garanti|guarantee|oracle|kâhin/i);
     }
