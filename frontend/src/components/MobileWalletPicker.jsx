@@ -34,7 +34,7 @@ export function WalletOption({ icon, label, sublabel, trailing, ...buttonProps }
 //      tarayıcısında siteyi açan bağlantılar; bağlanmayı denemez). 2) Coinbase Wallet: doğrudan bağlanır.
 // [EN] Mobile + no injected provider: two main options. 1) Browser wallet: inline list of deeplinks (no connect
 //      attempt). 2) Coinbase Wallet connector: connects directly.
-export default function MobileWalletPicker({ lang = 'TR', location, connectors = [], onConnect }) {
+export default function MobileWalletPicker({ lang = 'TR', location, connectors = [], onConnect, nav = typeof navigator !== 'undefined' ? navigator : null }) {
   const tr = lang === 'TR';
   const [open, setOpen] = useState(false);
   // [TR] Açılış geçişi: liste önce kapalı yükseklikte (0fr) çizilir, bir kare sonra 1fr'e geçer.
@@ -49,7 +49,7 @@ export default function MobileWalletPicker({ lang = 'TR', location, connectors =
     if (open) setEntered(false);
     setOpen((v) => !v);
   };
-  const links = buildWalletDeepLinks(location);
+  const links = buildWalletDeepLinks(location, nav);
   const { walletConnect, coinbase } = groupWalletConnectors(connectors, null);
 
   return (
