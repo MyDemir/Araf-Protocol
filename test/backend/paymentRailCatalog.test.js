@@ -1,6 +1,7 @@
 "use strict";
 
 const {
+  EXCLUDED_COUNTRIES,
   RAIL_CATALOG,
   REGIONS,
   getRailCodes,
@@ -75,6 +76,11 @@ describe("payment rail catalog integrity", () => {
     // IBAN uzunluğu kaynakla doğrulanamayan SK, SM, VA katalogda yok
     for (const c of ["SK", "SM", "VA"]) expect(sepa.countries).not.toContain(c);
     for (const c of ["DE", "FR", "NL", "BE", "ES", "IT", "AT", "PT", "IE", "LU", "FI", "GR"]) expect(sepa.countries).toContain(c);
+  });
+
+  it("EXCLUDED_COUNTRIES is the single list and no rail lists those countries", () => {
+    expect([...EXCLUDED_COUNTRIES].sort()).toEqual([...SANCTIONED_OR_EXCLUDED].sort());
+    for (const r of RAIL_CATALOG) for (const c of r.countries) expect(EXCLUDED_COUNTRIES).not.toContain(c);
   });
 
   it("only the three legacy rails are defaultEnabled and legacyCanonical", () => {

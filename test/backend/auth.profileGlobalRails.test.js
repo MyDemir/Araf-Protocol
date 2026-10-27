@@ -109,6 +109,23 @@ describe("PUT /api/auth/profile with catalog rails", () => {
     expect((await put(body("NOPE_X", "GB", {}))).status).toBe(400);
   });
 
+  it("route: foreign catalog key 400 when filled, ignored when empty; '' counts as null on optional fields", async () => {
+    const pix = { pix_key_type: "email", pix_key: "a@b.com" };
+    expect((await put(body("BR_PIX", "BR", { ...pix, sort_code: "123456" }))).status).toBe(400);
+    expect((await put(body("BR_PIX", "BR", { ...pix, sort_code: "" }))).status).toBe(200);
+    expect((await put(body("BR_PIX", "BR", { ...pix, sort_code: null }))).status).toBe(200);
+    const iban = "PK36SCBL0000001123456702";
+    expect((await put(body("PK_RAAST", "PK", { iban, alias: "", alias_type: "" }))).status).toBe(200);
+    expect((await put(body("BR_PIX", "BR", { pix_key_type: "", pix_key: "" }))).status).toBe(400);
+  });
+
+  it("route: SWIFT_INTL rejects excluded profile country and bank_country", async () => {
+    const f = { bic: "DEUTDEFF", bank_country: "DE", account_number: "DE89370400440532013000" };
+    expect((await put(body("SWIFT_INTL", "DE", f))).status).toBe(200);
+    expect((await put(body("SWIFT_INTL", "RU", f))).status).toBe(400);
+    expect((await put(body("SWIFT_INTL", "DE", { ...f, bank_country: "IR" }))).status).toBe(400);
+  });
+
   it("enforces rail-country matching for catalog rails", async () => {
     expect((await put(body("GB_FPS", "US", { sort_code: "123456", account_number: "12345678" }))).status).toBe(400);
     expect((await put(body("MX_SPEI", "MX", { clabe: "002010077777777771" }))).status).toBe(200);

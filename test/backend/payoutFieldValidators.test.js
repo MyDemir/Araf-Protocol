@@ -200,6 +200,45 @@ describe("unrelated legacy keys are not silently dropped on new rails", () => {
   });
 });
 
+describe("catalog keys foreign to the rail", () => {
+  it("non-empty foreign catalog key is rejected on new rails; empty/null is ignored", () => {
+    const pix = { pix_key_type: "email", pix_key: "a@b.com" };
+    expect(ok("BR_PIX", "BR", { ...pix, sort_code: "123456" })).toMatch(/geçerli değil/);
+    expect(ok("BR_PIX", "BR", { ...pix, sort_code: null })).toBeNull();
+    expect(ok("BR_PIX", "BR", { ...pix, sort_code: "" })).toBeNull();
+  });
+  it("legacy rails ignore extra keys and the canonical object is unaffected", () => {
+    const f = { iban: "TR963456789012345678901234", sort_code: "123456" };
+    expect(ok("TR_IBAN", "TR", f)).toBeNull();
+    expect(V.buildCanonicalDetails("TR_IBAN", { account_holder_name: NAME, ...f })).toEqual(
+      V.buildCanonicalDetails("TR_IBAN", { account_holder_name: NAME, iban: f.iban })
+    );
+  });
+});
+
+describe("empty string on optional fields", () => {
+  it("normalizes '' to null; required '' stays an error", () => {
+    const legacyNorm = { account_holder_name: NAME };
+    const out = V.normalizeCatalogFields("PK_RAAST", { iban: "", alias: "", alias_type: "" }, legacyNorm);
+    expect(out.alias).toBeNull();
+    expect(out.alias_type).toBeNull();
+    expect(out.iban).toBeNull();
+    expect(ok("PK_RAAST", "PK", { iban: out.iban, alias: out.alias, alias_type: out.alias_type })).toMatch(/zorunlu/);
+    const iban = makeIban("PK", 24);
+    expect(ok("PK_RAAST", "PK", { iban, alias: null, alias_type: null })).toBeNull();
+  });
+});
+
+describe("SWIFT_INTL excluded countries", () => {
+  const acct = { bic: "DEUTDEFF", account_number: "DE89370400440532013000" };
+  it("rejects an excluded profile country or bank_country", () => {
+    expect(V.validateRailCountry("SWIFT_INTL", "RU")).toMatch(/desteklenmiyor/);
+    expect(V.validateRailCountry("SWIFT_INTL", "DE")).toBeNull();
+    expect(ok("SWIFT_INTL", "DE", { bic: "SBININBB", bank_country: "KP", account_number: "1234567" })).toMatch(/desteklenmeyen/);
+    expect(ok("SWIFT_INTL", "DE", { ...acct, bank_country: "DE" })).toBeNull();
+  });
+});
+
 describe("normalizeCatalogFields", () => {
   it("applies catalog normalizers on new rails and leaves legacy rails untouched", () => {
     const legacyNorm = { account_holder_name: NAME, iban: null, routing_number: null, account_number: "12 34", account_type: null, bic: null, bank_name: null };

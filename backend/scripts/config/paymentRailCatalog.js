@@ -18,6 +18,12 @@
 
 const REGIONS = Object.freeze(["EUROPE", "MIDDLE_EAST_AFRICA", "AMERICAS", "ASIA_PACIFIC", "INTERNATIONAL"]);
 
+// [TR] Yaptırımlı / değerlendirilmemiş ülkeler (şef kararı 8): hiçbir rail'in `countries` listesinde olamaz;
+//      SWIFT_INTL'de profil ülkesi ya da bank_country bu listede ise reddedilir.
+const EXCLUDED_COUNTRIES = Object.freeze([
+  "RU", "BY", "IR", "KP", "SY", "CU", "CN", "LB", "IQ", "LY", "PS", "SD", "YE", "SO", "DJ", "BI", "MR", "LC", "SC", "MU", "MN", "FK",
+]);
+
 const L = (TR, EN) => ({ TR, EN });
 
 // ─── Ortak desenler ──────────────────────────────────────────────────────────
@@ -436,6 +442,7 @@ function getCatalogCurrencies() {
 
 module.exports = {
   REGIONS,
+  EXCLUDED_COUNTRIES,
   RAIL_CATALOG,
   getRailCatalog,
   getRailCodes,

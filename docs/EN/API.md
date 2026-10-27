@@ -164,13 +164,13 @@ Accepted request body:
   }
 }
 ```
-`rail`, `country`, `contact.channel`, `contact.value` and the 7 existing `fields` keys (`account_holder_name`, `iban`, `routing_number`, `account_number`, `account_type`, `bic`, `bank_name`) are required (use `null` for unused ones; a missing key counts as `null`). In addition, send the selected rail's catalog field keys (e.g. `sort_code`, `pix_key`, `clabe`); any key that is neither in the catalog nor one of the 7 returns `400`. Legacy keys the rail does not define must be `null`/empty. `country` is 2–3 characters; `account_holder_name` is 2–100 letters/space/apostrophe/dot/hyphen; `bank_name` max 120; `contact.value` max 120.
+`rail`, `country`, `contact.channel`, `contact.value` and the 7 existing `fields` keys (`account_holder_name`, `iban`, `routing_number`, `account_number`, `account_type`, `bic`, `bank_name`) are required (use `null` for unused ones; a missing key counts as `null`). In addition, send the selected rail's catalog field keys (e.g. `sort_code`, `pix_key`, `clabe`); any key that is neither in the catalog nor one of the 7 returns `400`. Legacy keys the rail does not define must be `null`/empty. On new rails (anything other than `TR_IBAN`/`US_ACH`/`SEPA_IBAN`), a FILLED catalog key that the rail does not define (e.g. `sort_code` for `BR_PIX`) returns `400`; empty/`null` is ignored. On the 3 legacy rails extra keys are ignored and never enter the fingerprint canonical object. For optional catalog fields an empty string (`""`) counts as `null`; an empty required field is `400`. `country` is 2–3 characters; `account_holder_name` is 2–100 letters/space/apostrophe/dot/hyphen; `bank_name` max 120; `contact.value` max 120.
 
 Rail-country rules (enforced):
 - `TR_IBAN` -> `TR`
 - `US_ACH` -> `US`
 - `SEPA_IBAN` -> EPC v8.0 EUR countries: `DE, FR, NL, BE, ES, IT, AT, PT, IE, LU, FI, GR, BG, HR, CY, EE, LV, LT, MT, SI, MC, AD` (`SK`, `SM`, `VA` are absent because their IBAN length could not be verified against the registry)
-- Other rails: the country must be in the catalog `countries` list (`*` for `SWIFT_INTL`: any ISO-3166 alpha-2)
+- Other rails: the country must be in the catalog `countries` list (`*` for `SWIFT_INTL`: any ISO-3166 alpha-2 except sanctioned/unassessed countries; both the profile `country` and `bank_country` reject `RU, BY, IR, KP, SY, CU, CN, LB, IQ, LY, PS, SD, YE, SO, DJ, BI, MR, LC, SC, MU, MN, FK` with `400`)
 
 Catalog: `paymentRailCatalog` in the `GET /api/orders/config` and `/payment-risk-config` responses gives each rail's field schema (`fields[].kind/pattern/checksum/ibanCountryLengths/options/aliasPatterns/normalize`). New rails are CLOSED by default; only an admin opens them. A `kind: "alias"` field comes with an enum sibling `<key>_type` in the same rail (e.g. `pix_key` + `pix_key_type`). IBAN fields are checked against the per-country length table and mod-97; `MX_SPEI` uses the CLABE 3-7-1 check digit. National ID numbers (CPF, NRIC, Thai ID, MyKad, Aadhaar, RUT) are not fields. Fingerprint: the canonical object for `TR_IBAN`/`US_ACH`/`SEPA_IBAN` is unchanged; new rails use `{ account_holder_name, bank_name, ...catalog fields }`.
 

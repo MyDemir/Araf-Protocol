@@ -176,7 +176,7 @@ const _buildCanonicalDetailsByRail = buildCanonicalDetails;
 
 // [TR] Katalogdaki 7 eski anahtar dışındaki alan anahtarları (ör. sort_code, pix_key): opsiyonel string.
 const _EXTRA_FIELD_SCHEMA = Object.fromEntries(
-  getExtraFieldKeys(getRailCatalog()).map((k) => [k, Joi.string().max(200).allow(null)])
+  getExtraFieldKeys(getRailCatalog()).map((k) => [k, Joi.string().max(200).allow("", null)])
 );
 
 const PROFILE_SCHEMA = Joi.object({

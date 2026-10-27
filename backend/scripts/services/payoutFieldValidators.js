@@ -9,7 +9,7 @@
  *      Karar mercii kontrattır; burası yalnız girdi biçimi denetler.
  */
 
-const { getRailByCode } = require("../config/paymentRailCatalog");
+const { getRailByCode, EXCLUDED_COUNTRIES } = require("../config/paymentRailCatalog");
 
 /** PUT /profile gövdesinde her zaman bulunan 7 anahtar. */
 const LEGACY_FIELD_KEYS = Object.freeze([
@@ -83,11 +83,15 @@ function normalizeCatalogFields(rail, rawFields, legacyNormalized) {
   for (const [key, raw] of Object.entries(rawFields || {})) {
     const f = map.get(key);
     if (!f) {
-      if (!LEGACY_FIELD_KEYS.includes(key)) out[key] = raw;
+      if (!LEGACY_FIELD_KEYS.includes(key)) out[key] = raw === "" ? null : raw;
       continue;
     }
     if (raw == null) out[key] = null;
-    else out[key] = typeof raw === "string" ? applyNormalize(f.normalize, raw) : "";
+    else {
+      const v = typeof raw === "string" ? applyNormalize(f.normalize, raw) : "";
+      // Boş string null gibi kabul edilir (zorunlu alanda null yine "zorunludur" hatası verir).
+      out[key] = v === "" ? null : v;
+    }
   }
   return out;
 }
@@ -96,7 +100,7 @@ function normalizeCatalogFields(rail, rawFields, legacyNormalized) {
 function isCountryAllowedForRail(rail, country) {
   const def = getRailByCode(rail);
   if (!def) return false;
-  if (def.countries.includes("*")) return /^[A-Z]{2}$/.test(country || "");
+  if (def.countries.includes("*")) return /^[A-Z]{2}$/.test(country || "") && !EXCLUDED_COUNTRIES.includes(country);
   return def.countries.includes(country);
 }
 
@@ -144,6 +148,9 @@ function _validateOne(def, field, value, fields, country) {
     case "alnum":
     default: {
       if (typeof value !== "string" || value.length > 200) return `${label} geçersiz.`;
+      if (def.code === "SWIFT_INTL" && label === "bank_country" && EXCLUDED_COUNTRIES.includes(value)) {
+        return "bank_country desteklenmeyen bir ülke.";
+      }
       if (field.pattern && !new RegExp(field.pattern).test(value)) return `${label} biçimi geçersiz.`;
       if (field.checksum === "clabe" && !isValidClabe(value)) return `${label} kontrol basamağı geçersiz.`;
       // SWIFT_INTL: banka ülkesi IBAN ülkesiyse hesap alanı IBAN kuralına tabidir.
@@ -197,6 +204,12 @@ function validatePayoutFields(rail, country, fields = {}) {
   for (const key of LEGACY_FIELD_KEYS) {
     if (key === "account_holder_name" || key === "bank_name") continue;
     if (!map.has(key) && !_isEmpty(fields[key])) return `${key} bu ödeme yöntemi için geçerli değil.`;
+  }
+  // Rail'de tanımlı olmayan DOLU katalog anahtarı (ör. BR_PIX için sort_code) reddedilir; boş/null yok sayılır.
+  for (const [key, v] of Object.entries(fields)) {
+    if (!LEGACY_FIELD_KEYS.includes(key) && !map.has(key) && !_isEmpty(v)) {
+      return `${key} bu ödeme yöntemi için geçerli değil.`;
+    }
   }
   for (const f of def.fields) {
     const value = fields[f.key];
