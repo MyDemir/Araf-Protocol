@@ -27,6 +27,7 @@ import { diagnoseWriteError, applyDiagnosis, stripAddresses, isUserRejection } f
 import { addKnownTradeIds } from '../app/knownTrades';
 import { safeStorage } from '../app/safeStorage';
 import { prepareTxParams } from '../app/txGasFee';
+import { BUILDER_SUFFIX_PARAMS } from '../app/builderCode';
 
 const ArafEscrowABI = parseAbi([
   'function registerWallet()',
@@ -405,6 +406,7 @@ export function useArafContract({ expectedChainId = null } = {}) {
         functionName,
         args,
         ...txParams,
+        ...BUILDER_SUFFIX_PARAMS,
       });
 
       submittedHash = hash;
@@ -647,6 +649,7 @@ export function useArafContract({ expectedChainId = null } = {}) {
         functionName: 'approve',
         args: approveArgs,
         ...txParams,
+        ...BUILDER_SUFFIX_PARAMS,
       });
       return assertReceiptSucceeded(await publicClient.waitForTransactionReceipt({ hash }), 'approve');
     } catch (error) {
@@ -695,6 +698,7 @@ export function useArafContract({ expectedChainId = null } = {}) {
         abi: mintAbi,
         functionName: 'mint',
         ...txParams,
+        ...BUILDER_SUFFIX_PARAMS,
       });
       return assertReceiptSucceeded(await publicClient.waitForTransactionReceipt({ hash }), 'mint');
     } catch (error) {
