@@ -1,6 +1,7 @@
 "use strict";
 
 const mongoose = require("mongoose");
+const { getRailCodes } = require("../config/paymentRailCatalog");
 
 /**
  * User Model
@@ -38,7 +39,7 @@ const userSchema = new mongoose.Schema(
     payout_profile: {
       rail: {
         type: String,
-        enum: ["TR_IBAN", "US_ACH", "SEPA_IBAN", null],
+        enum: [...getRailCodes(), null],
         default: null,
       },
       country: { type: String, default: null, uppercase: true },

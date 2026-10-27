@@ -21,10 +21,12 @@
  */
 
 const { getRedisClient } = require("../config/redis");
+const { getCatalogCurrencies } = require("../config/paymentRailCatalog");
 
 const ORDER_MARKET_META_PREFIX = "order_meta:";
 const ORDER_MARKET_META_TTL_SECS = 24 * 60 * 60;
-const ALLOWED_FIAT = ["TRY", "USD", "EUR"];
+// [TR] Fiat listesi katalogdaki rail para birimlerinin birleşimidir (TRY/USD/EUR dahil).
+const ALLOWED_FIAT = getCatalogCurrencies();
 const MAX_EXCHANGE_RATE = 1_000_000;
 
 function normalizeMarketMeta({ fiatCurrency, exchangeRate } = {}) {
