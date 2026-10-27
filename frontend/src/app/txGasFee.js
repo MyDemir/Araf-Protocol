@@ -21,6 +21,7 @@ export const bufferMaxFee = (maxFee, priority) => {
   return (base * MAX_FEE_BASE_COMPONENT_NUMERATOR) / MAX_FEE_BASE_COMPONENT_DENOMINATOR + priority;
 };
 
+import { BUILDER_SUFFIX_PARAMS } from './builderCode';
 import { estimateContractL1Fee } from 'viem/op-stack';
 import { BASE_MAINNET_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID, getSupportedChainsMap } from './chainPolicy';
 
@@ -50,7 +51,7 @@ export async function estimateTxParams({ publicClient, account, address, abi, fu
   const gasP = (async () => {
     try {
       if (typeof publicClient.estimateContractGas !== 'function') return;
-      const gas = await publicClient.estimateContractGas({ address, abi, functionName, args, account });
+      const gas = await publicClient.estimateContractGas({ address, abi, functionName, args, account, ...BUILDER_SUFFIX_PARAMS });
       if (typeof gas === 'bigint' && gas > 0n) out.gas = bufferGas(gas);
     } catch { /* tahmin yok -> cüzdana bırak */ }
   })();

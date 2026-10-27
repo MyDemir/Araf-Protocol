@@ -4,6 +4,7 @@ import { parseAbi, getAddress } from 'viem';
 import { getSupportedChainsMap } from '../app/chainPolicy';
 import { resolveRevenueVaultAddress } from '../app/envConfig';
 import { decorateContractError } from '../app/contractErrors';
+import { BUILDER_SUFFIX_PARAMS } from '../app/builderCode';
 import { resolveChainMismatch } from './useArafContract';
 
 const REWARDS_ADDRESS = import.meta.env.VITE_REWARDS_ADDRESS;
@@ -167,7 +168,7 @@ export function useRewardsContract() {
     // [TR] F2-14: publicClient yoksa tx gönderilmeden önce dur (gönderim sonrası waitForTransactionReceipt TypeError verirdi).
     if (!_isValid(VAULT_ADDRESS) || !walletClient || !publicClient) throw new Error('Vault unavailable');
     try {
-      const hash = await walletClient.writeContract({ address: getAddress(VAULT_ADDRESS), abi: VAULT_ABI, functionName, args });
+      const hash = await walletClient.writeContract({ address: getAddress(VAULT_ADDRESS), abi: VAULT_ABI, functionName, args, ...BUILDER_SUFFIX_PARAMS });
       return _assertSuccess(await publicClient.waitForTransactionReceipt({ hash }), functionName);
     } catch (error) {
       throw decorateContractError(error);
@@ -179,7 +180,7 @@ export function useRewardsContract() {
     // [TR] F2-14: publicClient yoksa tx gönderilmeden önce dur (gönderim sonrası waitForTransactionReceipt TypeError verirdi).
     if (!_isValid(REWARDS_ADDRESS) || !walletClient || !publicClient) throw new Error('Rewards unavailable');
     try {
-      const hash = await walletClient.writeContract({ address: getAddress(REWARDS_ADDRESS), abi: REWARDS_ABI, functionName, args });
+      const hash = await walletClient.writeContract({ address: getAddress(REWARDS_ADDRESS), abi: REWARDS_ABI, functionName, args, ...BUILDER_SUFFIX_PARAMS });
       return _assertSuccess(await publicClient.waitForTransactionReceipt({ hash }), functionName);
     } catch (error) {
       throw decorateContractError(error);
