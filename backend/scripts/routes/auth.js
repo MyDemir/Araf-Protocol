@@ -52,7 +52,14 @@ const {
 const User = require("../models/User");
 const Trade = require("../models/Trade");
 const logger = require("../utils/logger");
-const { SEPA_COUNTRY_ALLOWLIST } = require("../config/paymentRailRiskConfig");
+const { getRailCodes, getRailCatalog } = require("../config/paymentRailCatalog");
+const {
+  getExtraFieldKeys,
+  normalizeCatalogFields,
+  validateRailCountry,
+  validatePayoutFields,
+  buildCanonicalDetails,
+} = require("../services/payoutFieldValidators");
 
 const COOKIE_OPTIONS_BASE = {
   httpOnly: true,
@@ -108,15 +115,16 @@ function _normalizePayoutProfileBody(rawBody = {}) {
       : rawChannel === "phone" && typeof rawContactValue === "string"
         ? rawContactValue.replace(/\s+/g, "")
         : rawContactValue;
+  const railCode = typeof profile.rail === "string" ? profile.rail.trim().toUpperCase() : "";
   return {
     payoutProfile: {
-      rail: typeof profile.rail === "string" ? profile.rail.trim().toUpperCase() : "",
+      rail: railCode,
       country: typeof profile.country === "string" ? profile.country.trim().toUpperCase() : "",
       contact: {
         channel: rawChannel,
         value: normalizedContactValue,
       },
-      fields: {
+      fields: normalizeCatalogFields(railCode, fields, {
         account_holder_name:
           typeof fields.account_holder_name === "string"
             ? fields.account_holder_name.trim().replace(/\s+/g, " ")
@@ -157,58 +165,23 @@ function _normalizePayoutProfileBody(rawBody = {}) {
             : typeof fields.bank_name === "string"
               ? fields.bank_name.trim()
               : "",
-      },
+      }),
     },
   };
 }
 
-function _buildCanonicalDetailsByRail(rail, fields = {}) {
-  const base = {
-    account_holder_name: fields.account_holder_name || "",
-    iban: null,
-    routing_number: null,
-    account_number: null,
-    account_type: null,
-    bic: null,
-    bank_name: fields.bank_name || null,
-  };
+// [TR] Kanonik nesne ve alan doğrulaması services/payoutFieldValidators.js'tedir; eski 3 rail için çıktı
+//      bayt bayt aynıdır (fingerprint sürekliliği).
+const _buildCanonicalDetailsByRail = buildCanonicalDetails;
 
-  if (rail === "TR_IBAN") {
-    return { ...base, iban: fields.iban || null };
-  }
-  if (rail === "SEPA_IBAN") {
-    return { ...base, iban: fields.iban || null, bic: fields.bic || null };
-  }
-  return {
-    ...base,
-    routing_number: fields.routing_number || null,
-    account_number: fields.account_number || null,
-    account_type: fields.account_type || null,
-  };
-}
-
-/**
- * [TR] ISO 13616 IBAN mod-97 kontrolü. Yalnız regex ile tek hane hatalı IBAN kabul edilir ve
- *      taker parayı yanlış hesaba gönderir; bu da gereksiz uyuşmazlık/bleeding üretir.
- * [EN] ISO 13616 IBAN mod-97 checksum; a regex alone accepts single-digit typos.
- */
-function _isValidIbanChecksum(iban) {
-  const normalized = String(iban || "").toUpperCase();
-  if (!/^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/.test(normalized)) return false;
-  const rearranged = normalized.slice(4) + normalized.slice(0, 4);
-  let remainder = 0;
-  for (const ch of rearranged) {
-    const digits = /[A-Z]/.test(ch) ? String(ch.charCodeAt(0) - 55) : ch;
-    for (const d of digits) {
-      remainder = (remainder * 10 + Number(d)) % 97;
-    }
-  }
-  return remainder === 1;
-}
+// [TR] Katalogdaki 7 eski anahtar dışındaki alan anahtarları (ör. sort_code, pix_key): opsiyonel string.
+const _EXTRA_FIELD_SCHEMA = Object.fromEntries(
+  getExtraFieldKeys(getRailCatalog()).map((k) => [k, Joi.string().max(200).allow("", null)])
+);
 
 const PROFILE_SCHEMA = Joi.object({
   payoutProfile: Joi.object({
-    rail: Joi.string().valid("TR_IBAN", "US_ACH", "SEPA_IBAN").required(),
+    rail: Joi.string().valid(...getRailCodes()).required(),
     country: Joi.string().min(2).max(3).required(),
     contact: Joi.object({
       channel: Joi.string().valid("telegram", "email", "phone").allow(null).required(),
@@ -229,6 +202,7 @@ const PROFILE_SCHEMA = Joi.object({
       account_type: Joi.string().valid("checking", "savings").allow(null).required(),
       bic: Joi.string().allow(null).required(),
       bank_name: Joi.string().max(120).allow(null).required(),
+      ..._EXTRA_FIELD_SCHEMA,
     }).required(),
   }).required(),
 }).custom((value, helpers) => {
@@ -241,14 +215,9 @@ const PROFILE_SCHEMA = Joi.object({
     return helpers.error("any.invalid", { message: "Contact channel/value birlikte verilmelidir." });
   }
 
-  if (rail === "TR_IBAN" && payoutProfile.country !== "TR") {
-    return helpers.error("any.invalid", { message: "TR_IBAN yalnız TR country ile kullanılabilir." });
-  }
-  if (rail === "US_ACH" && payoutProfile.country !== "US") {
-    return helpers.error("any.invalid", { message: "US_ACH yalnız US country ile kullanılabilir." });
-  }
-  if (rail === "SEPA_IBAN" && !SEPA_COUNTRY_ALLOWLIST.has(payoutProfile.country)) {
-    return helpers.error("any.invalid", { message: "SEPA_IBAN için country allowlist dışı." });
+  const countryError = validateRailCountry(rail, payoutProfile.country);
+  if (countryError) {
+    return helpers.error("any.invalid", { message: countryError });
   }
 
   if (channel === "telegram" && !/^[a-zA-Z0-9_]{5,32}$/.test(cValue || "")) {
@@ -261,29 +230,9 @@ const PROFILE_SCHEMA = Joi.object({
     return helpers.error("any.invalid", { message: "Telefon formatı geçersiz." });
   }
 
-  if (rail === "TR_IBAN") {
-    if (!/^TR\d{24}$/.test(fields.iban || "")) {
-      return helpers.error("any.invalid", { message: "TR_IBAN için iban TR formatında olmalı." });
-    }
-  }
-  if (rail === "SEPA_IBAN") {
-    if (!/^[A-Z]{2}[A-Z0-9]{13,32}$/.test(fields.iban || "")) {
-      return helpers.error("any.invalid", { message: "SEPA_IBAN için iban formatı geçersiz." });
-    }
-    if (fields.iban.slice(0, 2) !== payoutProfile.country) {
-      return helpers.error("any.invalid", { message: "IBAN ülke kodu seçilen ülkeyle eşleşmiyor." });
-    }
-  }
-  if ((rail === "TR_IBAN" || rail === "SEPA_IBAN") && !_isValidIbanChecksum(fields.iban)) {
-    return helpers.error("any.invalid", { message: "IBAN kontrol basamağı geçersiz. Lütfen IBAN'ı kontrol edin." });
-  }
-  if (rail === "US_ACH") {
-    if (!/^\d{9}$/.test(fields.routing_number || "") || !/^\d{4,17}$/.test(fields.account_number || "")) {
-      return helpers.error("any.invalid", { message: "US_ACH için routing/account number geçersiz." });
-    }
-    if (!fields.account_type) {
-      return helpers.error("any.invalid", { message: "US_ACH için account_type zorunludur." });
-    }
+  const fieldsError = validatePayoutFields(rail, payoutProfile.country, fields);
+  if (fieldsError) {
+    return helpers.error("any.invalid", { message: fieldsError });
   }
   return value;
 });

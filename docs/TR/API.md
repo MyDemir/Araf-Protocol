@@ -116,7 +116,7 @@ Middleware: `requireAuth` (`x-wallet-address` header'ı burada opsiyoneldir; var
 Yanıt: `{ wallet, authenticated: true, isAdmin, hasPayoutProfile, payoutRail, payoutRailEnabled }`.
 - `isAdmin`: cüzdan `ADMIN_WALLETS` içinde mi (`requireAdminWallet` ile aynı mantık).
 - `hasPayoutProfile`: kullanıcının backend'e KAYITLI ödeme profili var mı (yalnız boolean, PII yok). Sorgu başarısız olursa `null` döner; istemci `null`'ı "bilinmiyor" sayıp emir oluşturma/doldurmayı kapalı tutar (fail-closed).
-- `payoutRail` / `payoutRailEnabled`: kayıtlı profilin rail kodu (`TR_IBAN` / `US_ACH` / `SEPA_IBAN`) ve o rail'in admin tarafından açık olup olmadığı. Profil yoksa ya da okunamazsa ikisi de `null`; rail kapalıysa `payoutRailEnabled: false` (`hasPayoutProfile` "veri var" anlamını korur).
+- `payoutRail` / `payoutRailEnabled`: kayıtlı profilin rail kodu (katalogdaki herhangi bir kod; örn. `TR_IBAN`, `GB_FPS`, `BR_PIX`) ve o rail'in admin tarafından açık olup olmadığı. Profil yoksa ya da okunamazsa ikisi de `null`; rail kapalıysa `payoutRailEnabled: false` (`hasPayoutProfile` "veri var" anlamını korur).
 
 ### `POST /api/auth/refresh`
 Middleware: `authLimiter`. `araf_refresh` cookie'sini okur (yoksa `401`).
@@ -145,7 +145,7 @@ Kabul edilen request body:
 ```json
 {
   "payoutProfile": {
-    "rail": "TR_IBAN | US_ACH | SEPA_IBAN",
+    "rail": "TR_IBAN | US_ACH | SEPA_IBAN | GB_FPS | ... (paymentRailCatalog kodları)",
     "country": "TR | US | DE | ...",
     "contact": {
       "channel": "telegram | email | phone | null",
@@ -158,17 +158,21 @@ Kabul edilen request body:
       "account_number": "string | null",
       "account_type": "checking | savings | null",
       "bic": "string | null",
-      "bank_name": "string | null"
+      "bank_name": "string | null",
+      "<katalog alan anahtarı>": "string | null"
     }
   }
 }
 ```
-`rail`, `country`, `contact.channel`, `contact.value` ve tüm `fields.*` anahtarları zorunludur (kullanılmayanlar için `null` gönderin). `country` 2–3 karakter; `account_holder_name` 2–100 karakter harf/boşluk/apostrof/nokta/tire; `bank_name` en çok 120; `contact.value` en çok 120.
+`rail`, `country`, `contact.channel`, `contact.value` ve `fields` altındaki 7 mevcut anahtar (`account_holder_name`, `iban`, `routing_number`, `account_number`, `account_type`, `bic`, `bank_name`) zorunludur (kullanılmayanlar için `null` gönderin; eksik anahtar `null` sayılır). Bunlara ek olarak seçilen rail'in katalog alan anahtarları (örn. `sort_code`, `pix_key`, `clabe`) gönderilir; katalogda ve bu 7 anahtarda olmayan anahtar `400` döner. Rail'de tanımlı olmayan eski anahtarlar `null`/boş olmalıdır. Yeni rail'lerde (`TR_IBAN`/`US_ACH`/`SEPA_IBAN` dışındakiler) o rail'de tanımlı olmayan bir katalog anahtarı (örn. `BR_PIX` için `sort_code`) DOLU gelirse `400` döner; boş/`null` gelirse yok sayılır. Eski 3 rail'de fazla anahtarlar yok sayılır ve fingerprint kanonik nesnesine girmez. Opsiyonel katalog alanlarında boş string (`""`) `null` sayılır; zorunlu alanda boş değer `400`dür. `country` 2–3 karakter; `account_holder_name` 2–100 karakter harf/boşluk/apostrof/nokta/tire; `bank_name` en çok 120; `contact.value` en çok 120.
 
 Rail-country kuralları (zorunlu):
 - `TR_IBAN` -> `TR`
 - `US_ACH` -> `US`
-- `SEPA_IBAN` -> `DE, FR, NL, BE, ES, IT, AT, PT, IE, LU, FI, GR`
+- `SEPA_IBAN` -> EPC v8.0 EUR ülkeleri: `DE, FR, NL, BE, ES, IT, AT, PT, IE, LU, FI, GR, BG, HR, CY, EE, LV, LT, MT, SI, MC, AD` (`SK`, `SM`, `VA` IBAN uzunluğu kaynakla doğrulanamadığı için yok)
+- Diğer rail'ler: ülke eşleşmesi katalogdaki `countries` listesiyle yapılır (`SWIFT_INTL` için `*`: yaptırımlı/değerlendirilmemiş ülkeler hariç herhangi bir ISO-3166 alpha-2; hem profil `country` hem `bank_country` için `RU, BY, IR, KP, SY, CU, CN, LB, IQ, LY, PS, SD, YE, SO, DJ, BI, MR, LC, SC, MU, MN, FK` reddedilir, `400`)
+
+Katalog: `GET /api/orders/config` ve `/payment-risk-config` yanıtlarındaki `paymentRailCatalog` her rail için alan şemasını (`fields[].kind/pattern/checksum/ibanCountryLengths/options/aliasPatterns/normalize`) verir. Yeni rail'ler varsayılan KAPALIdır; yalnız admin açar. `kind: "alias"` alanı aynı rail'de `<anahtar>_type` enum kardeşiyle gelir (örn. `pix_key` + `pix_key_type`). IBAN alanları ülke uzunluk tablosu ve mod-97, `MX_SPEI` CLABE 3-7-1 kontrol basamağı ile doğrulanır. Ulusal kimlik numarası (CPF, NRIC, Thai ID, MyKad, Aadhaar, RUT) alan olarak yoktur. Fingerprint: `TR_IBAN`/`US_ACH`/`SEPA_IBAN` için kanonik nesne değişmez; yeni rail'lerde `{ account_holder_name, bank_name, ...katalog alanları }` kullanılır.
 
 IBAN kontrolleri: `TR_IBAN`, `TR` + 24 rakam olmalı; `SEPA_IBAN`, `^[A-Z]{2}[A-Z0-9]{13,32}$` ile eşleşmeli ve ülke öneki `country` ile aynı olmalı; ikisi de ISO 13616 mod-97 kontrol basamağından geçmeli. `US_ACH`: `routing_number` 9 rakam, `account_number` 4–17 rakam, `account_type` zorunlu.
 
@@ -182,6 +186,7 @@ Rail-specific field set:
 - `TR_IBAN`: `account_holder_name`, `iban`, opsiyonel `bank_name`
 - `SEPA_IBAN`: `account_holder_name`, `iban`, opsiyonel `bic`, opsiyonel `bank_name`
 - `US_ACH`: `account_holder_name`, `routing_number`, `account_number`, `account_type`, opsiyonel `bank_name`
+- Katalogdaki diğer rail'ler: `account_holder_name`, opsiyonel `bank_name` ve rail'in `paymentRailCatalog` alanları (`required` bayrağı ile)
 
 Yanıt: `{ success, message, bankProfileChanged, profileVersion, lastBankChangeAt, bankChangeCount7d, bankChangeCount30d, payoutProfile: { rail, country, contact: { channel }, fingerprintVersion } }` (PII geri döndürülmez).
 
@@ -207,10 +212,10 @@ Order rotaları parent-order state'in read-layer mirror yüzeyidir. State-changi
 ### `GET /api/orders/config`
 Middleware: `marketReadLimiter`. Public.
 
-Mirror protocol config snapshot döner: `configStale`, `bondMap`, `feeConfig`, `cooldownConfig`, `tokenMap`, `paymentRiskConfig` (her rail girdisi `enabled` taşır), `enabledPaymentRails`, `reputationPolicy`, `deployment: { escrowAddress, chainId }` (`ARAF_ESCROW_ADDRESS` / `EXPECTED_CHAIN_ID` kaynaklı; frontend deploy kaymasını uyarmak için kullanır) ve `selectedOrderRiskLevel`. `configStale: true`, config'in zincirden tazelenemeyip Redis'teki son bilinen kopyadan servis edildiğini söyler (kısıtlı mod). Config mirror'ı yoksa `503 { error }` (iç hata kodu `CONFIG_UNAVAILABLE`; gövdede ayrı `code` alanı yok).
+Mirror protocol config snapshot döner: `configStale`, `bondMap`, `feeConfig`, `cooldownConfig`, `tokenMap`, `paymentRiskConfig` (her rail girdisi `enabled` taşır), `enabledPaymentRails`, `reputationPolicy`, `paymentRailCatalog` (küresel rail kataloğu; PII yok), `supportedFiat` (katalog para birimlerinin sıralı birleşimi; `TRY`/`USD`/`EUR` dahil), `deployment: { escrowAddress, chainId }` (`ARAF_ESCROW_ADDRESS` / `EXPECTED_CHAIN_ID` kaynaklı; frontend deploy kaymasını uyarmak için kullanır) ve `selectedOrderRiskLevel`. `configStale: true`, config'in zincirden tazelenemeyip Redis'teki son bilinen kopyadan servis edildiğini söyler (kısıtlı mod). Config mirror'ı yoksa `503 { error }` (iç hata kodu `CONFIG_UNAVAILABLE`; gövdede ayrı `code` alanı yok).
 
 ### `GET /api/orders/payment-risk-config`
-Middleware: `marketReadLimiter`. Public. `{ configStale, paymentRiskConfig, enabledPaymentRails, selectedOrderRiskLevel }` döner; config yoksa `503`.
+Middleware: `marketReadLimiter`. Public. `{ configStale, paymentRiskConfig, enabledPaymentRails, paymentRailCatalog, supportedFiat, selectedOrderRiskLevel }` döner; config yoksa `503`.
 
 ### `GET /api/orders`
 Middleware: `marketReadLimiter`. Public order feed. Query (Joi):
@@ -229,7 +234,7 @@ Middleware: `marketReadLimiter`. Public order feed. Query (Joi):
 | `page` | tamsayı 1–200 | `1` |
 | `limit` | tamsayı 1–50 | `20` |
 
-Yanıt: `{ orders, total, page, limit }`. Yanıt doğrulanmış sorgu değerlerinden türetilen anahtarla bellekte `MARKET_CACHE_TTL_MS` (çalışma ayarı) kadar tutulur (varsayılan 10 sn; `NODE_ENV=test` iken env verilmedikçe `0`; en çok 200 girdi); isabet olursa `X-Cache: HIT` header'ı eklenir. Geçersiz query `400`. Her order `trust_visibility_summary`, `owner_has_payout_profile` (boolean: emir sahibinin kayıtlı ödeme profili var mı), `owner_rail_enabled` (boolean: sahibin profilindeki rail açık mı; profil/rail yoksa `true`) ve `owner_rail` (yalnız rail kodu `TR_IBAN`/`SEPA_IBAN`/`US_ACH`, bilinmiyorsa `null`) taşır. PII/şifreli alan dönmez; `owner_has_payout_profile` `false` ise UI doldurmayı kapatır.
+Yanıt: `{ orders, total, page, limit }`. Yanıt doğrulanmış sorgu değerlerinden türetilen anahtarla bellekte `MARKET_CACHE_TTL_MS` (çalışma ayarı) kadar tutulur (varsayılan 10 sn; `NODE_ENV=test` iken env verilmedikçe `0`; en çok 200 girdi); isabet olursa `X-Cache: HIT` header'ı eklenir. Geçersiz query `400`. Her order `trust_visibility_summary`, `owner_has_payout_profile` (boolean: emir sahibinin kayıtlı ödeme profili var mı), `owner_rail_enabled` (boolean: sahibin profilindeki rail açık mı; profil/rail yoksa `true`) ve `owner_rail` (yalnız katalogdaki rail kodu, örn. `TR_IBAN`/`GB_FPS`; bilinmiyorsa `null`) taşır. PII/şifreli alan dönmez; `owner_has_payout_profile` `false` ise UI doldurmayı kapatır.
 
 ### `GET /api/orders/my`
 Middleware: `requireAuth`, `requireSessionWalletMatch`, `ordersReadLimiter`. Query: `page` (varsayılan 1), `limit` (1–50, varsayılan 20). Yanıt: çağıranın emirleri için `{ orders, total, page, limit }`, son güncellenen önce.
@@ -439,7 +444,7 @@ Aynı yetki zinciri (`requireAuth` -> `requireSessionWalletMatch` -> `requireAdm
 
 | Route | Gövde / Query | Yanıt |
 |---|---|---|
-| `GET /api/admin/payment-rails` | — | `{ rails: [{ code, name{TR,EN}, countries, riskLevel, enabled, changedAt, changedBy }] }` |
+| `GET /api/admin/payment-rails` | — | `{ rails: [{ code, name{TR,EN}, countries, riskLevel, region, currencies, defaultEnabled, enabled, changedAt, changedBy }] }` (DB kaydı yokken `enabled = defaultEnabled`: yalnız `TR_IBAN`, `US_ACH`, `SEPA_IBAN` açık, diğerleri kapalı) |
 | `PUT /api/admin/payment-rails/:rail` | `{ enabled: boolean, reason?: string<=300 }` (sıkı Joi) | `{ success, rail, previousEnabled, enabled, changed }`; bilinmeyen rail `400 PAYMENT_RAIL_UNKNOWN`, geçersiz gövde `400`; son açık rail'i kapatma `409 LAST_ENABLED_RAIL`; eşzamanlı değişiklik `409 PAYMENT_RAIL_CONFLICT`; DB yok `503 DB_UNAVAILABLE` |
 | `GET /api/admin/payment-rails/audit` | `page` (1-10000), `limit` (1-100, varsayılan 20) | `{ items: [{ rail, previousEnabled, newEnabled, adminWallet, reason, ipHash, createdAt }], total, page, limit }` (yalnız-ekleme koleksiyonu, IP yalnız HMAC) |
 | `GET /api/admin/runtime-settings` | — | `{ settings: [{ key, group, unit, min, max, default, envValue, adminValue, value, source(admin\|env\|default), warning?, constraints[{TR,EN}], constraintViolations[string], changedAt, changedBy }], version, degraded }` |
@@ -453,7 +458,7 @@ Not (TR): `GET /api/admin/runtime-settings` her ayar için `constraints` (kısa 
 
 Sosyal link doğrulaması sunucuda tek kaynaktadır (`backend/scripts/utils/socialLinks.js`): her link `{ id?, label, url, order?, enabled }` (başka alan reddedilir); `label` 1-24 karakter düz metin, `url` yalnız `https`, en çok 300 karakter, userinfo/port/IDN-punycode yok, yinelenen URL yok, host izinli listede olmalı (kod içi varsayılan liste ya da `SOCIAL_LINK_ALLOWED_HOSTS` env'i; admin panelinden değiştirilemez). `id` verilmezse sunucu üretir.
 
-Herkese açık etkiler: `GET /api/orders/config` ve `/payment-risk-config` `enabledPaymentRails` döner ve `paymentRiskConfig[*][rail].enabled` değerini yansıtır; `GET /api/orders` satırlarında `owner_rail_enabled` (boolean) bulunur; `GET /api/auth/me` `payoutRail` ve `payoutRailEnabled` döner (kayıtlı profilin rail'i kapalıysa `false`; `hasPayoutProfile` "veri var" anlamını korur); `PUT /api/auth/profile` ve `POST /api/orders/market-meta` kapalı rail için `409 PAYMENT_RAIL_DISABLED` döner. Aktif işlemler (LOCKED/PAID/CHALLENGED), snapshot ve PII akışı rail durumuna bakmaz. Kontrat rail bilmez: bu kapı yalnız UI/API düzeyindedir.
+Herkese açık etkiler: `GET /api/orders/config` ve `/payment-risk-config` `enabledPaymentRails` döner ve `paymentRiskConfig[*][rail].enabled` değerini yansıtır; `GET /api/orders` satırlarında `owner_rail_enabled` (boolean) bulunur; `GET /api/auth/me` `payoutRail` ve `payoutRailEnabled` döner (kayıtlı profilin rail'i kapalıysa `false`; `hasPayoutProfile` "veri var" anlamını korur); `PUT /api/auth/profile` ve `POST /api/orders/market-meta` kapalı rail için `409 PAYMENT_RAIL_DISABLED` döner. Aktif işlemler (LOCKED/PAID/CHALLENGED), snapshot ve PII akışı rail durumuna bakmaz. Bilinmeyen rail kodu kapalı sayılır. Kontrat rail bilmez: bu kapı yalnız UI/API düzeyindedir.
 
 ---
 

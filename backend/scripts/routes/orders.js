@@ -28,6 +28,7 @@ const { getConfig, isProtocolConfigStale } = require("../services/protocolConfig
 const { isConfigStale } = require("../services/serviceMode");
 const { getRailStates, applyRailStatesToRiskConfig, getEnabledRailCodes, isRailEnabledStrict, isKnownRail } = require("../services/paymentRails");
 const { buildTradeHealthSignals } = require("./tradeRisk");
+const { getPublicRailCatalog, getCatalogCurrencies } = require("../config/paymentRailCatalog");
 const { ALLOWED_FIAT, normalizeMarketMeta, storePendingMarketMeta } = require("../services/orderMarketMeta");
 
 const FILLABLE_ORDER_STATUSES = ["OPEN", "PARTIALLY_FILLED"];
@@ -287,6 +288,9 @@ router.get("/config", marketReadLimiter, asyncHandler(async (_req, res, next) =>
       tokenMap: config.tokenMap || {},
       paymentRiskConfig,
       enabledPaymentRails,
+      // [TR] Katalog (PII yok, legacyCanonical hariç) ve katalog para birimlerinden türeyen fiat listesi.
+      paymentRailCatalog: getPublicRailCatalog(),
+      supportedFiat: getCatalogCurrencies(),
       reputationPolicy: config.reputationPolicy || null,
       // [TR] Frontend kendi escrow adresi/zinciriyle karşılaştırır; farklıysa uyarı gösterir (deploy uyumu).
       // [EN] The frontend compares these with its own escrow/chain and warns on drift (deploy alignment).
@@ -312,6 +316,8 @@ router.get("/payment-risk-config", marketReadLimiter, asyncHandler(async (_req, 
       configStale: isConfigStale() || isProtocolConfigStale(),
       paymentRiskConfig: await applyRailStatesToRiskConfig(config.paymentRiskConfig || {}),
       enabledPaymentRails: await getEnabledRailCodes(),
+      paymentRailCatalog: getPublicRailCatalog(),
+      supportedFiat: getCatalogCurrencies(),
       selectedOrderRiskLevel: {
         source: "onchain_order_snapshot",
         nonAuthoritative: true,
@@ -378,7 +384,7 @@ router.get("/", marketReadLimiter, asyncHandler(async (req, res, next) => {
       // [TR] Sunucu tarafı pazar araması: fiat, token biriminde minimum kalan tutar ve en iyi kur sıralaması.
       //      İstemci yalnız ilk sayfayı çektiği için filtreler sunucuda uygulanmazsa sayfa dışı emirler kaybolur.
       // [EN] Server-side market search: fiat, minimum remaining amount (token units) and best-rate sort.
-      fiat: Joi.string().valid("TRY", "USD", "EUR").optional(),
+      fiat: Joi.string().valid(...ALLOWED_FIAT).optional(),
       // [TR] B3-13: aşırı büyük min_amount Infinity -> 503 yerine 400 olur.
       min_amount: Joi.number().positive().max(1e12).optional(),
       sort: Joi.string().valid("default", "best_rate", "newest").default("default"),

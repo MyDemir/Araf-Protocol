@@ -95,9 +95,15 @@ describe("orders market-meta route (maker fiat/rate enrichment)", () => {
     expect(opts).toEqual(expect.objectContaining({ NX: true }));
   });
 
+  it("accepts a catalog-derived fiat that was not in the old TRY/USD/EUR list", async () => {
+    const { app } = buildApp({ existingOrder: null });
+    const res = await request(app).post("/api/orders/market-meta").send({ orderRef: ORDER_REF, fiatCurrency: "GBP", exchangeRate: 0.8 });
+    expect(res.status).toBe(202);
+  });
+
   it("rejects invalid fiat or rate", async () => {
     const { app } = buildApp();
-    const badFiat = await request(app).post("/api/orders/market-meta").send({ orderRef: ORDER_REF, fiatCurrency: "GBP", exchangeRate: 1 });
+    const badFiat = await request(app).post("/api/orders/market-meta").send({ orderRef: ORDER_REF, fiatCurrency: "XYZ", exchangeRate: 1 });
     const badRate = await request(app).post("/api/orders/market-meta").send({ orderRef: ORDER_REF, fiatCurrency: "TRY", exchangeRate: 0 });
     expect(badFiat.status).toBe(400);
     expect(badRate.status).toBe(400);

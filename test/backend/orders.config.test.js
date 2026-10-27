@@ -2,6 +2,7 @@
 
 const request = require("supertest");
 const express = require("express");
+const { getPublicRailCatalog, getCatalogCurrencies } = require("../../backend/scripts/config/paymentRailCatalog");
 
 jest.mock("../../backend/scripts/services/protocolConfig", () => ({
   isProtocolConfigStale: jest.fn(() => false),
@@ -63,6 +64,12 @@ describe("GET /api/orders/config", () => {
     expect(res.body.feeConfig.currentTakerFeeBps).toBe(10);
     expect(res.body.tokenMap.usdt.decimals).toBe(6);
     expect(res.body.paymentRiskConfig.TR.TR_IBAN.riskLevel).toBe("MEDIUM");
+    // Katalog ve fiat listesi yanıtta; legacyCanonical (iç alan) sızmaz.
+    expect(res.body.paymentRailCatalog).toEqual(getPublicRailCatalog());
+    expect(res.body.paymentRailCatalog.length).toBeGreaterThan(3);
+    expect(JSON.stringify(res.body.paymentRailCatalog)).not.toContain("legacyCanonical");
+    expect(res.body.supportedFiat).toEqual(getCatalogCurrencies());
+    expect(res.body.supportedFiat).toEqual(expect.arrayContaining(["TRY", "USD", "EUR", "GBP"]));
     expect(res.body.tokenMap.usdt.tierMaxAmountsBaseUnit).toEqual([
       "150000000",
       "1500000000",
@@ -110,6 +117,8 @@ describe("GET /api/orders/config", () => {
       },
       configStale: false,
       enabledPaymentRails: ["TR_IBAN", "US_ACH", "SEPA_IBAN"],
+      paymentRailCatalog: getPublicRailCatalog(),
+      supportedFiat: getCatalogCurrencies(),
       selectedOrderRiskLevel: {
         source: "onchain_order_snapshot",
         nonAuthoritative: true,
