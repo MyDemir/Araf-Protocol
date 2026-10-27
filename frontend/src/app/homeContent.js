@@ -114,7 +114,54 @@ const TR = {
       { key: 'dispute', title: 'İtiraz', text: 'Hakem yok: teminatlar ve sonra ana para erir. Hızlı uzlaşmak her iki taraf için en ucuz yoldur.' },
     ],
   },
-  faq: { eyebrow: 'Sık sorulanlar', title: 'Merak edilenler' },
+  // [TR] SSS: kaynak satırı her sorunun üstünde. {fee} yer tutucusu kontrattan okunan ücretle değişir.
+  // [EN] FAQ: source line above each question. {fee} is replaced by the fee read from the contract.
+  faq: {
+    eyebrow: 'Sık sorulanlar',
+    title: 'Merak edilenler',
+    items: [
+      // README.md:56
+      { q: 'Araf hakem kullanıyor mu?', a: 'Hayır. Uyuşmazlıkta insan hakem yoktur. Süreç zincirdeki zamanlayıcılar ve ekonomik teşviklerle ilerler; son söz kontratındır.' },
+      // README.md:172-173, :178
+      { q: 'Platform fonlarıma erişebilir mi?', a: 'Hayır. Fonlar akıllı kontratta kilitlidir. Backend yalnız zinciri yansıtır; serbest bırakma kararı veremez.' },
+      // ArafEscrow.sol:268, :1133, :1161
+      { q: 'Satıcı ödemeyi onaylamazsa ne olur?', a: 'Ödeme bildiriminden 48 saat sonra alıcı satıcıyı uyarır; 24 saat içinde yanıt gelmezse kripto otomatik olarak alıcıya geçer.' },
+      // ArafEscrow.sol:273, :292-294, :1095; README.md:84-92
+      { q: 'Eriyen kasa nedir?', a: 'İtiraz açıldıktan 48 saat sonra iki tarafın teminatı saat saat erimeye başlar; 144. saatten itibaren ana para da erir. 10 gün içinde uzlaşma olmazsa kalan tutar yakılır.' },
+      // ArafEscrow.sol:244-254, :256-257; README.md:120-122
+      { q: 'Neden tier ve teminat var?', a: 'Tier sistemi yeni cüzdanların emir büyüklüğünü sınırlar; teminatlar kötü niyeti pahalı hale getirir. Temiz sicil teminatı %1 düşürür, risk puanı %3 artırır.' },
+      // ArafEscrow.sol:263-264, :836-837
+      { q: 'Ücret ne kadar?', a: 'Başarılı işlemde kontrat {fee} ücret keser.', aNoFee: 'Ücret oranı kontratta tanımlıdır ve işlem kilitlenirken sabitlenir.' },
+      // ArafEscrow.sol:565, :587, :635, :663, :1790, :1814, :1846, :1943; README.md:174-180, :183
+      { q: 'Kontrat sahibi (owner) neler yapabilir?', a: 'Ücreti, işlemler arası bekleme süresini, desteklenen token\'ları, tier tavanlarını ve itibar politikasını ayarlayabilir; yeni emir ve dolumları duraklatabilir. Emanetteki fonu alamaz ve bir işlemin sonucuna karar veremez. Sahip bugün tek adrestir; çoklu imzaya geçiş ana ağ listesindedir.' },
+      // ArafEscrow.sol:271, :893-916; README.md:46-47
+      { q: 'Alıcı 48 saatte ödeme bildirmezse ne olur?', a: 'Taraflardan biri kilidi çözer: satıcı kriptosunu ve teminatını geri alır, alıcı teminatının %2\'sini satıcıya öder. Tier 0\'da teminat olmadığından bu ceza 0\'dır.' },
+      // ArafEscrow.sol:281, :992, :1013-1022; README.md:108
+      { q: 'İtiraz (challenge) ne zaman açılabilir?', a: 'Yalnızca satıcı açabilir. Önce ödeme bildiriminden en az 24 saat sonra uyarı atar; itiraz uyarıdan 24 saat sonra açılır, uyarıdan 48 saat dolunca kapanır. Pencere kaçarsa uyarı düşer ve alıcının otomatik serbest bırakma yolu açılır.' },
+      // ArafEscrow.sol:244-254, :288-290, :521-522; README.md:124-135
+      { q: 'Tier\'lar ve teminat oranları nedir?', a: 'Tier 0\'da teminat yoktur. Tier 1-4\'te satıcı/alıcı teminatı sırasıyla %8/%10, %6/%8, %5/%5 ve %2/%2\'dir. Yükselmek için varsayılan olarak 15, 50, 100 ya da 200 başarılı işlem, risk puanı sınırı ve ilk başarılı işlemden 15 gün gerekir. 20 USD altı işlemler itibara sayılmaz.' },
+      // ArafEscrow.sol:310, :733-737, :836-837, :1814-1818; README.md:104-105
+      { q: 'Ücret ne kadar artabilir? Tier 0\'da satıcı ücreti var mı?', a: 'Sahip ücreti taraf başına en çok 2.000 baz puana (%20) ayarlayabilir; açık emir ve işlemler oluşturuldukları andaki ücreti korur. Tier 0 emirlerinde satıcı ücreti 0\'dır.' },
+      // ArafEscrow.sol:1039-1053, :1063-1081, :1309-1327
+      { q: 'Karşılıklı iptal nasıl çalışır?', a: 'İki taraf da kendi işlemiyle onay verir; ikinci onayla iptal yürür. Onay, karşı taraf onaylamadan geri çekilebilir. Ödeme öncesi iptalde ücret yoktur; sonrasında ücret tarafın kendi teminatından kesilir. İptal nötr bir çıkıştır, başarılı işlem sayılmaz.' },
+      // README.md:160; docs/TR/ARCHITECTURE.md:784-789, :795-797, :800
+      { q: 'Banka bilgilerim nasıl korunur, kim görür?', a: 'Ödeme bilgileri sunucuda AES-256-GCM ile şifreli saklanır. İşlem kilitlenince bir kez anlık görüntü alınır ve işlem sürerken değiştirilemez. Görüntüleme, işleme özel ve oturum cüzdanınızla eşleşen kısa ömürlü (varsayılan 15 dakika) bir jetonla, yalnız işlem açıkken yapılır.' },
+      // ArafEscrow.sol:1846-1880; homeContent.js hero.lead; README.md:303
+      { q: 'Hangi token\'lar kullanılır?', a: 'Arayüz USDT ve USDC için tasarlandı. Desteklenen token\'lar, alış ve satış yönü ile tier başına tutar tavanları kontratta sahip tarafından token bazında ayarlanır.' },
+      // docs/TR/ARCHITECTURE.md:1126-1128
+      { q: 'Ödeme yöntemlerini kim yönetir?', a: 'Yönetici panelinden bir ödeme yöntemi yalnız açılıp kapatılabilir ve en az biri açık kalır. Kapatma yalnız yeni işleri engeller; açık işlemler etkilenmez. Bu kapı arayüz ve API düzeyindedir, kontrat ödeme yöntemini bilmez.' },
+      // README.md:21, :188-191, :289
+      { q: 'Gerçek parayla kullanabilir miyim?', a: 'Hayır. Yazılım Base Sepolia testnet içindir ve harici bir güvenlik denetiminden geçmedi. Gerçek fon yatırmayın.' },
+      // README.md:116-117, :159-167; ArafEscrow.sol:541-545, :644, :1766-1769, :1991-2006, :2023-2029
+      { q: 'Cüzdanı nasıl bağlarım, alıcı olmak için ne gerekir?', a: 'Cüzdanla Ethereum ile giriş (SIWE) yapılır; fon hareketi doğrudan cüzdanınızla kontrata imzalanır. Alıcı olmak için cüzdanın kayıtlı olması, kayıttan 2 gün geçmesi ve en az 0,001 ETH bakiye gerekir. Banlı cüzdan yeni emir ya da dolum yapamaz.' },
+      // README.md:156; docs/TR/ARCHITECTURE_INCENTIVES.md:56; docs/TR/GAME_THEORY.md:179, :206
+      { q: 'Ödüller (Proof of Peace) nedir?', a: 'Hızlı ve temiz kapanan işlemlerden doğan, havuzdan paya göre dağıtılan ödüllerdir. Cashback değildir; sabit bir getiri vaadi de değildir. Tier 0 ve karşılıklı iptal ağırlık kazandırmaz.' },
+      // ArafEscrow.sol:508-519, :2023-2029; docs/TR/ARCHITECTURE.md:495-510
+      { q: 'Ban ve itibar nasıl işler?', a: 'Her işlem sonucu risk puanını artırır ya da azaltır; itirazı kaybeden +60, yakım +90 alır, temiz serbest bırakma puanı düşürür. Puan 100\'e ulaşınca varsayılan 30 gün ban gelir; tekrarında süre katlanır. Banlıyken yeni emir ya da dolum yapılamaz.' },
+      // README.md:188-190
+      { q: 'Kontrat adresi nedir?', a: 'Henüz herkese açık bir kontrat adresi yayımlanmadı; Base Sepolia dağıtımı sürüyor. Ana ağ dağıtımı yok.' },
+    ],
+  },
 };
 
 const EN = {
@@ -207,7 +254,54 @@ const EN = {
       { key: 'dispute', title: 'Dispute', text: 'No arbitrator: bonds, then principal, decay. Settling fast is the cheapest path for both sides.' },
     ],
   },
-  faq: { eyebrow: 'FAQ', title: 'Common questions' },
+  // [TR] SSS: kaynak satırı her sorunun üstünde. {fee} yer tutucusu kontrattan okunan ücretle değişir.
+  // [EN] FAQ: source line above each question. {fee} is replaced by the fee read from the contract.
+  faq: {
+    eyebrow: 'FAQ',
+    title: 'Common questions',
+    items: [
+      // README.md:56
+      { q: 'Does Araf use arbitrators?', a: 'No. There are no human arbitrators. The flow runs on on-chain timers and economic incentives; the contract has the final say.' },
+      // README.md:172-173, :178
+      { q: 'Can the platform access my funds?', a: 'No. Funds stay locked in the smart contract. The backend only mirrors the chain and cannot release funds.' },
+      // ArafEscrow.sol:268, :1133, :1161
+      { q: 'What if the seller never confirms payment?', a: '48 hours after the payment report the buyer can ping the seller; with no response within 24 hours the crypto is released to the buyer automatically.' },
+      // ArafEscrow.sol:273, :292-294, :1095; README.md:84-92
+      { q: 'What is the bleeding escrow?', a: 'Starting 48 hours after a dispute opens, both bonds decay every hour; from hour 144 the principal decays too. Without a settlement within 10 days the rest is burned.' },
+      // ArafEscrow.sol:244-254, :256-257; README.md:120-122
+      { q: 'Why tiers and bonds?', a: 'Tiers cap order size for new wallets; bonds make bad faith expensive. A clean record lowers the bond by 1%, risk points raise it by 3%.' },
+      // ArafEscrow.sol:263-264, :836-837
+      { q: 'What are the fees?', a: 'On a successful trade the contract charges {fee}.', aNoFee: 'The fee rate is defined in the contract and fixed when a trade locks.' },
+      // ArafEscrow.sol:565, :587, :635, :663, :1790, :1814, :1846, :1943; README.md:174-180, :183
+      { q: 'What can the contract owner do?', a: 'The owner can set fees, trade cooldowns, supported tokens, tier caps and the reputation policy, and can pause new orders and fills. The owner cannot take escrowed funds or decide a trade. The owner is a single address today; moving to a multisig is on the mainnet checklist.' },
+      // ArafEscrow.sol:271, :893-916; README.md:46-47
+      { q: 'What if the buyer does not report payment within 48 hours?', a: 'Either party can unwind the lock: the seller gets the crypto and bond back, and the buyer pays 2% of their bond to the seller. On Tier 0 there is no bond, so that penalty is 0.' },
+      // ArafEscrow.sol:281, :992, :1013-1022; README.md:108
+      { q: 'When can a challenge be opened?', a: 'Only the seller can. First the seller pings at least 24 hours after the payment report; the challenge opens 24 hours after the ping and closes 48 hours after it. If the window is missed the ping lapses and the buyer\'s auto-release path opens.' },
+      // ArafEscrow.sol:244-254, :288-290, :521-522; README.md:124-135
+      { q: 'What are the tiers and bond rates?', a: 'Tier 0 has no bond. Tiers 1-4 post seller/buyer bonds of 8%/10%, 6%/8%, 5%/5% and 2%/2%. By default, moving up needs 15, 50, 100 or 200 successful trades, a risk-point limit and 15 days since the first successful trade. Trades under 20 USD do not count toward reputation.' },
+      // ArafEscrow.sol:310, :733-737, :836-837, :1814-1818; README.md:104-105
+      { q: 'How high can fees go? Does the seller pay on Tier 0?', a: 'The owner can set fees up to 2,000 bps (20%) per side; open orders and trades keep the fee they were created with. On Tier 0 orders the seller fee is 0.' },
+      // ArafEscrow.sol:1039-1053, :1063-1081, :1309-1327
+      { q: 'How does mutual cancel work?', a: 'Each party consents with its own transaction; the second consent executes the cancel. A consent can be withdrawn before the other side confirms. Before payment there is no fee; afterwards each side\'s fee comes out of its own bond. A cancel is a neutral exit, not a successful trade.' },
+      // README.md:160; docs/TR/ARCHITECTURE.md:784-789, :795-797, :800
+      { q: 'How is my bank info protected and who can see it?', a: 'Payment details are stored on the server with AES-256-GCM encryption. A snapshot is taken once when the trade locks and cannot change while it runs. Viewing needs a trade-scoped, short-lived token (15 minutes by default) matching your session wallet, and works only while the trade is open.' },
+      // ArafEscrow.sol:1846-1880; homeContent.js hero.lead; README.md:303
+      { q: 'Which tokens are supported?', a: 'The interface is built for USDT and USDC. Supported tokens, their buy and sell directions and per-tier amount caps are set per token in the contract by the owner.' },
+      // docs/TR/ARCHITECTURE.md:1126-1128
+      { q: 'Who manages payment methods?', a: 'From the admin panel a payment method can only be switched on or off, and at least one stays on. Switching one off blocks only new activity; open trades are unaffected. This gate lives in the UI and API, not the contract, which knows nothing about payment methods.' },
+      // README.md:21, :188-191, :289
+      { q: 'Can I use it with real money?', a: 'No. The software is for the Base Sepolia testnet and has not had an external security audit. Do not deposit real funds.' },
+      // README.md:116-117, :159-167; ArafEscrow.sol:541-545, :644, :1766-1769, :1991-2006, :2023-2029
+      { q: 'How do I connect a wallet and what does a buyer need?', a: 'You sign in with your wallet (SIWE) and sign fund-moving actions directly against the contract. To be a buyer the wallet must be registered, at least 2 days old since registration, and hold at least 0.001 ETH. A banned wallet cannot place new orders or fills.' },
+      // README.md:156; docs/TR/ARCHITECTURE_INCENTIVES.md:56; docs/TR/GAME_THEORY.md:179, :206
+      { q: 'What are the rewards (Proof of Peace)?', a: 'They come from fast, clean trades and are shared pro rata from a pool. They are not cashback and not a fixed return. Tier 0 and mutual cancel earn no weight.' },
+      // ArafEscrow.sol:508-519, :2023-2029; docs/TR/ARCHITECTURE.md:495-510
+      { q: 'How do bans and reputation work?', a: 'Each outcome adds or removes risk points; losing a dispute adds 60, a burn adds 90, and a clean release lowers the score. At 100 points a ban follows, 30 days by default, and it grows on repeats. While banned you cannot place new orders or fills.' },
+      // README.md:188-190
+      { q: 'What is the contract address?', a: 'No public contract address is published yet; the Base Sepolia deployment is in progress. There is no mainnet deployment.' },
+    ],
+  },
 };
 
 export const getHomeContent = (lang) => (lang === 'TR' ? TR : EN);

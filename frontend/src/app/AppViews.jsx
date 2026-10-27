@@ -72,9 +72,10 @@ const SOCIAL_LINKS = {
   farcaster: import.meta.env.VITE_SOCIAL_FARCASTER || '',
 };
 
-// [TR] SSS yanıtları kontrat sabitlerine dayanır (ArafEscrow: 48s ödeme penceresi, 48s+24s otomatik serbest,
-//      itirazda 48s sonra teminat erimesi, 144s sonra ana para erimesi, 240s'te yakım). Ücret kontrattan okunur.
-// [EN] FAQ answers follow contract constants; the fee comes from the contract fee config.
+// [TR] SSS soruları homeContent.js'tedir (her birinin kaynak satırı orada). Burada yalnız ücret yer tutucusu çözülür:
+//      {fee} kontrattan okunan ücretle değişir; ücret bilinmiyorsa aNoFee kullanılır.
+// [EN] FAQ items live in homeContent.js (source line next to each). Here only the fee placeholder is resolved:
+//      {fee} becomes the fee read from the contract; aNoFee is used when the fee is unknown.
 const buildFaqItems = (lang, protocolFeeConfig) => {
   const feeText = (() => {
     if (!isKnownNumber(protocolFeeConfig?.takerFeeBps) || !isKnownNumber(protocolFeeConfig?.makerFeeBps)) return null;
@@ -82,23 +83,10 @@ const buildFaqItems = (lang, protocolFeeConfig) => {
     const mb = Number(protocolFeeConfig.makerFeeBps);
     return lang === 'TR' ? `alıcıdan ${fmtBps(tb, lang)}, satıcıdan ${fmtBps(mb, lang)}` : `${fmtBps(tb, lang)} from the buyer and ${fmtBps(mb, lang)} from the seller`;
   })();
-  return lang === 'TR'
-    ? [
-        { q: 'Araf hakem kullanıyor mu?', a: 'Hayır. Uyuşmazlıkta insan hakem yoktur. Süreç zincirdeki zamanlayıcılar ve ekonomik teşviklerle ilerler; son söz kontratındır.' },
-        { q: 'Platform fonlarıma erişebilir mi?', a: 'Hayır. Fonlar akıllı kontratta kilitlidir. Backend yalnız zinciri yansıtır; serbest bırakma kararı veremez.' },
-        { q: 'Satıcı ödemeyi onaylamazsa ne olur?', a: 'Ödeme bildiriminden 48 saat sonra alıcı satıcıyı uyarır; 24 saat içinde yanıt gelmezse kripto otomatik olarak alıcıya geçer.' },
-        { q: 'Eriyen kasa nedir?', a: 'İtiraz açıldıktan 48 saat sonra iki tarafın teminatı saat saat erimeye başlar; 144. saatten itibaren ana para da erir. 10 gün içinde uzlaşma olmazsa kalan tutar yakılır.' },
-        { q: 'Neden tier ve teminat var?', a: 'Tier sistemi yeni cüzdanların emir büyüklüğünü sınırlar; teminatlar kötü niyeti pahalı hale getirir. Temiz sicil teminatı %1 düşürür, risk puanı %3 artırır.' },
-        { q: 'Ücret ne kadar?', a: feeText ? `Başarılı işlemde kontrat ${feeText} ücret keser.` : 'Ücret oranı kontratta tanımlıdır ve işlem kilitlenirken sabitlenir.' },
-      ]
-    : [
-        { q: 'Does Araf use arbitrators?', a: 'No. There are no human arbitrators. The flow runs on on-chain timers and economic incentives; the contract has the final say.' },
-        { q: 'Can the platform access my funds?', a: 'No. Funds stay locked in the smart contract. The backend only mirrors the chain and cannot release funds.' },
-        { q: 'What if the seller never confirms payment?', a: '48 hours after the payment report the buyer can ping the seller; with no response within 24 hours the crypto is released to the buyer automatically.' },
-        { q: 'What is the bleeding escrow?', a: 'Starting 48 hours after a dispute opens, both bonds decay every hour; from hour 144 the principal decays too. Without a settlement within 10 days the rest is burned.' },
-        { q: 'Why tiers and bonds?', a: 'Tiers cap order size for new wallets; bonds make bad faith expensive. A clean record lowers the bond by 1%, risk points raise it by 3%.' },
-        { q: 'What are the fees?', a: feeText ? `On a successful trade the contract charges ${feeText}.` : 'The fee rate is defined in the contract and fixed when a trade locks.' },
-      ];
+  return getHomeContent(lang).faq.items.map(({ q, a, aNoFee }) => ({
+    q,
+    a: a.includes('{fee}') ? (feeText ? a.replace('{fee}', feeText) : aNoFee) : a,
+  }));
 };
 
 export const buildAppViews = (ctx) => {
