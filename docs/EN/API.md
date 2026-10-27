@@ -116,7 +116,7 @@ Middleware: `requireAuth` (the `x-wallet-address` header is optional here; if pr
 Response: `{ wallet, authenticated: true, isAdmin, hasPayoutProfile, payoutRail, payoutRailEnabled }`.
 - `isAdmin`: whether the wallet is in `ADMIN_WALLETS` (same logic as `requireAdminWallet`).
 - `hasPayoutProfile`: whether the user has a SAVED payout profile on the backend (boolean only, no PII). If the lookup fails it is `null`; clients treat `null` as "unknown" and keep order creation/filling blocked (fail-closed).
-- `payoutRail` / `payoutRailEnabled`: the saved profile's rail code (`TR_IBAN` / `US_ACH` / `SEPA_IBAN`) and whether an admin has that rail open. Both are `null` when there is no profile or it could not be read; `payoutRailEnabled: false` when the rail is closed (`hasPayoutProfile` keeps meaning "data exists").
+- `payoutRail` / `payoutRailEnabled`: the saved profile's rail code (any catalog code, e.g. `TR_IBAN`, `GB_FPS`, `BR_PIX`) and whether an admin has that rail open. Both are `null` when there is no profile or it could not be read; `payoutRailEnabled: false` when the rail is closed (`hasPayoutProfile` keeps meaning "data exists").
 
 ### `POST /api/auth/refresh`
 Middleware: `authLimiter`. Reads the `araf_refresh` cookie (`401` if missing).
@@ -145,7 +145,7 @@ Accepted request body:
 ```json
 {
   "payoutProfile": {
-    "rail": "TR_IBAN | US_ACH | SEPA_IBAN",
+    "rail": "TR_IBAN | US_ACH | SEPA_IBAN | GB_FPS | ... (paymentRailCatalog codes)",
     "country": "TR | US | DE | ...",
     "contact": {
       "channel": "telegram | email | phone | null",
@@ -158,17 +158,21 @@ Accepted request body:
       "account_number": "string | null",
       "account_type": "checking | savings | null",
       "bic": "string | null",
-      "bank_name": "string | null"
+      "bank_name": "string | null",
+      "<catalog field key>": "string | null"
     }
   }
 }
 ```
-All of `rail`, `country`, `contact.channel`, `contact.value`, and every `fields.*` key are required (use `null` for unused ones). `country` is 2–3 characters; `account_holder_name` is 2–100 letters/space/apostrophe/dot/hyphen; `bank_name` max 120; `contact.value` max 120.
+`rail`, `country`, `contact.channel`, `contact.value` and the 7 existing `fields` keys (`account_holder_name`, `iban`, `routing_number`, `account_number`, `account_type`, `bic`, `bank_name`) are required (use `null` for unused ones; a missing key counts as `null`). In addition, send the selected rail's catalog field keys (e.g. `sort_code`, `pix_key`, `clabe`); any key that is neither in the catalog nor one of the 7 returns `400`. Legacy keys the rail does not define must be `null`/empty. On new rails (anything other than `TR_IBAN`/`US_ACH`/`SEPA_IBAN`), a FILLED catalog key that the rail does not define (e.g. `sort_code` for `BR_PIX`) returns `400`; empty/`null` is ignored. On the 3 legacy rails extra keys are ignored and never enter the fingerprint canonical object. For optional catalog fields an empty string (`""`) counts as `null`; an empty required field is `400`. `country` is 2–3 characters; `account_holder_name` is 2–100 letters/space/apostrophe/dot/hyphen; `bank_name` max 120; `contact.value` max 120.
 
 Rail-country rules (enforced):
 - `TR_IBAN` -> `TR`
 - `US_ACH` -> `US`
-- `SEPA_IBAN` -> one of `DE, FR, NL, BE, ES, IT, AT, PT, IE, LU, FI, GR`
+- `SEPA_IBAN` -> EPC v8.0 EUR countries: `DE, FR, NL, BE, ES, IT, AT, PT, IE, LU, FI, GR, BG, HR, CY, EE, LV, LT, MT, SI, MC, AD` (`SK`, `SM`, `VA` are absent because their IBAN length could not be verified against the registry)
+- Other rails: the country must be in the catalog `countries` list (`*` for `SWIFT_INTL`: any ISO-3166 alpha-2 except sanctioned/unassessed countries; both the profile `country` and `bank_country` reject `RU, BY, IR, KP, SY, CU, CN, LB, IQ, LY, PS, SD, YE, SO, DJ, BI, MR, LC, SC, MU, MN, FK` with `400`)
+
+Catalog: `paymentRailCatalog` in the `GET /api/orders/config` and `/payment-risk-config` responses gives each rail's field schema (`fields[].kind/pattern/checksum/ibanCountryLengths/options/aliasPatterns/normalize`). New rails are CLOSED by default; only an admin opens them. A `kind: "alias"` field comes with an enum sibling `<key>_type` in the same rail (e.g. `pix_key` + `pix_key_type`). IBAN fields are checked against the per-country length table and mod-97; `MX_SPEI` uses the CLABE 3-7-1 check digit. National ID numbers (CPF, NRIC, Thai ID, MyKad, Aadhaar, RUT) are not fields. Fingerprint: the canonical object for `TR_IBAN`/`US_ACH`/`SEPA_IBAN` is unchanged; new rails use `{ account_holder_name, bank_name, ...catalog fields }`.
 
 IBAN checks: `TR_IBAN` must match `TR` + 24 digits; `SEPA_IBAN` must match `^[A-Z]{2}[A-Z0-9]{13,32}$` and its country prefix must equal `country`; both must pass the ISO 13616 mod-97 checksum. `US_ACH`: `routing_number` is 9 digits, `account_number` 4–17 digits, `account_type` required.
 
@@ -182,6 +186,7 @@ Rail-specific fields:
 - `TR_IBAN`: `account_holder_name`, `iban`, optional `bank_name`
 - `SEPA_IBAN`: `account_holder_name`, `iban`, optional `bic`, optional `bank_name`
 - `US_ACH`: `account_holder_name`, `routing_number`, `account_number`, `account_type`, optional `bank_name`
+- Every other catalog rail: `account_holder_name`, optional `bank_name` and the rail's `paymentRailCatalog` fields (per their `required` flag)
 
 Response: `{ success, message, bankProfileChanged, profileVersion, lastBankChangeAt, bankChangeCount7d, bankChangeCount30d, payoutProfile: { rail, country, contact: { channel }, fingerprintVersion } }` (no PII is echoed back).
 
@@ -207,10 +212,10 @@ Order routes are read-layer mirrors of parent-order state. State-changing order 
 ### `GET /api/orders/config`
 Middleware: `marketReadLimiter`. Public.
 
-Returns the mirrored protocol config snapshot: `configStale`, `bondMap`, `feeConfig`, `cooldownConfig`, `tokenMap`, `paymentRiskConfig` (each rail entry carries `enabled`), `enabledPaymentRails`, `reputationPolicy`, `deployment: { escrowAddress, chainId }` (from `ARAF_ESCROW_ADDRESS` / `EXPECTED_CHAIN_ID`; the frontend uses it to warn on deploy drift) and `selectedOrderRiskLevel`. `configStale: true` means the config could not be refreshed from the chain and the last-known Redis copy is served (degraded mode). `503 { error }` when the config mirror is not available (internal error code `CONFIG_UNAVAILABLE`; the body has no separate `code` field).
+Returns the mirrored protocol config snapshot: `configStale`, `bondMap`, `feeConfig`, `cooldownConfig`, `tokenMap`, `paymentRiskConfig` (each rail entry carries `enabled`), `enabledPaymentRails`, `reputationPolicy`, `paymentRailCatalog` (the global rail catalog; no PII), `supportedFiat` (sorted union of catalog currencies; includes `TRY`/`USD`/`EUR`), `deployment: { escrowAddress, chainId }` (from `ARAF_ESCROW_ADDRESS` / `EXPECTED_CHAIN_ID`; the frontend uses it to warn on deploy drift) and `selectedOrderRiskLevel`. `configStale: true` means the config could not be refreshed from the chain and the last-known Redis copy is served (degraded mode). `503 { error }` when the config mirror is not available (internal error code `CONFIG_UNAVAILABLE`; the body has no separate `code` field).
 
 ### `GET /api/orders/payment-risk-config`
-Middleware: `marketReadLimiter`. Public. Returns `{ configStale, paymentRiskConfig, enabledPaymentRails, selectedOrderRiskLevel }`; `503` when the config is unavailable.
+Middleware: `marketReadLimiter`. Public. Returns `{ configStale, paymentRiskConfig, enabledPaymentRails, paymentRailCatalog, supportedFiat, selectedOrderRiskLevel }`; `503` when the config is unavailable.
 
 ### `GET /api/orders`
 Middleware: `marketReadLimiter`. Public order feed. Query (Joi):
@@ -229,7 +234,7 @@ Middleware: `marketReadLimiter`. Public order feed. Query (Joi):
 | `page` | integer 1–200 | `1` |
 | `limit` | integer 1–50 | `20` |
 
-Response: `{ orders, total, page, limit }`. The response is cached in memory, keyed by the validated query values, for `MARKET_CACHE_TTL_MS` (runtime setting; default 10 s; `0` under `NODE_ENV=test` unless the env is set; at most 200 entries); a hit adds the `X-Cache: HIT` header. Invalid query: `400`. Each order carries `trust_visibility_summary`, `owner_has_payout_profile` (boolean: whether the order owner has a saved payout profile), `owner_rail_enabled` (boolean: whether the rail on the owner's profile is open; `true` when there is no profile/rail) and `owner_rail` (the rail code only, `TR_IBAN`/`SEPA_IBAN`/`US_ACH`, `null` if unknown). No PII/encrypted fields are returned; the UI disables filling when `owner_has_payout_profile` is false.
+Response: `{ orders, total, page, limit }`. The response is cached in memory, keyed by the validated query values, for `MARKET_CACHE_TTL_MS` (runtime setting; default 10 s; `0` under `NODE_ENV=test` unless the env is set; at most 200 entries); a hit adds the `X-Cache: HIT` header. Invalid query: `400`. Each order carries `trust_visibility_summary`, `owner_has_payout_profile` (boolean: whether the order owner has a saved payout profile), `owner_rail_enabled` (boolean: whether the rail on the owner's profile is open; `true` when there is no profile/rail) and `owner_rail` (the catalog rail code only, e.g. `TR_IBAN`/`GB_FPS`; `null` if unknown). No PII/encrypted fields are returned; the UI disables filling when `owner_has_payout_profile` is false.
 
 ### `GET /api/orders/my`
 Middleware: `requireAuth`, `requireSessionWalletMatch`, `ordersReadLimiter`. Query: `page` (default 1), `limit` (1–50, default 20). Response `{ orders, total, page, limit }` for caller-owned orders, newest update first.
@@ -439,7 +444,7 @@ Same auth chain (`requireAuth` -> `requireSessionWalletMatch` -> `requireAdminWa
 
 | Route | Body / Query | Response |
 |---|---|---|
-| `GET /api/admin/payment-rails` | — | `{ rails: [{ code, name{TR,EN}, countries, riskLevel, enabled, changedAt, changedBy }] }` |
+| `GET /api/admin/payment-rails` | — | `{ rails: [{ code, name{TR,EN}, countries, riskLevel, region, currencies, defaultEnabled, enabled, changedAt, changedBy }] }` (with no DB record `enabled = defaultEnabled`: only `TR_IBAN`, `US_ACH`, `SEPA_IBAN` are open, the rest closed) |
 | `PUT /api/admin/payment-rails/:rail` | `{ enabled: boolean, reason?: string<=300 }` (strict Joi) | `{ success, rail, previousEnabled, enabled, changed }`; unknown rail `400 PAYMENT_RAIL_UNKNOWN`, invalid body `400`; closing the last enabled rail `409 LAST_ENABLED_RAIL`; concurrent change `409 PAYMENT_RAIL_CONFLICT`; DB unavailable `503 DB_UNAVAILABLE` |
 | `GET /api/admin/payment-rails/audit` | `page` (1-10000), `limit` (1-100, default 20) | `{ items: [{ rail, previousEnabled, newEnabled, adminWallet, reason, ipHash, createdAt }], total, page, limit }` (append-only collection, IP stored only as HMAC) |
 | `GET /api/admin/runtime-settings` | — | `{ settings: [{ key, group, unit, min, max, default, envValue, adminValue, value, source(admin\|env\|default), warning?, constraints[{TR,EN}], constraintViolations[string], changedAt, changedBy }], version, degraded }` |
@@ -453,7 +458,7 @@ Note (EN): `GET /api/admin/runtime-settings` returns, per setting, `constraints`
 
 Social link validation has a single server-side source (`backend/scripts/utils/socialLinks.js`): each link is `{ id?, label, url, order?, enabled }` (other keys are rejected); `label` is 1-24 characters of plain text, `url` is `https` only, max 300 characters, with no userinfo/port/IDN-punycode, no duplicate URLs, and the host must be on the allowlist (code default list or the `SOCIAL_LINK_ALLOWED_HOSTS` env; not changeable from the admin panel). The server generates an `id` when none is given.
 
-Public effects: `GET /api/orders/config` and `/payment-risk-config` return `enabledPaymentRails` and set `paymentRiskConfig[*][rail].enabled`; `GET /api/orders` rows carry `owner_rail_enabled` (boolean); `GET /api/auth/me` returns `payoutRail` and `payoutRailEnabled` (`false` when the saved profile's rail is closed; `hasPayoutProfile` keeps meaning "data exists"); `PUT /api/auth/profile` and `POST /api/orders/market-meta` answer `409 PAYMENT_RAIL_DISABLED` for a closed rail. Active trades (LOCKED/PAID/CHALLENGED), snapshots and the PII flow never consult rail state. The contract is rail-agnostic: this gate exists at UI/API level only.
+Public effects: `GET /api/orders/config` and `/payment-risk-config` return `enabledPaymentRails` and set `paymentRiskConfig[*][rail].enabled`; `GET /api/orders` rows carry `owner_rail_enabled` (boolean); `GET /api/auth/me` returns `payoutRail` and `payoutRailEnabled` (`false` when the saved profile's rail is closed; `hasPayoutProfile` keeps meaning "data exists"); `PUT /api/auth/profile` and `POST /api/orders/market-meta` answer `409 PAYMENT_RAIL_DISABLED` for a closed rail. Active trades (LOCKED/PAID/CHALLENGED), snapshots and the PII flow never consult rail state. An unknown rail code counts as closed. The contract is rail-agnostic: this gate exists at UI/API level only.
 
 ---
 

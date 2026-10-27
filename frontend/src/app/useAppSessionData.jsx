@@ -12,6 +12,7 @@ import { installInfraRevalidation, markInfraFailure, markInfraOk, registerInfraP
 import { WALLET_AGE_MIN_SEC } from './walletAge';
 import { applyStatePin, createStatePin, isTerminalTradeState } from './tradeStateSync';
 import { addKnownTradeIds } from './knownTrades';
+import { getSupportedFiat, normalizeCatalog, setRailCatalogState } from './railCatalog';
 
 // [TR] İçerik değişmediyse eski referans korunur (gereksiz render/effect zincirini önler).
 export const deepEqual = (a, b) => {
@@ -362,6 +363,9 @@ export function useAppSessionData({
   const [onchainBondMap, setOnchainBondMap] = useState(null);
   const [onchainTokenMap, setOnchainTokenMap] = useState({});
   const [paymentRiskConfig, setPaymentRiskConfig] = useState({});
+  // [TR] Küresel rail kataloğu ve desteklenen fiat (/orders/config); yoksa null → statik yedek (railCatalog.js).
+  const [paymentRailCatalog, setPaymentRailCatalog] = useState(null);
+  const [supportedFiat, setSupportedFiat] = useState(null);
   // [TR] null = henüz okunmadı / okunamadı (bilinmiyor); eski varsayılan 15 gerçek ücretmiş gibi gösteriliyordu.
   // [TR] Zincir saati - cihaz saati farkı (ms); aşağıdaki zamana bağlı kararlar bunu kullanır.
   const [chainOffsetMs, setChainOffsetMs] = useState(0);
@@ -835,6 +839,9 @@ export function useAppSessionData({
         if (data.deployment) setBackendDeployment(data.deployment);
         if (data.paymentRiskConfig) setPaymentRiskConfig(data.paymentRiskConfig);
         if (Array.isArray(data.enabledPaymentRails)) setEnabledPaymentRails(data.enabledPaymentRails);
+        setPaymentRailCatalog(normalizeCatalog(data.paymentRailCatalog));
+        setSupportedFiat(Array.isArray(data.supportedFiat) ? getSupportedFiat(data.supportedFiat) : null);
+        setRailCatalogState({ paymentRailCatalog: data.paymentRailCatalog, supportedFiat: data.supportedFiat, enabledPaymentRails: data.enabledPaymentRails });
       })
       .catch((err) => { if (!cancelled) console.error('[ProtocolConfig] fetch failed:', err); });
     return () => { cancelled = true; };
@@ -1538,6 +1545,8 @@ export function useAppSessionData({
               value: data.pii?.contact?.value || null,
             },
             fields: {
+              // [TR] Katalog rail'lerinin ek alan anahtarları (ör. sort_code) olduğu gibi taşınır; sabit 7 anahtar aşağıda ezer.
+              ...(data.pii?.fields && typeof data.pii.fields === 'object' ? data.pii.fields : {}),
               account_holder_name: data.pii?.fields?.account_holder_name || '',
               iban: data.pii?.fields?.iban || null,
               routing_number: data.pii?.fields?.routing_number || null,
@@ -1864,6 +1873,8 @@ export function useAppSessionData({
     reputationPolicy,
     backendDeployment,
     paymentRiskConfig,
+    paymentRailCatalog,
+    supportedFiat,
     takerFeeBps,
     tokenDecimalsMap,
     bleedingAmounts,

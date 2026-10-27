@@ -3,6 +3,7 @@
 const express = require("express");
 const request = require("supertest");
 const cookieParser = require("cookie-parser");
+const { getRailCodes } = require("../../backend/scripts/config/paymentRailCatalog");
 
 const USER = "0x1111111111111111111111111111111111111111";
 const OTHER = "0x2222222222222222222222222222222222222222";
@@ -172,8 +173,12 @@ describe("admin payment rails API", () => {
     expect((await as(request(app).put("/api/admin/payment-rails/US_ACH").send({ enabled: false }), "admin", ADMIN, false)).status).toBe(401);
     const ok = await as(request(app).get("/api/admin/payment-rails"));
     expect(ok.status).toBe(200);
-    expect(ok.body.rails.map((r) => r.code).sort()).toEqual(["SEPA_IBAN", "TR_IBAN", "US_ACH"]);
-    expect(ok.body.rails.every((r) => r.enabled === true)).toBe(true);
+    expect(ok.body.rails.map((r) => r.code).sort()).toEqual([...getRailCodes()].sort());
+    // DB kaydı yokken durum katalogdaki defaultEnabled'dır: eski 3 açık, yeniler kapalı.
+    expect(ok.body.rails.every((r) => r.enabled === r.defaultEnabled)).toBe(true);
+    expect(ok.body.rails.filter((r) => r.enabled).map((r) => r.code).sort()).toEqual(["SEPA_IBAN", "TR_IBAN", "US_ACH"]);
+    const gb = ok.body.rails.find((r) => r.code === "GB_FPS");
+    expect(gb).toEqual(expect.objectContaining({ region: "EUROPE", currencies: ["GBP"], countries: ["GB"], defaultEnabled: false, enabled: false }));
   });
 
   it("validates input: unknown rail, non-boolean, extra keys, long reason", async () => {

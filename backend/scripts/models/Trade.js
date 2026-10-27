@@ -1,6 +1,7 @@
 "use strict";
 
 const mongoose = require("mongoose");
+const { getCatalogCurrencies } = require("../config/paymentRailCatalog");
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TRADE MODEL — V3 Child Trade Mirror
@@ -140,7 +141,7 @@ const tradeSchema = new mongoose.Schema(
       fiat_amount:   { type: Number, default: null },
       exchange_rate: { type: Number, default: null },
       crypto_asset:  { type: String, enum: ["USDT", "USDC", null], default: null },
-      fiat_currency: { type: String, enum: ["TRY", "USD", "EUR", null], default: null },
+      fiat_currency: { type: String, enum: [...getCatalogCurrencies(), null], default: null },
 
       // [TR] Otoritatif kümülatif erime: String (BigInt güvenli).
       // [EN] Authoritative cumulative decay: String (BigInt-safe).

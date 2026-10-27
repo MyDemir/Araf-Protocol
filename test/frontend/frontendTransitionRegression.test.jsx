@@ -460,7 +460,9 @@ describe('frontend transition regression invariants', () => {
     expect(screen.queryByText(/minBondSurchargeBps/i)).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /Show technical disclosure/i }));
     expect(screen.getByText(/minBondSurchargeBps/i)).toBeInTheDocument();
-    expect(screen.getByText(/ACH_REVERSAL_WINDOW/i)).toBeInTheDocument();
+    // Ham anahtar yerine risk açıklaması (description) gösterilir.
+    expect(screen.queryByText(/ACH_REVERSAL_WINDOW/i)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/ACH can have reversal windows/i).length).toBeGreaterThan(0);
   });
 
   it('migration_theme_bootstrap_survives_missing_match_media_and_persists_provider_mode', () => {

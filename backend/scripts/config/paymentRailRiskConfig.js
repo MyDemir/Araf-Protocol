@@ -1,50 +1,38 @@
 "use strict";
 
-const ALLOWED_RISK_LEVELS = new Set(["LOW", "MEDIUM", "HIGH", "RESTRICTED"]);
-const PROFILE_SUPPORTED_RAILS = new Set(["TR_IBAN", "US_ACH", "SEPA_IBAN"]);
-const SEPA_COUNTRY_ALLOWLIST = new Set(["DE", "FR", "NL", "BE", "ES", "IT", "AT", "PT", "IE", "LU", "FI", "GR"]);
+const { RAIL_CATALOG, getRailByCode, getRailCodes } = require("./paymentRailCatalog");
 
-const PAYMENT_RAIL_RISK_CONFIG = {
-  TR: {
-    TR_IBAN: {
-      riskLevel: "MEDIUM",
-      minBondSurchargeBps: 0,
-      feeSurchargeBps: 0,
-      warningKey: "BANK_TRANSFER_CONFIRMATION_REQUIRED",
+const ALLOWED_RISK_LEVELS = new Set(["LOW", "MEDIUM", "HIGH", "RESTRICTED"]);
+const PROFILE_SUPPORTED_RAILS = new Set(getRailCodes());
+// [TR] SEPA ülke listesi katalogdan türetilir (EPC v8.0; IBAN uzunluğu doğrulanamayan SK/SM/VA hariç).
+const SEPA_COUNTRY_ALLOWLIST = new Set(getRailByCode("SEPA_IBAN").countries);
+
+// [TR] Risk girdisi "ülke kovası" altında tutulur (mevcut yanıt biçimi): eski kovalar TR / US / EU korunur;
+//      diğer rail'ler tek ülkeliyse o ülke, çok ülkeliyse ilk ülke, SWIFT_INTL için "INTL".
+function _bucketFor(rail) {
+  if (rail.code === "SEPA_IBAN") return "EU";
+  if (rail.countries.includes("*")) return "INTL";
+  return rail.countries[0];
+}
+
+function _buildRiskConfig() {
+  const out = {};
+  for (const rail of RAIL_CATALOG) {
+    const bucket = _bucketFor(rail);
+    out[bucket] = out[bucket] || {};
+    out[bucket][rail.code] = {
+      riskLevel: rail.risk.riskLevel,
+      minBondSurchargeBps: rail.risk.minBondSurchargeBps,
+      feeSurchargeBps: rail.risk.feeSurchargeBps,
+      warningKey: rail.risk.warningKey,
       enabled: true,
-      description: {
-        TR: "Banka transferi onayı kullanıcı sorumluluğundadır. Araf bu yöntemi doğrulamaz.",
-        EN: "Bank transfer confirmation is the user's responsibility. Araf does not verify this method.",
-      },
-    },
-  },
-  US: {
-    US_ACH: {
-      riskLevel: "HIGH",
-      minBondSurchargeBps: 50,
-      feeSurchargeBps: 0,
-      warningKey: "ACH_REVERSAL_AND_SETTLEMENT_DELAY_RISK",
-      enabled: true,
-      description: {
-        TR: "ACH işlemleri gecikme veya geri dönüş karmaşıklığı taşıyabilir.",
-        EN: "ACH transfers may involve delay or reversal complexity.",
-      },
-    },
-  },
-  EU: {
-    SEPA_IBAN: {
-      riskLevel: "MEDIUM",
-      minBondSurchargeBps: 0,
-      feeSurchargeBps: 0,
-      warningKey: "SEPA_CONFIRMATION_REQUIRED",
-      enabled: true,
-      description: {
-        TR: "SEPA transferlerinde ödeme detaylarını dikkatle kontrol et.",
-        EN: "Carefully check payment details for SEPA transfers.",
-      },
-    },
-  },
-};
+      description: { TR: rail.risk.description.TR, EN: rail.risk.description.EN },
+    };
+  }
+  return out;
+}
+
+const PAYMENT_RAIL_RISK_CONFIG = _buildRiskConfig();
 
 function _isPlainObject(value) {
   return value && typeof value === "object" && !Array.isArray(value);
@@ -122,8 +110,10 @@ function resolvePaymentRailRiskEntry(country, rail, config = PAYMENT_RAIL_RISK_C
   const direct = safeConfig[safeCountry]?.[safeRail];
   if (direct) return direct;
 
-  if (safeRail === "SEPA_IBAN" && SEPA_COUNTRY_ALLOWLIST.has(safeCountry)) {
-    return safeConfig.EU?.SEPA_IBAN || null;
+  // Çok ülkeli rail'ler (SEPA, DK_IBAN ...): ülke rail'in countries listesindeyse ana kovadaki girdi.
+  const def = getRailByCode(safeRail);
+  if (def && def.countries.includes(safeCountry)) {
+    return safeConfig[_bucketFor(def)]?.[safeRail] || null;
   }
   return null;
 }

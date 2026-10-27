@@ -1,7 +1,11 @@
+import { useRef, useState } from 'react';
 import { Lock } from 'lucide-react';
 
 import { SEPA_COUNTRY_CODES } from '../../orderUiModel';
-import { RAIL_LABELS } from '../../railLabels';
+import { RAIL_LABELS, getRailLabel } from '../../railLabels';
+import {
+  aliasTypeKey, getCatalogRail, groupRailsByRegion, isBlockedFreeCountry, isLegacyRail, regionLabel, useRailCatalogState, validateCatalogRail,
+} from '../../railCatalog';
 
 const identity = (draft) => draft;
 
@@ -19,6 +23,7 @@ export const PaymentProfilePanel = ({
   canonicalizePayoutProfileDraft = identity,
   isContractLoading = false,
   paymentRiskConfig = null,
+  paymentRailCatalog = null,
 }) => {
   const draft = payoutProfileDraft || {};
   const fields = draft.fields || {};
@@ -35,15 +40,111 @@ export const PaymentProfilePanel = ({
     Object.entries(bucket || {}).forEach(([code, entry]) => { if (entry?.enabled === false) disabledRails.add(code); });
   });
   const selectedRailClosed = disabledRails.has(rail);
-  const countryOptions = rail === 'TR_IBAN' ? ['TR'] : rail === 'US_ACH' ? ['US'] : SEPA_COUNTRY_CODES;
+
+  // [TR] Katalog (prop > bağlam). Yoksa eski 3 rail'lik statik görünüm aynen kalır.
+  const { catalog: contextCatalog, enabledRails } = useRailCatalogState();
+  const catalog = paymentRailCatalog || contextCatalog;
+  const catalogRail = catalog ? getCatalogRail(rail, catalog) : null;
+  const dynamicRail = catalogRail && !isLegacyRail(rail) ? catalogRail : null;
+  // [TR] Kullanıcının daha önce gördüğü (kayıtlı) rail kapansa bile listede kalır (karar 11); kapalı rail'ler yeni seçim için gizlenir.
+  const seenRails = useRef(new Set());
+  seenRails.current.add(rail);
+  const isRailOpen = (code) => (enabledRails ? enabledRails.includes(code) : true) && !disabledRails.has(code);
+  const visibleCatalogRows = catalog ? catalog.filter((r) => isRailOpen(r.code) || seenRails.current.has(r.code)) : [];
+  const railGroups = groupRailsByRegion(visibleCatalogRows);
+  const closedSuffix = (code) => (isRailOpen(code) ? '' : (isTR ? ' — şu an kapalı' : ' — currently closed'));
+
+  const catalogCountries = catalogRail && Array.isArray(catalogRail.countries) ? catalogRail.countries : null;
+  const freeCountry = Boolean(catalogCountries && catalogCountries.includes('*'));
+  const countryOptions = catalogCountries && !freeCountry
+    ? catalogCountries
+    : (rail === 'TR_IBAN' ? ['TR'] : rail === 'US_ACH' ? ['US'] : SEPA_COUNTRY_CODES);
+
+  // [TR] İstemci ön kontrolü (asıl doğrulama backend'de): yalnız katalog alanlı rail'lerde, gönderim denenince hatalar görünür.
+  const [attempted, setAttempted] = useState(false);
+  const fieldErrors = dynamicRail ? validateCatalogRail(dynamicRail, fields) : {};
+  const countryValue = String(draft.country || '').toUpperCase();
+  const countryError = freeCountry
+    ? (!/^[A-Z]{2}$/.test(countryValue) ? 'required' : (isBlockedFreeCountry(countryValue) ? 'blocked' : null))
+    : null;
+  const errorText = (code) => (code === 'blocked' ? (isTR ? 'Bu ülke desteklenmiyor' : 'This country is not supported') : code === 'required' ? (isTR ? 'Zorunlu alan' : 'Required') : (isTR ? 'Biçim geçersiz' : 'Invalid format'));
+  const handleSubmit = (e) => {
+    if (dynamicRail && (Object.keys(fieldErrors).length > 0 || countryError)) {
+      e?.preventDefault?.();
+      setAttempted(true);
+      return;
+    }
+    handleUpdatePII(e);
+  };
+  // [TR] Alias alanı + `<anahtar>_type` enum kardeşi tek grup (tür seçimi, sonra değer); kardeş ayrıca çizilmez.
+  const aliasTypeKeys = new Set((dynamicRail?.fields || []).filter((f) => f.kind === 'alias').map(aliasTypeKey));
+  const renderDynamicFields = () => (dynamicRail.fields || []).map((f) => {
+    if (f.kind === 'enum' && aliasTypeKeys.has(f.key)) return null;
+    if (f.kind !== 'alias') return renderCatalogField(f);
+    const typeField = dynamicRail.fields.find((x) => x.key === aliasTypeKey(f));
+    return (
+      <div key={f.key} className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-3" data-testid={`alias-group-${f.key}`}>
+        {typeField && renderCatalogField(typeField)}
+        {renderCatalogField(f)}
+      </div>
+    );
+  });
+  const renderCatalogField = (f) => {
+    const id = `payout-f-${f.key}`;
+    const label = f.label?.[isTR ? 'TR' : 'EN'] || f.key;
+    const err = attempted ? fieldErrors[f.key] : null;
+    const common = {
+      id,
+      value: fields[f.key] || '',
+      'aria-required': f.required ? 'true' : undefined,
+      'aria-invalid': err ? 'true' : undefined,
+      'aria-describedby': err ? `${id}-err` : undefined,
+    };
+    let control;
+    if (f.kind === 'enum') {
+      control = (
+        <select {...common} onChange={(e) => updateField(f.key, e.target.value)} className={inputClass}>
+          <option value="">—</option>
+          {(f.options || []).map((o) => <option key={o} value={o}>{o}</option>)}
+        </select>
+      );
+    } else {
+      const mono = f.kind !== 'email' && f.kind !== 'phone';
+      control = (
+        <input
+          {...common}
+          type={f.kind === 'email' ? 'email' : f.kind === 'phone' ? 'tel' : 'text'}
+          inputMode={f.kind === 'digits' ? 'numeric' : f.kind === 'phone' ? 'tel' : undefined}
+          autoComplete="off"
+          onChange={(e) => updateField(f.key, e.target.value)}
+          className={`${inputClass} ${mono ? 'font-mono' : ''} ${err ? 'border-danger' : ''}`}
+        />
+      );
+    }
+    return (
+      <div key={f.key}>
+        <label className={labelClass} htmlFor={id}>{label}{f.required ? ' *' : ''}</label>
+        {control}
+        {err && <p id={`${id}-err`} role="alert" className="mt-1 text-xs text-danger">{errorText(err)}</p>}
+      </div>
+    );
+  };
 
   return (
-    <form onSubmit={handleUpdatePII} className="space-y-3 bg-surface border border-borderSubtle rounded-xl p-4 max-w-xl">
+    <form onSubmit={handleSubmit} className="space-y-3 bg-surface border border-borderSubtle rounded-xl p-4 max-w-xl">
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className={labelClass} htmlFor="payout-rail">{isTR ? 'Ödeme yöntemi' : 'Payment method'}</label>
           <select id="payout-rail" value={rail} onChange={(e) => update({ rail: e.target.value })} className={inputClass}>
-            {Object.keys(RAIL_LABELS).map((key) => (
+            {catalog ? railGroups.map((g) => (
+              <optgroup key={g.region} label={regionLabel(g.region, isTR ? 'TR' : 'EN')}>
+                {g.rows.map((r) => (
+                  <option key={r.code} value={r.code} disabled={!isRailOpen(r.code) && r.code !== rail}>
+                    {getRailLabel(r.code, isTR ? 'TR' : 'EN', catalog) || r.code}{closedSuffix(r.code)}
+                  </option>
+                ))}
+              </optgroup>
+            )) : Object.keys(RAIL_LABELS).map((key) => (
               <option key={key} value={key} disabled={disabledRails.has(key) && key !== rail}>
                 {RAIL_LABELS[key][isTR ? 'TR' : 'EN']}{disabledRails.has(key) ? (isTR ? ' — şu an kapalı' : ' — currently closed') : ''}
               </option>
@@ -59,9 +160,18 @@ export const PaymentProfilePanel = ({
         </div>
         <div>
           <label className={labelClass} htmlFor="payout-country">{isTR ? 'Ülke' : 'Country'}</label>
-          <select id="payout-country" value={draft.country || countryOptions[0]} onChange={(e) => update({ country: e.target.value })} className={inputClass}>
-            {countryOptions.map((code) => <option key={code} value={code}>{code}</option>)}
-          </select>
+          {freeCountry ? (
+            <input id="payout-country" value={draft.country || ''} maxLength={2} placeholder="XX" onChange={(e) => setPayoutProfileDraft((prev) => ({ ...prev, country: e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2) }))} aria-invalid={attempted && countryError ? 'true' : undefined} className={`${inputClass} font-mono uppercase`} />
+          ) : (
+            <select id="payout-country" value={draft.country || countryOptions[0]} onChange={(e) => update({ country: e.target.value })} className={inputClass}>
+              {countryOptions.map((code) => <option key={code} value={code}>{code}</option>)}
+            </select>
+          )}
+          {attempted && countryError && (
+            <p role="alert" className="mt-1 text-xs text-danger">
+              {countryError === 'blocked' ? (isTR ? 'Bu ülke desteklenmiyor' : 'This country is not supported') : errorText('required')}
+            </p>
+          )}
         </div>
       </div>
 
@@ -70,19 +180,21 @@ export const PaymentProfilePanel = ({
         <input id="payout-holder" value={fields.account_holder_name || ''} onChange={(e) => updateField('account_holder_name', e.target.value)} autoComplete="name" className={inputClass} />
       </div>
 
-      {(rail === 'TR_IBAN' || rail === 'SEPA_IBAN') && (
+      {dynamicRail && renderDynamicFields()}
+
+      {!dynamicRail && (rail === 'TR_IBAN' || rail === 'SEPA_IBAN') && (
         <div>
           <label className={labelClass} htmlFor="payout-iban">IBAN</label>
           <input id="payout-iban" value={fields.iban || ''} onChange={(e) => updateField('iban', e.target.value)} placeholder={rail === 'TR_IBAN' ? 'TR00 0000 0000 0000 0000 0000 00' : 'DE00 0000 0000 0000 0000 00'} className={`${inputClass} font-mono`} />
         </div>
       )}
-      {rail === 'SEPA_IBAN' && (
+      {!dynamicRail && rail === 'SEPA_IBAN' && (
         <div>
           <label className={labelClass} htmlFor="payout-bic">BIC</label>
           <input id="payout-bic" value={fields.bic || ''} onChange={(e) => updateField('bic', e.target.value || null)} className={`${inputClass} font-mono`} />
         </div>
       )}
-      {rail === 'US_ACH' && (
+      {!dynamicRail && rail === 'US_ACH' && (
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className={labelClass} htmlFor="payout-routing">Routing</label>

@@ -11,7 +11,8 @@ const RISK_LEVEL_CLASS = {
 const TECHNICAL_FIELDS = [
   ['minBondSurchargeBps', (riskEntry) => riskEntry.minBondSurchargeBps ?? 0],
   ['feeSurchargeBps', (riskEntry) => riskEntry.feeSurchargeBps ?? 0],
-  ['warningKey', (riskEntry) => riskEntry.warningKey || '—'],
+  // [TR] Ham warningKey kullanıcıya gösterilmez: çeviri yoksa risk girdisinin `description` metni (lang'e göre), o da yoksa '—'.
+  ['warningKey', (riskEntry, lang) => riskEntry?.description?.[lang] || riskEntry?.description?.EN || riskEntry.warningKey || '—'],
   ['source', (riskEntry) => riskEntry.source || (riskEntry?.generic === true ? 'config' : '—')],
   ['config', (riskEntry) => riskEntry.config || riskEntry.configKey || riskEntry.configVersion || null],
   ['snapshot', (riskEntry) => riskEntry.snapshot || riskEntry.snapshotId || riskEntry.snapshotBlock || null],
@@ -100,7 +101,7 @@ function PaymentRiskTechnicalDisclosure({ lang, riskEntry, defaultOpen = false }
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
             {TECHNICAL_FIELDS.map(([label, readValue]) => (
               <p key={label} className="text-textSecondary">
-                {label}: <span className="text-textPrimary font-mono break-all">{formatTechnicalValue(readValue(riskEntry))}</span>
+                {label === 'warningKey' ? (lang === 'TR' ? 'Uyarı' : 'Warning') : label}: <span className="text-textPrimary font-mono break-all">{formatTechnicalValue(readValue(riskEntry, lang))}</span>
               </p>
             ))}
           </div>

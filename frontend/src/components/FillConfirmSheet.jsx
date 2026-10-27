@@ -5,6 +5,7 @@ import BottomSheet from './BottomSheet';
 import { fmtNumber } from '../app/format';
 import { fmtBps } from '../app/copy';
 import { railLabel } from '../app/railLabels';
+import { useRailCatalogState } from '../app/railCatalog';
 
 // [TR] Emre girme onayı: fon hareketinden önceki son ekran. Mobilde alt sheet, masaüstünde aynı kabuğun kart hali
 //      (BottomSheet; cüzdan modalıyla aynı dil). Esc, arka plan, X ve "Vazgeç" vazgeçer. Altyapı kapısı (txGate)
@@ -109,6 +110,7 @@ function Row({ label, children, sub, testId }) {
 export default function FillConfirmSheet({ summary, lang = 'EN', txGate = null, onConfirm, onCancel }) {
   const t = T[lang === 'TR' ? 'TR' : 'EN'];
   const decided = React.useRef(false);
+  const { catalog: railCatalog } = useRailCatalogState();
   if (!summary) return null;
   const blocked = Boolean(txGate?.blocked);
   const buying = summary.direction === 'buy';
@@ -131,7 +133,7 @@ export default function FillConfirmSheet({ summary, lang = 'EN', txGate = null, 
     : null;
   const windowHours = Math.round(summary.paymentWindowMs / 3600000);
   const tierText = summary.counterpartyTier !== null ? `${t.tier} ${summary.counterpartyTier}` : null;
-  const railName = railLabel(summary.rail, lang);
+  const railName = railLabel(summary.rail, lang, railCatalog);
   const upper = summary.bondIsUpperBound ? `${t.bondUpper} ` : '';
 
   const decide = (accepted) => {
