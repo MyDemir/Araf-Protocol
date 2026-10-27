@@ -171,6 +171,36 @@ describe('profile form with a catalog', () => {
     expect(within(screen.getByLabelText('Country')).getAllByRole('option').map((o) => o.value)).toContain('PL');
   });
 
+  it('SWIFT_INTL free country: sanctioned/unsupported countries are rejected client-side', () => {
+    loadCatalog({ enabledPaymentRails: [...enabledRailsFixture, 'SWIFT_INTL'] });
+    const ok = { bic: 'DEUTDEFF', bank_country: 'ZA', account_number: '12345' };
+    for (const c of ['RU', 'IR', 'KP', 'CN', 'FK', 'MU']) {
+      const onSubmit = vi.fn();
+      const { unmount } = render(<Harness initial={draftOf('SWIFT_INTL', c, ok)} onSubmit={onSubmit} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+      expect(onSubmit).not.toHaveBeenCalled();
+      expect(screen.getByText('This country is not supported')).toBeInTheDocument();
+      expect(canonicalizePayoutProfileDraft(draftOf('SWIFT_INTL', c, ok)).country).toBe('');
+      unmount();
+    }
+    const onSubmit = vi.fn();
+    render(<Harness initial={draftOf('SWIFT_INTL', 'ZA', ok)} onSubmit={onSubmit} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  it('payload carries only the selected rail catalog keys (leftovers from another rail are dropped)', () => {
+    loadCatalog();
+    const draft = draftOf('MX_SPEI', 'MX', { clabe: '646180157000000004', sort_code: '123456', pix_key: 'x@y.co', vpa: 'a@upi', iban: 'DE89370400440532013000' });
+    const f = canonicalizePayoutProfileDraft(draft).fields;
+    expect(Object.keys(f).sort()).toEqual(['account_holder_name', 'account_number', 'account_type', 'bank_name', 'bic', 'clabe', 'iban', 'routing_number'].sort());
+    expect(f.iban).toBeNull();
+    expect(f.clabe).toBe('646180157000000004');
+    expect(f).not.toHaveProperty('sort_code');
+    expect(f).not.toHaveProperty('pix_key');
+    expect(f).not.toHaveProperty('vpa');
+  });
+
   it('canonicalizer derives allowed countries and defaults from the catalog', () => {
     loadCatalog();
     expect(canonicalizePayoutProfileDraft(draftOf('SEPA_IBAN', 'PL')).country).toBe('PL');

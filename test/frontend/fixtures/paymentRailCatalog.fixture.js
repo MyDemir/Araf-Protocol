@@ -1,6 +1,6 @@
 // [TR] Ortak brifteki ARAYÜZ'e uyan katalog fixture'ı (getPublicRailCatalog çıktısı: legacyCanonical yok).
 //      Gerçek API yokken testler ve görsel kontrol bunu kullanır; alan metinleri örnektir.
-const risk = (riskLevel = 'MEDIUM') => ({ riskLevel, minBondSurchargeBps: 0, feeSurchargeBps: 0, warningKey: null, description: { TR: '', EN: '' } });
+const risk = (riskLevel = 'MEDIUM', warningKey = null, description = { TR: '', EN: '' }) => ({ riskLevel, minBondSurchargeBps: 0, feeSurchargeBps: 0, warningKey, description });
 const f = (key, TR, EN, kind, extra = {}) => ({ key, label: { TR, EN }, kind, required: true, normalize: 'trim', copyable: false, ...extra });
 
 export const SEPA_FIXTURE_COUNTRIES = ['DE', 'FR', 'NL', 'BE', 'ES', 'IT', 'AT', 'PT', 'IE', 'LU', 'FI', 'GR', 'PL', 'SE'];
@@ -16,14 +16,14 @@ export const paymentRailCatalogFixture = [
       f('account_number', 'Hesap no', 'Account no', 'digits', { pattern: '^\\d{4,17}$', normalize: 'strip_spaces', copyable: true }),
       f('account_type', 'Hesap tipi', 'Account type', 'enum', { required: false, options: ['checking', 'savings'] }),
     ] },
-  { code: 'GB_FPS', region: 'EUROPE', name: { TR: 'Birleşik Krallık (Faster Payments)', EN: 'United Kingdom (Faster Payments)' }, countries: ['GB'], currencies: ['GBP'], defaultEnabled: false, risk: risk('HIGH'),
+  { code: 'GB_FPS', region: 'EUROPE', name: { TR: 'Birleşik Krallık (Faster Payments)', EN: 'United Kingdom (Faster Payments)' }, countries: ['GB'], currencies: ['GBP'], defaultEnabled: false, risk: risk('HIGH', 'GB_FPS_APP_REIMBURSEMENT_RISK', { TR: 'Yetkili push ödeme dolandırıcılığında geri alma ve iade kuralları farklıdır.', EN: 'Authorised push payment fraud reimbursement rules apply.' }),
     fields: [
       f('sort_code', 'Sort code', 'Sort code', 'digits', { pattern: '^\\d{6}$', normalize: 'strip_spaces', copyable: true }),
       f('account_number', 'Hesap numarası', 'Account number', 'digits', { pattern: '^\\d{8}$', normalize: 'strip_spaces', copyable: true }),
     ] },
   { code: 'MX_SPEI', region: 'AMERICAS', name: { TR: 'Meksika (SPEI)', EN: 'Mexico (SPEI)' }, countries: ['MX'], currencies: ['MXN'], defaultEnabled: false, risk: risk(),
     fields: [f('clabe', 'CLABE', 'CLABE', 'digits', { pattern: '^\\d{18}$', checksum: 'clabe', normalize: 'strip_spaces', copyable: true })] },
-  { code: 'BR_PIX', region: 'AMERICAS', name: { TR: 'Brezilya (Pix)', EN: 'Brazil (Pix)' }, countries: ['BR'], currencies: ['BRL'], defaultEnabled: false, risk: risk('HIGH'),
+  { code: 'BR_PIX', region: 'AMERICAS', name: { TR: 'Brezilya (Pix)', EN: 'Brazil (Pix)' }, countries: ['BR'], currencies: ['BRL'], defaultEnabled: false, risk: risk('HIGH', 'BR_PIX_MED_REVERSAL_RISK', { TR: 'Pix, MED 2.0 ile ödeme sonrası geri alınabilir.', EN: 'Pix payments can be reversed after the fact (MED 2.0).' }),
     fields: [
       f('pix_key_type', 'Pix anahtar türü', 'Pix key type', 'enum', { options: ['email', 'phone', 'evp', 'cnpj'] }),
       f('pix_key', 'Pix anahtarı', 'Pix key', 'alias', {

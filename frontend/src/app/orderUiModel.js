@@ -6,7 +6,7 @@
 import { formatUnits } from 'viem';
 import { orderSide as orderSideCopy } from './copy';
 import { fmtNumber } from './format';
-import { getCatalogRail, getRailCatalogState, isLegacyRail, normalizeFieldValue } from './railCatalog';
+import { getCatalogRail, getRailCatalogState, isBlockedFreeCountry, isLegacyRail, normalizeFieldValue } from './railCatalog';
 
 const DEFAULT_TOKEN_DECIMALS = 6;
 const VALID_ORDER_SIDES = new Set(['SELL_CRYPTO', 'BUY_CRYPTO']);
@@ -55,7 +55,7 @@ export const canonicalizePayoutProfileDraft = (draft = {}) => {
   const allowedCountries = getAllowedRailCountries(rail);
   const requestedCountry = String(draft.country || '').toUpperCase();
   const country = allowedCountries === null
-    ? (/^[A-Z]{2}$/.test(requestedCountry) ? requestedCountry : '')
+    ? (/^[A-Z]{2}$/.test(requestedCountry) && !isBlockedFreeCountry(requestedCountry) ? requestedCountry : '')
     : (allowedCountries.includes(requestedCountry) ? requestedCountry : getRailDefaultCountry(rail));
   const rawChannel = draft?.contact?.channel || null;
   const channel = rawChannel ? String(rawChannel).toLowerCase() : null;

@@ -16,6 +16,10 @@ export const isLegacyRail = (code) => LEGACY_RAIL_CODES.includes(String(code || 
 export const REFERENCE_RATE_FIATS = Object.freeze(['TRY', 'USD', 'EUR', 'GBP']);
 export const hasReferenceRate = (fiat) => REFERENCE_RATE_FIATS.includes(String(fiat || '').toUpperCase());
 
+// [TR] Serbest ülke girişinde (SWIFT_INTL, countries ["*"]) backend'in reddettiği ülkeler (karar 8); istemci yalnız ön kontrol yapar.
+export const BLOCKED_FREE_COUNTRIES = Object.freeze(['RU', 'BY', 'IR', 'KP', 'SY', 'CU', 'CN', 'LB', 'IQ', 'LY', 'PS', 'SD', 'YE', 'SO', 'DJ', 'BI', 'MR', 'LC', 'SC', 'MU', 'MN', 'FK']);
+export const isBlockedFreeCountry = (code) => BLOCKED_FREE_COUNTRIES.includes(String(code || '').toUpperCase());
+
 export const REGION_ORDER = ['EUROPE', 'MIDDLE_EAST_AFRICA', 'AMERICAS', 'ASIA_PACIFIC', 'INTERNATIONAL', 'OTHER'];
 const REGION_LABELS = {
   EUROPE: { TR: 'Avrupa', EN: 'Europe' },

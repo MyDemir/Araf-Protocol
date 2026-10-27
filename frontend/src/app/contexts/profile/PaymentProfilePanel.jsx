@@ -4,7 +4,7 @@ import { Lock } from 'lucide-react';
 import { SEPA_COUNTRY_CODES } from '../../orderUiModel';
 import { RAIL_LABELS, getRailLabel } from '../../railLabels';
 import {
-  aliasTypeKey, getCatalogRail, groupRailsByRegion, isLegacyRail, regionLabel, useRailCatalogState, validateCatalogRail,
+  aliasTypeKey, getCatalogRail, groupRailsByRegion, isBlockedFreeCountry, isLegacyRail, regionLabel, useRailCatalogState, validateCatalogRail,
 } from '../../railCatalog';
 
 const identity = (draft) => draft;
@@ -65,9 +65,13 @@ export const PaymentProfilePanel = ({
   // [TR] İstemci ön kontrolü (asıl doğrulama backend'de): yalnız katalog alanlı rail'lerde, gönderim denenince hatalar görünür.
   const [attempted, setAttempted] = useState(false);
   const fieldErrors = dynamicRail ? validateCatalogRail(dynamicRail, fields) : {};
+  const countryValue = String(draft.country || '').toUpperCase();
+  const countryError = freeCountry
+    ? (!/^[A-Z]{2}$/.test(countryValue) ? 'required' : (isBlockedFreeCountry(countryValue) ? 'blocked' : null))
+    : null;
   const errorText = (code) => (code === 'required' ? (isTR ? 'Zorunlu alan' : 'Required') : (isTR ? 'Biçim geçersiz' : 'Invalid format'));
   const handleSubmit = (e) => {
-    if (dynamicRail && Object.keys(fieldErrors).length > 0) {
+    if (dynamicRail && (Object.keys(fieldErrors).length > 0 || countryError)) {
       e?.preventDefault?.();
       setAttempted(true);
       return;
@@ -159,11 +163,16 @@ export const PaymentProfilePanel = ({
         <div>
           <label className={labelClass} htmlFor="payout-country">{isTR ? 'Ülke' : 'Country'}</label>
           {freeCountry ? (
-            <input id="payout-country" value={draft.country || ''} maxLength={2} placeholder="XX" onChange={(e) => update({ country: e.target.value.toUpperCase() })} className={`${inputClass} font-mono uppercase`} />
+            <input id="payout-country" value={draft.country || ''} maxLength={2} placeholder="XX" onChange={(e) => update({ country: e.target.value.toUpperCase() })} aria-invalid={attempted && countryError ? 'true' : undefined} className={`${inputClass} font-mono uppercase`} />
           ) : (
             <select id="payout-country" value={draft.country || countryOptions[0]} onChange={(e) => update({ country: e.target.value })} className={inputClass}>
               {countryOptions.map((code) => <option key={code} value={code}>{code}</option>)}
             </select>
+          )}
+          {attempted && countryError && (
+            <p role="alert" className="mt-1 text-xs text-danger">
+              {countryError === 'blocked' ? (isTR ? 'Bu ülke desteklenmiyor' : 'This country is not supported') : errorText('required')}
+            </p>
           )}
         </div>
       </div>
