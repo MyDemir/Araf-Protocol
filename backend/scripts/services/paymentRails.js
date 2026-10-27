@@ -3,11 +3,11 @@
 /**
  * Payment Rails Service — ödeme yöntemi (rail) etkinlik durumu.
  *
- * - Kalıcı kaynak: Mongo tek belge (PaymentRailSetting, key="payment_rails"). Kayıt yoksa kodda tanımlı
- *   tüm rail'ler etkin (mevcut davranış).
+ * - Kalıcı kaynak: Mongo tek belge (PaymentRailSetting, key="payment_rails"). Kayıt yoksa katalogdaki defaultEnabled
+ *   değeri geçerlidir (yalnız TR_IBAN, US_ACH, SEPA_IBAN açık); DB'de kaydı olan rail kayıtlı durumunu korur.
  * - Okuma kısa süreli süreç-içi önbellekten (varsayılan 15 sn, en çok 30 sn). Yazma bu süreçte önbelleği
  *   hemen geçersiz kılar; diğer süreçler en geç TTL sonunda görür.
- * - Okuma hatasında son bilinen değer, o da yoksa "hepsi etkin" döner (fail-open: yalnız yeni iş kapısıdır,
+ * - Okuma hatasında son bilinen değer, o da yoksa "varsayılan durumlar" döner (fail-open: yalnız yeni iş kapısıdır,
  *   mevcut işleri bozmaz).
  * - Bu kapı yalnız UI/API düzeyindedir; kontrat rail bilmez.
  */
@@ -15,7 +15,7 @@
 const mongoose = require("mongoose");
 const PaymentRailSetting = require("../models/PaymentRailSetting");
 const PaymentRailAudit = require("../models/PaymentRailAudit");
-const { PAYMENT_RAIL_RISK_CONFIG, SEPA_COUNTRY_ALLOWLIST } = require("../config/paymentRailRiskConfig");
+const { RAIL_CATALOG } = require("../config/paymentRailCatalog");
 const logger = require("../utils/logger");
 
 const SETTING_KEY = "payment_rails";
@@ -27,26 +27,17 @@ function _ttlFromEnv(raw, fallback = 15_000, max = 30_000) {
 }
 const CACHE_TTL_MS = _ttlFromEnv(process.env.PAYMENT_RAILS_CACHE_TTL_MS);
 
-const RAIL_NAMES = {
-  TR_IBAN: { TR: "Türkiye Banka Havalesi (IBAN)", EN: "Turkey Bank Transfer (IBAN)" },
-  US_ACH: { TR: "ABD ACH", EN: "US ACH" },
-  SEPA_IBAN: { TR: "SEPA (IBAN)", EN: "SEPA (IBAN)" },
-};
-
-/** Kodda tanımlı rail kataloğu: [{ code, name, countries, riskLevel }] */
+/** Kodda tanımlı rail kataloğu (admin listesi): paymentRailCatalog.js tek kaynaktır. */
 function getRailCatalog() {
-  const out = [];
-  for (const [bucket, rails] of Object.entries(PAYMENT_RAIL_RISK_CONFIG)) {
-    for (const [code, entry] of Object.entries(rails)) {
-      out.push({
-        code,
-        name: RAIL_NAMES[code] || { TR: code, EN: code },
-        countries: code === "SEPA_IBAN" && bucket === "EU" ? [...SEPA_COUNTRY_ALLOWLIST] : [bucket],
-        riskLevel: entry.riskLevel,
-      });
-    }
-  }
-  return out;
+  return RAIL_CATALOG.map((r) => ({
+    code: r.code,
+    name: { TR: r.name.TR, EN: r.name.EN },
+    countries: [...r.countries],
+    riskLevel: r.risk.riskLevel,
+    region: r.region,
+    currencies: [...r.currencies],
+    defaultEnabled: r.defaultEnabled,
+  }));
 }
 
 function getRailCodes() {
@@ -63,7 +54,7 @@ let lastKnown = null;
 
 function _defaultStates() {
   const states = {};
-  for (const code of getRailCodes()) states[code] = { enabled: true, changed_at: null, changed_by: null };
+  for (const { code, defaultEnabled } of RAIL_CATALOG) states[code] = { enabled: defaultEnabled, changed_at: null, changed_by: null };
   return states;
 }
 
@@ -135,14 +126,14 @@ async function isRailEnabledStrict(code) {
     throw _err("RAIL_STATE_UNAVAILABLE", "Ödeme yöntemi durumu şu an doğrulanamıyor.");
   }
   const st = states[String(code || "").toUpperCase()];
-  return st ? st.enabled : true;
+  return st ? st.enabled : false;
 }
 
 async function isRailEnabled(code) {
   const states = await getRailStates();
   const st = states[String(code || "").toUpperCase()];
-  // Katalogda olmayan rail zaten ayrı doğrulamada reddedilir; burada "bilinmiyor" = kapalı sayılmaz.
-  return st ? st.enabled : true;
+  // Katalogda olmayan (bilinmeyen) rail kapalıdır.
+  return st ? st.enabled : false;
 }
 
 async function getEnabledRailCodes() {
@@ -170,7 +161,7 @@ async function applyRailStatesToRiskConfig(riskConfig) {
   for (const [bucket, rails] of Object.entries(riskConfig || {})) {
     out[bucket] = {};
     for (const [code, entry] of Object.entries(rails || {})) {
-      out[bucket][code] = { ...entry, enabled: entry.enabled !== false && (states[code] ? states[code].enabled : true) };
+      out[bucket][code] = { ...entry, enabled: entry.enabled !== false && (states[code] ? states[code].enabled : false) };
     }
   }
   return out;
