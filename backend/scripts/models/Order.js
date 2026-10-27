@@ -1,6 +1,7 @@
 "use strict";
 
 const mongoose = require("mongoose");
+const { getCatalogCurrencies } = require("../config/paymentRailCatalog");
 
 /**
  * Order Model — V3 Parent Order Mirror
@@ -76,7 +77,7 @@ const orderSchema = new mongoose.Schema(
     // [EN] UI/search enrichment fields. Not canonical truth.
     market: {
       crypto_asset:  { type: String, enum: ["USDT", "USDC", null], default: null },
-      fiat_currency: { type: String, enum: ["TRY", "USD", "EUR", null], default: null },
+      fiat_currency: { type: String, enum: [...getCatalogCurrencies(), null], default: null },
       exchange_rate: { type: Number, default: null },
     },
 
