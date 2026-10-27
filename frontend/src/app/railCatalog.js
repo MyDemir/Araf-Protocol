@@ -94,12 +94,23 @@ export const normalizeFieldValue = (field, value) => {
 };
 const safeRegExp = (src) => { try { return new RegExp(src); } catch { return null; } };
 
-// [TR] Alias alanının türü: seçenekleri aynı olan kardeş enum alanının değeri (ör. pix_key_type). Yoksa null.
-//      [doğrulanamadı: sözleşme alias türünün nerede tutulduğunu yazmıyor; bu sezgi yalnız istemci ön kontrolüdür.]
+// [TR] Alias alanının türü: aynı rail'deki `<anahtar>_type` enum kardeşi (sözleşme). Yoksa null.
+export const aliasTypeKey = (field) => `${field.key}_type`;
 export const resolveAliasType = (field, rail, values) => {
-  const opts = [...(field.options || [])].sort().join('|');
-  const sibling = (rail?.fields || []).find((f) => f !== field && f.kind === 'enum' && [...(f.options || [])].sort().join('|') === opts);
+  const sibling = (rail?.fields || []).find((f) => f.key === aliasTypeKey(field) && f.kind === 'enum');
   return sibling ? (values?.[sibling.key] || null) : null;
+};
+// [TR] IBAN mod-97 (ISO 13616); SWIFT_INTL hesap no ön kontrolü için. Asıl doğrulama backend.
+export const ibanMod97Ok = (iban) => {
+  const sv = String(iban || '').toUpperCase();
+  if (!/^[A-Z]{2}\d{2}[A-Z0-9]+$/.test(sv)) return false;
+  const moved = sv.slice(4) + sv.slice(0, 4);
+  let rem = 0;
+  for (const ch of moved) {
+    const chunk = ch >= 'A' ? String(ch.charCodeAt(0) - 55) : ch;
+    rem = Number(String(rem) + chunk) % 97;
+  }
+  return rem === 1;
 };
 
 // [TR] Dönen değer: null (geçerli ya da boş-opsiyonel) ya da 'required' | 'pattern' | 'option' | 'length'.
@@ -116,6 +127,12 @@ export const validateCatalogField = (field, rawValue, { rail = null, values = {}
     return null;
   }
   if (field.pattern) { const re = safeRegExp(field.pattern); if (re && !re.test(value)) return 'pattern'; }
+  // [TR] checksum:"mod97" + ibanCountryLengths: `bank_country` tabloda varsa IBAN olarak, yoksa düz hesap no olarak kontrol edilir.
+  if (field.checksum === 'mod97' && field.ibanCountryLengths) {
+    const want = field.ibanCountryLengths[String(values?.bank_country || '').toUpperCase()];
+    if (want) return value.length === want && ibanMod97Ok(value) ? null : 'length';
+    return null;
+  }
   if (field.kind === 'iban' && field.ibanCountryLengths) {
     const want = field.ibanCountryLengths[value.slice(0, 2)];
     if (want && value.length !== want) return 'length';

@@ -37,7 +37,8 @@ export const paymentRailCatalogFixture = [
   { code: 'SWIFT_INTL', region: 'INTERNATIONAL', name: { TR: 'Uluslararası (SWIFT)', EN: 'International (SWIFT)' }, countries: ['*'], currencies: ['USD', 'EUR', 'GBP'], defaultEnabled: false, risk: risk('HIGH'),
     fields: [
       f('bic', 'BIC', 'BIC', 'bic', { normalize: 'strip_spaces_upper', pattern: '^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$' }),
-      f('account_number', 'Hesap no / IBAN', 'Account no / IBAN', 'alnum', { normalize: 'strip_spaces_upper', copyable: true }),
+      f('bank_country', 'Banka ülkesi', 'Bank country', 'alnum', { pattern: '^[A-Z]{2}$', normalize: 'strip_spaces_upper' }),
+      f('account_number', 'Hesap no / IBAN', 'Account no / IBAN', 'alnum', { normalize: 'strip_spaces_upper', checksum: 'mod97', ibanCountryLengths: { DE: 22, GB: 22, TR: 26 }, copyable: true }),
     ] },
 ];
 

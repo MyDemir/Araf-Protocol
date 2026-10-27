@@ -64,11 +64,16 @@ export const canonicalizePayoutProfileDraft = (draft = {}) => {
   if (channel === 'phone' && value) value = value.replace(/\s+/g, '');
   if (!channel) value = null;
   const fields = draft?.fields || {};
-  // [TR] Katalog rail'i (eski 3 hariç): kanonik = {account_holder_name, bank_name, ...katalog alanları}; boş alan gönderilmez.
+  // [TR] Katalog rail'i (eski 3 hariç): eski 7 anahtar her zaman (null olabilir) + dolu katalog alanları (backend sözleşmesi).
   //      Eski 3 rail'de aşağıdaki şekil BAYT BAYT aynı kalır (backend fingerprint kuralı).
   if (catalogRail && !isLegacyRail(rail)) {
     const out = {
       account_holder_name: String(fields.account_holder_name || '').trim().replace(/\s+/g, ' '),
+      iban: null,
+      routing_number: null,
+      account_number: null,
+      account_type: null,
+      bic: null,
       bank_name: fields.bank_name ? String(fields.bank_name).trim() : null,
     };
     (catalogRail.fields || []).forEach((f) => {
@@ -257,10 +262,18 @@ export const resolvePaymentRiskEntry = ({ paymentRiskConfig = {}, rail, country 
   if (!safeRail || !paymentRiskConfig || typeof paymentRiskConfig !== 'object') return null;
   const direct = paymentRiskConfig?.[safeCountry]?.[safeRail];
   if (direct) return direct;
-  // [TR] Çok ülkeli rail'ler katalogdaki `countries` ile çözülür (SEPA: EU kovası); kovası olmayanlar genel aramaya düşer.
+  // [TR] Rail'in katalogdaki `countries` listesiyle çözüm: SEPA -> EU kovası; diğer çok ülkeli rail ana ülke kovasında
+  //      (DK_IBAN -> DK), SWIFT_INTL (["*"]) INTL kovasında.
   const railCountries = getAllowedRailCountries(safeRail);
   if (safeRail === 'SEPA_IBAN' && railCountries && railCountries.includes(safeCountry)) {
     return paymentRiskConfig?.EU?.SEPA_IBAN || null;
+  }
+  if (getCatalogRail(safeRail)) {
+    const buckets = railCountries === null ? ['INTL'] : railCountries;
+    for (const key of buckets) {
+      const hit = paymentRiskConfig?.[key]?.[safeRail];
+      if (hit) return hit;
+    }
   }
   const genericEntry = Object.values(paymentRiskConfig)
     .find((bucket) => bucket && typeof bucket === 'object' && bucket[safeRail]);

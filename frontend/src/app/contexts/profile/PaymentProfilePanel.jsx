@@ -4,7 +4,7 @@ import { Lock } from 'lucide-react';
 import { SEPA_COUNTRY_CODES } from '../../orderUiModel';
 import { RAIL_LABELS, getRailLabel } from '../../railLabels';
 import {
-  getCatalogRail, groupRailsByRegion, isLegacyRail, regionLabel, useRailCatalogState, validateCatalogRail,
+  aliasTypeKey, getCatalogRail, groupRailsByRegion, isLegacyRail, regionLabel, useRailCatalogState, validateCatalogRail,
 } from '../../railCatalog';
 
 const identity = (draft) => draft;
@@ -74,6 +74,19 @@ export const PaymentProfilePanel = ({
     }
     handleUpdatePII(e);
   };
+  // [TR] Alias alanı + `<anahtar>_type` enum kardeşi tek grup (tür seçimi, sonra değer); kardeş ayrıca çizilmez.
+  const aliasTypeKeys = new Set((dynamicRail?.fields || []).filter((f) => f.kind === 'alias').map(aliasTypeKey));
+  const renderDynamicFields = () => (dynamicRail.fields || []).map((f) => {
+    if (f.kind === 'enum' && aliasTypeKeys.has(f.key)) return null;
+    if (f.kind !== 'alias') return renderCatalogField(f);
+    const typeField = dynamicRail.fields.find((x) => x.key === aliasTypeKey(f));
+    return (
+      <div key={f.key} className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-3" data-testid={`alias-group-${f.key}`}>
+        {typeField && renderCatalogField(typeField)}
+        {renderCatalogField(f)}
+      </div>
+    );
+  });
   const renderCatalogField = (f) => {
     const id = `payout-f-${f.key}`;
     const label = f.label?.[isTR ? 'TR' : 'EN'] || f.key;
@@ -160,7 +173,7 @@ export const PaymentProfilePanel = ({
         <input id="payout-holder" value={fields.account_holder_name || ''} onChange={(e) => updateField('account_holder_name', e.target.value)} autoComplete="name" className={inputClass} />
       </div>
 
-      {dynamicRail && dynamicRail.fields.map(renderCatalogField)}
+      {dynamicRail && renderDynamicFields()}
 
       {!dynamicRail && (rail === 'TR_IBAN' || rail === 'SEPA_IBAN') && (
         <div>

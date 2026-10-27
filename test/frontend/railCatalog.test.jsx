@@ -120,7 +120,7 @@ describe('profile form with a catalog', () => {
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(onSubmit.mock.calls[0][0]).toEqual({
       rail: 'GB_FPS', country: 'GB', contact: { channel: null, value: null },
-      fields: { account_holder_name: 'Jane Doe', bank_name: null, sort_code: '123456', account_number: '12345678' },
+      fields: { account_holder_name: 'Jane Doe', iban: null, routing_number: null, account_number: '12345678', account_type: null, bic: null, bank_name: null, sort_code: '123456' },
     });
   });
 
@@ -147,8 +147,10 @@ describe('profile form with a catalog', () => {
     expect(onSubmit).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText(/^Pix key \*/), { target: { value: '12345678000199' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(screen.getByTestId('alias-group-pix_key')).toContainElement(screen.getByLabelText(/Pix key type/));
     expect(onSubmit.mock.calls[0][0].fields).toEqual({
-      account_holder_name: 'Jane Doe', bank_name: null, pix_key_type: 'cnpj', pix_key: '12345678000199',
+      account_holder_name: 'Jane Doe', iban: null, routing_number: null, account_number: null, account_type: null, bic: null, bank_name: null,
+      pix_key_type: 'cnpj', pix_key: '12345678000199',
     });
   });
 
@@ -175,6 +177,30 @@ describe('profile form with a catalog', () => {
     expect(canonicalizePayoutProfileDraft(draftOf('SEPA_IBAN', 'US')).country).toBe('DE');
     expect(canonicalizePayoutProfileDraft(draftOf('BR_PIX', 'XX')).country).toBe('BR');
     expect(canonicalizePayoutProfileDraft(draftOf('SWIFT_INTL', 'za')).country).toBe('ZA');
+  });
+
+  it('SWIFT_INTL account number is checked as an IBAN (mod-97) only when bank_country is in the length table', () => {
+    loadCatalog({ enabledPaymentRails: [...enabledRailsFixture, 'SWIFT_INTL'] });
+    const onSubmit = vi.fn();
+    const base = { bic: 'DEUTDEFF', bank_country: 'DE' };
+    const { unmount } = render(<Harness initial={draftOf('SWIFT_INTL', 'DE', { ...base, account_number: 'DE89370400440532013001' })} onSubmit={onSubmit} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(onSubmit).not.toHaveBeenCalled(); // geçersiz kontrol basamağı / uzunluk
+    unmount();
+    render(<Harness initial={draftOf('SWIFT_INTL', 'DE', { ...base, account_number: 'DE89370400440532013000' })} onSubmit={onSubmit} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    cleanup();
+    render(<Harness initial={draftOf('SWIFT_INTL', 'ZA', { bic: 'DEUTDEFF', bank_country: 'ZA', account_number: '12345' })} onSubmit={onSubmit} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(onSubmit).toHaveBeenCalledTimes(2); // tabloda yok: düz hesap no
+  });
+
+  it('resolvePaymentRiskEntry finds catalog rails in their country bucket and SWIFT_INTL in INTL', () => {
+    loadCatalog();
+    const cfg = { BR: { BR_PIX: { riskLevel: 'HIGH' } }, INTL: { SWIFT_INTL: { riskLevel: 'HIGH', tag: 'intl' } } };
+    expect(resolvePaymentRiskEntry({ paymentRiskConfig: cfg, rail: 'BR_PIX', country: 'BR' })).toEqual({ riskLevel: 'HIGH' });
+    expect(resolvePaymentRiskEntry({ paymentRiskConfig: cfg, rail: 'SWIFT_INTL', country: 'ZA' }).tag).toBe('intl');
   });
 
   it('resolvePaymentRiskEntry resolves multi-country SEPA through catalog countries', () => {
