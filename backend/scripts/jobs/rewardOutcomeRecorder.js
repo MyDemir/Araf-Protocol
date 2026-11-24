@@ -22,6 +22,7 @@
 const { ethers } = require("ethers");
 const { isConfiguredAddress: _isConfiguredAddress } = require("../utils/onchain");
 const Trade = require("../models/Trade");
+const { escrowScopeFilter } = require("../services/escrowScope");
 const logger = require("../utils/logger");
 const { getSharedProvider } = require("../services/rpcProvider");
 
@@ -104,7 +105,10 @@ async function runRewardOutcomeRecorder(opts = {}) {
 
   const candidateLimit = await runtimeValue("REWARD_RECORDER_CANDIDATE_LIMIT");
   const batchLimit = await runtimeValue("REWARD_RECORDER_BATCH_LIMIT");
+  // [TR] Escrow kapsamı: eski kontratın aynı numaralı trade'i aktif kontrata kaydedilmez/işaretlenmez.
+  const scope = escrowScopeFilter();
   const candidates = await Trade.find({
+    ...scope,
     resolution_type: { $in: REWARDABLE_RESOLUTION_TYPES },
     tier: { $gte: 1 },
     "timers.resolved_at": { $gte: since },
@@ -154,7 +158,7 @@ async function runRewardOutcomeRecorder(opts = {}) {
 
   try {
     await Trade.updateMany(
-      { onchain_escrow_id: { $in: pendingRaw }, "timers.reward_recorded_at": null },
+      { ...scope, onchain_escrow_id: { $in: pendingRaw }, "timers.reward_recorded_at": null },
       { $set: { "timers.reward_recorded_at": new Date() } }
     );
   } catch (err) {

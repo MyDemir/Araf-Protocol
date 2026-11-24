@@ -30,6 +30,7 @@ const Order = require("../models/Order");
 const User = require("../models/User");
 const RevenueEvent = require("../models/RevenueEvent");
 const { recordTerminalTradeStat } = require("./terminalStats");
+const { escrowScopeFilter, escrowScopeFields } = require("./escrowScope");
 const RewardFunding = require("../models/RewardFunding");
 const RewardEpoch = require("../models/RewardEpoch");
 const RewardClaim = require("../models/RewardClaim");
@@ -397,7 +398,9 @@ function _toIdentityString(v, { allowZero = false } = {}) {
 
 function _buildIdentityLookup(field, rawId) {
   const idString = _toIdentityString(rawId);
-  return { [field]: idString };
+  // [TR] Escrow kapsamı: aynı numara eski kontratta da olabilir; okuma (routes) ile aynı normalizasyon.
+  //      Upsert'te eşitlik alanı olarak insert edilen belgeye escrow_address'i de taşır.
+  return { ...escrowScopeFilter(), [field]: idString };
 }
 
 /**
@@ -1761,6 +1764,7 @@ class EventWorker {
   async _upsertOrderMirror(orderData, opts = {}) {
     const orderId = _toIdentityString(orderData.id);
     const payload = {
+      ...escrowScopeFields(),
       onchain_order_id: orderId,
       owner_address: orderData.owner.toLowerCase(),
       side: _normalizeSide(orderData.side),
@@ -1847,7 +1851,7 @@ class EventWorker {
     if (!intent || intent.owner !== owner) return currentMarket;
 
     await Order.updateOne(
-      { onchain_order_id: orderDoc.onchain_order_id, "market.exchange_rate": null },
+      { ..._buildIdentityLookup("onchain_order_id", orderDoc.onchain_order_id), "market.exchange_rate": null },
       { $set: { "market.fiat_currency": intent.fiat_currency, "market.exchange_rate": intent.exchange_rate } },
       { session }
     );
@@ -1871,6 +1875,7 @@ class EventWorker {
     // [EN] All nested fields use dotted paths. A nested-object $set would silently wipe the
     //      encrypted receipt, decay accounting and fiat/rate enrichment on replay.
     const setPayload = {
+      ...escrowScopeFields(),
       onchain_escrow_id: tradeId,
       parent_order_id: parentOrderId === "0" ? null : parentOrderId,
       trade_origin: tradeOrigin,
@@ -2103,7 +2108,7 @@ class EventWorker {
     //      terminal trade çekilip yalnız o örneklemde eksik aranıyordu; eski/yeni sorunlu kayıtlar kaçabiliyordu.
     // [EN] B22: terminal trades missing resolved_at are queried DIRECTLY. Previously an unsorted limit(100) sample
     //      of terminal trades was fetched and only that sample was checked, so problem rows could be missed.
-    const missingFilter = { status: { $in: terminalStatuses }, "timers.resolved_at": null };
+    const missingFilter = { ...escrowScopeFilter(), status: { $in: terminalStatuses }, "timers.resolved_at": null };
     const missingTerminalTimestamp = await Trade.find(missingFilter)
       .select("onchain_escrow_id status timers.resolved_at")
       .sort({ _id: -1 })
@@ -2120,7 +2125,7 @@ class EventWorker {
 
     // [TR] Tekrar projeksiyonu kontrolü son terminal trade'lerin en yeni örnekleminde yapılır.
     // [EN] The duplicate-projection check runs on the newest sample of terminal trades.
-    const terminalTrades = await Trade.find({ status: { $in: terminalStatuses } })
+    const terminalTrades = await Trade.find({ ...escrowScopeFilter(), status: { $in: terminalStatuses } })
       .select("onchain_escrow_id status timers.resolved_at")
       .sort({ _id: -1 })
       .limit(max)
@@ -2156,6 +2161,7 @@ class EventWorker {
     let snapshotMissingCount;
     try {
       snapshotMissingCount = Number(await Trade.countDocuments({
+        ...escrowScopeFilter(),
         status: { $in: ["PAID", "CHALLENGED"] },
         "payout_snapshot.captured_at": null,
         "payout_snapshot.is_complete": false,

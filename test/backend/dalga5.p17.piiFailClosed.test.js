@@ -12,11 +12,20 @@ const TRADE_ID = "a".repeat(24);
 
 describe("PII routes: zincir durumu bilinmiyorsa production'da fail-closed", () => {
   const savedEnv = process.env.NODE_ENV;
-  afterEach(() => { process.env.NODE_ENV = savedEnv; jest.resetModules(); jest.clearAllMocks(); });
+  const ESCROW = "0x3333333333333333333333333333333333333333";
+  beforeEach(() => { process.env.ARAF_ESCROW_ADDRESS = ESCROW; process.env.EXPECTED_CHAIN_ID = "84532"; });
+  afterEach(() => {
+    process.env.NODE_ENV = savedEnv;
+    delete process.env.ARAF_ESCROW_ADDRESS;
+    delete process.env.EXPECTED_CHAIN_ID;
+    jest.resetModules();
+    jest.clearAllMocks();
+  });
 
   function buildApp(activeOnChain) {
     const decryptField = jest.fn().mockResolvedValue(JSON.stringify({ iban: "TR00", account_holder_name: "X" }));
     const trade = {
+      escrow_address: ESCROW,
       maker_address: MAKER,
       taker_address: WALLET,
       status: "PAID",

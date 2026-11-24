@@ -822,6 +822,28 @@ Yeni kontrat deploy'unda eski escrow'a bağlı Mongo koleksiyonları aynı verit
 
 Güvenlik: bu adımların env'inde `JWT_SECRET`/`MASTER_ENCRYPTION_KEY` yoktur (sarmalayıcı varsa reddeder); şifreli alanlar çözülmez. Arşivdeki trade kayıtlarında 365 günlük TTL ve PII `delete_at` temizliği sürer.
 
+### 6.6c Escrow kapsamlı Mongo göçü (`scope-escrow-mirrors.yml`)
+
+**Sorun:** kontrat yeniden dağıtılınca eski kontratın `onchain_order_id`/`onchain_escrow_id` numaraları yenisininkilerle çakışır. Çözüm: Order/Trade/TerminalTradeStat belgeleri `escrow_address` + `chain_id` taşır, benzersizlik bileşik anahtardadır (`{escrow_address, onchain_order_id}`, `{escrow_address, onchain_escrow_id}` unique+sparse, `{escrow_address, trade_key}`), tüm okuma/yazma aktif escrow ile sınırlıdır. Tek alanlı "lookup" indeksi KASTEN yoktur (eski unique ile aynı anahtar + farklı ad/seçenek = MongoDB `IndexOptionsConflict` 85/86); sorgular hep `escrow_address` eşitliğiyle geldiği için bileşik indeksin öneki yeter (`test/backend/escrowScope.schema.test.js` kanıtlar). Göç **veri silmez** (`deleteMany`/`deleteOne`/koleksiyon düşürme yok; yalnız eski tek alanlı unique indeks düşer).
+
+**Sınıflandırma (zaman damgasıyla):** eşik = `ARAF_DEPLOYMENT_BLOCK` bloğunun zaman damgası (`--deploy-timestamp=<ISO|unix>` ya da `RPC_URL`/`BASE_RPC_URL` ile salt-okunur `getBlock`). orders/trades: `timers.created_at_onchain`, yoksa `created_at`; terminal_trade_stats: `locked_at` → `resolved_at` → `recorded_at`. Eşik ve üstü = aktif (`escrow_address`=aktif adres, `chain_id`=84532); altı = `escrow_address: "legacy:<eski adres|unknown>"`. Tarihi olmayan belgeye dokunulmaz ("sınıflandırılamayan" sayılır). Yalnız `escrow_address`'i olmayan belgeler işlenir (idempotent).
+
+**Çalıştırma sırası** (Actions → Scope Escrow Mirrors; eski escrow'u önce `pause()` edin, aksi hâlde eski kontratta eşikten sonra oluşan kayıtlar yanlışlıkla "aktif" sınıflanır):
+1. `mode=dry-run` (varsayılan; hiç yazmaz). Özet satırlarındaki `aktif`, `legacy`, `sınıflandırılamayan`, `conflicts` ve indeks planını kontrol edin. `conflicts` 0 olmalıdır.
+2. `mode=apply`, `expected_active=<N>`, `expected_legacy=<M>` (dry-run toplamlarıyla birebir; tutmazsa hiçbir şey yazılmaz, çıkış kodu 2). İsteğe bağlı `old_escrow_address`, `batch`. Özetteki `batch` değerini saklayın.
+3. Runtime deploy (`deploy-runtime-base-sepolia.yml`).
+4. `mode=apply`'ı **bir kez daha** (yeni `expected_*` değerleriyle; önce dry-run): eski kodun adım 2–3 arasında `escrow_address`'siz yazdığı belgeleri sınıflar ve eski runtime yeniden başlayıp mongoose autoIndex ile eski tek alanlı unique'i geri oluşturduysa yeniden düşürür.
+
+Apply her güncellenen belgeye `scope_migration_batch` yazar. Aktif sınıfa düşecek belgenin id'si aktif escrow'da zaten varsa (çakışma) apply hiçbir şey yazmadan durur. İndeks sırası (her koleksiyon): alanları yaz → yeni bileşik unique oluştur → bileşik unique VARSA eski unique'i (`onchain_order_id_1`, `onchain_escrow_id_1`, `trade_key_1`) düşür; var olan indeks atlanır.
+
+**Eski runtime çalışırken güvenli:** eski kod belgeleri `{onchain_order_id: "<id>"}` / `{onchain_escrow_id: "<id>"}` filtresi ve `$set` ile günceller (`eventListener.js` eski `_buildIdentityLookup`); `$set` yalnız adı geçen yolları yazdığından göçün eklediği `escrow_address`/`chain_id`/`scope_migration_batch` alanları bozulmaz. Eski unique düştükten sonra eski kodun upsert'i aynı filtreyle aynı (legacy) belgeyi eşler; yeni belge ancak o id yoksa eklenir ve (`null`, id) bileşik unique ile çakışmaz. Aktif escrow'un belgeleri eski runtime çalışırken oluşmaz. Eski runtime yeniden başlarsa autoIndex eski unique'i yeniden kurmaya çalışır (aynı id iki belgede varsa `E11000` ile başarısız olur, süreç düşmez); adım 4 bunu düzeltir.
+
+**DLQ sınırı:** yeni runtime, eski unique geri gelmişse ya da apply henüz çalışmamışsa yazamayan olayları DLQ'ya alar. `dlqProcessor.js`: `MAX_DLQ_SIZE=100` (aşan girdi arşivlenir), `MAX_REDRIVE_ATTEMPTS=10`, `BASE_BACKOFF_MS=30000` ve üstel artış (tavan 30 dk); yeniden deneme aralıkları 30 s, 1, 2, 4, 8, 16, 30, 30, 30 dk → yaklaşık **2 saat** (≈7290 s + `JOB_DLQ_INTERVAL_MS` taraması) sonra girdi karantinaya (`worker:dlq:quarantine`) taşınır ve olay "acked-poison" sayılır; worker onu kendiliğinden bir daha denemez. Bu yüzden adım 4'ü deploy'dan hemen sonra çalıştırın. **Karantinadan elle yeniden sürme:** (a) kök nedeni (apply) düzeltin; (b) `LRANGE worker:dlq:quarantine 0 -1` ile girdiyi bulun (JSON'u bozmayın); (c) girdinin `attempt` değerini 0 yapıp `next_retry_at` alanını silin; (d) `RPUSH worker:dlq <girdi>`, `SADD worker:dlq:keys <idempotencyKey>`, `SREM worker:dlq:quarantine:keys <idempotencyKey>`, `LREM worker:dlq:quarantine 1 <eski girdi>`. Bu adım Redis erişimi ister; aracı yoktur ve bu iş akışı yapmaz.
+
+**Geri alma:** `mode=rollback`, `batch=<apply özetindeki batch>`: yalnız o batch'in `escrow_address`, `chain_id`, `scope_migration_batch` alanlarını kaldırır; indekslere dokunmaz (dry-run varsayılan adımı eşleşme sayısını gösterir). Geri alma sonrası yeni kod production'da bu belgeleri göremez; kod geri alınmadan rollback yapmayın.
+
+Güvenlik/not: iş akışı yalnız `MONGODB_URI`, `BASE_SEPOLIA_RPC_URL` secret'larını ve `ARAF_ESCROW_ADDRESS`, `ARAF_DEPLOYMENT_BLOCK` değişkenlerini kullanır; girdiler `env` üzerinden geçer ve biçim doğrulanır. Kapsam **yalnız `NODE_ENV=production`'da fail-closed**'dur. `jobs/cleanupSensitiveData.js` kasıtlı kapsamsızdır (gizlilik temizliği legacy dahil).
+
 ### 6.7 Backend — zamanlanmış işler (aksi belirtilmedikçe ms; en çok 2 147 483 647)
 
 | Değişken | Varsayılan |

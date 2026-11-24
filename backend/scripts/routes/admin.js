@@ -12,6 +12,7 @@ const worker = require("../services/eventListener");
 const { resolveClientIp } = require("../utils/clientIp");
 const logger = require("../utils/logger");
 const Trade = require("../models/Trade");
+const { escrowScopeFilter } = require("../services/escrowScope");
 const User = require("../models/User");
 const Feedback = require("../models/Feedback");
 const HistoricalStat = require("../models/HistoricalStat");
@@ -64,6 +65,8 @@ function _adminCacheSet(key, value) {
 
 const ADMIN_TRADE_PROJECTION = [
   "_id",
+  "escrow_address",
+  "chain_id",
   "onchain_escrow_id",
   "parent_order_id",
   "trade_origin",
@@ -286,7 +289,7 @@ router.get("/summary", asyncHandler(async (req, res, next) => {
       latestStat = null;
     }
 
-    const activeFilter = { status: { $nin: TERMINAL_TRADE_STATUSES } };
+    const activeFilter = { ...escrowScopeFilter(), status: { $nin: TERMINAL_TRADE_STATUSES } };
     let tradeCounts = [0, 0, 0, 0, 0];
     try {
       const cachedCounts = _adminCacheGet("summary:tradeCounts");
@@ -295,10 +298,10 @@ router.get("/summary", asyncHandler(async (req, res, next) => {
       } else {
         const countResults = await Promise.allSettled([
           Trade.countDocuments(activeFilter),
-          Trade.countDocuments({ status: "LOCKED" }),
-          Trade.countDocuments({ status: "PAID" }),
-          Trade.countDocuments({ status: "CHALLENGED" }),
-          Trade.countDocuments({ "payout_snapshot.is_complete": false }),
+          Trade.countDocuments({ ...escrowScopeFilter(), status: "LOCKED" }),
+          Trade.countDocuments({ ...escrowScopeFilter(), status: "PAID" }),
+          Trade.countDocuments({ ...escrowScopeFilter(), status: "CHALLENGED" }),
+          Trade.countDocuments({ ...escrowScopeFilter(), "payout_snapshot.is_complete": false }),
         ]);
 
         const rejectedCount = countResults.find((result) => result.status === "rejected");
@@ -345,11 +348,12 @@ router.get("/summary", asyncHandler(async (req, res, next) => {
       } else {
       const now = new Date();
       const finalized24hStart = new Date(now.getTime() - 24 * 3600 * 1000);
-      const proposalStateFilter = { "settlement_proposal.state": { $in: ADMIN_SETTLEMENT_STATE_VALUES.filter((v) => v !== "ALL") } };
+      const proposalStateFilter = { ...escrowScopeFilter(), "settlement_proposal.state": { $in: ADMIN_SETTLEMENT_STATE_VALUES.filter((v) => v !== "ALL") } };
       const settlementSplitRowsPromise = Promise.resolve().then(() =>
         // [TR] B3-08: ortalama sunucuda, tüm FINALIZED kayıtlar üzerinden hesaplanır (eski: sırasız ilk 5000).
         Trade.aggregate([
           { $match: {
+            ...escrowScopeFilter(),
             "settlement_proposal.state": "FINALIZED",
             "settlement_proposal.maker_share_bps": { $gte: 0, $lte: 10_000 },
           } },
@@ -366,15 +370,17 @@ router.get("/summary", asyncHandler(async (req, res, next) => {
 
       const settlementResults = await Promise.allSettled([
         Trade.countDocuments({
+          ...escrowScopeFilter(),
           "settlement_proposal.state": "PROPOSED",
           status: { $nin: TERMINAL_TRADE_STATUSES },
         }),
-        Trade.countDocuments({ "settlement_proposal.state": "EXPIRED" }),
+        Trade.countDocuments({ ...escrowScopeFilter(), "settlement_proposal.state": "EXPIRED" }),
         Trade.countDocuments({
+          ...escrowScopeFilter(),
           "settlement_proposal.state": "FINALIZED",
           "settlement_proposal.finalized_at": { $gte: finalized24hStart },
         }),
-        Trade.countDocuments({ "settlement_proposal.state": "FINALIZED" }),
+        Trade.countDocuments({ ...escrowScopeFilter(), "settlement_proposal.state": "FINALIZED" }),
         settlementSplitRowsPromise,
         Trade.countDocuments(proposalStateFilter),
       ]);
@@ -431,7 +437,7 @@ router.get("/summary", asyncHandler(async (req, res, next) => {
       } else {
         // [TR] B3-09: 8 ayrı countDocuments yerine tek aggregate ($group). UNKNOWN = "UNKNOWN" + null + alan yok.
         const rows = await Trade.aggregate([
-          { $match: { status: { $in: TERMINAL_TRADE_STATUSES } } },
+          { $match: { ...escrowScopeFilter(), status: { $in: TERMINAL_TRADE_STATUSES } } },
           { $group: { _id: { $ifNull: ["$resolution_type", "UNKNOWN"] }, n: { $sum: 1 } } },
         ]);
         const byType = new Map((Array.isArray(rows) ? rows : []).map((row) => [row?._id, Number(row?.n) || 0]));
@@ -563,7 +569,7 @@ router.get("/trades", asyncHandler(async (req, res, next) => {
     const { error, value } = schema.validate(req.query);
     if (error) return res.status(400).json({ error: error.message });
 
-    const filter = {};
+    const filter = { ...escrowScopeFilter() };
 
     if (value.status !== "ALL") filter.status = value.status;
     if (typeof value.tier === "number") filter.tier = value.tier;
@@ -649,7 +655,7 @@ router.get("/settlement-proposals", asyncHandler(async (req, res, next) => {
     const { error, value } = schema.validate(req.query);
     if (error) return res.status(400).json({ error: error.message });
 
-    const filter = {};
+    const filter = { ...escrowScopeFilter() };
     if (value.state !== "ALL") {
       filter["settlement_proposal.state"] = value.state;
     } else {
@@ -659,6 +665,8 @@ router.get("/settlement-proposals", asyncHandler(async (req, res, next) => {
     const skip = (value.page - 1) * value.limit;
     const projection = [
       "_id",
+      "escrow_address",
+      "chain_id",
       "onchain_escrow_id",
       "status",
       "resolution_type",

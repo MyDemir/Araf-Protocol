@@ -24,6 +24,7 @@ const requireSessionWalletMatch = asyncHandler(_requireSessionWalletMatch);
 const { receiptUploadLimiter } = require("../middleware/rateLimiter");
 const { encryptField } = require("../services/encryption");
 const Trade = require("../models/Trade");
+const { escrowScopeFilter } = require("../services/escrowScope");
 const logger = require("../utils/logger");
 const { promises: fsp } = fs;
 
@@ -79,7 +80,8 @@ const MAGIC_BYTES_BY_MIME = {
 
 
 function _buildIdentityLookup(idString) {
-  return { onchain_escrow_id: idString };
+  // [TR] Escrow kapsamı: eski kontratın aynı numaralı trade'ine dekont yazılamaz/okunamaz (404).
+  return { ...escrowScopeFilter(), onchain_escrow_id: idString };
 }
 
 function _receiptRejection(existing, onchainId, wallet) {

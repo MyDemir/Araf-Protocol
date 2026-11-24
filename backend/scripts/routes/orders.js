@@ -21,6 +21,7 @@ const requireAuth = asyncHandler(_requireAuth);
 const requireSessionWalletMatch = asyncHandler(_requireSessionWalletMatch);
 const { marketReadLimiter, ordersReadLimiter, ordersWriteLimiter } = require("../middleware/rateLimiter");
 const Order = require("../models/Order");
+const { escrowScopeFilter } = require("../services/escrowScope");
 const Trade = require("../models/Trade");
 const User = require("../models/User");
 const logger = require("../utils/logger");
@@ -35,6 +36,8 @@ const FILLABLE_ORDER_STATUSES = ["OPEN", "PARTIALLY_FILLED"];
 
 const SAFE_ORDER_PROJECTION = [
   "_id",
+  "escrow_address",
+  "chain_id",
   "onchain_order_id",
   "owner_address",
   "side",
@@ -105,6 +108,8 @@ function _buildMinRemainingClauses(minAmount, tokenAddress) {
 //      This endpoint remains read-only and non-authoritative.
 const SAFE_ORDER_TRADES_PROJECTION = [
   "_id",
+  "escrow_address",
+  "chain_id",
   "onchain_escrow_id",
   "parent_order_id",
   "maker_address",
@@ -193,7 +198,7 @@ async function _attachMarketTrustVisibilitySummary(orders = []) {
     const addrField = `${role}_address`;
     const snapField = `payout_snapshot.${role}`;
     return Trade.aggregate([
-      { $match: { [addrField]: { $in: owners }, ...LOCK_OR_SNAPSHOT_CAPTURED_MATCH } },
+      { $match: { ...escrowScopeFilter(), [addrField]: { $in: owners }, ...LOCK_OR_SNAPSHOT_CAPTURED_MATCH } },
       { $sort: { [addrField]: 1, created_at: -1, _id: -1 } },
       { $project: { [addrField]: 1, "payout_snapshot.is_complete": 1, [snapField]: 1 } },
       { $unset: [`${snapField}.payout_details_enc`, `${snapField}.contact_value_enc`] },
@@ -272,7 +277,8 @@ async function _attachMarketTrustVisibilitySummary(orders = []) {
 
 
 function _buildIdentityLookup(field, idString) {
-  return { [field]: idString };
+  // [TR] Escrow kapsamı: eski kontratın aynı numaralı belgesi okunmaz (bileşik indeks {escrow_address, ...} önekini kullanır).
+  return { ...escrowScopeFilter(), [field]: idString };
 }
 
 router.get("/config", marketReadLimiter, asyncHandler(async (_req, res, next) => {
@@ -402,7 +408,7 @@ router.get("/", marketReadLimiter, asyncHandler(async (req, res, next) => {
       return res.json(cached);
     }
 
-    const filter = {};
+    const filter = { ...escrowScopeFilter() };
     if (value.side) filter.side = value.side;
     if (value.status === "ACTIVE") filter.status = { $in: FILLABLE_ORDER_STATUSES };
     else if (value.status) filter.status = value.status;
@@ -474,7 +480,7 @@ router.get("/my", requireAuth, requireSessionWalletMatch, ordersReadLimiter, asy
     const { error, value } = schema.validate(req.query);
     if (error) return res.status(400).json({ error: error.message });
 
-    const filter = { owner_address: req.wallet };
+    const filter = { ...escrowScopeFilter(), owner_address: req.wallet };
     const skip = (value.page - 1) * value.limit;
     const [orders, total] = await Promise.all([
       Order.find(filter)
@@ -526,7 +532,7 @@ router.post("/market-meta", requireAuth, requireSessionWalletMatch, ordersWriteL
       return res.status(409).json({ error: "Bu ödeme yöntemi şu an kapalı.", code: "PAYMENT_RAIL_DISABLED", rail: ownerRail });
     }
 
-    const existing = await Order.findOne({ "refs.order_ref": orderRef })
+    const existing = await Order.findOne({ ...escrowScopeFilter(), "refs.order_ref": orderRef })
       .select("owner_address market")
       .lean();
 
@@ -538,7 +544,7 @@ router.post("/market-meta", requireAuth, requireSessionWalletMatch, ordersWriteL
         return res.status(409).json({ error: "Kur bilgisi zaten kayıtlı.", code: "MARKET_META_ALREADY_SET" });
       }
       const updateResult = await Order.updateOne(
-        { "refs.order_ref": orderRef, owner_address: req.wallet, "market.exchange_rate": null },
+        { ...escrowScopeFilter(), "refs.order_ref": orderRef, owner_address: req.wallet, "market.exchange_rate": null },
         { $set: { "market.fiat_currency": meta.fiat_currency, "market.exchange_rate": meta.exchange_rate } }
       );
       // [TR] B3-11: eşzamanlı istekte filtre tutmadıysa kayıt bu istekle yazılmadı; set-once semantiği 409 ile bildirilir.

@@ -92,6 +92,10 @@ Kod tabanında `/api/listings` route'u yoktur; kanonik pazar primitive'i parent 
 
 ---
 
+### Escrow kapsamı (`escrow_address`, `chain_id`)
+
+Order, trade ve terminal sayaç belgeleri hangi kontrata ait olduklarını `escrow_address` (küçük harf) ve `chain_id` (Number) ile taşır; yanıtlara bu iki alan EKLENİR (hiçbir alan kaldırılmaz). Pazar listesi, `/orders/my`, `/orders/:id`, `/orders/:id/trades`, market-meta, güven özeti, tüm `/trades`, `/pii` ve `/receipts` uçları, admin sayaçları/listeleri, istatistik anlık görüntüsü ve ödül kaydedici yalnız **aktif** escrow'un (`ARAF_ESCROW_ADDRESS` + `EXPECTED_CHAIN_ID`) belgelerini görür. Eski kontratın aynı numaralı kaydı `404` döner; PII/dekont/trade uçlarında taraf kontrolü (maker/taker == oturum cüzdanı, aksi `403`) aynen sürer. Kapsam **yalnız `NODE_ENV=production`'da fail-closed**'dur: env eksikse `ESCROW_SCOPE_UNAVAILABLE` hatası (5xx) döner; production dışında env boşsa filtre uygulanmaz (eski davranış). Veri göçü: `docs/TR/DEPLOYMENT_GUIDE.md` §6.6c.
+
 ## 3) Auth rotaları (`/api/auth`)
 
 ### `GET /api/auth/nonce?wallet=<address>`
