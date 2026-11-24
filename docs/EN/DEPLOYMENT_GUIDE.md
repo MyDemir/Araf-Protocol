@@ -818,6 +818,28 @@ On a new contract deploy the Mongo collections bound to the old escrow are renam
 
 Security: these steps have no `JWT_SECRET`/`MASTER_ENCRYPTION_KEY` in their environment (the wrapper rejects them); encrypted fields are never decrypted. The 365-day TTL on archived trades and the PII `delete_at` cleanup continue.
 
+### 6.6c Escrow-scoped Mongo migration (`scope-escrow-mirrors.yml`)
+
+**Problem:** after a contract redeploy the old contract's `onchain_order_id`/`onchain_escrow_id` numbers collide with the new one's. Fix: Order/Trade/TerminalTradeStat documents carry `escrow_address` + `chain_id`, uniqueness is compound (`{escrow_address, onchain_order_id}`, `{escrow_address, onchain_escrow_id}` unique+sparse, `{escrow_address, trade_key}`), and all reads/writes are limited to the active escrow. A single-field "lookup" index is deliberately absent (same key as the old unique with a different name/options = MongoDB `IndexOptionsConflict` 85/86); queries always carry `escrow_address` equality, so the compound index prefix suffices (proved by `test/backend/escrowScope.schema.test.js`). The migration **deletes no data** (no `deleteMany`/`deleteOne`/collection drop; only the old single-field unique index is dropped).
+
+**Classification (by timestamp):** threshold = timestamp of block `ARAF_DEPLOYMENT_BLOCK` (`--deploy-timestamp=<ISO|unix>` or read-only `getBlock` via `RPC_URL`/`BASE_RPC_URL`). orders/trades: `timers.created_at_onchain`, else `created_at`; terminal_trade_stats: `locked_at` -> `resolved_at` -> `recorded_at`. At/after threshold = active (`escrow_address`=active address, `chain_id`=84532); before = `escrow_address: "legacy:<old address|unknown>"`. Documents without a date are left untouched (counted as "unclassifiable"). Only documents lacking `escrow_address` are processed (idempotent).
+
+**Run order** (Actions -> Scope Escrow Mirrors; `pause()` the old escrow first, otherwise records created on the old contract after the threshold are classified "active" by mistake):
+1. `mode=dry-run` (default; writes nothing). Check `active`, `legacy`, `unclassifiable`, `conflicts` and the index plan in the summary lines. `conflicts` must be 0.
+2. `mode=apply` with `expected_active=<N>`, `expected_legacy=<M>` (exactly the dry-run totals; otherwise nothing is written, exit code 2). Optional `old_escrow_address`, `batch`. Keep the `batch` from the summary.
+3. Runtime deploy (`deploy-runtime-base-sepolia.yml`).
+4. `mode=apply` **once more** (new `expected_*` values; dry-run first): classifies documents the old code wrote without `escrow_address` between steps 2-3 and drops the old single-field unique again if a restarted old runtime re-created it through mongoose autoIndex.
+
+Apply stamps every updated document with `scope_migration_batch`. If an id that would become active already exists in the active escrow (conflict), apply stops without writing. Index order (per collection): write fields -> create the compound unique -> drop the old unique (`onchain_order_id_1`, `onchain_escrow_id_1`, `trade_key_1`) only IF the compound unique exists; existing indexes are skipped.
+
+**Safe while the old runtime runs:** old code updates documents with filter `{onchain_order_id: "<id>"}` / `{onchain_escrow_id: "<id>"}` and `$set` (old `_buildIdentityLookup` in `eventListener.js`); `$set` writes only the named paths, so the added `escrow_address`/`chain_id`/`scope_migration_batch` fields stay intact. After the old unique is dropped the old upsert matches the same (legacy) document with the same filter; a new document is inserted only if the id is absent and does not clash with the (`null`, id) compound unique. Active-escrow documents are not created while the old runtime runs. If the old runtime restarts, autoIndex tries to rebuild the old unique (fails with `E11000` if an id exists twice; the process keeps running); step 4 repairs it.
+
+**DLQ limit:** if the old unique is back or apply has not run, the new runtime sends unwritable events to the DLQ. `dlqProcessor.js`: `MAX_DLQ_SIZE=100` (overflow is archived), `MAX_REDRIVE_ATTEMPTS=10`, `BASE_BACKOFF_MS=30000` with exponential growth (cap 30 min); retry gaps 30 s, 1, 2, 4, 8, 16, 30, 30, 30 min -> about **2 hours** (~7290 s plus the `JOB_DLQ_INTERVAL_MS` scan) after which the entry moves to quarantine (`worker:dlq:quarantine`) and the event counts as "acked-poison"; the worker never retries it by itself. Run step 4 right after the deploy. **Manual re-drive from quarantine:** (a) fix the root cause (apply); (b) find the entry with `LRANGE worker:dlq:quarantine 0 -1` (do not corrupt the JSON); (c) set its `attempt` to 0 and remove `next_retry_at`; (d) `RPUSH worker:dlq <entry>`, `SADD worker:dlq:keys <idempotencyKey>`, `SREM worker:dlq:quarantine:keys <idempotencyKey>`, `LREM worker:dlq:quarantine 1 <old entry>`. This needs Redis access; there is no tool and the workflow does not do it.
+
+**Rollback:** `mode=rollback`, `batch=<batch from the apply summary>`: unsets only that batch's `escrow_address`, `chain_id`, `scope_migration_batch`; indexes are untouched (the default dry-run step shows the match count). After rollback the new code cannot see those documents in production; do not roll back without rolling back the code.
+
+Security/notes: the workflow uses only the `MONGODB_URI`, `BASE_SEPOLIA_RPC_URL` secrets and the `ARAF_ESCROW_ADDRESS`, `ARAF_DEPLOYMENT_BLOCK` variables; inputs pass through `env` and are format-validated. The scope is **fail-closed only when `NODE_ENV=production`**. `jobs/cleanupSensitiveData.js` is intentionally unscoped (privacy cleanup includes legacy).
+
 ### 6.7 Backend — scheduled jobs (all in ms unless noted; max 2 147 483 647)
 
 | Variable | Default |
