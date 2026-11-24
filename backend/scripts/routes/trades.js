@@ -13,6 +13,7 @@ const requireAuth = asyncHandler(_requireAuth);
 const requireSessionWalletMatch = asyncHandler(_requireSessionWalletMatch);
 const { roomReadLimiter, coordinationWriteLimiter } = require("../middleware/rateLimiter");
 const Trade = require("../models/Trade");
+const { escrowScopeFilter, matchesActiveEscrow } = require("../services/escrowScope");
 const User = require("../models/User");
 const logger = require("../utils/logger");
 const { hmacDigest } = require("../services/encryption");
@@ -124,6 +125,8 @@ async function _getOnchainCurrentAmountsForPreview(onchainEscrowId) {
 
 const SAFE_TRADE_PROJECTION = [
   "_id",
+  "escrow_address",
+  "chain_id",
   "onchain_escrow_id",
   "parent_order_id",
   "trade_origin",
@@ -215,7 +218,8 @@ const MAX_MY_TRADES_LIMIT = 50;
 
 
 function _buildIdentityLookup(field, idString) {
-  return { [field]: idString };
+  // [TR] Escrow kapsamı: eski kontratın aynı numaralı trade'i okunmaz.
+  return { ...escrowScopeFilter(), [field]: idString };
 }
 
 function _parseBpsOrNull(raw) {
@@ -313,6 +317,7 @@ router.get("/my", requireAuth, requireSessionWalletMatch, roomReadLimiter, async
     if (error) return res.status(400).json({ error: error.message });
 
     const filter = {
+      ...escrowScopeFilter(),
       $or: [{ maker_address: req.wallet }, { taker_address: req.wallet }],
       status: { $nin: ["RESOLVED", "CANCELED", "BURNED"] },
     };
@@ -346,6 +351,7 @@ router.get("/history", requireAuth, requireSessionWalletMatch, roomReadLimiter, 
     if (error) return res.status(400).json({ error: error.message });
 
     const filter = {
+      ...escrowScopeFilter(),
       $or: [{ maker_address: req.wallet }, { taker_address: req.wallet }],
       status: { $in: ["RESOLVED", "CANCELED", "BURNED"] },
     };
@@ -390,7 +396,7 @@ router.get("/by-escrow/:onchainId", requireAuth, requireSessionWalletMatch, room
       .select(SAFE_TRADE_PROJECTION)
       .lean();
 
-    if (!trade) {
+    if (!trade || !matchesActiveEscrow(trade)) {
       return res.status(404).json({ error: "Trade bulunamadı." });
     }
 
@@ -416,9 +422,9 @@ router.get("/:id/settlement-proposal", requireAuth, requireSessionWalletMatch, r
     }
 
     const trade = await Trade.findById(req.params.id)
-      .select("maker_address taker_address settlement_proposal")
+      .select("escrow_address maker_address taker_address settlement_proposal")
       .lean();
-    if (!trade) return res.status(404).json({ error: "İşlem bulunamadı." });
+    if (!trade || !matchesActiveEscrow(trade)) return res.status(404).json({ error: "İşlem bulunamadı." });
     if (trade.maker_address !== req.wallet && trade.taker_address !== req.wallet) {
       return res.status(403).json({ error: "Erişim reddedildi." });
     }
@@ -448,9 +454,9 @@ router.post("/:id/settlement-proposal/preview", requireAuth, requireSessionWalle
     if (error) return res.status(400).json({ error: error.message });
 
     const trade = await Trade.findById(req.params.id)
-      .select("maker_address taker_address onchain_escrow_id status fee_snapshot.taker_fee_bps fee_snapshot.maker_fee_bps")
+      .select("escrow_address maker_address taker_address onchain_escrow_id status fee_snapshot.taker_fee_bps fee_snapshot.maker_fee_bps")
       .lean();
-    if (!trade) return res.status(404).json({ error: "İşlem bulunamadı." });
+    if (!trade || !matchesActiveEscrow(trade)) return res.status(404).json({ error: "İşlem bulunamadı." });
     if (trade.maker_address !== req.wallet && trade.taker_address !== req.wallet) {
       return res.status(403).json({ error: "Erişim reddedildi." });
     }
@@ -528,7 +534,7 @@ router.get("/:id", requireAuth, requireSessionWalletMatch, roomReadLimiter, asyn
       .select(SAFE_TRADE_PROJECTION)
       .lean();
 
-    if (!trade) {
+    if (!trade || !matchesActiveEscrow(trade)) {
       return res.status(404).json({ error: "İşlem bulunamadı." });
     }
 
@@ -570,6 +576,7 @@ router.post("/:id/chargeback-ack", requireAuth, requireSessionWalletMatch, coord
 
     const updatedTrade = await Trade.findOneAndUpdate(
       {
+        ...escrowScopeFilter(),
         _id: req.params.id,
         maker_address: req.wallet,
         status: { $in: ["PAID", "CHALLENGED"] },
@@ -588,10 +595,10 @@ router.post("/:id/chargeback-ack", requireAuth, requireSessionWalletMatch, coord
 
     if (!updatedTrade) {
       const existing = await Trade.findById(req.params.id)
-        .select("maker_address status chargeback_ack")
+        .select("escrow_address maker_address status chargeback_ack")
         .lean();
 
-      if (!existing) return res.status(404).json({ error: "İşlem bulunamadı." });
+      if (!existing || !matchesActiveEscrow(existing)) return res.status(404).json({ error: "İşlem bulunamadı." });
       if (existing.maker_address !== req.wallet) {
         return res.status(403).json({ error: "Bu işlem için yetkiniz yok." });
       }

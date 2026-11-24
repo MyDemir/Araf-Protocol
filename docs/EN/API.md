@@ -92,6 +92,10 @@ There is no `/api/listings` route in the codebase; the canonical market primitiv
 
 ---
 
+### Escrow scope (`escrow_address`, `chain_id`)
+
+Order, trade and terminal-counter documents carry the contract they belong to as `escrow_address` (lowercase) and `chain_id` (Number); both fields are ADDED to responses (none removed). The market list, `/orders/my`, `/orders/:id`, `/orders/:id/trades`, market-meta, trust summary, every `/trades`, `/pii` and `/receipts` route, admin counters/lists, the stats snapshot and the reward recorder only see documents of the **active** escrow (`ARAF_ESCROW_ADDRESS` + `EXPECTED_CHAIN_ID`). The same-numbered record of an old contract returns `404`; the party check on PII/receipt/trade routes (maker/taker == session wallet, else `403`) is unchanged. The scope is **fail-closed only when `NODE_ENV=production`**: missing env raises `ESCROW_SCOPE_UNAVAILABLE` (5xx); outside production an empty env applies no filter (old behaviour). Data migration: `docs/EN/DEPLOYMENT_GUIDE.md` §6.6c.
+
 ## 3) Auth routes (`/api/auth`)
 
 ### `GET /api/auth/nonce?wallet=<address>`

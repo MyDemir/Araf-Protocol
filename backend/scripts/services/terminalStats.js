@@ -1,6 +1,7 @@
 "use strict";
 
 const TerminalTradeStat = require("../models/TerminalTradeStat");
+const { escrowScopeFields } = require("./escrowScope");
 
 const TERMINAL = new Set(["RESOLVED", "CANCELED", "BURNED"]);
 
@@ -24,6 +25,8 @@ function buildTerminalStatDoc(trade) {
   const burned = _big(trade.financials?.total_decayed) + _big(trade.financials?.burned_amount);
 
   return {
+    // [TR] Escrow kapsamı: trade_key yeniden dağıtımda tekrar eder; yazma okumayla aynı normalizasyonu kullanır.
+    ...escrowScopeFields(),
     trade_key: String(key),
     status: trade.status,
     token_address: trade.token_address ? String(trade.token_address).toLowerCase() : null,
@@ -46,7 +49,7 @@ async function recordTerminalTradeStat(trade, { session } = {}) {
   const doc = buildTerminalStatDoc(trade);
   if (!doc) return false;
   await TerminalTradeStat.updateOne(
-    { trade_key: doc.trade_key },
+    { ...(doc.escrow_address ? { escrow_address: doc.escrow_address } : {}), trade_key: doc.trade_key },
     { $setOnInsert: doc },
     { upsert: true, ...(session ? { session } : {}) }
   );

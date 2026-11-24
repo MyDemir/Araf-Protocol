@@ -30,6 +30,7 @@ const {
   piiFetchLimiter,
 } = require("../middleware/rateLimiter");
 const Trade = require("../models/Trade");
+const { escrowScopeFilter, matchesActiveEscrow } = require("../services/escrowScope");
 const User = require("../models/User");
 const { decryptField, decryptPayoutProfile } = require("../services/encryption");
 const { issuePIIToken } = require("../services/siwe");
@@ -160,8 +161,8 @@ router.get("/taker-name/:onchainId", requireAuth, requireSessionWalletMatch, pii
       return res.status(400).json({ error: "Geçersiz on-chain ID formatı." });
     }
 
-    const trade = await Trade.findOne({ onchain_escrow_id: onchainId })
-      .select("maker_address taker_address status payout_snapshot onchain_escrow_id")
+    const trade = await Trade.findOne({ ...escrowScopeFilter(), onchain_escrow_id: onchainId })
+      .select("escrow_address maker_address taker_address status payout_snapshot onchain_escrow_id")
       .lean();
 
     if (!trade) {
@@ -240,7 +241,7 @@ router.post("/request-token/:tradeId", requireAuth, requireSessionWalletMatch, p
     }
 
     const trade = await Trade.findById(tradeId).lean();
-    if (!trade) {
+    if (!trade || !matchesActiveEscrow(trade)) {
       return res.status(404).json({ error: "Trade bulunamadı." });
     }
 
@@ -282,10 +283,10 @@ router.get(
       }
 
       const trade = await Trade.findById(tradeId)
-        .select("maker_address status taker_address payout_snapshot onchain_escrow_id")
+        .select("escrow_address maker_address status taker_address payout_snapshot onchain_escrow_id")
         .lean();
 
-      if (!trade) {
+      if (!trade || !matchesActiveEscrow(trade)) {
         return res.status(404).json({ error: "Trade bulunamadı." });
       }
 

@@ -15,7 +15,9 @@
     "migrate:identity:dry": "node scripts/migrations/normalizeIdentityFields.js",
     "migrate:identity": "node scripts/migrations/normalizeIdentityFields.js --apply",
     "migrate:last-ban-ends-at:dry": "node scripts/migrations/backfillLastBanEndsAt.js",
-    "migrate:last-ban-ends-at": "node scripts/migrations/backfillLastBanEndsAt.js --apply"
+    "migrate:last-ban-ends-at": "node scripts/migrations/backfillLastBanEndsAt.js --apply",
+    "migrate:scope-escrow:dry": "node scripts/migrations/scopeEscrowMirrors.js",
+    "migrate:scope-escrow": "node scripts/migrations/scopeEscrowMirrors.js --apply"
   },
   "dependencies": {
     "express": "^4.19.2",
