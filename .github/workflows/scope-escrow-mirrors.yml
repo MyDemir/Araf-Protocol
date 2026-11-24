@@ -1,0 +1,190 @@
+name: Scope Escrow Mirrors
+
+# Kontrat yeniden dağıtımı sonrası Mongo aynalarını (orders, trades, terminal_trade_stats) escrow kapsamına alan
+# canlı göç. Çekirdek: backend/scripts/migrations/scopeEscrowMirrors.js. VERİ SİLMEZ.
+#   dry-run  : varsayılan; hiçbir şey yazmaz. Sayıları ve indeks planını $GITHUB_STEP_SUMMARY'ye yazar.
+#   apply    : expected_active ve expected_legacy ZORUNLU; dry-run sayıları tutmazsa hiçbir şey yazılmaz.
+#   rollback : batch ZORUNLU; yalnız o batch'in escrow_address/chain_id/scope_migration_batch alanlarını kaldırır.
+# Dry-run adımı HER modda çalışır (rollback modunda o batch'in eşleşme sayısını raporlar).
+# Sıra: dry-run -> sayıları kontrol et -> apply -> runtime deploy -> apply'ı bir kez daha (docs/TR/DEPLOYMENT_GUIDE.md §6.6c).
+# Girdiler run içinde ${{ }} ile doğrudan KULLANILMAZ; env üzerinden geçer ve biçim doğrulanır.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry-run (default, writes nothing) | apply | rollback"
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - apply
+          - rollback
+      old_escrow_address:
+        description: "Optional: the OLD escrow address (0x...). Used only to label legacy documents."
+        required: false
+        default: ""
+        type: string
+      expected_active:
+        description: "apply: number of documents expected to become ACTIVE (from the dry-run)."
+        required: false
+        default: ""
+        type: string
+      expected_legacy:
+        description: "apply: number of documents expected to become LEGACY (from the dry-run)."
+        required: false
+        default: ""
+        type: string
+      batch:
+        description: "rollback: batch id to undo (printed in the apply summary). apply: optional batch id."
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-base-sepolia
+  cancel-in-progress: false
+
+jobs:
+  scope:
+    name: Scope escrow mirrors (${{ inputs.mode }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: base-sepolia
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Validate inputs
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+          IN_OLD: ${{ inputs.old_escrow_address }}
+          IN_ACTIVE: ${{ inputs.expected_active }}
+          IN_LEGACY: ${{ inputs.expected_legacy }}
+          IN_BATCH: ${{ inputs.batch }}
+          VAR_ESCROW: ${{ vars.ARAF_ESCROW_ADDRESS }}
+          VAR_BLOCK: ${{ vars.ARAF_DEPLOYMENT_BLOCK }}
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+        run: |
+          set -euo pipefail
+          ADDRESS_RE='^0x[a-fA-F0-9]{40}$'
+          BATCH_RE='^[A-Za-z0-9._:-]{1,64}$'
+          fail() { echo "::error::$*"; exit 1; }
+          case "$MODE" in dry-run|apply|rollback) ;; *) fail "mode must be dry-run, apply or rollback." ;; esac
+          test -n "$MONGODB_URI" || fail "MONGODB_URI is required."
+          [[ "$VAR_ESCROW" =~ $ADDRESS_RE ]] || fail "Repository variable ARAF_ESCROW_ADDRESS must be a 0x address."
+          [[ "$VAR_BLOCK" =~ ^[1-9][0-9]*$ ]] || fail "Repository variable ARAF_DEPLOYMENT_BLOCK must be a positive integer."
+          if [ "$MODE" != "rollback" ]; then test -n "$BASE_SEPOLIA_RPC_URL" || fail "BASE_SEPOLIA_RPC_URL is required."; fi
+          if [ -n "$IN_OLD" ]; then
+            [[ "$IN_OLD" =~ $ADDRESS_RE ]] || fail "old_escrow_address must be 0x + 40 hex."
+            [[ "${IN_OLD,,}" != "${VAR_ESCROW,,}" ]] || fail "old_escrow_address must differ from the active ARAF_ESCROW_ADDRESS."
+          fi
+          if [ -n "$IN_BATCH" ]; then [[ "$IN_BATCH" =~ $BATCH_RE ]] || fail "batch contains unsafe characters (allowed: A-Z a-z 0-9 . _ : -, max 64)."; fi
+          if [ "$MODE" = "apply" ]; then
+            [[ "$IN_ACTIVE" =~ ^[0-9]+$ ]] || fail "expected_active (digits only) is required for mode=apply."
+            [[ "$IN_LEGACY" =~ ^[0-9]+$ ]] || fail "expected_legacy (digits only) is required for mode=apply."
+          fi
+          if [ "$MODE" = "rollback" ]; then test -n "$IN_BATCH" || fail "batch is required for mode=rollback."; fi
+          {
+            echo "SCOPE_MODE=$MODE"
+            echo "SCOPE_OLD_ESCROW=$IN_OLD"
+            echo "SCOPE_EXPECTED_ACTIVE=$IN_ACTIVE"
+            echo "SCOPE_EXPECTED_LEGACY=$IN_LEGACY"
+            echo "SCOPE_BATCH=$IN_BATCH"
+          } >> "$GITHUB_ENV"
+
+      # Mongo sürücüsü ve ethers backend bağımlılığıdır (yeni paket değil).
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci --omit=dev --ignore-scripts
+
+      - name: Dry-run (read-only; runs in every mode)
+        shell: bash
+        working-directory: backend
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+          ARAF_ESCROW_ADDRESS: ${{ vars.ARAF_ESCROW_ADDRESS }}
+          ARAF_DEPLOYMENT_BLOCK: ${{ vars.ARAF_DEPLOYMENT_BLOCK }}
+          EXPECTED_CHAIN_ID: "84532"
+        run: |
+          set -euo pipefail
+          ARGS=()
+          if [ "$SCOPE_MODE" = "rollback" ]; then
+            ARGS+=("--rollback=$SCOPE_BATCH")
+          else
+            if [ -n "$SCOPE_OLD_ESCROW" ]; then ARGS+=("--legacy-address=$SCOPE_OLD_ESCROW"); fi
+            if [ -n "$SCOPE_BATCH" ]; then ARGS+=("--batch=$SCOPE_BATCH"); fi
+          fi
+          set +e
+          node scripts/migrations/scopeEscrowMirrors.js "${ARGS[@]}" 2>&1 | tee "$RUNNER_TEMP/scope-dry.log"
+          CODE=${PIPESTATUS[0]}
+          set -e
+          {
+            echo "### Scope escrow mirrors: dry-run (mode=$SCOPE_MODE)"
+            echo '```'
+            grep -F '[scopeEscrowMirrors]' "$RUNNER_TEMP/scope-dry.log" || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$CODE"
+
+      - name: Apply
+        if: ${{ inputs.mode == 'apply' }}
+        shell: bash
+        working-directory: backend
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+          ARAF_ESCROW_ADDRESS: ${{ vars.ARAF_ESCROW_ADDRESS }}
+          ARAF_DEPLOYMENT_BLOCK: ${{ vars.ARAF_DEPLOYMENT_BLOCK }}
+          EXPECTED_CHAIN_ID: "84532"
+        run: |
+          set -euo pipefail
+          ARGS=(--apply "--expected-active=$SCOPE_EXPECTED_ACTIVE" "--expected-legacy=$SCOPE_EXPECTED_LEGACY")
+          if [ -n "$SCOPE_OLD_ESCROW" ]; then ARGS+=("--legacy-address=$SCOPE_OLD_ESCROW"); fi
+          if [ -n "$SCOPE_BATCH" ]; then ARGS+=("--batch=$SCOPE_BATCH"); fi
+          set +e
+          node scripts/migrations/scopeEscrowMirrors.js "${ARGS[@]}" 2>&1 | tee "$RUNNER_TEMP/scope-apply.log"
+          CODE=${PIPESTATUS[0]}
+          set -e
+          {
+            echo "### Scope escrow mirrors: apply"
+            echo '```'
+            grep -F '[scopeEscrowMirrors]' "$RUNNER_TEMP/scope-apply.log" || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$CODE"
+
+      - name: Rollback
+        if: ${{ inputs.mode == 'rollback' }}
+        shell: bash
+        working-directory: backend
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          ARAF_ESCROW_ADDRESS: ${{ vars.ARAF_ESCROW_ADDRESS }}
+          EXPECTED_CHAIN_ID: "84532"
+        run: |
+          set -euo pipefail
+          set +e
+          node scripts/migrations/scopeEscrowMirrors.js "--rollback=$SCOPE_BATCH" --apply 2>&1 | tee "$RUNNER_TEMP/scope-rollback.log"
+          CODE=${PIPESTATUS[0]}
+          set -e
+          {
+            echo "### Scope escrow mirrors: rollback"
+            echo '```'
+            grep -F '[scopeEscrowMirrors]' "$RUNNER_TEMP/scope-rollback.log" || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$CODE"

@@ -14,6 +14,7 @@ describe('K4-07: workflow environment ve CODEOWNERS', function () {
     'deploy-runtime-base-sepolia.yml': { 'runtime-deploy': 'base-sepolia' },
     'escrow-registry-adopt.yml': { adopt: 'base-sepolia' },
     'rotate-escrow.yml': { rotate: 'base-sepolia' },
+    'scope-escrow-mirrors.yml': { scope: 'base-sepolia' },
     'release.yml': { release: undefined },
     'ci.yml': { backend: undefined, frontend: undefined, 'contracts-abi-drift': undefined },
   };
