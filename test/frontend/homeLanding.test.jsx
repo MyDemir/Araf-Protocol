@@ -229,3 +229,66 @@ describe('ana sayfa metni ↔ ArafEscrow sabitleri', () => {
     expect(fns.filter((f) => /withdraw|rescue|sweep|emergency/i.test(f))).toEqual(['withdrawSettlement']);
   });
 });
+
+describe('SSS (homeContent.faq.items)', () => {
+  const sol = fs.readFileSync(path.resolve(process.cwd(), '../contracts/src/ArafEscrow.sol'), 'utf8');
+  const num = (name) => Number(sol.match(new RegExp(`${name}\\s*=\\s*([\\d_]+)\\s*;`))[1].replace(/_/g, ''));
+  const tr = getHomeContent('TR').faq.items;
+  const en = getHomeContent('EN').faq.items;
+
+  it('TR ve EN soru sayısı eşit; en az 16 soru; her soru ve cevap dolu', () => {
+    expect(tr.length).toBe(en.length);
+    expect(tr.length).toBeGreaterThanOrEqual(16);
+    for (const item of [...tr, ...en]) {
+      expect(item.q.trim()).not.toBe('');
+      expect(item.a.trim()).not.toBe('');
+      // [TR] {fee} içeren her cevabın, ücret bilinmediğinde kullanılacak yedeği vardır.
+      if (item.a.includes('{fee}')) expect(item.aNoFee.trim()).not.toBe('');
+    }
+    expect(new Set(tr.map((i) => i.q)).size).toBe(tr.length);
+    expect(new Set(en.map((i) => i.q)).size).toBe(en.length);
+    expect(tr.map((i) => i.a.includes('{fee}'))).toEqual(en.map((i) => i.a.includes('{fee}')));
+  });
+
+  it.each(['TR', 'EN'])('%s: ekranda {fee} kalmaz (ücret biliniyorsa da bilinmiyorsa da)', (lang) => {
+    renderHome({ lang, protocolFeeConfig: { takerFeeBps: 15, makerFeeBps: 15 } });
+    expect(screen.getByTestId('home-faq').querySelectorAll('details')).toHaveLength(getHomeContent(lang).faq.items.length);
+    expect(screen.getByTestId('home-faq').textContent).not.toContain('{fee}');
+    expect(screen.getByTestId('home-faq').textContent).toMatch(/0[.,]15/);
+    cleanup();
+    renderHome({ lang, protocolFeeConfig: null });
+    expect(screen.getByTestId('home-faq').textContent).not.toContain('{fee}');
+  });
+
+  it('rakamlar kontrat sabitleriyle uyumlu; mutlak ifade ve hakem çağrışımı yok', () => {
+    const maker = [1, 2, 3, 4].map((t) => num(`MAKER_BOND_TIER${t}_BPS`) / 100);
+    const taker = [1, 2, 3, 4].map((t) => num(`TAKER_BOND_TIER${t}_BPS`) / 100);
+    const pairs = maker.map((m, i) => `${m}%/${taker[i]}%`);
+    const tierEn = en.find((i) => i.q === 'What are the tiers and bond rates?').a;
+    expect(tierEn).toContain(`${pairs[0]}, ${pairs[1]}, ${pairs[2]} and ${pairs[3]}`);
+    const feeCapBps = num('MAX_FEE_CONFIG_BPS');
+    expect(en.find((i) => i.q.startsWith('How high can fees go')).a).toContain(`${feeCapBps.toLocaleString('en-US')} bps (${feeCapBps / 100}%)`);
+    expect(sol).toMatch(/PAYMENT_WINDOW\s*=\s*48 hours/);
+    expect(sol).toMatch(/MAKER_CHALLENGE_WINDOW\s*=\s*24 hours/);
+    expect(sol).toMatch(/AUTO_RELEASE_PENALTY_BPS\s*=\s*200/);
+    expect(sol).toMatch(/_tier == 0 \? 0 : uint16\(makerFeeBps\)/);
+    expect(sol).toMatch(/DUST_LIMIT\s*=\s*0\.001 ether/);
+    expect(sol).toMatch(/WALLET_AGE_MIN\s*=\s*2 days/);
+    // [TR] Düzeltme 1: owner cevabı onlyOwner fonksiyon listesiyle eşleşir; iptal "nötr" değil; yakım hazineye gider.
+    const ownerFns = [...sol.matchAll(/function (\w+)\([^)]*\)[^{;]*\bonlyOwner\b/gs)].map((m) => m[1]).sort();
+    expect(ownerFns).toEqual(['pause', 'setCooldownConfig', 'setFeeConfig', 'setReputationPolicy', 'setReputationTierThresholds', 'setTokenConfig', 'setTreasury', 'unpause']);
+    const ownerEn = en.find((i) => i.q === 'What can the contract owner do?').a;
+    const ownerTr = tr.find((i) => i.q.startsWith('Kontrat sahibi')).a;
+    for (const re of [/fees/, /cooldowns/, /supported tokens/, /reputation policy/, /tier thresholds/, /treasury/, /pause/]) expect(ownerEn).toMatch(re);
+    for (const re of [/Ücreti/, /bekleme/, /token/, /itibar politikasını/, /tier eşiklerini/, /hazine/, /duraklat/]) expect(ownerTr).toMatch(re);
+    expect(en.find((i) => i.q === 'How does mutual cancel work?').a).not.toMatch(/neutral/i);
+    expect(tr.find((i) => i.q.startsWith('Karşılıklı iptal')).a).not.toMatch(/nötr/i);
+    expect(sol).toMatch(/mutualCancelPenaltyPts\s*=\s*20/);
+    expect(en.find((i) => i.q === 'What is the bleeding escrow?').a).toMatch(/treasury/);
+    expect(tr.find((i) => i.q === 'Eriyen kasa nedir?').a).toMatch(/hazine/);
+    expect(`${en.map((i) => i.a).join(' ')} ${tr.map((i) => i.a).join(' ')}`).not.toMatch(/burned|yakılır/i);
+    for (const item of [...tr, ...en]) {
+      expect(`${item.q} ${item.a} ${item.aNoFee || ''}`).not.toMatch(/risksiz|risk[- ]free|always|every time|her zaman|garanti|guarantee|oracle|kâhin/i);
+    }
+  });
+});
