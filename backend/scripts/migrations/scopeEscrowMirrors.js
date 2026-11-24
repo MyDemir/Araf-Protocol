@@ -117,7 +117,8 @@ async function fetchDeployTimestampFromRpc(env = process.env) {
     if (!b || !Number.isFinite(Number(b.timestamp))) throw new Error(`Blok ${block} bulunamadı.`);
     return new Date(Number(b.timestamp) * 1000);
   } catch (err) {
-    throw new Error(`RPC getBlock başarısız: ${redactRpcSecrets(err.message)}`);
+    err.message = redactRpcSecrets(err.message); // [TR] cause ham URL taşımasın
+    throw new Error(`RPC getBlock başarısız: ${err.message}`, { cause: err });
   } finally {
     try { provider.destroy(); } catch { /* yok say */ }
   }
@@ -203,7 +204,7 @@ async function applyIndexes(db, def, log) {
       await col.createIndex(def.compound.key, def.compound.options);
     } catch (err) {
       if (err?.code === 85 || err?.code === 86) {
-        throw new Error(`${def.name}: bileşik indeks mevcut bir indeksle çakışıyor (code ${err.code}); elle incele: ${err.message}`);
+        throw new Error(`${def.name}: bileşik indeks mevcut bir indeksle çakışıyor (code ${err.code}); elle incele: ${err.message}`, { cause: err });
       }
       throw err;
     }
