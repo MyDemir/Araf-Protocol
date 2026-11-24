@@ -21,11 +21,17 @@ const { getCatalogCurrencies } = require("../config/paymentRailCatalog");
 
 const orderSchema = new mongoose.Schema(
   {
+    // [TR] Escrow kapsamı: aynı onchain_order_id farklı kontratlarda tekrar edebilir. Benzersizlik
+    //      {escrow_address, onchain_order_id} bileşiğindedir (aşağıda); tek alanlı unique/index YOK.
+    // [EN] Escrow scope: ids restart on redeploy; uniqueness is the compound below.
+    escrow_address: { type: String, lowercase: true, trim: true, index: false },
+    chain_id: { type: Number },
+    // [TR] Göç betiği izi (rollback için). [EN] Migration batch marker (rollback).
+    scope_migration_batch: { type: String },
+
     onchain_order_id: {
       type: String,
       required: true,
-      unique: true,
-      index: true,
       match: /^\d+$/,
     },
 
@@ -135,6 +141,9 @@ const orderSchema = new mongoose.Schema(
 );
 
 // ── Indexes ───────────────────────────────────────────────────────────────────
+// [TR] Tek alanlı "lookup" indeksi KASTEN yok: eski unique ile aynı anahtar/farklı seçenek =
+//      IndexOptionsConflict (85/86). Sorgular hep escrow_address eşitliğiyle gelir; bileşiğin öneki yeter.
+orderSchema.index({ escrow_address: 1, onchain_order_id: 1 }, { unique: true });
 orderSchema.index({ owner_address: 1, status: 1, side: 1 });
 // [TR] B3-15: /orders/my updated_at sıralaması. [EN] /orders/my updated_at sort.
 orderSchema.index({ owner_address: 1, updated_at: -1 });

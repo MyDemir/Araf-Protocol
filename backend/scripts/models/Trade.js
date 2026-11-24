@@ -29,11 +29,13 @@ const tradeSchema = new mongoose.Schema(
   {
     // [TR] Kontrattaki tradeId aynası — child trade için birincil kimlik.
     // [EN] Mirror of on-chain tradeId — primary identity for child trade.
+    // [TR] Escrow kapsamı (bkz. Order.js). Benzersizlik bileşiklerde; tek alanlı unique/index YOK.
+    escrow_address: { type: String, lowercase: true, trim: true },
+    chain_id: { type: Number },
+    scope_migration_batch: { type: String },
+
     onchain_escrow_id: {
       type: String,
-      unique: true,
-      sparse: true,
-      index: true,
       match: /^\d+$/,
     },
 
@@ -360,6 +362,8 @@ const tradeSchema = new mongoose.Schema(
 // [TR] Bileşik indekslerin ÖNEKİYLE örtüşen tekli index:true tanımları kaldırıldı
 //      (parent_order_id, maker_address, taker_address, trade_origin, parent_order_side, token_address,
 //      tier, settlement_proposal.state). Tek başına status/resolution_type/risk indexleri korunur.
+// [TR] Tek alanlı lookup indeksi KASTEN yok (IndexOptionsConflict 85/86); bileşik önek yeter.
+tradeSchema.index({ escrow_address: 1, onchain_escrow_id: 1 }, { unique: true, sparse: true });
 tradeSchema.index({ parent_order_id: 1, status: 1 });
 tradeSchema.index({ maker_address: 1, status: 1 });
 // [TR] Pazar güven özeti: maker başına en son trade. [EN] Market trust summary: latest trade per maker.

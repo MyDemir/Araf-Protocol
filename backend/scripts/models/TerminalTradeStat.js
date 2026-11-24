@@ -22,7 +22,12 @@ if (typeof mongoose.Schema !== "function") {
 } else {
   const schema = new mongoose.Schema(
     {
-      trade_key: { type: String, required: true, unique: true },
+      // [TR] Escrow kapsamı: trade_key (= onchain_escrow_id) yeniden dağıtımda tekrar eder; benzersizlik
+      //      {escrow_address, trade_key} bileşiğindedir. Tek alanlı unique/index YOK (bkz. Order.js).
+      escrow_address: { type: String, lowercase: true, trim: true },
+      chain_id: { type: Number },
+      scope_migration_batch: { type: String },
+      trade_key: { type: String, required: true },
       status: { type: String, enum: ["RESOLVED", "CANCELED", "BURNED"], required: true, index: true },
       token_address: { type: String, default: null, lowercase: true },
       crypto_amount: { type: String, default: "0" },
@@ -36,6 +41,8 @@ if (typeof mongoose.Schema !== "function") {
     },
     { timestamps: { createdAt: "recorded_at", updatedAt: false }, versionKey: false, collection: "terminal_trade_stats" }
   );
+
+  schema.index({ escrow_address: 1, trade_key: 1 }, { unique: true });
 
   module.exports = mongoose.model("TerminalTradeStat", schema);
 }

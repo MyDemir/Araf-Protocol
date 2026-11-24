@@ -51,6 +51,7 @@ const {
 } = require("../services/encryption");
 const User = require("../models/User");
 const Trade = require("../models/Trade");
+const { escrowScopeFilter } = require("../services/escrowScope");
 const logger = require("../utils/logger");
 const { getRailCodes, getRailCatalog } = require("../config/paymentRailCatalog");
 const {
@@ -682,6 +683,8 @@ router.put("/profile", requireAuth, requireSessionWalletMatch, authLimiter, asyn
     // [TR] Contact değişimi serbest; payout details değişimi aktif trade sırasında kilitli.
     if (bankProfileChanged) {
       const activeTradeExists = await Trade.exists({
+        // [TR] Yalnız aktif escrow'daki trade'ler kilitler; eski kontratın açık trade'i profili kilitlemez.
+        ...escrowScopeFilter(),
         status: { $in: ACTIVE_TRADE_STATUSES_FOR_BANK_PROFILE_LOCK },
         $or: [
           { maker_address: req.wallet },

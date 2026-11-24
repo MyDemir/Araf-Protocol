@@ -157,6 +157,7 @@ describe("trades settlement proposal read-model routes", () => {
       maker_address: "0x1111111111111111111111111111111111111111",
       taker_address: "0x2222222222222222222222222222222222222222",
       status: "CHALLENGED",
+      escrow_address: "0x3333333333333333333333333333333333333333",
       onchain_escrow_id: "88",
       fee_snapshot: {
         maker_fee_bps: 200,
